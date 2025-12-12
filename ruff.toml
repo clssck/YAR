@@ -29,6 +29,7 @@ ignore = [
   "RUF001", # ignore ambiguous characters (intentional for text processing)
   "RUF002", # ignore ambiguous characters (intentional for text processing)
   "RUF003", # ignore ambiguous characters (intentional for text processing)
+  "SIM117", # allow nested with statements (common async pattern)
 ]
 fixable = ["ALL"]
 

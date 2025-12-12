@@ -12,13 +12,13 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from openai import AsyncOpenAI
 import httpx
-
+from openai import AsyncOpenAI
 
 # Import variants from test script
 from test_prompt_variants import PROMPT_VARIANTS
@@ -28,8 +28,7 @@ async def get_context(query: str, server_url: str = 'http://localhost:9621') -> 
     """Get context from LightRAG server."""
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
-            f'{server_url}/query',
-            json={'query': query, 'mode': 'mix', 'only_need_context': True}
+            f'{server_url}/query', json={'query': query, 'mode': 'mix', 'only_need_context': True}
         )
         return response.json().get('response', '')
 
@@ -51,10 +50,7 @@ async def main():
     with open(dataset_path) as f:
         data = json.load(f)
 
-    if isinstance(data, dict) and 'test_cases' in data:
-        dataset = data['test_cases']
-    else:
-        dataset = data
+    dataset = data['test_cases'] if isinstance(data, dict) and 'test_cases' in data else data
 
     # Create client
     client = AsyncOpenAI(
@@ -76,52 +72,59 @@ async def main():
         question = q['question']
         ground_truth = q['ground_truth']
 
-        print(f"\n{'='*80}")
-        print(f"QUERY {i+1}: {question[:70]}...")
-        print(f"{'='*80}")
+        print(f'\n{"=" * 80}')
+        print(f'QUERY {i + 1}: {question[:70]}...')
+        print(f'{"=" * 80}')
 
         # Get context once
         context = await get_context(question)
 
         if not context or 'No relevant context' in context:
-            print("⚠️ NO CONTEXT RETRIEVED")
+            print('⚠️ NO CONTEXT RETRIEVED')
             continue
 
-        print(f"\n📄 CONTEXT LENGTH: {len(context)} chars, {len(context.split())} words")
-        print(f"📋 GROUND TRUTH (first 200 chars):\n{ground_truth[:200]}...")
+        print(f'\n📄 CONTEXT LENGTH: {len(context)} chars, {len(context.split())} words')
+        print(f'📋 GROUND TRUTH (first 200 chars):\n{ground_truth[:200]}...')
 
         for variant_name in variants_to_test:
             template = PROMPT_VARIANTS[variant_name]
             prompt = template.format(context_data=context, user_prompt=question)
 
-            print(f"\n--- {variant_name.upper()} RESPONSE ---")
+            print(f'\n--- {variant_name.upper()} RESPONSE ---')
 
             response = await call_llm(prompt, client)
 
             # Show response
-            print(f"Length: {len(response)} chars, {len(response.split())} words")
-            print(f"\nFull response:\n{response[:1000]}...")
+            print(f'Length: {len(response)} chars, {len(response.split())} words')
+            print(f'\nFull response:\n{response[:1000]}...')
 
             # Quick analysis
-            print(f"\n📊 Quick Analysis:")
+            print('\n📊 Quick Analysis:')
 
             # Check if response uses question terms
             q_terms = set(question.lower().split())
             r_terms = set(response.lower().split())
             term_overlap = len(q_terms & r_terms)
-            print(f"  - Question term overlap: {term_overlap}/{len(q_terms)}")
+            print(f'  - Question term overlap: {term_overlap}/{len(q_terms)}')
 
             # Check response structure
             has_numbers = any(c.isdigit() for c in response[:200])
             has_bullets = any(x in response for x in ['•', '-', '1.', '(1)', '1)'])
-            print(f"  - Has structure (numbers/bullets): {has_numbers or has_bullets}")
+            print(f'  - Has structure (numbers/bullets): {has_numbers or has_bullets}')
 
             # Check for hedging
-            hedging = any(x in response.lower() for x in [
-                "i'm sorry", "cannot answer", "no information", "not specified",
-                "does not contain", "unable to"
-            ])
-            print(f"  - Contains hedging/refusal: {hedging}")
+            hedging = any(
+                x in response.lower()
+                for x in [
+                    "i'm sorry",
+                    'cannot answer',
+                    'no information',
+                    'not specified',
+                    'does not contain',
+                    'unable to',
+                ]
+            )
+            print(f'  - Contains hedging/refusal: {hedging}')
 
 
 if __name__ == '__main__':

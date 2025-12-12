@@ -2971,9 +2971,7 @@ class PGVectorStorage(BaseVectorStorage):
             # Re-sort by boosted scores
             fused_results = sorted(fused_results, key=lambda x: x.get('rrf_score', 0), reverse=True)
 
-            logger.info(
-                f'[{self.workspace}] Entity boost applied to {boosted_count}/{len(fused_results)} chunks'
-            )
+            logger.info(f'[{self.workspace}] Entity boost applied to {boosted_count}/{len(fused_results)} chunks')
 
         logger.debug(
             f'[{self.workspace}] Hybrid+entity search: {len(vector_results)} vector + '

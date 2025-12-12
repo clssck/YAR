@@ -25,7 +25,6 @@ import asyncio
 import json
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -43,15 +42,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # DSPy Signatures
 # ============================================================================
 
+
 class RAGResponse(dspy.Signature):
     """Generate a grounded answer based on retrieved context.
 
     The answer must be faithful to the context (no hallucination) and
     directly relevant to the question asked.
     """
-    context: str = dspy.InputField(desc="Retrieved knowledge graph context with entities, relations, and source excerpts")
+
+    context: str = dspy.InputField(
+        desc='Retrieved knowledge graph context with entities, relations, and source excerpts'
+    )
     question: str = dspy.InputField(desc="User's question to answer")
-    answer: str = dspy.OutputField(desc="Grounded answer based only on the context provided")
+    answer: str = dspy.OutputField(desc='Grounded answer based only on the context provided')
 
 
 class RAGResponseWithReasoning(dspy.Signature):
@@ -59,15 +62,17 @@ class RAGResponseWithReasoning(dspy.Signature):
 
     First identify relevant facts from context, then synthesize the answer.
     """
-    context: str = dspy.InputField(desc="Retrieved knowledge graph context")
+
+    context: str = dspy.InputField(desc='Retrieved knowledge graph context')
     question: str = dspy.InputField(desc="User's question")
-    relevant_facts: str = dspy.OutputField(desc="Key facts from context relevant to the question")
-    answer: str = dspy.OutputField(desc="Answer synthesized from the relevant facts only")
+    relevant_facts: str = dspy.OutputField(desc='Key facts from context relevant to the question')
+    answer: str = dspy.OutputField(desc='Answer synthesized from the relevant facts only')
 
 
 # ============================================================================
 # DSPy Modules
 # ============================================================================
+
 
 class SimpleRAG(dspy.Module):
     """Simple RAG response module."""
@@ -105,6 +110,7 @@ class ReasoningRAG(dspy.Module):
 # ============================================================================
 # RAGAS-based Metric
 # ============================================================================
+
 
 def ragas_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> float:
     """
@@ -160,12 +166,12 @@ def ragas_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> fl
         score = 0.6 * float(faith) + 0.4 * float(relevance)
 
         if trace is not None:
-            print(f"  RAGAS: faith={faith:.3f} rel={relevance:.3f} -> {score:.3f}")
+            print(f'  RAGAS: faith={faith:.3f} rel={relevance:.3f} -> {score:.3f}')
 
         return score
 
     except Exception as e:
-        print(f"  RAGAS eval failed: {e}")
+        print(f'  RAGAS eval failed: {e}')
         return 0.0
 
 
@@ -209,6 +215,7 @@ def fast_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> flo
 # Data Loading
 # ============================================================================
 
+
 async def get_context_from_server(query: str, server_url: str = 'http://localhost:9621') -> str:
     """Get context from running LightRAG server."""
     import httpx
@@ -220,7 +227,7 @@ async def get_context_from_server(query: str, server_url: str = 'http://localhos
                 'query': query,
                 'mode': 'mix',
                 'only_need_context': True,
-            }
+            },
         )
         data = response.json()
         return data.get('response', '')
@@ -231,10 +238,7 @@ def load_dataset(dataset_path: Path, num_queries: int | None = None) -> list[dic
     with open(dataset_path) as f:
         data = json.load(f)
 
-    if isinstance(data, dict) and 'test_cases' in data:
-        dataset = data['test_cases']
-    else:
-        dataset = data
+    dataset = data['test_cases'] if isinstance(data, dict) and 'test_cases' in data else data
 
     if num_queries:
         dataset = dataset[:num_queries]
@@ -249,18 +253,18 @@ async def prepare_dspy_examples(
     """Convert dataset to DSPy examples with context."""
     examples = []
 
-    print(f"Fetching context for {len(dataset)} queries...")
+    print(f'Fetching context for {len(dataset)} queries...')
 
     for i, item in enumerate(dataset):
         question = item['question']
         ground_truth = item.get('ground_truth', '')
 
-        print(f"  [{i+1}/{len(dataset)}] {question[:50]}...")
+        print(f'  [{i + 1}/{len(dataset)}] {question[:50]}...')
 
         context = await get_context_from_server(question, server_url)
 
         if not context or context == 'No relevant context found for the query.':
-            print(f"    Skipping - no context")
+            print('    Skipping - no context')
             continue
 
         example = dspy.Example(
@@ -271,13 +275,14 @@ async def prepare_dspy_examples(
 
         examples.append(example)
 
-    print(f"Prepared {len(examples)} examples")
+    print(f'Prepared {len(examples)} examples')
     return examples
 
 
 # ============================================================================
 # Optimization
 # ============================================================================
+
 
 def optimize_with_mipro(
     module: dspy.Module,
@@ -288,7 +293,7 @@ def optimize_with_mipro(
     """Optimize module using MIPROv2."""
     from dspy.teleprompt import MIPROv2
 
-    print(f"\nRunning MIPROv2 optimization (mode={mode})...")
+    print(f'\nRunning MIPROv2 optimization (mode={mode})...')
 
     optimizer = MIPROv2(
         metric=metric,
@@ -314,7 +319,7 @@ def optimize_with_bootstrap(
     """Optimize module using BootstrapFewShot."""
     from dspy.teleprompt import BootstrapFewShot
 
-    print(f"\nRunning BootstrapFewShot optimization...")
+    print('\nRunning BootstrapFewShot optimization...')
 
     optimizer = BootstrapFewShot(
         metric=metric,
@@ -332,16 +337,17 @@ def optimize_with_bootstrap(
 # Evaluation
 # ============================================================================
 
+
 def evaluate_module(
     module: dspy.Module,
     testset: list[dspy.Example],
     metric,
-    name: str = "Module",
+    name: str = 'Module',
 ) -> float:
     """Evaluate a module on test set."""
     from dspy.evaluate import Evaluate
 
-    print(f"\nEvaluating {name}...")
+    print(f'\nEvaluating {name}...')
 
     evaluator = Evaluate(
         devset=testset,
@@ -361,7 +367,7 @@ def evaluate_module(
         # Try to extract from string representation
         score = float(str(result).split('%')[0].split()[-1]) / 100 if '%' in str(result) else 0.0
 
-    print(f"{name} score: {score:.3f}")
+    print(f'{name} score: {score:.3f}')
 
     return score
 
@@ -370,16 +376,17 @@ def evaluate_module(
 # Prompt Export
 # ============================================================================
 
+
 def extract_optimized_prompt(module: dspy.Module) -> str:
     """Extract the optimized prompt template from a DSPy module."""
     # Get the predictor
     predictor = None
-    for name, child in module.named_predictors():
+    for _name, child in module.named_predictors():
         predictor = child
         break
 
     if predictor is None:
-        return "Could not extract prompt - no predictor found"
+        return 'Could not extract prompt - no predictor found'
 
     # Build prompt representation
     prompt_parts = []
@@ -388,35 +395,35 @@ def extract_optimized_prompt(module: dspy.Module) -> str:
     if hasattr(predictor, 'signature'):
         sig = predictor.signature
         if sig.__doc__:
-            prompt_parts.append(f"# Task Description\n{sig.__doc__}\n")
+            prompt_parts.append(f'# Task Description\n{sig.__doc__}\n')
 
         # Add input/output field descriptions
-        prompt_parts.append("# Input Fields")
+        prompt_parts.append('# Input Fields')
         for field_name, field in sig.input_fields.items():
             desc = getattr(field, 'desc', '') or ''
-            prompt_parts.append(f"- {field_name}: {desc}")
+            prompt_parts.append(f'- {field_name}: {desc}')
 
-        prompt_parts.append("\n# Output Fields")
+        prompt_parts.append('\n# Output Fields')
         for field_name, field in sig.output_fields.items():
             desc = getattr(field, 'desc', '') or ''
-            prompt_parts.append(f"- {field_name}: {desc}")
+            prompt_parts.append(f'- {field_name}: {desc}')
 
     # Add any demos/examples
     if hasattr(predictor, 'demos') and predictor.demos:
-        prompt_parts.append("\n# Few-Shot Examples")
+        prompt_parts.append('\n# Few-Shot Examples')
         for i, demo in enumerate(predictor.demos):
-            prompt_parts.append(f"\n## Example {i+1}")
+            prompt_parts.append(f'\n## Example {i + 1}')
             for key, value in demo.items():
                 if isinstance(value, str) and len(value) > 200:
-                    value = value[:200] + "..."
-                prompt_parts.append(f"{key}: {value}")
+                    value = value[:200] + '...'
+                prompt_parts.append(f'{key}: {value}')
 
     # Add extended signature if available (from MIPRO)
     if hasattr(predictor, 'extended_signature'):
-        prompt_parts.append("\n# Optimized Instructions")
+        prompt_parts.append('\n# Optimized Instructions')
         prompt_parts.append(str(predictor.extended_signature))
 
-    return "\n".join(prompt_parts)
+    return '\n'.join(prompt_parts)
 
 
 def format_as_lightrag_prompt(optimized_prompt: str) -> str:
@@ -448,16 +455,20 @@ Answer (grounded only in context above):"""
 # Main
 # ============================================================================
 
+
 async def main():
     parser = argparse.ArgumentParser(description='DSPy Prompt Optimization for LightRAG')
     parser.add_argument('--num-queries', '-n', type=int, help='Number of queries to use')
     parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='LightRAG server URL')
-    parser.add_argument('--mode', '-m', choices=['light', 'medium', 'heavy'], default='light',
-                        help='Optimization intensity')
-    parser.add_argument('--optimizer', '-o', choices=['mipro', 'bootstrap', 'both'], default='bootstrap',
-                        help='Optimizer to use')
-    parser.add_argument('--module', choices=['simple', 'cot', 'reasoning'], default='cot',
-                        help='DSPy module architecture')
+    parser.add_argument(
+        '--mode', '-m', choices=['light', 'medium', 'heavy'], default='light', help='Optimization intensity'
+    )
+    parser.add_argument(
+        '--optimizer', '-o', choices=['mipro', 'bootstrap', 'both'], default='bootstrap', help='Optimizer to use'
+    )
+    parser.add_argument(
+        '--module', choices=['simple', 'cot', 'reasoning'], default='cot', help='DSPy module architecture'
+    )
     parser.add_argument('--fast-metric', action='store_true', help='Use fast heuristic metric instead of RAGAS')
     parser.add_argument('--export-prompt', type=str, help='Export optimized prompt to file')
     parser.add_argument('--save-module', type=str, help='Save optimized module to JSON')
@@ -473,14 +484,14 @@ async def main():
     )
     dspy.configure(lm=lm)
 
-    print("=" * 70)
-    print("DSPy Prompt Optimization for LightRAG")
-    print("=" * 70)
-    print(f"LLM: {os.getenv('LLM_MODEL', 'gpt-4o-mini')}")
-    print(f"Optimizer: {args.optimizer}")
-    print(f"Module: {args.module}")
-    print(f"Mode: {args.mode}")
-    print("=" * 70)
+    print('=' * 70)
+    print('DSPy Prompt Optimization for LightRAG')
+    print('=' * 70)
+    print(f'LLM: {os.getenv("LLM_MODEL", "gpt-4o-mini")}')
+    print(f'Optimizer: {args.optimizer}')
+    print(f'Module: {args.module}')
+    print(f'Mode: {args.mode}')
+    print('=' * 70)
 
     # Load dataset
     dataset_path = Path(__file__).parent / 'pharma_test_dataset.json'
@@ -490,7 +501,7 @@ async def main():
     examples = await prepare_dspy_examples(dataset, args.server)
 
     if len(examples) < 2:
-        print("Error: Need at least 2 examples for optimization")
+        print('Error: Need at least 2 examples for optimization')
         return
 
     # Split into train/test
@@ -498,8 +509,8 @@ async def main():
     trainset = examples[:split_idx]
     testset = examples[split_idx:]
 
-    print(f"\nTrain set: {len(trainset)} examples")
-    print(f"Test set: {len(testset)} examples")
+    print(f'\nTrain set: {len(trainset)} examples')
+    print(f'Test set: {len(testset)} examples')
 
     # Select module
     if args.module == 'simple':
@@ -513,31 +524,31 @@ async def main():
     metric = fast_metric if args.fast_metric else ragas_metric
 
     # Evaluate baseline
-    print("\n" + "=" * 70)
-    print("BASELINE EVALUATION")
-    print("=" * 70)
-    baseline_score = evaluate_module(module, testset, metric, "Baseline")
+    print('\n' + '=' * 70)
+    print('BASELINE EVALUATION')
+    print('=' * 70)
+    baseline_score = evaluate_module(module, testset, metric, 'Baseline')
 
     # Optimize
-    print("\n" + "=" * 70)
-    print("OPTIMIZATION")
-    print("=" * 70)
+    print('\n' + '=' * 70)
+    print('OPTIMIZATION')
+    print('=' * 70)
 
     optimized_module = None
 
     if args.optimizer in ['bootstrap', 'both']:
         optimized_module = optimize_with_bootstrap(module, trainset, metric)
-        bootstrap_score = evaluate_module(optimized_module, testset, metric, "Bootstrap")
+        bootstrap_score = evaluate_module(optimized_module, testset, metric, 'Bootstrap')
 
     if args.optimizer in ['mipro', 'both']:
         base_for_mipro = optimized_module if optimized_module else module
         optimized_module = optimize_with_mipro(base_for_mipro, trainset, metric, args.mode)
-        mipro_score = evaluate_module(optimized_module, testset, metric, "MIPRO")
+        mipro_score = evaluate_module(optimized_module, testset, metric, 'MIPRO')
 
     # Extract and display optimized prompt
-    print("\n" + "=" * 70)
-    print("OPTIMIZED PROMPT")
-    print("=" * 70)
+    print('\n' + '=' * 70)
+    print('OPTIMIZED PROMPT')
+    print('=' * 70)
 
     optimized_prompt = extract_optimized_prompt(optimized_module)
     print(optimized_prompt)
@@ -547,20 +558,20 @@ async def main():
         formatted = format_as_lightrag_prompt(optimized_prompt)
         with open(args.export_prompt, 'w') as f:
             f.write(formatted)
-        print(f"\nExported to: {args.export_prompt}")
+        print(f'\nExported to: {args.export_prompt}')
 
     if args.save_module:
         optimized_module.save(args.save_module)
-        print(f"Saved module to: {args.save_module}")
+        print(f'Saved module to: {args.save_module}')
 
-    print("\n" + "=" * 70)
-    print("SUMMARY")
-    print("=" * 70)
-    print(f"Baseline score: {baseline_score:.3f}")
+    print('\n' + '=' * 70)
+    print('SUMMARY')
+    print('=' * 70)
+    print(f'Baseline score: {baseline_score:.3f}')
     if args.optimizer in ['bootstrap', 'both']:
-        print(f"Bootstrap score: {bootstrap_score:.3f}")
+        print(f'Bootstrap score: {bootstrap_score:.3f}')
     if args.optimizer in ['mipro', 'both']:
-        print(f"MIPRO score: {mipro_score:.3f}")
+        print(f'MIPRO score: {mipro_score:.3f}')
 
 
 if __name__ == '__main__':

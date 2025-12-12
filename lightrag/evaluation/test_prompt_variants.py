@@ -35,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from openai import AsyncOpenAI
 from ragas import evaluate
-from ragas.metrics import AnswerRelevancy, Faithfulness
 
 # ============================================================================
 # PROMPT VARIANTS - Edit these to test different prompts
@@ -226,6 +225,7 @@ PROMPT_VARIANTS = {
 # Core Functions
 # ============================================================================
 
+
 @dataclass
 class TestResult:
     variant: str
@@ -262,7 +262,7 @@ async def get_context_from_server(query: str, server_url: str = 'http://localhos
                 'query': query,
                 'mode': 'mix',
                 'only_need_context': True,
-            }
+            },
         )
         data = response.json()
         return data.get('response', '')
@@ -271,9 +271,8 @@ async def get_context_from_server(query: str, server_url: str = 'http://localhos
 def run_ragas_eval(question: str, answer: str, context: str, ground_truth: str) -> tuple[float, float]:
     """Run RAGAS evaluation and return (faithfulness, relevance)"""
     from datasets import Dataset
-    from ragas import evaluate
-    from ragas.metrics import answer_relevancy, faithfulness
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from ragas.metrics import answer_relevancy, faithfulness
 
     # Create dataset
     data = {
@@ -298,7 +297,9 @@ def run_ragas_eval(question: str, answer: str, context: str, ground_truth: str) 
 
     # Extract first element since we're evaluating single samples
     faith = result['faithfulness'][0] if isinstance(result['faithfulness'], list) else result['faithfulness']
-    relevance = result['answer_relevancy'][0] if isinstance(result['answer_relevancy'], list) else result['answer_relevancy']
+    relevance = (
+        result['answer_relevancy'][0] if isinstance(result['answer_relevancy'], list) else result['answer_relevancy']
+    )
 
     return float(faith), float(relevance)
 
@@ -317,13 +318,13 @@ async def test_variant(
         question = q['question']
         ground_truth = q['ground_truth']
 
-        print(f'  [{variant_name}] Query {i+1}/{len(queries)}: {question[:50]}...')
+        print(f'  [{variant_name}] Query {i + 1}/{len(queries)}: {question[:50]}...')
 
         # Get context from server
         context = await get_context_from_server(question, server_url)
 
         if not context or context == 'No relevant context found for the query.':
-            print(f'    ⚠️ No context retrieved, skipping')
+            print('    ⚠️ No context retrieved, skipping')
             continue
 
         # Build prompt and call LLM
@@ -341,14 +342,16 @@ async def test_variant(
             print(f'    ⚠️ RAGAS eval failed: {e}')
             faith, relevance = 0.0, 0.0
 
-        results.append(TestResult(
-            variant=variant_name,
-            query=question[:60],
-            answer=answer[:200],
-            faithfulness=faith,
-            relevance=relevance,
-            latency_ms=latency,
-        ))
+        results.append(
+            TestResult(
+                variant=variant_name,
+                query=question[:60],
+                answer=answer[:200],
+                faithfulness=faith,
+                relevance=relevance,
+                latency_ms=latency,
+            )
+        )
 
         print(f'    Faith: {faith:.3f} | Relevance: {relevance:.3f} | {latency:.0f}ms')
 
@@ -357,12 +360,12 @@ async def test_variant(
 
 def print_summary(all_results: dict[str, list[TestResult]]):
     """Print comparison summary"""
-    print('\n' + '='*80)
+    print('\n' + '=' * 80)
     print('📊 PROMPT VARIANT COMPARISON')
-    print('='*80)
+    print('=' * 80)
 
-    print(f"\n{'Variant':<12} | {'Faithfulness':>12} | {'Relevance':>12} | {'Avg Latency':>12}")
-    print('-'*55)
+    print(f'\n{"Variant":<12} | {"Faithfulness":>12} | {"Relevance":>12} | {"Avg Latency":>12}')
+    print('-' * 55)
 
     for variant, results in all_results.items():
         if not results:
@@ -373,14 +376,14 @@ def print_summary(all_results: dict[str, list[TestResult]]):
 
         print(f'{variant:<12} | {avg_faith:>12.3f} | {avg_rel:>12.3f} | {avg_lat:>10.0f}ms')
 
-    print('='*80)
+    print('=' * 80)
 
     # Per-query breakdown
     print('\n📋 Per-Query Results:')
-    queries = list(all_results.values())[0] if all_results else []
+    queries = next(iter(all_results.values())) if all_results else []
     for i in range(len(queries)):
         query = queries[i].query if i < len(queries) else 'N/A'
-        print(f'\nQ{i+1}: {query}')
+        print(f'\nQ{i + 1}: {query}')
         for variant, results in all_results.items():
             if i < len(results):
                 r = results[i]
@@ -401,17 +404,14 @@ async def main():
         data = json.load(f)
 
     # Handle both formats: dict with 'test_cases' key or direct list
-    if isinstance(data, dict) and 'test_cases' in data:
-        dataset = data['test_cases']
-    else:
-        dataset = data
+    dataset = data['test_cases'] if isinstance(data, dict) and 'test_cases' in data else data
 
     # Select queries
     if args.indices:
         indices = [int(i) for i in args.indices.split(',')]
         queries = [dataset[i] for i in indices if i < len(dataset)]
     else:
-        queries = dataset[:args.num_queries]
+        queries = dataset[: args.num_queries]
 
     print(f'🧪 Testing {len(queries)} queries')
 

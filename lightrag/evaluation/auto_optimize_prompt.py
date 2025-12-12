@@ -34,11 +34,10 @@ import re
 import shutil
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
-from typing import Any
 
 from dotenv import load_dotenv
 
@@ -354,9 +353,7 @@ class PromptOptimizer:
             logger.error(f'Mutation LLM call failed: {e}')
             return ''
 
-    def run_ragas_eval(
-        self, question: str, answer: str, context: str, ground_truth: str
-    ) -> tuple[float, float]:
+    def run_ragas_eval(self, question: str, answer: str, context: str, ground_truth: str) -> tuple[float, float]:
         """Run RAGAS evaluation and return (faithfulness, relevance)."""
         from datasets import Dataset
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -413,7 +410,7 @@ class PromptOptimizer:
             context = await self.get_context(question)
 
             if not context or context == 'No relevant context found for the query.':
-                logger.warning(f'      ⚠️ No context, skipping')
+                logger.warning('      ⚠️ No context, skipping')
                 continue
 
             # Call LLM with the variant prompt
@@ -421,7 +418,7 @@ class PromptOptimizer:
             total_latency += latency
 
             if not answer:
-                logger.warning(f'      ⚠️ Empty answer, skipping')
+                logger.warning('      ⚠️ Empty answer, skipping')
                 continue
 
             # Run RAGAS eval
@@ -575,10 +572,7 @@ class PromptOptimizer:
 
     def check_target_reached(self, result: EvalResult) -> bool:
         """Check if optimization target has been reached."""
-        return (
-            result.ragas_score >= self.config.target_ragas
-            and result.faithfulness >= self.config.target_faithfulness
-        )
+        return result.ragas_score >= self.config.target_ragas and result.faithfulness >= self.config.target_faithfulness
 
     async def run(self) -> EvalResult | None:
         """Run the optimization loop."""
@@ -695,9 +689,7 @@ class PromptOptimizer:
 async def main():
     parser = argparse.ArgumentParser(description='Automated DSPy Prompt Optimization')
     parser.add_argument('--target-ragas', '-t', type=float, default=0.95, help='Target RAGAS score')
-    parser.add_argument(
-        '--target-faithfulness', '-f', type=float, default=0.95, help='Target faithfulness score'
-    )
+    parser.add_argument('--target-faithfulness', '-f', type=float, default=0.95, help='Target faithfulness score')
     parser.add_argument('--max-iterations', '-i', type=int, default=10, help='Max optimization iterations')
     parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='LightRAG server URL')
     parser.add_argument(
@@ -719,10 +711,7 @@ async def main():
     # mix/local/global mode → rag_response
     prompt_key = args.prompt_key
     if prompt_key is None:
-        if args.mode == 'naive':
-            prompt_key = 'naive_rag_response'
-        else:
-            prompt_key = 'rag_response'
+        prompt_key = 'naive_rag_response' if args.mode == 'naive' else 'rag_response'
 
     # Determine which mode/prompt combinations to optimize
     if args.all_modes:
@@ -768,7 +757,9 @@ async def main():
     print('=' * 70)
     for (mode, key), result in results.items():
         if result:
-            print(f'{key} ({mode}): RAGAS={result.ragas_score:.3f} (F={result.faithfulness:.3f}, R={result.relevance:.3f})')
+            print(
+                f'{key} ({mode}): RAGAS={result.ragas_score:.3f} (F={result.faithfulness:.3f}, R={result.relevance:.3f})'
+            )
         else:
             print(f'{key} ({mode}): No improvement found')
     print('=' * 70)

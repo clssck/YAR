@@ -1,14 +1,14 @@
 from __future__ import annotations
-from typing import Any
 
+from typing import Any
 
 PROMPTS: dict[str, Any] = {}
 
 # All delimiters must be formatted as "<|UPPER_CASE_STRING|>"
-PROMPTS["DEFAULT_TUPLE_DELIMITER"] = "<|#|>"
-PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
+PROMPTS['DEFAULT_TUPLE_DELIMITER'] = '<|#|>'
+PROMPTS['DEFAULT_COMPLETION_DELIMITER'] = '<|COMPLETE|>'
 
-PROMPTS["entity_extraction_system_prompt"] = """---Role---
+PROMPTS['entity_extraction_system_prompt'] = """---Role---
 You are a Knowledge Graph Specialist responsible for extracting entities and relationships from the input text.
 
 ---Instructions---
@@ -60,7 +60,7 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
 {examples}
 """
 
-PROMPTS["entity_extraction_user_prompt"] = """---Task---
+PROMPTS['entity_extraction_user_prompt'] = """---Task---
 Extract entities and relationships from the input text in Data to be Processed below.
 
 ---Instructions---
@@ -81,7 +81,7 @@ Extract entities and relationships from the input text in Data to be Processed b
 <Output>
 """
 
-PROMPTS["entity_continue_extraction_user_prompt"] = """---Task---
+PROMPTS['entity_continue_extraction_user_prompt'] = """---Task---
 Based on the last extraction task, identify and extract any **missed or incorrectly formatted** entities and relationships from the input text.
 
 ---Instructions---
@@ -99,7 +99,7 @@ Based on the last extraction task, identify and extract any **missed or incorrec
 <Output>
 """
 
-PROMPTS["entity_extraction_examples"] = [
+PROMPTS['entity_extraction_examples'] = [
     """<Entity_types>
 ["Person","Creature","Organization","Location","Event","Concept","Method","Content","Data","Artifact","NaturalObject"]
 
@@ -182,7 +182,7 @@ relation{tuple_delimiter}Noah Carter{tuple_delimiter}World Athletics Championshi
 """,
 ]
 
-PROMPTS["summarize_entity_descriptions"] = """---Role---
+PROMPTS['summarize_entity_descriptions'] = """---Role---
 You are a Knowledge Graph Specialist, proficient in data curation and synthesis.
 
 ---Task---
@@ -217,11 +217,9 @@ Description List:
 ---Output---
 """
 
-PROMPTS["fail_response"] = (
-    "Sorry, I'm not able to provide an answer to that question.[no-context]"
-)
+PROMPTS['fail_response'] = "Sorry, I'm not able to provide an answer to that question.[no-context]"
 
-PROMPTS["rag_response"] = """---Role---
+PROMPTS['rag_response'] = """---Role---
 
 You are an expert AI assistant specializing in synthesizing information from a provided knowledge base. Your primary function is to answer user queries accurately by ONLY using the information within the provided **Context**.
 
@@ -275,7 +273,7 @@ Consider the conversation history if provided to maintain conversational flow an
 {context_data}
 """
 
-PROMPTS["naive_rag_response"] = """---Role---
+PROMPTS['naive_rag_response'] = """---Role---
 
 You are an expert AI assistant specializing in synthesizing information from a provided knowledge base. Your primary function is to answer user queries accurately by ONLY using the information within the provided **Context**.
 
@@ -329,7 +327,7 @@ Consider the conversation history if provided to maintain conversational flow an
 {content_data}
 """
 
-PROMPTS["kg_query_context"] = """
+PROMPTS['kg_query_context'] = """
 Knowledge Graph Data (Entity):
 
 ```json
@@ -356,7 +354,7 @@ Reference Document List (Each entry starts with a [reference_id] that correspond
 
 """
 
-PROMPTS["naive_query_context"] = """
+PROMPTS['naive_query_context'] = """
 Document Chunks (Each entry has a reference_id refer to the `Reference Document List`):
 
 ```json
@@ -371,7 +369,7 @@ Reference Document List (Each entry starts with a [reference_id] that correspond
 
 """
 
-PROMPTS["keywords_extraction"] = """---Role---
+PROMPTS['keywords_extraction'] = """---Role---
 You are an expert keyword extractor, specializing in analyzing user queries for a Retrieval-Augmented Generation (RAG) system. Your purpose is to identify both high-level and low-level keywords in the user's query that will be used for effective document retrieval.
 
 ---Goal---
@@ -395,7 +393,7 @@ User Query: {query}
 ---Output---
 Output:"""
 
-PROMPTS["keywords_extraction_examples"] = [
+PROMPTS['keywords_extraction_examples'] = [
     """Example 1:
 
 Query: "How does international trade influence global economic stability?"

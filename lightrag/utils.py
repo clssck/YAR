@@ -2577,7 +2577,7 @@ async def process_chunks_unified(
         # ms-marco-MiniLM-L-6-v2 produces scores in -11 to +10 range (logits)
         # Score of 0 is the decision boundary, but real RAG data is noisy.
         # Default None = no filtering (use reranker for ordering only, no cutoff)
-        min_rerank_score = global_config.get('min_rerank_score', None)
+        min_rerank_score = global_config.get('min_rerank_score')
         if min_rerank_score is not None and min_rerank_score > -100:
             original_count = len(unique_chunks)
 
