@@ -10,6 +10,7 @@
   "reportOptionalMemberAccess": "none",
   "reportOptionalContextManager": "none",
   "reportOptionalOperand": "none",
+  "reportInconsistentOverload": "none",
   "reportAttributeAccessIssue": "warning",
   "reportArgumentType": "warning",
   "reportReturnType": "warning",

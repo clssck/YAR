@@ -221,7 +221,7 @@ async def _handle_entity_relation_summary(
         return description_list[0], False
 
     # Get configuration
-    tokenizer: Tokenizer = global_config['tokenizer']
+    tokenizer = global_config['tokenizer']
     summary_context_size = global_config['summary_context_size']
     summary_max_tokens = global_config['summary_max_tokens']
     force_llm_summary_on_merge = global_config['force_llm_summary_on_merge']
@@ -1185,12 +1185,12 @@ async def _rebuild_single_entity(
                 seen_paths.add(file_path)
 
     # Apply MAX_FILE_PATHS limit
-    max_file_paths = global_config.get('max_file_paths')
+    max_file_paths = int(global_config.get('max_file_paths', 0))
     file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
-    limit_method = global_config.get('source_ids_limit_method')
+    limit_method = str(global_config.get('source_ids_limit_method', ''))
 
     original_count = len(file_paths_list)
-    if original_count > max_file_paths:
+    if max_file_paths > 0 and original_count > max_file_paths:
         if limit_method == SOURCE_IDS_LIMIT_METHOD_FIFO:
             # FIFO: keep tail (newest), discard head
             file_paths_list = file_paths_list[-max_file_paths:]
@@ -1330,12 +1330,12 @@ async def _rebuild_single_relationship(
                 seen_paths.add(file_path)
 
     # Apply count limit
-    max_file_paths = global_config.get('max_file_paths')
+    max_file_paths = int(global_config.get('max_file_paths', 0))
     file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
-    limit_method = global_config.get('source_ids_limit_method')
+    limit_method = str(global_config.get('source_ids_limit_method', ''))
 
     original_count = len(file_paths_list)
-    if original_count > max_file_paths:
+    if max_file_paths > 0 and original_count > max_file_paths:
         if limit_method == SOURCE_IDS_LIMIT_METHOD_FIFO:
             # FIFO: keep tail (newest), discard head
             file_paths_list = file_paths_list[-max_file_paths:]
@@ -1555,8 +1555,8 @@ async def _merge_nodes_then_upsert(
         )
 
     # 3. Finalize source_id by applying source ids limit
-    limit_method = global_config.get('source_ids_limit_method')
-    max_source_limit = global_config.get('max_source_ids_per_entity')
+    limit_method = str(global_config.get('source_ids_limit_method', ''))
+    max_source_limit = int(global_config.get('max_source_ids_per_entity', 0))
     source_ids = apply_source_ids_limit(
         full_source_ids,
         max_source_limit,
@@ -1829,15 +1829,15 @@ async def _merge_edges_then_upsert(
         )
 
     # 3. Finalize source_id by applying source ids limit
-    limit_method = global_config.get('source_ids_limit_method')
-    max_source_limit = global_config.get('max_source_ids_per_relation')
+    limit_method = str(global_config.get('source_ids_limit_method', ''))
+    max_source_limit = int(global_config.get('max_source_ids_per_relation', 0))
     source_ids = apply_source_ids_limit(
         full_source_ids,
         max_source_limit,
         limit_method,
         identifier=f'`{src_id}`~`{tgt_id}`',
     )
-    limit_method = global_config.get('source_ids_limit_method') or SOURCE_IDS_LIMIT_METHOD_KEEP
+    limit_method = str(global_config.get('source_ids_limit_method', '')) or SOURCE_IDS_LIMIT_METHOD_KEEP
 
     # 4. Only keep edges with source_id in the final source_ids list if in KEEP mode
     if limit_method == SOURCE_IDS_LIMIT_METHOD_KEEP:
@@ -1950,9 +1950,9 @@ async def _merge_edges_then_upsert(
             seen_paths.add(file_path_item)
 
     # Apply count limit
-    max_file_paths = global_config.get('max_file_paths')
+    max_file_paths = int(global_config.get('max_file_paths', 0))
 
-    if len(file_paths_list) > max_file_paths:
+    if max_file_paths > 0 and len(file_paths_list) > max_file_paths:
         limit_method = global_config.get('source_ids_limit_method', SOURCE_IDS_LIMIT_METHOD_KEEP)
         file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
 
@@ -2102,8 +2102,8 @@ async def _merge_edges_then_upsert(
                 )
 
             # 4. Apply source_ids limit for graph and vector db
-            limit_method = global_config.get('source_ids_limit_method', SOURCE_IDS_LIMIT_METHOD_KEEP)
-            max_source_limit = global_config.get('max_source_ids_per_entity')
+            limit_method = str(global_config.get('source_ids_limit_method', SOURCE_IDS_LIMIT_METHOD_KEEP))
+            max_source_limit = int(global_config.get('max_source_ids_per_entity', 0))
             limited_source_ids = apply_source_ids_limit(
                 merged_full_source_ids,
                 max_source_limit,
@@ -2571,7 +2571,7 @@ async def extract_entities(
                 raise PipelineCancelledException('User cancelled during entity extraction')
 
     use_llm_func: callable = global_config['llm_model_func']
-    entity_extract_max_gleaning = global_config['entity_extract_max_gleaning']
+    entity_extract_max_gleaning = int(global_config.get('entity_extract_max_gleaning', 0))
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
@@ -2611,7 +2611,7 @@ async def extract_entities(
         nonlocal processed_chunks
         chunk_key = chunk_key_dp[0]
         chunk_dp = chunk_key_dp[1]
-        content = chunk_dp['content']
+        content = chunk_dp.get('content', '')
         # Get file path from chunk data or use default
         file_path = chunk_dp.get('file_path', 'unknown_source')
 
@@ -2900,7 +2900,7 @@ async def kg_query(
         return QueryResult(content=prompt_content, raw_data=context_result.raw_data)
 
     # Call LLM
-    tokenizer: Tokenizer = global_config['tokenizer']
+    tokenizer = global_config['tokenizer']
     len_of_prompts = len(tokenizer.encode(query + sys_prompt))
     logger.debug(
         f'[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})'
@@ -3056,7 +3056,7 @@ async def extract_keywords_only(
         language=language,
     )
 
-    tokenizer: Tokenizer = global_config['tokenizer']
+    tokenizer = global_config['tokenizer']
     len_of_prompts = len(tokenizer.encode(kw_prompt))
     logger.debug(f'[extract_keywords] Sending to LLM: {len_of_prompts:,} tokens (Prompt: {len_of_prompts})')
 
@@ -3627,10 +3627,12 @@ async def _build_context_str(
         return '', empty_raw_data
 
     # Get token limits
-    max_total_tokens = getattr(
-        query_param,
-        'max_total_tokens',
-        global_config.get('max_total_tokens', DEFAULT_MAX_TOTAL_TOKENS),
+    max_total_tokens = int(
+        getattr(
+            query_param,
+            'max_total_tokens',
+            global_config.get('max_total_tokens', DEFAULT_MAX_TOTAL_TOKENS),
+        )
     )
 
     # Get the system prompt template from PROMPTS or global_config
@@ -4449,7 +4451,7 @@ async def naive_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
 
-    tokenizer: Tokenizer = global_config['tokenizer']
+    tokenizer = global_config['tokenizer']
     if not tokenizer:
         logger.error('Tokenizer not found in global configuration.')
         return QueryResult(content=PROMPTS['fail_response'])
@@ -4461,10 +4463,12 @@ async def naive_query(
         return None
 
     # Calculate dynamic token limit for chunks
-    max_total_tokens = getattr(
-        query_param,
-        'max_total_tokens',
-        global_config.get('max_total_tokens', DEFAULT_MAX_TOTAL_TOKENS),
+    max_total_tokens = int(
+        getattr(
+            query_param,
+            'max_total_tokens',
+            global_config.get('max_total_tokens', DEFAULT_MAX_TOTAL_TOKENS),
+        )
     )
 
     # Calculate system prompt template tokens (excluding content_data)
