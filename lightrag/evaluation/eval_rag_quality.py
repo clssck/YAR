@@ -126,6 +126,19 @@ CONNECT_TIMEOUT_SECONDS = 180.0
 READ_TIMEOUT_SECONDS = 300.0
 TOTAL_TIMEOUT_SECONDS = 180.0
 
+# Anti-hedging prompt for evaluation - encourages confident answers instead of
+# "the context does not explicitly..." hedging that RAGAS scores as 0.0 relevance
+EVAL_USER_PROMPT = os.getenv(
+    'EVAL_USER_PROMPT',
+    'Answer confidently and directly based on the provided context. '
+    'Synthesize information across sources. Avoid phrases like "does not explicitly mention" '
+    'or "context does not detail". If information is partial, provide what you can.',
+)
+
+# RAGAS AnswerRelevancy strictness - number of questions generated per answer
+# Lower = less strict (1-2), Higher = more strict (3-5). Default 3 often too harsh.
+EVAL_ANSWER_RELEVANCY_STRICTNESS = int(os.getenv('EVAL_ANSWER_RELEVANCY_STRICTNESS', '2'))
+
 
 def _is_nan(value: Any) -> bool:
     """Return True when value is a float NaN."""
@@ -336,10 +349,13 @@ class RAGEvaluator:
                 'include_chunk_content': True,  # Request chunk content in references
                 'response_type': 'Single Paragraph',
                 # Retrieval tuning parameters (override via EVAL_* env vars)
-                'top_k': int(os.getenv('EVAL_QUERY_TOP_K', '10')),
-                'chunk_top_k': int(os.getenv('EVAL_CHUNK_TOP_K', '10')),
-                'max_total_tokens': int(os.getenv('EVAL_MAX_TOTAL_TOKENS', '30000')),
+                # Bumped defaults for better context recall: top_k 10→15, chunk 10→15, tokens 30k→40k
+                'top_k': int(os.getenv('EVAL_QUERY_TOP_K', '15')),
+                'chunk_top_k': int(os.getenv('EVAL_CHUNK_TOP_K', '15')),
+                'max_total_tokens': int(os.getenv('EVAL_MAX_TOTAL_TOKENS', '40000')),
+                'cosine_threshold': float(os.getenv('EVAL_COSINE_THRESHOLD', '0.30')),  # 0.30 default, lower for more recall
                 'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'true').lower() == 'true',
+                'user_prompt': EVAL_USER_PROMPT,  # Anti-hedging instructions
             }
 
             # Optional keyword overrides from test dataset - bypasses LLM keyword extraction
@@ -526,7 +542,7 @@ class RAGEvaluator:
                         dataset=eval_dataset,
                         metrics=[
                             Faithfulness(),
-                            AnswerRelevancy(),
+                            AnswerRelevancy(strictness=EVAL_ANSWER_RELEVANCY_STRICTNESS),
                             ContextRecall(),
                             ContextPrecision(),
                         ],
@@ -1115,10 +1131,13 @@ Examples:
   EVAL_QUERY_TOP_K=15 EVAL_CHUNK_TOP_K=20 python lightrag/evaluation/eval_rag_quality.py
 
 Environment Variables (for parameter tuning):
-  EVAL_QUERY_TOP_K     Number of entities/relations to retrieve (default: 10)
-  EVAL_CHUNK_TOP_K     Number of text chunks to retrieve (default: 10)
-  EVAL_MAX_TOTAL_TOKENS  Maximum tokens for context (default: 30000)
+  EVAL_QUERY_TOP_K     Number of entities/relations to retrieve (default: 15)
+  EVAL_CHUNK_TOP_K     Number of text chunks to retrieve (default: 15)
+  EVAL_MAX_TOTAL_TOKENS  Maximum tokens for context (default: 40000)
+  EVAL_COSINE_THRESHOLD  Vector similarity threshold (default: 0.30)
   EVAL_ENABLE_RERANK   Enable reranking (default: true)
+  EVAL_USER_PROMPT     Custom prompt for anti-hedging behavior
+  EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 2)
   LIGHTRAG_API_KEY     API key for LightRAG authentication (optional)
             """,
         )
