@@ -3308,7 +3308,18 @@ async def _get_vector_context(
         search_top_k = query_param.chunk_top_k or query_param.top_k
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
 
-        results = await chunks_vdb.query(query, top_k=search_top_k, query_embedding=query_embedding)
+        # Use BM25 fusion (vector + BM25 with RRF) if enabled and available
+        if query_param.enable_bm25_fusion and hasattr(chunks_vdb, 'hybrid_search'):
+            logger.info(f'Using BM25 fusion (bm25_weight={query_param.bm25_weight})')
+            results = await chunks_vdb.hybrid_search(
+                query,
+                top_k=search_top_k,
+                query_embedding=query_embedding,
+                bm25_weight=query_param.bm25_weight,
+            )
+        else:
+            results = await chunks_vdb.query(query, top_k=search_top_k, query_embedding=query_embedding)
+
         if not results:
             logger.info(f'Naive query: 0 chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})')
             return []
@@ -3320,12 +3331,13 @@ async def _get_vector_context(
                     'content': result['content'],
                     'created_at': result.get('created_at', None),
                     'file_path': result.get('file_path', 'unknown_source'),
-                    'source_type': 'vector',  # Mark the source type
+                    'source_type': result.get('source_type', 'vector'),  # Preserve source from hybrid search
                     'chunk_id': result.get('id'),  # Add chunk_id for deduplication
                 }
                 valid_chunks.append(chunk_with_metadata)
 
-        logger.info(f'Naive query: {len(valid_chunks)} chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})')
+        search_type = 'bm25_fusion' if query_param.enable_bm25_fusion else 'vector'
+        logger.info(f'Naive query ({search_type}): {len(valid_chunks)} chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})')
         return valid_chunks
 
     except Exception as e:

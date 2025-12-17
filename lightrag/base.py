@@ -170,6 +170,17 @@ class QueryParam:
     content differs significantly from the question's keywords.
     """
 
+    enable_bm25_fusion: bool = os.getenv('ENABLE_BM25_FUSION', 'false').lower() == 'true'
+    """Enable BM25 fusion: combines vector similarity with BM25 full-text search.
+    Uses Reciprocal Rank Fusion (RRF) to merge results. Helps with multi-constraint
+    queries where exact keyword matches matter (e.g., "Olipudase 2019 NPP").
+    """
+
+    bm25_weight: float = float(os.getenv('BM25_WEIGHT', '0.3'))
+    """Weight for BM25 results in hybrid search (0.0-1.0). Higher values
+    give more influence to keyword matches vs semantic similarity.
+    """
+
     include_references: bool = False
     """If True, includes reference list in the response for supported endpoints.
     This parameter controls whether the API response includes a references field

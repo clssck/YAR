@@ -164,6 +164,18 @@ class QueryRequest(BaseModel):
         description='Enable HyDE (Hypothetical Document Embedding). When enabled, generates a hypothetical answer and uses its embedding for retrieval. Can improve results for questions with semantic gap between query and answer.',
     )
 
+    enable_bm25_fusion: bool | None = Field(
+        default=None,
+        description='Enable BM25 fusion: combines vector similarity with BM25 full-text search using Reciprocal Rank Fusion (RRF). Helps with multi-constraint queries where exact keyword matches matter (e.g., drug names, dates, acronyms).',
+    )
+
+    bm25_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description='Weight for BM25 results in BM25 fusion (0.0-1.0). Higher values give more influence to keyword matches vs semantic similarity. Default is 0.3.',
+    )
+
     include_references: bool | None = Field(
         default=True,
         description='If True, includes reference list in responses. Affects /query and /query/stream endpoints. /query/data always includes references.',

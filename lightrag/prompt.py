@@ -22,15 +22,22 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
         *   Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
 
 2.  **Relationship Extraction & Output:**
-    *   **Identification:** Identify direct, clearly stated, and meaningful relationships between previously extracted entities.
-    *   **N-ary Relationship Decomposition:** If a single statement describes a relationship involving more than two entities (an N-ary relationship), decompose it into multiple binary (two-entity) relationship pairs for separate description.
-        *   **Example:** For "Alice, Bob, and Carol collaborated on Project X," extract binary relationships such as "Alice collaborated with Project X," "Bob collaborated with Project X," and "Carol collaborated with Project X," or "Alice collaborated with Bob," based on the most reasonable binary interpretations.
-    *   **Relationship Details:** For each binary relationship, extract the following fields:
-        *   `source_entity`: The name of the source entity. Ensure **consistent naming** with entity extraction. Capitalize the first letter of each significant word (title case) if the name is case-insensitive.
-        *   `target_entity`: The name of the target entity. Ensure **consistent naming** with entity extraction. Capitalize the first letter of each significant word (title case) if the name is case-insensitive.
-        *   `relationship_keywords`: One or more high-level keywords summarizing the overarching nature, concepts, or themes of the relationship. Multiple keywords within this field must be separated by a comma `,`. **DO NOT use `{tuple_delimiter}` for separating multiple keywords within this field.**
-        *   `relationship_description`: A concise explanation of the nature of the relationship between the source and target entities, providing a clear rationale for their connection.
-    *   **Output Format - Relationships:** Output a total of 5 fields for each relationship, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `relation`.
+    *   **Identification:** Identify direct, clearly stated relationships between previously extracted entities. Focus on concrete, actionable relationships.
+    *   **Common Relationship Types to Look For:**
+        *   **Organization-Product:** manufactures, develops, produces, sells, markets
+        *   **Organization-Organization:** acquired, partnered with, collaborated with, merged with, invested in
+        *   **Person-Organization:** leads, founded, CEO of, works at, directs
+        *   **Product-Concept:** treats, targets, inhibits, blocks, activates
+        *   **Organization-Event:** approved, authorized, sponsored, conducted
+        *   **Person-Event:** participated in, won, presented at, discovered
+    *   **N-ary Relationship Decomposition:** If a statement involves more than two entities, decompose into binary relationships.
+        *   **Example:** "Pfizer and BioNTech developed the COVID-19 vaccine" → extract "Pfizer developed COVID-19 Vaccine" AND "BioNTech developed COVID-19 Vaccine" AND "Pfizer partnered with BioNTech"
+    *   **Relationship Details:** For each binary relationship, extract:
+        *   `source_entity`: The name of the source entity (use consistent naming with entities above).
+        *   `target_entity`: The name of the target entity (use consistent naming with entities above).
+        *   `relationship_keywords`: One or more **action-oriented keywords** (e.g., "manufactures", "treats", "leads", "approved"). Separate multiple keywords with comma `,`. **DO NOT use `{tuple_delimiter}` within this field.**
+        *   `relationship_description`: A concise explanation of the relationship.
+    *   **Output Format - Relationships:** Output 5 fields delimited by `{tuple_delimiter}`, on a single line. First field must be `relation`.
         *   Format: `relation{tuple_delimiter}source_entity{tuple_delimiter}target_entity{tuple_delimiter}relationship_keywords{tuple_delimiter}relationship_description`
 
 3.  **Delimiter Usage Protocol:**
@@ -105,26 +112,23 @@ PROMPTS['entity_extraction_examples'] = [
 
 <Input Text>
 ```
-while Alex clenched his jaw, the buzz of frustration dull against the backdrop of Taylor's authoritarian certainty. It was this competitive undercurrent that kept him alert, the sense that his and Jordan's shared commitment to discovery was an unspoken rebellion against Cruz's narrowing vision of control and order.
-
-Then Taylor did something unexpected. They paused beside Jordan and, for a moment, observed the device with something akin to reverence. "If this tech can be understood..." Taylor said, their voice quieter, "It could change the game for us. For all of us."
-
-The underlying dismissal earlier seemed to falter, replaced by a glimpse of reluctant respect for the gravity of what lay in their hands. Jordan looked up, and for a fleeting heartbeat, their eyes locked with Taylor's, a wordless clash of wills softening into an uneasy truce.
-
-It was a small transformation, barely perceptible, but one that Alex noted with an inward nod. They had all been brought here by different paths
+Merck announced that the FDA has approved Keytruda (pembrolizumab) for the treatment of non-small cell lung cancer. The approval was based on results from the KEYNOTE-024 clinical trial, which demonstrated a 40% reduction in disease progression. Dr. Roger Perlmutter, President of Merck Research Laboratories, stated that this approval represents a significant advancement in cancer immunotherapy. Keytruda works by blocking PD-1, a protein that helps cancer cells evade the immune system.
 ```
 
 <Output>
-entity{tuple_delimiter}Alex{tuple_delimiter}person{tuple_delimiter}Alex is a character who experiences frustration and is observant of the dynamics among other characters.
-entity{tuple_delimiter}Taylor{tuple_delimiter}person{tuple_delimiter}Taylor is portrayed with authoritarian certainty and shows a moment of reverence towards a device, indicating a change in perspective.
-entity{tuple_delimiter}Jordan{tuple_delimiter}person{tuple_delimiter}Jordan shares a commitment to discovery and has a significant interaction with Taylor regarding a device.
-entity{tuple_delimiter}Cruz{tuple_delimiter}person{tuple_delimiter}Cruz is associated with a vision of control and order, influencing the dynamics among other characters.
-entity{tuple_delimiter}The Device{tuple_delimiter}equipment{tuple_delimiter}The Device is central to the story, with potential game-changing implications, and is revered by Taylor.
-relation{tuple_delimiter}Alex{tuple_delimiter}Taylor{tuple_delimiter}power dynamics, observation{tuple_delimiter}Alex observes Taylor's authoritarian behavior and notes changes in Taylor's attitude toward the device.
-relation{tuple_delimiter}Alex{tuple_delimiter}Jordan{tuple_delimiter}shared goals, rebellion{tuple_delimiter}Alex and Jordan share a commitment to discovery, which contrasts with Cruz's vision.)
-relation{tuple_delimiter}Taylor{tuple_delimiter}Jordan{tuple_delimiter}conflict resolution, mutual respect{tuple_delimiter}Taylor and Jordan interact directly regarding the device, leading to a moment of mutual respect and an uneasy truce.
-relation{tuple_delimiter}Jordan{tuple_delimiter}Cruz{tuple_delimiter}ideological conflict, rebellion{tuple_delimiter}Jordan's commitment to discovery is in rebellion against Cruz's vision of control and order.
-relation{tuple_delimiter}Taylor{tuple_delimiter}The Device{tuple_delimiter}reverence, technological significance{tuple_delimiter}Taylor shows reverence towards the device, indicating its importance and potential impact.
+entity{tuple_delimiter}Merck{tuple_delimiter}organization{tuple_delimiter}Merck is a pharmaceutical company that manufactures Keytruda and announced the FDA approval.
+entity{tuple_delimiter}FDA{tuple_delimiter}organization{tuple_delimiter}The FDA (Food and Drug Administration) is the regulatory agency that approved Keytruda for lung cancer treatment.
+entity{tuple_delimiter}Keytruda{tuple_delimiter}artifact{tuple_delimiter}Keytruda (pembrolizumab) is an immunotherapy drug approved for treating non-small cell lung cancer by blocking PD-1.
+entity{tuple_delimiter}Non-Small Cell Lung Cancer{tuple_delimiter}concept{tuple_delimiter}Non-small cell lung cancer is the disease condition that Keytruda is approved to treat.
+entity{tuple_delimiter}KEYNOTE-024{tuple_delimiter}event{tuple_delimiter}KEYNOTE-024 is the clinical trial that demonstrated Keytruda's efficacy with a 40% reduction in disease progression.
+entity{tuple_delimiter}Roger Perlmutter{tuple_delimiter}person{tuple_delimiter}Dr. Roger Perlmutter is the President of Merck Research Laboratories who commented on the approval.
+entity{tuple_delimiter}PD-1{tuple_delimiter}concept{tuple_delimiter}PD-1 is a protein that Keytruda blocks to help the immune system fight cancer cells.
+relation{tuple_delimiter}Merck{tuple_delimiter}Keytruda{tuple_delimiter}manufactures, develops{tuple_delimiter}Merck is the pharmaceutical company that manufactures and develops Keytruda.
+relation{tuple_delimiter}FDA{tuple_delimiter}Keytruda{tuple_delimiter}approved{tuple_delimiter}The FDA approved Keytruda for the treatment of non-small cell lung cancer.
+relation{tuple_delimiter}Keytruda{tuple_delimiter}Non-Small Cell Lung Cancer{tuple_delimiter}treats{tuple_delimiter}Keytruda is approved as a treatment for non-small cell lung cancer.
+relation{tuple_delimiter}Keytruda{tuple_delimiter}PD-1{tuple_delimiter}blocks, inhibits{tuple_delimiter}Keytruda works by blocking PD-1 protein to enable the immune system to fight cancer.
+relation{tuple_delimiter}KEYNOTE-024{tuple_delimiter}Keytruda{tuple_delimiter}demonstrated efficacy{tuple_delimiter}The KEYNOTE-024 clinical trial demonstrated Keytruda's efficacy in treating lung cancer.
+relation{tuple_delimiter}Roger Perlmutter{tuple_delimiter}Merck{tuple_delimiter}leads, president of{tuple_delimiter}Dr. Roger Perlmutter is the President of Merck Research Laboratories.
 {completion_delimiter}
 
 """,
@@ -370,19 +374,29 @@ Reference Document List (Each entry starts with a [reference_id] that correspond
 """
 
 PROMPTS['keywords_extraction'] = """---Role---
-You are an expert keyword extractor, specializing in analyzing user queries for a Retrieval-Augmented Generation (RAG) system. Your purpose is to identify both high-level and low-level keywords in the user's query that will be used for effective document retrieval.
+You are an expert keyword extractor specializing in scientific and technical information retrieval. Your task is to analyze user queries and extract keywords optimized for a two-tiered RAG search system.
 
 ---Goal---
-Given a user query, your task is to extract two distinct types of keywords:
-1. **high_level_keywords**: for overarching concepts or themes, capturing user's core intent, the subject area, or the type of question being asked.
-2. **low_level_keywords**: for specific entities or details, identifying the specific entities, proper nouns, technical jargon, product names, or concrete items.
+Extract two distinct types of keywords from the user query:
 
----Instructions & Constraints---
-1. **Output Format**: Your output MUST be a valid JSON object and nothing else. Do not include any explanatory text, markdown code fences (like ```json), or any other text before or after the JSON. It will be parsed directly by a JSON parser.
-2. **Source of Truth**: All keywords must be explicitly derived from the user query, with both high-level and low-level keyword categories are required to contain content.
-3. **Concise & Meaningful**: Keywords should be concise words or meaningful phrases. Prioritize multi-word phrases when they represent a single concept. For example, from "latest financial report of Apple Inc.", you should extract "latest financial report" and "Apple Inc." rather than "latest", "financial", "report", and "Apple".
-4. **Handle Edge Cases**: For queries that are too simple, vague, or nonsensical (e.g., "hello", "ok", "asdfghjkl"), you must return a JSON object with empty lists for both keyword types.
-5. **Language**: All extracted keywords MUST be in {language}. Proper nouns (e.g., personal names, place names, organization names) should be kept in their original language.
+1. **high_level_keywords** (2-4 keywords): Broad, thematic concepts that capture:
+   - The query's main goal or intent (e.g., "mechanism of action", "comparison", "efficacy")
+   - The subject area or domain (e.g., "cancer treatment", "drug development", "clinical trials")
+   - The type of information sought (e.g., "side effects", "approval process", "research findings")
+
+2. **low_level_keywords** (1-4 keywords): Specific entities that appear EXPLICITLY in the query:
+   - Drug/product names: "Keytruda", "Ozempic", "CRISPR-Cas9"
+   - Organization names: "FDA", "WHO", "Pfizer"
+   - Technical terms: "mRNA", "PD-1", "monoclonal antibody"
+   - Diseases/conditions: "lung cancer", "diabetes", "hemophilia"
+
+---Instructions---
+1. **Output Format**: Output ONLY a valid JSON object. No explanatory text, no markdown code fences.
+2. **Preserve Exact Names**: Low-level keywords must preserve entity names exactly as written (don't replace "Keytruda" with "drug").
+3. **Derive from Query**: All keywords must come from the query itself. Do not invent related concepts.
+4. **Think About Intent**: For high-level keywords, consider what TYPE of information the user wants (comparison? mechanism? results?).
+5. **Handle Edge Cases**: For vague queries (e.g., "hello"), return empty lists.
+6. **Language**: Keywords MUST be in {language}. Proper nouns keep original language.
 
 ---Examples---
 {examples}
@@ -394,36 +408,47 @@ User Query: {query}
 Output:"""
 
 PROMPTS['keywords_extraction_examples'] = [
-    """Example 1:
+    """Example 1 (Drug mechanism query):
 
-Query: "How does international trade influence global economic stability?"
+Query: "What is the mechanism of action of Fitusiran for hemophilia treatment?"
 
 Output:
 {
-  "high_level_keywords": ["International trade", "Global economic stability", "Economic impact"],
-  "low_level_keywords": ["Trade agreements", "Tariffs", "Currency exchange", "Imports", "Exports"]
+  "high_level_keywords": ["mechanism of action", "therapeutic mechanism", "hemophilia treatment"],
+  "low_level_keywords": ["Fitusiran", "hemophilia"]
 }
 
 """,
-    """Example 2:
+    """Example 2 (Regulatory/approval query):
 
-Query: "What are the environmental consequences of deforestation on biodiversity?"
+Query: "What drugs did the FDA approve for diabetes in 2024?"
 
 Output:
 {
-  "high_level_keywords": ["Environmental consequences", "Deforestation", "Biodiversity loss"],
-  "low_level_keywords": ["Species extinction", "Habitat destruction", "Carbon emissions", "Rainforest", "Ecosystem"]
+  "high_level_keywords": ["drug approval", "regulatory approval", "diabetes treatment"],
+  "low_level_keywords": ["FDA", "diabetes", "2024"]
 }
 
 """,
-    """Example 3:
+    """Example 3 (Technology comparison query):
 
-Query: "What is the role of education in reducing poverty?"
+Query: "How does CRISPR-Cas9 gene editing compare to traditional methods?"
 
 Output:
 {
-  "high_level_keywords": ["Education", "Poverty reduction", "Socioeconomic development"],
-  "low_level_keywords": ["School access", "Literacy rates", "Job training", "Income inequality"]
+  "high_level_keywords": ["gene editing", "technology comparison", "methods comparison"],
+  "low_level_keywords": ["CRISPR-Cas9"]
+}
+
+""",
+    """Example 4 (Drug efficacy comparison):
+
+Query: "Compare the efficacy of Keytruda vs Opdivo for lung cancer"
+
+Output:
+{
+  "high_level_keywords": ["drug comparison", "efficacy comparison", "cancer treatment"],
+  "low_level_keywords": ["Keytruda", "Opdivo", "lung cancer"]
 }
 
 """,

@@ -355,6 +355,8 @@ class RAGEvaluator:
                 'max_total_tokens': int(os.getenv('EVAL_MAX_TOTAL_TOKENS', '40000')),
                 'cosine_threshold': float(os.getenv('EVAL_COSINE_THRESHOLD', '0.30')),  # 0.30 default, lower for more recall
                 'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'true').lower() == 'true',
+                'enable_bm25_fusion': os.getenv('EVAL_ENABLE_BM25_FUSION', 'false').lower() == 'true',
+                'bm25_weight': float(os.getenv('EVAL_BM25_WEIGHT', '0.3')),
                 'user_prompt': EVAL_USER_PROMPT,  # Anti-hedging instructions
             }
 
@@ -1136,6 +1138,8 @@ Environment Variables (for parameter tuning):
   EVAL_MAX_TOTAL_TOKENS  Maximum tokens for context (default: 40000)
   EVAL_COSINE_THRESHOLD  Vector similarity threshold (default: 0.30)
   EVAL_ENABLE_RERANK   Enable reranking (default: true)
+  EVAL_ENABLE_BM25_FUSION  Enable BM25 fusion: vector + BM25 search (default: false)
+  EVAL_BM25_WEIGHT     BM25 weight for fusion 0.0-1.0 (default: 0.3)
   EVAL_USER_PROMPT     Custom prompt for anti-hedging behavior
   EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 2)
   LIGHTRAG_API_KEY     API key for LightRAG authentication (optional)
