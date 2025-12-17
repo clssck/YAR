@@ -1,12 +1,25 @@
 """
 Entity Resolution Module for LightRAG
 
-Provides automatic entity deduplication using a 3-layer approach:
+Provides automatic entity deduplication using a multi-layer approach:
 1. Case normalization (exact match)
+1.5. Abbreviation detection (FDA → US Food and Drug Administration)
 2. Fuzzy string matching (typos)
 3. Vector similarity + LLM verification (semantic matches)
 """
 
+from .abbreviations import (
+    AbbreviationMatch,
+    detect_abbreviation,
+    find_abbreviation_match,
+)
+from .clustering import (
+    ClusteringConfig,
+    ClusteringResult,
+    EntityCluster,
+    cluster_entities_batch,
+    process_clustering_results,
+)
 from .config import DEFAULT_CONFIG, EntityResolutionConfig
 from .resolver import (
     ResolutionResult,
@@ -18,8 +31,20 @@ from .resolver import (
 )
 
 __all__ = [
+    # Config
     'DEFAULT_CONFIG',
     'EntityResolutionConfig',
+    # Abbreviation detection
+    'AbbreviationMatch',
+    'detect_abbreviation',
+    'find_abbreviation_match',
+    # Clustering
+    'ClusteringConfig',
+    'ClusteringResult',
+    'EntityCluster',
+    'cluster_entities_batch',
+    'process_clustering_results',
+    # Resolution
     'ResolutionResult',
     'fuzzy_similarity',
     'get_cached_alias',

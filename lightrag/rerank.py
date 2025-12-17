@@ -19,6 +19,15 @@ from .utils import logger
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path='.env', override=False)
 
+# Stub for server compatibility - local reranking disabled, use API rerankers
+DEFAULT_RERANK_MODEL = 'jina-reranker-v2-base-multilingual'
+
+
+def create_local_rerank_func(model_name: str | None = None):
+    """Stub - local reranking disabled. Use RERANK_BINDING env vars for API reranking."""
+    logger.warning('Local reranking disabled. Use RERANK_BINDING=jina/cohere/aliyun for API reranking.')
+    return None
+
 
 def chunk_documents_for_rerank(
     documents: list[str],
@@ -488,6 +497,82 @@ async def ali_rerank(
         response_format='aliyun',
         request_format='aliyun',
     )
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    retry=(retry_if_exception_type(aiohttp.ClientError) | retry_if_exception_type(aiohttp.ClientResponseError)),
+)
+async def deepinfra_rerank(
+    query: str,
+    documents: list[str],
+    top_n: int | None = None,
+    api_key: str | None = None,
+    model: str = 'Qwen/Qwen3-Reranker-8B',
+    base_url: str = 'https://api.deepinfra.com/v1/inference/Qwen/Qwen3-Reranker-8B',
+) -> list[dict[str, Any]]:
+    """
+    Rerank documents using DeepInfra API (Qwen format).
+
+    Args:
+        query: The search query
+        documents: List of strings to rerank
+        top_n: Number of top results to return
+        api_key: DeepInfra API key
+        model: Model name (used in URL)
+        base_url: API endpoint
+
+    Returns:
+        List of dictionary of ["index": int, "relevance_score": float]
+    """
+    if api_key is None:
+        api_key = os.getenv('DEEPINFRA_API_KEY') or os.getenv('RERANK_BINDING_API_KEY')
+
+    if not base_url:
+        raise ValueError('Base URL is required')
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'bearer {api_key}',
+    }
+
+    # DeepInfra/Qwen format uses 'queries' (plural) not 'query'
+    payload = {
+        'queries': [query],
+        'documents': documents,
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(base_url, headers=headers, json=payload) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                raise aiohttp.ClientResponseError(
+                    request_info=response.request_info,
+                    history=response.history,
+                    status=response.status,
+                    message=f'DeepInfra Rerank API error: {error_text}',
+                )
+
+            response_json = await response.json()
+
+            # DeepInfra returns {"scores": [0.96, 0.01, ...]}
+            scores = response_json.get('scores', [])
+
+            if not scores:
+                return []
+
+            # Convert to standard format with index
+            results = [{'index': i, 'relevance_score': score} for i, score in enumerate(scores)]
+
+            # Sort by score descending
+            results.sort(key=lambda x: x['relevance_score'], reverse=True)
+
+            # Apply top_n limit
+            if top_n is not None and len(results) > top_n:
+                results = results[:top_n]
+
+            return results
 
 
 """Please run this test as a module:

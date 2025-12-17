@@ -159,6 +159,11 @@ class QueryRequest(BaseModel):
         description='Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True.',
     )
 
+    enable_hyde: bool | None = Field(
+        default=None,
+        description='Enable HyDE (Hypothetical Document Embedding). When enabled, generates a hypothetical answer and uses its embedding for retrieval. Can improve results for questions with semantic gap between query and answer.',
+    )
+
     include_references: bool | None = Field(
         default=True,
         description='If True, includes reference list in responses. Affects /query and /query/stream endpoints. /query/data always includes references.',
@@ -184,6 +189,11 @@ class QueryRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description='Minimum similarity threshold for citation matching (0.0-1.0). Higher values mean stricter matching.',
+    )
+
+    entity_filter: str | None = Field(
+        default=None,
+        description='Filter results to entities/chunks containing this term. Useful for multi-product corpora to prevent context mixing. Example: "Fitusiran" to restrict to Fitusiran-related content only.',
     )
 
     @field_validator('query', mode='after')

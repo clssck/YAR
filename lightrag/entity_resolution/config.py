@@ -52,6 +52,28 @@ Term B: {term_b}
 Answer only YES or NO.""",
     )
 
+    # Abbreviation detection: Enable/disable Layer 1.5 abbreviation matching
+    # Runs after exact match but before fuzzy matching
+    # Catches patterns like: FDA → US Food and Drug Administration
+    abbreviation_detection_enabled: bool = True
+
+    # Minimum confidence for abbreviation matches (0-1)
+    # Higher = fewer false positives but may miss valid abbreviations
+    # 0.80 = balanced default
+    abbreviation_min_confidence: float = 0.80
+
+    # Auto-resolve during extraction: When enabled, automatically resolve
+    # entity aliases during document extraction/indexing
+    auto_resolve_on_extraction: bool = True
+
+    # Batch size for entity resolution during extraction
+    # Larger batches = fewer VDB queries but more memory
+    batch_size: int = 100
+
+    # Skip LLM verification for high-confidence matches
+    # If abbreviation or fuzzy confidence >= this threshold, skip LLM call
+    skip_llm_threshold: float = 0.95
+
 
 # Default configuration
 DEFAULT_CONFIG = EntityResolutionConfig()

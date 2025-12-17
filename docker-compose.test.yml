@@ -115,8 +115,11 @@ services:
       - POSTGRES_PASSWORD=lightrag_pass
       - POSTGRES_DATABASE=lightrag
 
-      # Entity Resolution - DISABLED for faster ingestion (testing Context Precision changes)
-      - ENTITY_RESOLUTION_ENABLED=false
+      # Workspace - must match existing data
+      - WORKSPACE=default
+
+      # Entity Resolution - ENABLED for testing
+      - ENTITY_RESOLUTION_ENABLED=true
       - ENTITY_RESOLUTION_FUZZY_THRESHOLD=0.85
       - ENTITY_RESOLUTION_VECTOR_THRESHOLD=0.5
       - ENTITY_RESOLUTION_MAX_CANDIDATES=3

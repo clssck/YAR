@@ -428,3 +428,11 @@ Output:
 
 """,
 ]
+
+# HyDE (Hypothetical Document Embedding) prompt
+# Generates a hypothetical answer to improve retrieval through semantic similarity
+PROMPTS['hyde_prompt'] = """You are a knowledgeable assistant. Given the following question, write a brief, factual passage that would directly answer it. Write as if you are certain of the facts, even if you need to imagine plausible details. Focus on being informative and comprehensive.
+
+Question: {query}
+
+Write a concise 2-3 sentence hypothetical answer that contains the key information someone asking this question would want to find:"""

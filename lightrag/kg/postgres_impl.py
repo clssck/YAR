@@ -4350,13 +4350,15 @@ class PGGraphStorage(BaseGraphStorage):
         """
         label = self._normalize_node_id(source_node_id)
 
+        # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
         query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                      MATCH (n:base {{entity_id: $1}})
+                      UNWIND $node_ids AS node_id
+                      MATCH (n:base {{entity_id: node_id}})
                       OPTIONAL MATCH (n)-[]-(connected:base)
                       RETURN n.entity_id AS source_id, connected.entity_id AS connected_id
-                    $$, $1) AS (source_id text, connected_id text)"""
+                    $$, $1::agtype) AS (source_id text, connected_id text)"""
 
-        results = await self._query(query, params={'node_id': label})
+        results = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         edges = []
         for record in results:
             source_id = record['source_id']
@@ -4616,13 +4618,15 @@ class PGGraphStorage(BaseGraphStorage):
         """
         label = self._normalize_node_id(node_id)
 
+        # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
         query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                     MATCH (n:base {{entity_id: $1}})
+                     UNWIND $node_ids AS node_id
+                     MATCH (n:base {{entity_id: node_id}})
                      DETACH DELETE n
-                   $$, $1) AS (n agtype)"""
+                   $$, $1::agtype) AS (n agtype)"""
 
         try:
-            await self._query(query, readonly=False, params={'node_id': label})
+            await self._query(query, readonly=False, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         except Exception as e:
             logger.error(f'[{self.workspace}] Error during node deletion: {e}')
             raise
@@ -5111,13 +5115,15 @@ class PGGraphStorage(BaseGraphStorage):
         max_nodes_int = max_nodes
 
         # Get starting node data
+        # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
         label = self._normalize_node_id(node_label)
         query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                    MATCH (n:base {{entity_id: $1}})
-                    RETURN id(n) as node_id, n
-                  $$, $1) AS (node_id bigint, n agtype)"""
+                    UNWIND $node_ids AS node_id
+                    MATCH (n:base {{entity_id: node_id}})
+                    RETURN id(n) as internal_id, n
+                  $$, $1::agtype) AS (internal_id bigint, n agtype)"""
 
-        node_result = await self._query(query, params={'node_id': label})
+        node_result = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         if not node_result or not node_result[0].get('n'):
             return result
 

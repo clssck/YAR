@@ -2214,6 +2214,156 @@ async def _merge_edges_then_upsert(
     return edge_data
 
 
+async def _resolve_entity_aliases_for_batch(
+    all_nodes: dict[str, list],
+    all_edges: dict[tuple, list],
+    entity_vdb: BaseVectorStorage,
+    global_config: dict[str, Any],
+) -> tuple[dict[str, list], dict[tuple, list]]:
+    """Resolve entity aliases before merging into the knowledge graph.
+
+    This function checks each extracted entity against existing entities
+    in the VDB and the alias cache. If a match is found, the entity name
+    is rewritten to the canonical form.
+
+    Args:
+        all_nodes: Dict mapping entity names to list of entity data
+        all_edges: Dict mapping (src, tgt) tuples to list of edge data
+        entity_vdb: Entity vector database for similarity search
+        global_config: Global configuration dict
+
+    Returns:
+        Tuple of (rewritten_nodes, rewritten_edges) with canonical names
+    """
+    from lightrag.entity_resolution import (
+        EntityResolutionConfig,
+        find_abbreviation_match,
+        fuzzy_similarity,
+        get_cached_alias,
+        store_alias,
+    )
+
+    # Get entity resolution config
+    entity_resolution_config = global_config.get('entity_resolution_config')
+    if entity_resolution_config is None:
+        entity_resolution_config = EntityResolutionConfig()
+    elif isinstance(entity_resolution_config, dict):
+        # Handle case where global_config was created via asdict() which converts nested dataclasses to dicts
+        entity_resolution_config = EntityResolutionConfig(**entity_resolution_config)
+
+    # Check if auto-resolution is enabled
+    if not entity_resolution_config.enabled or not entity_resolution_config.auto_resolve_on_extraction:
+        return all_nodes, all_edges
+
+    workspace = global_config.get('workspace', '')
+
+    # Try to get database for alias cache
+    db = None
+    try:
+        if hasattr(entity_vdb, '_db_required'):
+            db = entity_vdb._db_required()
+    except Exception:
+        pass  # Not PostgreSQL, skip alias cache
+
+    # Build alias map: original_name -> canonical_name
+    alias_map: dict[str, str] = {}
+    entity_names = list(all_nodes.keys())
+
+    logger.debug(f'[{workspace}] Resolving aliases for {len(entity_names)} entities')
+
+    # Step 1: Check alias cache for known mappings
+    if db is not None:
+        for entity_name in entity_names:
+            try:
+                cached = await get_cached_alias(entity_name, db, workspace)
+                if cached:
+                    canonical, _method, confidence = cached
+                    alias_map[entity_name] = canonical
+                    logger.debug(f'[{workspace}] Cached alias: {entity_name} → {canonical}')
+            except Exception as e:
+                logger.debug(f'[{workspace}] Alias cache lookup failed for {entity_name}: {e}')
+
+    # Step 2: Within-batch fuzzy resolution for remaining entities
+    # This catches typos within the same document batch
+    remaining = [n for n in entity_names if n not in alias_map]
+    if entity_resolution_config.fuzzy_pre_resolution_enabled:
+        for i, name_a in enumerate(remaining):
+            if name_a in alias_map:
+                continue
+            for name_b in remaining[i + 1 :]:
+                if name_b in alias_map:
+                    continue
+                similarity = fuzzy_similarity(name_a, name_b)
+                if similarity >= entity_resolution_config.fuzzy_threshold:
+                    # Use longer name as canonical (more descriptive)
+                    if len(name_a) >= len(name_b):
+                        canonical, alias = name_a, name_b
+                    else:
+                        canonical, alias = name_b, name_a
+                    alias_map[alias] = canonical
+                    logger.debug(f'[{workspace}] Fuzzy match: {alias} → {canonical} ({similarity:.2f})')
+
+    # Step 3: Within-batch abbreviation detection
+    remaining = [n for n in entity_names if n not in alias_map]
+    if entity_resolution_config.abbreviation_detection_enabled:
+        for name in remaining:
+            if name in alias_map:
+                continue
+            # Check against other entities in batch
+            candidates = [n for n in remaining if n != name and n not in alias_map]
+            match = find_abbreviation_match(
+                name,
+                candidates,
+                min_confidence=entity_resolution_config.abbreviation_min_confidence,
+            )
+            if match:
+                canonical, confidence = match
+                alias_map[name] = canonical
+                logger.debug(f'[{workspace}] Abbreviation match: {name} → {canonical} ({confidence:.2f})')
+
+    # Step 4: Store new aliases in cache
+    if db is not None and alias_map:
+        for alias, canonical in alias_map.items():
+            try:
+                await store_alias(
+                    alias=alias,
+                    canonical=canonical,
+                    method='extraction',
+                    confidence=0.9,  # High confidence for extraction-time resolution
+                    db=db,
+                    workspace=workspace,
+                )
+            except Exception as e:
+                logger.debug(f'[{workspace}] Failed to store alias {alias} → {canonical}: {e}')
+
+    # If no aliases found, return original data
+    if not alias_map:
+        return all_nodes, all_edges
+
+    logger.info(f'[{workspace}] Resolved {len(alias_map)} entity aliases')
+
+    # Rewrite all_nodes with canonical names
+    new_all_nodes: dict[str, list] = defaultdict(list)
+    for entity_name, entities in all_nodes.items():
+        canonical = alias_map.get(entity_name, entity_name)
+        new_all_nodes[canonical].extend(entities)
+
+    # Rewrite all_edges with canonical names
+    new_all_edges: dict[tuple, list] = defaultdict(list)
+    for edge_key, edges in all_edges.items():
+        src, tgt = edge_key
+        new_src = alias_map.get(src, src)
+        new_tgt = alias_map.get(tgt, tgt)
+        # Skip self-loops created by aliasing
+        if new_src == new_tgt:
+            logger.debug(f'[{workspace}] Skipping self-loop: {src}-{tgt} → {new_src}')
+            continue
+        new_key = tuple(sorted([new_src, new_tgt]))
+        new_all_edges[new_key].extend(edges)
+
+    return dict(new_all_nodes), dict(new_all_edges)
+
+
 async def merge_nodes_and_edges(
     chunk_results: list,
     knowledge_graph_inst: BaseGraphStorage,
@@ -2277,6 +2427,18 @@ async def merge_nodes_and_edges(
         for edge_key, edges in maybe_edges.items():
             sorted_edge_key = tuple(sorted(edge_key))
             all_edges[sorted_edge_key].extend(edges)
+
+    # ===== Alias Resolution Phase =====
+    # Resolve entity aliases before merging (within-batch deduplication)
+    all_nodes, all_edges = await _resolve_entity_aliases_for_batch(
+        all_nodes=dict(all_nodes),
+        all_edges=dict(all_edges),
+        entity_vdb=entity_vdb,
+        global_config=global_config,
+    )
+    # Convert back to defaultdict for subsequent operations
+    all_nodes = defaultdict(list, all_nodes)
+    all_edges = defaultdict(list, all_edges)
 
     total_entities_count = len(all_nodes)
     total_relations_count = len(all_edges)
@@ -2920,6 +3082,7 @@ async def kg_query(
         ll_keywords_str,
         query_param.user_prompt or '',
         query_param.enable_rerank,
+        query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
     cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
@@ -3202,11 +3365,30 @@ async def _perform_kg_search(
     # Pre-compute query embedding once for all vector operations
     kg_chunk_pick_method = text_chunks_db.global_config.get('kg_chunk_pick_method', DEFAULT_KG_CHUNK_PICK_METHOD)
     query_embedding = None
+    embedding_query_text = query  # Text to embed (query or hypothetical answer for HyDE)
+
+    # HyDE: Generate hypothetical answer if enabled
+    if query and query_param.enable_hyde:
+        try:
+            use_model_func = query_param.model_func or text_chunks_db.global_config.get('llm_model_func')
+            if use_model_func:
+                hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
+                hypothetical_answer = await use_model_func(hyde_prompt)
+                if hypothetical_answer and isinstance(hypothetical_answer, str) and len(hypothetical_answer) > 20:
+                    embedding_query_text = hypothetical_answer
+                    logger.debug(f'HyDE: Generated hypothetical answer ({len(hypothetical_answer)} chars) for embedding')
+                else:
+                    logger.warning('HyDE: Generated answer too short, using original query')
+            else:
+                logger.warning('HyDE enabled but no LLM function available')
+        except Exception as e:
+            logger.warning(f'HyDE: Failed to generate hypothetical answer: {e}, using original query')
+
     if query and (kg_chunk_pick_method == 'VECTOR' or chunks_vdb):
         actual_embedding_func = text_chunks_db.embedding_func
         if actual_embedding_func:
             try:
-                query_embedding = await actual_embedding_func([query])
+                query_embedding = await actual_embedding_func([embedding_query_text])
                 query_embedding = query_embedding[0]  # Extract first embedding from batch result
                 logger.debug('Pre-computed query embedding for all vector operations')
             except Exception as e:
@@ -3805,6 +3987,44 @@ async def _build_query_context(
             if not search_result['chunk_tracking']:
                 return None
 
+    # Stage 1.5: Apply entity filter if specified (prevents context mixing between products)
+    if query_param.entity_filter:
+        filter_term = query_param.entity_filter.lower()
+        original_entity_count = len(search_result['final_entities'])
+        original_relation_count = len(search_result['final_relations'])
+
+        # Filter entities: keep those whose name or description contains the filter term
+        filtered_entities = [
+            e for e in search_result['final_entities']
+            if filter_term in e.get('entity_name', '').lower()
+            or filter_term in e.get('description', '').lower()
+        ]
+
+        # Get the set of filtered entity names for relation filtering
+        filtered_entity_names = {e.get('entity_name', '').lower() for e in filtered_entities}
+
+        # Filter relations: keep those connected to at least one filtered entity
+        filtered_relations = [
+            r for r in search_result['final_relations']
+            if (r.get('src_tgt', ('', ''))[0].lower() in filtered_entity_names
+                or r.get('src_tgt', ('', ''))[1].lower() in filtered_entity_names)
+        ]
+
+        # Update search_result with filtered data
+        search_result['final_entities'] = filtered_entities
+        search_result['final_relations'] = filtered_relations
+
+        logger.info(
+            f"Entity filter '{query_param.entity_filter}': "
+            f"{original_entity_count} → {len(filtered_entities)} entities, "
+            f"{original_relation_count} → {len(filtered_relations)} relations"
+        )
+
+        # Return None if filter removed all results
+        if not filtered_entities and not filtered_relations:
+            logger.warning(f"Entity filter '{query_param.entity_filter}' removed all results")
+            return None
+
     # Stage 2: Apply token truncation for LLM efficiency
     truncation_result = await _apply_token_truncation(
         search_result,
@@ -3966,6 +4186,12 @@ async def _find_most_related_edges_from_entities(
             if 'weight' not in edge_props:
                 logger.warning(f"Edge {pair} missing 'weight' attribute, using default value 1.0")
                 edge_props['weight'] = 1.0
+            else:
+                # Ensure weight is float (AGE may return string from JSONB)
+                try:
+                    edge_props['weight'] = float(edge_props['weight'])
+                except (ValueError, TypeError):
+                    edge_props['weight'] = 1.0
 
             combined = {
                 'src_tgt': pair,
@@ -4456,7 +4682,26 @@ async def naive_query(
         logger.error('Tokenizer not found in global configuration.')
         return QueryResult(content=PROMPTS['fail_response'])
 
-    chunks = await _get_vector_context(query, chunks_vdb, query_param, None)
+    # HyDE: Generate hypothetical answer and compute embedding if enabled
+    query_embedding = None
+    if query_param.enable_hyde:
+        try:
+            hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
+            hypothetical_answer = await use_model_func(hyde_prompt)
+            if hypothetical_answer and isinstance(hypothetical_answer, str) and len(hypothetical_answer) > 20:
+                embedding_func = getattr(chunks_vdb, 'embedding_func', None)
+                if embedding_func:
+                    query_embedding = await embedding_func([hypothetical_answer])
+                    query_embedding = query_embedding[0]
+                    logger.debug(f'HyDE (naive): Generated hypothetical answer ({len(hypothetical_answer)} chars)')
+                else:
+                    logger.warning('HyDE: No embedding function available on chunks_vdb')
+            else:
+                logger.warning('HyDE: Generated answer too short, using original query')
+        except Exception as e:
+            logger.warning(f'HyDE: Failed in naive_query: {e}, using original query')
+
+    chunks = await _get_vector_context(query, chunks_vdb, query_param, query_embedding)
 
     if chunks is None or len(chunks) == 0:
         logger.info('[naive_query] No relevant document chunks found; returning no-result.')
@@ -4579,6 +4824,7 @@ async def naive_query(
         query_param.max_total_tokens,
         query_param.user_prompt or '',
         query_param.enable_rerank,
+        query_param.entity_filter or '',  # Include entity_filter in cache key
     )
     cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
     if cached_result is not None:

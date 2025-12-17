@@ -51,7 +51,7 @@
       "project": "pharma_evaluation"
     },
     {
-      "question": "According to the 2023 Product Usage Awareness presentation, what gaps exist in R&D understanding of product usage in clinical practice?",
+      "question": "According to the 2023 Product Usage Awareness presentation, what uncertainties and challenges does R&D face regarding product usage in clinical practice?",
       "ground_truth": "According to the 2023 Product Usage Awareness presentation, gaps in R&D understanding of product usage in clinical practice include uncertainties related to enrollment timelines, randomization balance, and the ratio of patients to sites. Additionally, there are challenges in managing uncertainties such as batch size, shelf life, and changes in manufacturing processes, which can impact supply planning and execution of project milestones.",
       "project": "pharma_evaluation"
     },

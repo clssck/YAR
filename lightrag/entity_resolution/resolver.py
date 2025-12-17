@@ -15,6 +15,7 @@ import numpy as np
 
 from lightrag.utils import logger
 
+from .abbreviations import find_abbreviation_match
 from .config import DEFAULT_CONFIG, EntityResolutionConfig
 
 
@@ -123,6 +124,19 @@ async def resolve_entity(
         if name.lower().strip() == normalized:
             return ResolutionResult('match', name, 1.0, 'exact')
 
+    # Layer 1.5: Abbreviation detection
+    # Catches patterns like FDA → US Food and Drug Administration
+    if config.abbreviation_detection_enabled:
+        candidate_names = [name for name, _ in existing_entities]
+        abbrev_match = find_abbreviation_match(
+            entity_name,
+            candidate_names,
+            min_confidence=config.abbreviation_min_confidence,
+        )
+        if abbrev_match:
+            matched_name, confidence = abbrev_match
+            return ResolutionResult('match', matched_name, confidence, 'abbreviation')
+
     # Layer 2: Fuzzy string matching (catches typos)
     best_fuzzy_match = None
     best_fuzzy_score = 0.0
@@ -200,18 +214,38 @@ async def resolve_entity_with_vdb(
     if not candidates:
         return ResolutionResult('new', None, 0.0, 'none')
 
+    # Helper to safely extract entity_name from candidates
+    # VDB should return dicts, but we handle malformed data gracefully
+    def get_entity_name(candidate) -> str | None:
+        if isinstance(candidate, dict):
+            return candidate.get('entity_name')
+        return None
+
     # Layer 1: Case-insensitive exact match among candidates
     for candidate in candidates:
-        candidate_name = candidate.get('entity_name')
+        candidate_name = get_entity_name(candidate)
         if candidate_name and candidate_name.lower().strip() == normalized:
             return ResolutionResult('match', candidate_name, 1.0, 'exact')
+
+    # Layer 1.5: Abbreviation detection
+    # Catches patterns like FDA → US Food and Drug Administration
+    if config.abbreviation_detection_enabled:
+        candidate_names = [get_entity_name(c) for c in candidates if get_entity_name(c)]
+        abbrev_match = find_abbreviation_match(
+            entity_name,
+            candidate_names,
+            min_confidence=config.abbreviation_min_confidence,
+        )
+        if abbrev_match:
+            matched_name, confidence = abbrev_match
+            return ResolutionResult('match', matched_name, confidence, 'abbreviation')
 
     # Layer 2: Fuzzy string matching (catches typos)
     best_fuzzy_match = None
     best_fuzzy_score = 0.0
 
     for candidate in candidates:
-        candidate_name = candidate.get('entity_name')
+        candidate_name = get_entity_name(candidate)
         if not candidate_name:
             continue
         similarity = fuzzy_similarity(entity_name, candidate_name)
@@ -227,7 +261,7 @@ async def resolve_entity_with_vdb(
     for candidate in candidates:
         if verified_count >= config.max_candidates:
             break
-        candidate_name = candidate.get('entity_name')
+        candidate_name = get_entity_name(candidate)
         if not candidate_name:
             continue
 

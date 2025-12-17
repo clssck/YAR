@@ -3,18 +3,16 @@ LightRAG FastAPI Server
 """
 
 import argparse
+from collections.abc import AsyncIterator
 import configparser
+from contextlib import asynccontextmanager
 import logging
 import logging.config
 import os
-import sys
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
+import sys
 from typing import Annotated, Any, cast
 
-import pipmaster as pm
-import uvicorn
 from ascii_colors import ASCIIColors
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -27,11 +25,13 @@ from fastapi.openapi.docs import (
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+import pipmaster as pm
+import uvicorn
 
-from lightrag import LightRAG
-from lightrag import __version__ as core_version
+from lightrag import LightRAG, __version__ as core_version
 from lightrag.api import __api_version__
 from lightrag.api.auth import auth_handler
+from lightrag.api.routers.alias_routes import create_alias_routes
 from lightrag.api.routers.document_routes import (
     DocumentManager,
     create_document_routes,
@@ -920,19 +920,76 @@ def create_app(args):
     else:
         logger.info('Embedding max_token_size: not set (90% token warning disabled)')
 
-    # Configure local rerank function
+    # Configure rerank function (local or API-based)
     rerank_model_func = None
     if args.enable_rerank:
-        from lightrag.rerank import DEFAULT_RERANK_MODEL, create_local_rerank_func
+        rerank_binding = os.getenv('RERANK_BINDING', 'local').lower()
 
-        model_name = args.rerank_model or DEFAULT_RERANK_MODEL
-        try:
-            rerank_model_func = create_local_rerank_func(model_name)
-            logger.info(f'Local reranking enabled with model: {model_name}')
-        except Exception as e:
-            logger.error(f'Failed to initialize local reranker: {e}')
-            logger.warning('Continuing without reranking')
-            rerank_model_func = None
+        if rerank_binding == 'deepinfra':
+            from lightrag.rerank import deepinfra_rerank
+
+            rerank_api_key = os.getenv('RERANK_BINDING_API_KEY') or os.getenv('DEEPINFRA_API_KEY')
+            base_url = os.getenv('RERANK_BINDING_HOST', 'https://api.deepinfra.com/v1/inference/Qwen/Qwen3-Reranker-8B')
+            model = os.getenv('RERANK_MODEL', 'Qwen/Qwen3-Reranker-8B')
+
+            async def rerank_func(query, documents, top_n=None, **kwargs):
+                return await deepinfra_rerank(query, documents, top_n, rerank_api_key, model, base_url)
+
+            rerank_model_func = rerank_func
+            logger.info(f'DeepInfra reranking enabled: {model}')
+
+        elif rerank_binding == 'jina':
+            from lightrag.rerank import jina_rerank
+
+            rerank_api_key = os.getenv('RERANK_BINDING_API_KEY') or os.getenv('JINA_API_KEY')
+            base_url = os.getenv('RERANK_BINDING_HOST', 'https://api.jina.ai/v1/rerank')
+            model = os.getenv('RERANK_MODEL', 'jina-reranker-v2-base-multilingual')
+
+            async def rerank_func(query, documents, top_n=None, **kwargs):
+                return await jina_rerank(query, documents, top_n, rerank_api_key, model, base_url)
+
+            rerank_model_func = rerank_func
+            logger.info(f'Jina reranking enabled: {model}')
+
+        elif rerank_binding == 'cohere':
+            from lightrag.rerank import cohere_rerank
+
+            rerank_api_key = os.getenv('RERANK_BINDING_API_KEY') or os.getenv('COHERE_API_KEY')
+            base_url = os.getenv('RERANK_BINDING_HOST', 'https://api.cohere.com/v2/rerank')
+            model = os.getenv('RERANK_MODEL', 'rerank-v3.5')
+
+            async def rerank_func(query, documents, top_n=None, **kwargs):
+                return await cohere_rerank(query, documents, top_n, rerank_api_key, model, base_url)
+
+            rerank_model_func = rerank_func
+            logger.info(f'Cohere reranking enabled: {model}')
+
+        elif rerank_binding == 'aliyun':
+            from lightrag.rerank import ali_rerank
+
+            rerank_api_key = os.getenv('RERANK_BINDING_API_KEY') or os.getenv('DASHSCOPE_API_KEY')
+            base_url = os.getenv(
+                'RERANK_BINDING_HOST', 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank'
+            )
+            model = os.getenv('RERANK_MODEL', 'gte-rerank-v2')
+
+            async def rerank_func(query, documents, top_n=None, **kwargs):
+                return await ali_rerank(query, documents, top_n, rerank_api_key, model, base_url)
+
+            rerank_model_func = rerank_func
+            logger.info(f'Aliyun reranking enabled: {model}')
+
+        else:  # local
+            from lightrag.rerank import DEFAULT_RERANK_MODEL, create_local_rerank_func
+
+            model_name = args.rerank_model or DEFAULT_RERANK_MODEL
+            try:
+                rerank_model_func = create_local_rerank_func(model_name)
+                logger.info(f'Local reranking enabled with model: {model_name}')
+            except Exception as e:
+                logger.error(f'Failed to initialize local reranker: {e}')
+                logger.warning('Continuing without reranking')
+                rerank_model_func = None
     else:
         logger.info('Reranking is disabled')
 
@@ -988,6 +1045,8 @@ def create_app(args):
     )
     app.include_router(create_query_routes(rag, api_key, args.top_k, s3_client))
     app.include_router(create_graph_routes(rag, api_key))
+    app.include_router(create_alias_routes(rag, api_key))
+    logger.info('Entity alias routes registered at /aliases')
 
     # Register table routes if all storages are PostgreSQL
     all_postgres_storages = (
@@ -1156,7 +1215,14 @@ def create_app(args):
             default_workspace = get_default_workspace()
             if workspace is None:
                 workspace = default_workspace
-            pipeline_status = await get_namespace_data('pipeline_status', workspace=workspace)
+
+            # Handle case where pipeline_status isn't initialized yet (worker startup)
+            try:
+                pipeline_status = await get_namespace_data('pipeline_status', workspace=workspace)
+                pipeline_busy = pipeline_status.get('busy', False)
+            except Exception:
+                # Pipeline not yet initialized - worker still starting up
+                pipeline_busy = None  # Will show as null in response
 
             auth_mode = 'disabled' if not auth_configured else 'enabled'
 
@@ -1206,7 +1272,7 @@ def create_app(args):
                     'auto_connect_orphans': args.auto_connect_orphans,
                 },
                 'auth_mode': auth_mode,
-                'pipeline_busy': pipeline_status.get('busy', False),
+                'pipeline_busy': pipeline_busy,
                 'keyed_locks': keyed_lock_info,
                 'core_version': core_version,
                 'api_version': api_version_display,

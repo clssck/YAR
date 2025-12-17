@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 from typing import (
     Any,
     Literal,
@@ -162,6 +162,14 @@ class QueryParam:
     Default is True to enable reranking when rerank model is available.
     """
 
+    enable_hyde: bool = os.getenv('ENABLE_HYDE', 'false').lower() == 'true'
+    """Enable HyDE (Hypothetical Document Embedding) for improved retrieval.
+    When enabled, generates a hypothetical answer to the query using LLM,
+    then uses that hypothetical answer's embedding for vector search.
+    This can improve retrieval for questions where the answer's semantic
+    content differs significantly from the question's keywords.
+    """
+
     include_references: bool = False
     """If True, includes reference list in the response for supported endpoints.
     This parameter controls whether the API response includes a references field
@@ -184,6 +192,13 @@ class QueryParam:
     min_entity_coverage: float = DEFAULT_MIN_ENTITY_COVERAGE
     """Minimum ratio of entities that must be connected by relationships (0.0-1.0).
     Default 0.5 means at least 50% of retrieved entities must appear in relationships.
+    """
+
+    entity_filter: str | None = None
+    """Optional filter to restrict results to entities/chunks containing this term.
+    When provided, only retrieves entities whose name or description contains the filter term.
+    Useful for multi-product corpora to prevent context mixing between different products.
+    Example: 'Fitusiran' to restrict results to Fitusiran-related content only.
     """
 
     disable_truncation: bool = False
