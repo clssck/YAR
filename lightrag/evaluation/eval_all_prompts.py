@@ -39,7 +39,6 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from statistics import mean
-from typing import Any
 
 from dotenv import load_dotenv
 
@@ -49,6 +48,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import dspy
 from openai import AsyncOpenAI
+
+from lightrag.utils import logger
 
 # ============================================================================
 # Constants and Configuration
@@ -260,7 +261,7 @@ class RAGEvaluator:
                 data = response.json()
                 return data.get("response", "")
             except Exception as e:
-                print(f"Failed to get context: {e}")
+                logger.error(f"Failed to get context: {e}")
                 return ""
 
     async def generate_answer(self, prompt_template: str, context: str, question: str) -> tuple[str, float]:
@@ -894,7 +895,10 @@ class PromptEvaluationRunner:
         """Load test data for a prompt type."""
         if prompt_type in [PromptType.RAG, PromptType.NAIVE_RAG]:
             dataset_path = Path(__file__).parent / "pharma_test_dataset.json"
-            with open(dataset_path) as f:
+            if not dataset_path.exists():
+                logger.error(f"Test dataset not found: {dataset_path}")
+                return []
+            with open(dataset_path, encoding="utf-8") as f:
                 data = json.load(f)
             test_cases = data.get("test_cases", data)
             if self.config.quick_mode:

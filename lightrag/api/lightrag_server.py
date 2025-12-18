@@ -3,16 +3,18 @@ LightRAG FastAPI Server
 """
 
 import argparse
-from collections.abc import AsyncIterator
 import configparser
-from contextlib import asynccontextmanager
 import logging
 import logging.config
 import os
-from pathlib import Path
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any, cast
 
+import pipmaster as pm
+import uvicorn
 from ascii_colors import ASCIIColors
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -25,10 +27,9 @@ from fastapi.openapi.docs import (
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
-import pipmaster as pm
-import uvicorn
 
-from lightrag import LightRAG, __version__ as core_version
+from lightrag import LightRAG
+from lightrag import __version__ as core_version
 from lightrag.api import __api_version__
 from lightrag.api.auth import auth_handler
 from lightrag.api.routers.alias_routes import create_alias_routes

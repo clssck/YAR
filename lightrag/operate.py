@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections import Counter, defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, overload
@@ -329,7 +329,7 @@ async def _summarize_descriptions(
     Returns:
         Summarized description string
     """
-    use_llm_func: callable = global_config['llm_model_func']
+    use_llm_func: Callable[..., Any] = global_config['llm_model_func']
     # Apply higher priority (8) to entity/relation summary tasks
     use_llm_func = partial(use_llm_func, _priority=8)
 
@@ -523,7 +523,7 @@ async def rebuild_knowledge_from_chunks(
     relationships_vdb: BaseVectorStorage,
     text_chunks_storage: BaseKVStorage,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     pipeline_status: dict | None = None,
     pipeline_status_lock=None,
     entity_chunks_storage: BaseKVStorage | None = None,
@@ -601,7 +601,7 @@ async def rebuild_knowledge_from_chunks(
                     text_chunks_storage=text_chunks_storage,
                     chunk_id=chunk_id,
                     extraction_result=result[0],
-                    timestamp=result[1],
+                    timestamp=int(result[1]),
                 )
 
                 # Merge entities and relationships from this extraction result
@@ -651,7 +651,7 @@ async def rebuild_knowledge_from_chunks(
             continue
 
     # Get max async tasks limit from global_config for semaphore control
-    graph_max_async = global_config.get('llm_model_max_async', 4) * 2
+    graph_max_async = int(global_config.get('llm_model_max_async', 4)) * 2
     semaphore = asyncio.Semaphore(graph_max_async)
 
     # Counters for tracking progress
@@ -1026,7 +1026,7 @@ async def _rebuild_single_entity(
     chunk_ids: list[str],
     chunk_entities: dict,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     entity_chunks_storage: BaseKVStorage | None = None,
     pipeline_status: dict | None = None,
     pipeline_status_lock=None,
@@ -1107,7 +1107,7 @@ async def _rebuild_single_entity(
 
     limited_chunk_ids = apply_source_ids_limit(
         normalized_chunk_ids,
-        global_config['max_source_ids_per_entity'],
+        int(global_config['max_source_ids_per_entity']),
         limit_method,
         identifier=f'`{entity_name}`',
     )
@@ -1162,7 +1162,7 @@ async def _rebuild_single_entity(
         await _update_entity_storage(
             final_description,
             entity_type,
-            file_paths,
+            list(file_paths),
             limited_chunk_ids,
         )
         return
@@ -1257,7 +1257,7 @@ async def _rebuild_single_relationship(
     chunk_ids: list[str],
     chunk_relationships: dict,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     relation_chunks_storage: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     pipeline_status: dict | None = None,
@@ -1291,7 +1291,7 @@ async def _rebuild_single_relationship(
     limit_method = global_config.get('source_ids_limit_method') or SOURCE_IDS_LIMIT_METHOD_KEEP
     limited_chunk_ids = apply_source_ids_limit(
         normalized_chunk_ids,
-        global_config['max_source_ids_per_relation'],
+        int(global_config['max_source_ids_per_relation']),
         limit_method,
         identifier=f'`{src}`~`{tgt}`',
     )
@@ -2261,7 +2261,7 @@ async def _resolve_entity_aliases_for_batch(
     db = None
     try:
         if hasattr(entity_vdb, '_db_required'):
-            db = entity_vdb._db_required()
+            db = entity_vdb._db_required()  # type: ignore[union-attr]
     except Exception:
         pass  # Not PostgreSQL, skip alias cache
 
@@ -2369,12 +2369,12 @@ async def merge_nodes_and_edges(
     knowledge_graph_inst: BaseGraphStorage,
     entity_vdb: BaseVectorStorage,
     relationships_vdb: BaseVectorStorage,
-    global_config: dict[str, str],
-    full_entities_storage: BaseKVStorage = None,
-    full_relations_storage: BaseKVStorage = None,
+    global_config: dict[str, Any],
+    full_entities_storage: BaseKVStorage | None = None,
+    full_relations_storage: BaseKVStorage | None = None,
     doc_id: str | None = None,
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | None = None,
     llm_response_cache: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     relation_chunks_storage: BaseKVStorage | None = None,
@@ -2445,20 +2445,22 @@ async def merge_nodes_and_edges(
 
     log_message = f'Merging stage {current_file_number}/{total_files}: {file_path}'
     logger.info(log_message)
-    async with pipeline_status_lock:
-        pipeline_status['latest_message'] = log_message
-        pipeline_status['history_messages'].append(log_message)
+    if pipeline_status is not None and pipeline_status_lock is not None:
+        async with pipeline_status_lock:
+            pipeline_status['latest_message'] = log_message
+            pipeline_status['history_messages'].append(log_message)
 
     # Get max async tasks limit from global_config for semaphore control
-    graph_max_async = global_config.get('llm_model_max_async', 4) * 2
+    graph_max_async = int(global_config.get('llm_model_max_async', 4)) * 2
     semaphore = asyncio.Semaphore(graph_max_async)
 
     # ===== Phase 1: Process all entities concurrently =====
     log_message = f'Phase 1: Processing {total_entities_count} entities from {doc_id} (async: {graph_max_async})'
     logger.info(log_message)
-    async with pipeline_status_lock:
-        pipeline_status['latest_message'] = log_message
-        pipeline_status['history_messages'].append(log_message)
+    if pipeline_status is not None and pipeline_status_lock is not None:
+        async with pipeline_status_lock:
+            pipeline_status['latest_message'] = log_message
+            pipeline_status['history_messages'].append(log_message)
 
     async def _locked_process_entity_name(entity_name, entities):
         async with semaphore:
@@ -2544,9 +2546,10 @@ async def merge_nodes_and_edges(
     # ===== Phase 2: Process all relationships concurrently =====
     log_message = f'Phase 2: Processing {total_relations_count} relations from {doc_id} (async: {graph_max_async})'
     logger.info(log_message)
-    async with pipeline_status_lock:
-        pipeline_status['latest_message'] = log_message
-        pipeline_status['history_messages'].append(log_message)
+    if pipeline_status is not None and pipeline_status_lock is not None:
+        async with pipeline_status_lock:
+            pipeline_status['latest_message'] = log_message
+            pipeline_status['history_messages'].append(log_message)
 
     async def _locked_process_edges(edge_key, edges):
         async with semaphore:
@@ -2678,9 +2681,10 @@ async def merge_nodes_and_edges(
 
             log_message = f'Phase 3: Updating final {len(final_entity_names)}({len(processed_entities)}+{len(all_added_entities)}) entities and  {len(final_relation_pairs)} relations from {doc_id}'
             logger.info(log_message)
-            async with pipeline_status_lock:
-                pipeline_status['latest_message'] = log_message
-                pipeline_status['history_messages'].append(log_message)
+            if pipeline_status is not None and pipeline_status_lock is not None:
+                async with pipeline_status_lock:
+                    pipeline_status['latest_message'] = log_message
+                    pipeline_status['history_messages'].append(log_message)
 
             # Update storage
             if final_entity_names:
@@ -2713,16 +2717,17 @@ async def merge_nodes_and_edges(
 
     log_message = f'Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations'
     logger.info(log_message)
-    async with pipeline_status_lock:
-        pipeline_status['latest_message'] = log_message
-        pipeline_status['history_messages'].append(log_message)
+    if pipeline_status is not None and pipeline_status_lock is not None:
+        async with pipeline_status_lock:
+            pipeline_status['latest_message'] = log_message
+            pipeline_status['history_messages'].append(log_message)
 
 
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
-    global_config: dict[str, str],
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    global_config: dict[str, Any],
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | None = None,
     llm_response_cache: BaseKVStorage | None = None,
     text_chunks_storage: BaseKVStorage | None = None,
 ) -> list:
@@ -2732,7 +2737,7 @@ async def extract_entities(
             if pipeline_status.get('cancellation_requested', False):
                 raise PipelineCancelledException('User cancelled during entity extraction')
 
-    use_llm_func: callable = global_config['llm_model_func']
+    use_llm_func: Callable[..., Any] = global_config['llm_model_func']
     entity_extract_max_gleaning = int(global_config.get('entity_extract_max_gleaning', 0))
 
     ordered_chunks = list(chunks.items())
@@ -2808,7 +2813,7 @@ async def extract_entities(
             final_result,
             chunk_key,
             timestamp,
-            file_path,
+            file_path or 'unknown_source',
             tuple_delimiter=context_base['tuple_delimiter'],
             completion_delimiter=context_base['completion_delimiter'],
         )
@@ -2831,7 +2836,7 @@ async def extract_entities(
                 glean_result,
                 chunk_key,
                 timestamp,
-                file_path,
+                file_path or 'unknown_source',
                 tuple_delimiter=context_base['tuple_delimiter'],
                 completion_delimiter=context_base['completion_delimiter'],
             )
@@ -2877,7 +2882,7 @@ async def extract_entities(
         relations_count = len(maybe_edges)
         log_message = f'Chunk {processed_chunks} of {total_chunks} extracted {entities_count} Ent + {relations_count} Rel {chunk_key}'
         logger.info(log_message)
-        if pipeline_status is not None:
+        if pipeline_status is not None and pipeline_status_lock is not None:
             async with pipeline_status_lock:
                 pipeline_status['latest_message'] = log_message
                 pipeline_status['history_messages'].append(log_message)
@@ -2958,10 +2963,10 @@ async def kg_query(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
-    chunks_vdb: BaseVectorStorage = None,
+    chunks_vdb: BaseVectorStorage | None = None,
 ) -> QueryResult | None:
     """
     Execute knowledge graph query and return unified QueryResult object.
@@ -3153,7 +3158,7 @@ async def kg_query(
 async def get_keywords_from_query(
     query: str,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[list[str], list[str]]:
     """
@@ -3183,7 +3188,7 @@ async def get_keywords_from_query(
 async def extract_keywords_only(
     text: str,
     param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[list[str], list[str]]:
     """
@@ -3208,8 +3213,9 @@ async def extract_keywords_only(
         cached_response, _ = cached_result  # Extract content, ignore timestamp
         try:
             keywords_data = json_repair.loads(cached_response)
-            return keywords_data.get('high_level_keywords', []), keywords_data.get('low_level_keywords', [])
-        except (json.JSONDecodeError, KeyError):
+            if isinstance(keywords_data, dict):
+                return keywords_data.get('high_level_keywords', []), keywords_data.get('low_level_keywords', [])
+        except (json.JSONDecodeError, KeyError, AttributeError):
             logger.warning('Invalid cache format for keywords, proceeding with extraction')
 
     # 3. Build the keyword-extraction prompt
@@ -3237,7 +3243,7 @@ async def extract_keywords_only(
     result = remove_think_tags(result)
     try:
         keywords_data = json_repair.loads(result)
-        if not keywords_data:
+        if not keywords_data or not isinstance(keywords_data, dict):
             logger.error('No JSON-like structure found in the LLM respond.')
             return [], []
     except json.JSONDecodeError as e:
@@ -3254,7 +3260,7 @@ async def extract_keywords_only(
             'high_level_keywords': hl_keywords,
             'low_level_keywords': ll_keywords,
         }
-        if hashing_kv.global_config.get('enable_llm_cache'):
+        if hashing_kv is not None and hashing_kv.global_config.get('enable_llm_cache'):
             # Save to cache with query parameters
             queryparam_dict = {
                 'mode': param.mode,
@@ -3311,7 +3317,7 @@ async def _get_vector_context(
         # Use BM25 fusion (vector + BM25 with RRF) if enabled and available
         if query_param.enable_bm25_fusion and hasattr(chunks_vdb, 'hybrid_search'):
             logger.info(f'Using BM25 fusion (bm25_weight={query_param.bm25_weight})')
-            results = await chunks_vdb.hybrid_search(
+            results = await chunks_vdb.hybrid_search(  # type: ignore[union-attr]
                 query,
                 top_k=search_top_k,
                 query_embedding=query_embedding,
@@ -3354,7 +3360,7 @@ async def _perform_kg_search(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
-    chunks_vdb: BaseVectorStorage = None,
+    chunks_vdb: BaseVectorStorage | None = None,
 ) -> dict[str, Any]:
     """
     Pure search logic that retrieves raw entities, relations, and vector chunks.
@@ -3528,7 +3534,7 @@ async def _perform_kg_search(
 async def _apply_token_truncation(
     search_result: dict[str, Any],
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Apply token-based truncation to entities and relations for LLM efficiency.
@@ -3693,10 +3699,10 @@ async def _merge_all_chunks(
     filtered_relations: list[dict],
     vector_chunks: list[dict],
     query: str = '',
-    knowledge_graph_inst: BaseGraphStorage = None,
-    text_chunks_db: BaseKVStorage = None,
-    query_param: QueryParam = None,
-    chunks_vdb: BaseVectorStorage = None,
+    knowledge_graph_inst: BaseGraphStorage | None = None,
+    text_chunks_db: BaseKVStorage | None = None,
+    query_param: QueryParam | None = None,
+    chunks_vdb: BaseVectorStorage | None = None,
     chunk_tracking: dict | None = None,
     query_embedding: list[float] | None = None,
 ) -> list[dict]:
@@ -3707,8 +3713,8 @@ async def _merge_all_chunks(
         chunk_tracking = {}
 
     # Get chunks from entities
-    entity_chunks = []
-    if filtered_entities and text_chunks_db:
+    entity_chunks: list[dict] = []
+    if filtered_entities and text_chunks_db and query_param is not None and knowledge_graph_inst is not None:
         entity_chunks = await _find_related_text_unit_from_entities(
             filtered_entities,
             query_param,
@@ -3721,8 +3727,8 @@ async def _merge_all_chunks(
         )
 
     # Get chunks from relations
-    relation_chunks = []
-    if filtered_relations and text_chunks_db:
+    relation_chunks: list[dict] = []
+    if filtered_relations and text_chunks_db and query_param is not None:
         relation_chunks = await _find_related_text_unit_from_relations(
             filtered_relations,
             query_param,
@@ -3796,7 +3802,7 @@ async def _build_context_str(
     merged_chunks: list[dict],
     query: str,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     chunk_tracking: dict | None = None,
     entity_id_to_original: dict | None = None,
     relation_id_to_original: dict | None = None,
@@ -3966,7 +3972,7 @@ async def _build_query_context(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
-    chunks_vdb: BaseVectorStorage = None,
+    chunks_vdb: BaseVectorStorage | None = None,
 ) -> QueryContextResult | None:
     """
     Main query context building function using the new 4-stage architecture:
@@ -4223,10 +4229,10 @@ async def _find_related_text_unit_from_entities(
     text_chunks_db: BaseKVStorage,
     knowledge_graph_inst: BaseGraphStorage,
     query: str | None = None,
-    chunks_vdb: BaseVectorStorage = None,
+    chunks_vdb: BaseVectorStorage | None = None,
     chunk_tracking: dict | None = None,
-    query_embedding=None,
-):
+    query_embedding: list[float] | None = None,
+) -> list[dict]:
     """
     Find text chunks related to entities using configurable chunk selection method.
 
@@ -4453,10 +4459,10 @@ async def _find_related_text_unit_from_relations(
     text_chunks_db: BaseKVStorage,
     entity_chunks: list[dict] | None = None,
     query: str | None = None,
-    chunks_vdb: BaseVectorStorage = None,
+    chunks_vdb: BaseVectorStorage | None = None,
     chunk_tracking: dict | None = None,
-    query_embedding=None,
-):
+    query_embedding: list[float] | None = None,
+) -> list[dict]:
     """
     Find text chunks related to relationships using configurable chunk selection method.
 
@@ -4479,7 +4485,9 @@ async def _find_related_text_unit_from_relations(
                 if 'src_tgt' in relation:
                     rel_key = tuple(sorted(relation['src_tgt']))
                 else:
-                    rel_key = tuple(sorted([relation.get('src_id'), relation.get('tgt_id')]))
+                    src_id = relation.get('src_id', '')
+                    tgt_id = relation.get('tgt_id', '')
+                    rel_key = tuple(sorted([src_id, tgt_id]))
 
                 relations_with_chunks.append(
                     {
@@ -4597,7 +4605,7 @@ async def _find_related_text_unit_from_relations(
             f'Selecting {len(selected_chunk_ids)} from {total_relation_chunks} relation-related chunks by weighted polling'
         )
 
-    logger.debug(f'KG related chunks: {len(entity_chunks)} from entitys, {len(selected_chunk_ids)} from relations')
+    logger.debug(f'KG related chunks: {len(entity_chunks) if entity_chunks else 0} from entitys, {len(selected_chunk_ids)} from relations')
 
     if not selected_chunk_ids:
         return []
@@ -4631,7 +4639,7 @@ async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     return_raw_data: Literal[True] = True,
@@ -4643,7 +4651,7 @@ async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     return_raw_data: Literal[False] = False,
@@ -4654,7 +4662,7 @@ async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
 ) -> QueryResult | None:

@@ -23,15 +23,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import re
 import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from statistics import mean
 
 import dspy
 from dotenv import load_dotenv
@@ -39,7 +36,6 @@ from dotenv import load_dotenv
 load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from openai import AsyncOpenAI
 
 
 # ============================================================================
@@ -169,22 +165,6 @@ KEYWORDS_EXTRACTION_TRAINING_DATA = [
 # ============================================================================
 # DSPy Signatures
 # ============================================================================
-
-
-class EntityExtractionSignature(dspy.Signature):
-    """Extract entities and relationships from text for a knowledge graph.
-
-    Entities should be meaningful concepts, people, organizations, or things.
-    Relationships should capture how entities are connected.
-    """
-
-    text: str = dspy.InputField(desc="Input text to extract entities and relationships from")
-    entities: str = dspy.OutputField(
-        desc="Comma-separated list of extracted entities (names only, no types)"
-    )
-    relationships: str = dspy.OutputField(
-        desc="List of relationships in format: (entity1, entity2, relationship_type)"
-    )
 
 
 class EntityExtractionWithTypesSignature(dspy.Signature):
@@ -503,7 +483,7 @@ def extract_optimized_instructions(module: dspy.Module) -> str:
 # ============================================================================
 
 
-async def main():
+def main():
     parser = argparse.ArgumentParser(description="Optimize Extraction Prompts with DSPy")
     parser.add_argument(
         "--type", "-t",
@@ -583,6 +563,8 @@ async def main():
 
         # Evaluate baseline
         baseline_score = evaluate_module(module, testset, entity_extraction_metric, "Baseline")
+        bootstrap_score = baseline_score  # Initialize in case optimizer not used
+        mipro_score = baseline_score
 
         # Optimize
         if args.optimizer in ["bootstrap", "both"]:
@@ -603,7 +585,7 @@ async def main():
             "optimized": bootstrap_score if args.optimizer in ["bootstrap", "both"] else mipro_score,
         }
 
-        print(f"\n✅ Entity extraction optimization complete!")
+        print("\n✅ Entity extraction optimization complete!")
         print(f"   Baseline: {baseline_score:.3f}")
         print(f"   Optimized: {results['entity_extraction']['optimized']:.3f}")
 
@@ -629,6 +611,8 @@ async def main():
 
         # Evaluate baseline
         baseline_score = evaluate_module(module, testset, keywords_extraction_metric, "Baseline")
+        bootstrap_score = baseline_score  # Initialize in case optimizer not used
+        mipro_score = baseline_score
 
         # Optimize
         if args.optimizer in ["bootstrap", "both"]:
@@ -649,7 +633,7 @@ async def main():
             "optimized": bootstrap_score if args.optimizer in ["bootstrap", "both"] else mipro_score,
         }
 
-        print(f"\n✅ Keywords extraction optimization complete!")
+        print("\n✅ Keywords extraction optimization complete!")
         print(f"   Baseline: {baseline_score:.3f}")
         print(f"   Optimized: {results['keywords_extraction']['optimized']:.3f}")
 
@@ -675,4 +659,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

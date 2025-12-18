@@ -2520,7 +2520,7 @@ class LightRAG:
                 },
             }
             logger.info('[aquery_data] Query returned no results.')
-        else:
+        elif isinstance(query_result, QueryResult):
             # Extract raw_data from QueryResult
             final_data = query_result.raw_data or {}
 
@@ -2655,14 +2655,16 @@ class LightRAG:
                 }
 
             # Extract structured data from query result
-            raw_data = query_result.raw_data or {}
-            raw_data['llm_response'] = {
-                'content': query_result.content if not query_result.is_streaming else None,
-                'response_iterator': query_result.response_iterator if query_result.is_streaming else None,
-                'is_streaming': query_result.is_streaming,
-            }
-
-            return raw_data
+            if isinstance(query_result, QueryResult):
+                raw_data = query_result.raw_data or {}
+                raw_data['llm_response'] = {
+                    'content': query_result.content if not query_result.is_streaming else None,
+                    'response_iterator': query_result.response_iterator if query_result.is_streaming else None,
+                    'is_streaming': query_result.is_streaming,
+                }
+                return raw_data
+            # Fallback for dict type (shouldn't happen in normal flow)
+            return query_result if isinstance(query_result, dict) else {}
 
         except Exception as e:
             import traceback

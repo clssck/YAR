@@ -230,7 +230,9 @@ async def resolve_entity_with_vdb(
     # Layer 1.5: Abbreviation detection
     # Catches patterns like FDA → US Food and Drug Administration
     if config.abbreviation_detection_enabled:
-        candidate_names = [get_entity_name(c) for c in candidates if get_entity_name(c)]
+        candidate_names: list[str] = [
+            name for c in candidates if (name := get_entity_name(c)) is not None
+        ]
         abbrev_match = find_abbreviation_match(
             entity_name,
             candidate_names,

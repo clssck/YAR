@@ -241,6 +241,7 @@ async def generic_rerank_api(
             top_n = None
 
     # Build request payload based on request format
+    payload: dict[str, Any]
     if request_format == 'aliyun':
         # Aliyun format: nested input/parameters structure
         payload = {

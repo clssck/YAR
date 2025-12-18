@@ -498,7 +498,7 @@ def create_alias_routes(rag, api_key: str | None = None):
                 }
 
             # Apply each alias
-            stats = {'found': len(rows), 'merged': 0, 'failed': 0, 'details': []}
+            stats: dict[str, Any] = {'found': len(rows), 'merged': 0, 'failed': 0, 'details': []}
 
             for row in rows:
                 alias = row['alias']
@@ -553,7 +553,8 @@ async def _run_clustering_background(
         ClusteringConfig,
         cluster_entities_batch,
     )
-    from lightrag.entity_resolution.resolver import llm_verify as llm_verify_fn, store_alias
+    from lightrag.entity_resolution.resolver import llm_verify as llm_verify_fn
+    from lightrag.entity_resolution.resolver import store_alias
     from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
 
     workspace = rag.workspace
