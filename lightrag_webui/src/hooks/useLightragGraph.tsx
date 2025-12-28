@@ -25,6 +25,7 @@ type MutableNodeType = LightragNodeType & {
   degree: number
   size: number
   color?: string
+  type?: 'default' | 'orphan'
 }
 
 type MutableEdgeType = LightragEdgeType & {
@@ -198,6 +199,11 @@ const fetchGraph = async (
       }
     }
 
+    // Mark orphan nodes (degree = 0) with distinct "donut" rendering style
+    for (const node of mutableNodes) {
+      node.type = node.degree === 0 ? 'orphan' : 'default'
+    }
+
     rawGraph = new RawGraph()
     // Cast back to RawNodeType/RawEdgeType since we've added all required properties
     rawGraph.nodes = mutableNodes as unknown as RawNodeType[]
@@ -243,6 +249,8 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
       x: x,
       y: y,
       size: rawNode.size,
+      // Node type for rendering program selection (orphan = ring style, default = thin border)
+      type: rawNode.type || 'default',
       // for node-border
       borderColor: Constants.nodeBorderColor,
       borderSize: 0.2,

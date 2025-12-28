@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { S3ObjectInfo } from '@/api/lightrag'
 import { s3Delete, s3Download, s3List, s3Upload } from '@/api/lightrag'
+import { useSettingsStore } from '@/stores/settings'
 import FileViewer from '@/components/storage/FileViewer'
 import {
   AlertDialog,
@@ -81,6 +82,7 @@ export default function S3Browser() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const storageConfig = useSettingsStore.use.storageConfig()
 
   // Current prefix for navigation
   const [prefix, setPrefix] = useState('')
@@ -101,6 +103,7 @@ export default function S3Browser() {
   } = useQuery({
     queryKey: ['s3', 'list', prefix],
     queryFn: () => s3List(prefix),
+    enabled: !!storageConfig?.enable_s3,
   })
 
   // Upload mutation
@@ -195,6 +198,14 @@ export default function S3Browser() {
   const breadcrumbs = parseBreadcrumbs(prefix)
   const folders = listData?.folders || []
   const objects = listData?.objects || []
+
+  if (!storageConfig?.enable_s3) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+        <p>{t('storagePanel.notConfigured') || 'S3 Storage is not configured'}</p>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">

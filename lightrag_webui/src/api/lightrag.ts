@@ -65,6 +65,7 @@ export type LightragConfiguration = {
   min_rerank_score: number
   related_chunk_number: number
   auto_connect_orphans?: boolean
+  enable_s3?: boolean
 }
 
 export type LightragStatus = {

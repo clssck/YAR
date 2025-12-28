@@ -197,7 +197,12 @@
       "title": "إعدادات خادم LightRAG",
       "description": "عرض حالة النظام الحالية ومعلومات الاتصال"
     },
-    "legend": "المفتاح",
+    "legend": {
+      "shapes": "الأشكال",
+      "colors": "الألوان",
+      "connectedNode": "عقدة متصلة",
+      "orphanNode": "عقدة يتيمة (بدون اتصالات)"
+    },
     "nodeTypes": {
       "person": "شخص",
       "category": "فئة",
@@ -374,13 +379,20 @@
     },
     "graphLabels": {
       "selectTooltip": "الحصول على الرسم البياني الفرعي لعقدة (تسمية)",
+      "selectLabelTooltip": "اختر تسمية لتصفية الرسم البياني",
       "noLabels": "لم يتم العثور على عقد مطابقة",
       "label": "البحث عن اسم العقدة",
       "placeholder": "البحث عن اسم العقدة...",
+      "searchPlaceholder": "البحث عن التسميات...",
       "andOthers": "و {{count}} آخرون",
       "refreshGlobalTooltip": "تحديث بيانات الرسم البياني العالمي وإعادة تعيين سجل البحث",
       "refreshCurrentLabelTooltip": "تحديث بيانات الرسم البياني للصفحة الحالية",
-      "refreshingTooltip": "جارٍ تحديث البيانات..."
+      "refreshingTooltip": "جارٍ تحديث البيانات...",
+      "allLabels": "جميع التسميات",
+      "searchResults": "نتائج البحث",
+      "noResults": "لم يتم العثور على تسميات",
+      "recent": "الأخيرة",
+      "popular": "الشائعة"
     },
     "emptyGraph": "فارغ (حاول إعادة التحميل)"
   },

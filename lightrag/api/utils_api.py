@@ -18,7 +18,7 @@ from lightrag.constants import (
 )
 
 from .auth import auth_handler
-from .config import get_env_value, global_args, ollama_server_infos
+from .config import get_env_value, global_args
 
 
 def check_env_file():
@@ -204,8 +204,6 @@ def display_splash_screen(args: argparse.Namespace) -> None:
         ASCIIColors.yellow(f'{args.ssl_certfile}')
         ASCIIColors.white('    ├─ SSL Key: ', end='')
         ASCIIColors.yellow(f'{args.ssl_keyfile}')
-    ASCIIColors.white('    ├─ Ollama Emulating Model: ', end='')
-    ASCIIColors.yellow(f'{ollama_server_infos.LIGHTRAG_MODEL}')
     ASCIIColors.white('    ├─ Log Level: ', end='')
     ASCIIColors.yellow(f'{args.log_level}')
     ASCIIColors.white('    ├─ Verbose Debug: ', end='')

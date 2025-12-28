@@ -1,9 +1,8 @@
 // import { MiniMap } from '@react-sigma/minimap'
 import { SigmaContainer, useRegisterEvents, useSigma } from '@react-sigma/core'
-import type { GraphSearchOption, OptionItem } from '@react-sigma/graph-search'
 import { createEdgeCurveProgram, EdgeCurvedArrowProgram } from '@sigma/edge-curve'
-import { NodeBorderProgram } from '@sigma/node-border'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createNodeBorderProgram, NodeBorderProgram } from '@sigma/node-border'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Sigma } from 'sigma'
 import { EdgeArrowProgram, NodeCircleProgram, NodePointProgram } from 'sigma/rendering'
 import type { Settings as SigmaSettings } from 'sigma/settings'
@@ -12,7 +11,6 @@ import FocusOnNode from '@/components/graph/FocusOnNode'
 import FullScreenControl from '@/components/graph/FullScreenControl'
 import GraphControl from '@/components/graph/GraphControl'
 import GraphLabels from '@/components/graph/GraphLabels'
-import GraphSearch from '@/components/graph/GraphSearch'
 import LayoutsControl from '@/components/graph/LayoutsControl'
 import Legend from '@/components/graph/Legend'
 import LegendButton from '@/components/graph/LegendButton'
@@ -30,6 +28,17 @@ import { useSettingsStore } from '@/stores/settings'
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
 
+// Create a distinct program for orphan nodes - thick dashed-style border
+// Using a very thick outer ring to make orphans instantly recognizable
+const OrphanNodeProgram = createNodeBorderProgram({
+  borders: [
+    // Outer thick border ring (white gap)
+    { color: { attribute: 'color' }, size: { value: 0.4, mode: 'relative' } },
+    // Inner contrasting ring
+    { color: { value: '#374151' }, size: { value: 0.15, mode: 'relative' } },
+  ],
+})
+
 // Function to create sigma settings based on theme
 const createSigmaSettings = (isDarkTheme: boolean): Partial<SigmaSettings> => ({
   allowInvalidContainer: true,
@@ -43,8 +52,10 @@ const createSigmaSettings = (isDarkTheme: boolean): Partial<SigmaSettings> => ({
   },
   nodeProgramClasses: {
     default: NodeBorderProgram,
-    circel: NodeCircleProgram,
+    circle: NodeCircleProgram,
     point: NodePointProgram,
+    // Orphan nodes (degree = 0) render as triangles for visual distinction
+    orphan: OrphanNodeProgram,
   },
   labelGridCellSize: 60,
   labelRenderedSizeThreshold: 12,
@@ -74,23 +85,6 @@ const FocusSync = () => {
   return <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
 }
 
-// Keep GraphSearch value derivation local to avoid bubbling re-renders
-const GraphSearchWithSelection = ({
-  onFocus,
-  onSelect,
-}: {
-  onFocus: (value: GraphSearchOption | null) => void
-  onSelect: (value: GraphSearchOption | null) => void
-}) => {
-  const selectedNode = useGraphStore.use.selectedNode()
-
-  const searchInitSelectedNode = useMemo(
-    (): OptionItem | null => (selectedNode ? { type: 'nodes', id: selectedNode } : null),
-    [selectedNode]
-  )
-
-  return <GraphSearch value={searchInitSelectedNode} onFocus={onFocus} onChange={onSelect} />
-}
 
 const GraphEvents = () => {
   const registerEvents = useRegisterEvents()
@@ -139,6 +133,9 @@ const GraphEvents = () => {
 }
 
 const GraphViewer = () => {
+  // DEBUG: Uncomment next 2 lines to disable GraphViewer for testing
+  // return <div className="flex items-center justify-center h-full text-muted-foreground">Graph viewer temporarily disabled for debugging</div>
+
   const [isThemeSwitching, setIsThemeSwitching] = useState(false)
   const sigmaRef = useRef<Sigma | null>(null)
   const prevTheme = useRef<string>('')
@@ -146,7 +143,6 @@ const GraphViewer = () => {
   const isFetching = useGraphStore.use.isFetching()
 
   const showPropertyPanel = useSettingsStore.use.showPropertyPanel()
-  const showNodeSearchBar = useSettingsStore.use.showNodeSearchBar()
   const enableNodeDrag = useSettingsStore.use.enableNodeDrag()
   const showLegend = useSettingsStore.use.showLegend()
   const theme = useSettingsStore.use.theme()
@@ -200,19 +196,6 @@ const GraphViewer = () => {
   // but testing showed it wasn't executing or having any effect, while the backup mechanism
   // in GraphControl was sufficient. This code was removed to simplify implementation
 
-  const onSearchFocus = useCallback((value: GraphSearchOption | null) => {
-    if (value === null) useGraphStore.getState().setFocusedNode(null)
-    else if (value.type === 'nodes') useGraphStore.getState().setFocusedNode(value.id)
-  }, [])
-
-  const onSearchSelect = useCallback((value: GraphSearchOption | null) => {
-    if (value === null) {
-      useGraphStore.getState().setSelectedNode(null)
-    } else if (value.type === 'nodes') {
-      useGraphStore.getState().setSelectedNode(value.id, true)
-    }
-  }, [])
-
   // Always render SigmaContainer but control its visibility with CSS
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -229,9 +212,6 @@ const GraphViewer = () => {
 
         <div className="absolute top-2 left-2 flex items-start gap-2">
           <GraphLabels />
-          {showNodeSearchBar && !isThemeSwitching && (
-            <GraphSearchWithSelection onFocus={onSearchFocus} onSelect={onSearchSelect} />
-          )}
         </div>
 
         <div className="bg-background/60 absolute bottom-2 left-2 flex flex-col rounded-xl border-2 backdrop-blur-lg">
@@ -241,7 +221,6 @@ const GraphViewer = () => {
           <LegendButton />
           <OrphanConnectionControl />
           <Settings />
-          {/* <ThemeToggle /> */}
         </div>
 
         {showPropertyPanel && (
@@ -255,10 +234,6 @@ const GraphViewer = () => {
             <Legend className="bg-background/60 backdrop-blur-lg" />
           </div>
         )}
-
-        {/* <div className="absolute bottom-2 right-2 flex flex-col rounded-xl border-2">
-          <MiniMap width="100px" height="100px" />
-        </div> */}
 
         <SettingsDisplay />
       </SigmaContainer>

@@ -3,16 +3,18 @@ LightRAG FastAPI Server
 """
 
 import argparse
-from collections.abc import AsyncIterator
 import configparser
-from contextlib import asynccontextmanager
 import logging
 import logging.config
 import os
-from pathlib import Path
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any, cast
 
+import pipmaster as pm
+import uvicorn
 from ascii_colors import ASCIIColors
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -25,10 +27,9 @@ from fastapi.openapi.docs import (
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
-import pipmaster as pm
-import uvicorn
 
-from lightrag import LightRAG, __version__ as core_version, create_chunker
+from lightrag import LightRAG, create_chunker
+from lightrag import __version__ as core_version
 from lightrag.api import __api_version__
 from lightrag.api.auth import auth_handler
 from lightrag.api.routers.alias_routes import create_alias_routes
@@ -37,7 +38,6 @@ from lightrag.api.routers.document_routes import (
     create_document_routes,
 )
 from lightrag.api.routers.graph_routes import create_graph_routes
-from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.s3_routes import create_s3_routes
 from lightrag.api.routers.search_routes import create_search_routes
@@ -98,8 +98,6 @@ class LLMConfigCache:
 
         # Initialize configurations based on binding conditions
         self.openai_llm_options = None
-        self.ollama_llm_options = None
-        self.ollama_embedding_options = None
 
         # Only initialize and log OpenAI options when using OpenAI binding
         if args.llm_binding == 'openai':
@@ -107,28 +105,6 @@ class LLMConfigCache:
 
             self.openai_llm_options = OpenAILLMOptions.options_dict(args)
             logger.info(f'OpenAI LLM Options: {self.openai_llm_options}')
-
-        # Only initialize and log Ollama LLM options when using Ollama LLM binding
-        if args.llm_binding == 'ollama':
-            try:
-                from lightrag.llm.binding_options import OllamaLLMOptions
-
-                self.ollama_llm_options = OllamaLLMOptions.options_dict(args)
-                logger.info(f'Ollama LLM Options: {self.ollama_llm_options}')
-            except ImportError:
-                logger.warning('OllamaLLMOptions not available, using default configuration')
-                self.ollama_llm_options = {}
-
-        # Only initialize and log Ollama Embedding options when using Ollama Embedding binding
-        if args.embedding_binding == 'ollama':
-            try:
-                from lightrag.llm.binding_options import OllamaEmbeddingOptions
-
-                self.ollama_embedding_options = OllamaEmbeddingOptions.options_dict(args)
-                logger.info(f'Ollama Embedding Options: {self.ollama_embedding_options}')
-            except ImportError:
-                logger.warning('OllamaEmbeddingOptions not available, using default configuration')
-                self.ollama_embedding_options = {}
 
 
 def check_frontend_build():
@@ -261,12 +237,12 @@ def create_app(args):
     config_cache = LLMConfigCache(args)
 
     # Verify that bindings are correctly setup
-    # Supported: openai (covers OpenAI-compatible APIs), ollama (local)
-    if args.llm_binding not in ['ollama', 'openai']:
-        raise Exception(f'llm binding "{args.llm_binding}" not supported. Use: openai, ollama')
+    # Supported: openai (covers OpenAI-compatible APIs including local servers like vLLM, LiteLLM)
+    if args.llm_binding != 'openai':
+        raise Exception(f'llm binding "{args.llm_binding}" not supported. Use: openai')
 
-    if args.embedding_binding not in ['ollama', 'openai']:
-        raise Exception(f'embedding binding "{args.embedding_binding}" not supported. Use: openai, ollama')
+    if args.embedding_binding != 'openai':
+        raise Exception(f'embedding binding "{args.embedding_binding}" not supported. Use: openai')
 
     # Set default hosts if not provided
     if args.llm_binding_host is None:
@@ -343,7 +319,7 @@ def create_app(args):
                 logger.debug('Gunicorn Mode: postpone shared storage finalization to master process')
 
     # Initialize FastAPI
-    base_description = 'Providing API for LightRAG core, Web UI and Ollama Model Emulation'
+    base_description = 'Providing API for LightRAG core and Web UI'
     swagger_description = (
         base_description + (' (API-Key Enabled)' if api_key else '') + '\n\n[View ReDoc documentation](/redoc)'
     )
@@ -477,36 +453,16 @@ def create_app(args):
     def create_llm_model_func(binding: str):
         """
         Create LLM model function based on binding type.
-        Supports: openai (OpenAI-compatible APIs), ollama (local inference)
+        Supports: openai (OpenAI-compatible APIs including local servers like vLLM, LiteLLM)
         """
-        try:
-            if binding == 'ollama':
-                from lightrag.llm.ollama import ollama_model_complete
-
-                return ollama_model_complete
-            else:  # openai and compatible
-                # Use optimized function with pre-processed configuration
-                return create_optimized_openai_llm_func(config_cache, args, llm_timeout)
-        except ImportError as e:
-            raise Exception(f'Failed to import {binding} LLM binding: {e}') from e
+        # Use optimized function with pre-processed configuration
+        return create_optimized_openai_llm_func(config_cache, args, llm_timeout)
 
     def create_llm_model_kwargs(binding: str, args, llm_timeout: int) -> dict:
         """
         Create LLM model kwargs based on binding type.
         Uses lazy import for binding-specific options.
         """
-        if binding == 'ollama':
-            try:
-                from lightrag.llm.binding_options import OllamaLLMOptions
-
-                return {
-                    'host': args.llm_binding_host,
-                    'timeout': llm_timeout,
-                    'options': OllamaLLMOptions.options_dict(args),
-                    'api_key': args.llm_binding_api_key,
-                }
-            except ImportError as e:
-                raise Exception(f'Failed to import {binding} options: {e}') from e
         return {}
 
     def create_entity_resolution_config(args) -> 'EntityResolutionConfig':
@@ -557,10 +513,6 @@ def create_app(args):
                 from lightrag.llm.openai import openai_embed
 
                 provider_func = openai_embed
-            elif binding == 'ollama':
-                from lightrag.llm.ollama import ollama_embed
-
-                provider_func = ollama_embed
 
             # Extract attributes if provider is an EmbeddingFunc
             if provider_func and isinstance(provider_func, EmbeddingFunc):
@@ -584,47 +536,19 @@ def create_app(args):
         # Step 3: Create optimized embedding function (calls underlying function directly)
         # Note: When model is None, each binding will use its own default model
         async def optimized_embedding_function(texts, embedding_dim=None):
-            try:
-                if binding == 'ollama':
-                    from lightrag.llm.ollama import ollama_embed
+            from lightrag.llm.openai import openai_embed
 
-                    # Get real function, skip EmbeddingFunc wrapper if present
-                    actual_func = ollama_embed.func if isinstance(ollama_embed, EmbeddingFunc) else ollama_embed
-
-                    # Use pre-processed configuration if available
-                    if config_cache.ollama_embedding_options is not None:
-                        ollama_options = config_cache.ollama_embedding_options
-                    else:
-                        from lightrag.llm.binding_options import OllamaEmbeddingOptions
-
-                        ollama_options = OllamaEmbeddingOptions.options_dict(args)
-
-                    # Pass embed_model only if provided, let function use its default (bge-m3:latest)
-                    kwargs = {
-                        'texts': texts,
-                        'host': host,
-                        'api_key': api_key,
-                        'options': ollama_options,
-                    }
-                    if model:
-                        kwargs['embed_model'] = model
-                    return await actual_func(**kwargs)
-                else:  # openai and compatible
-                    from lightrag.llm.openai import openai_embed
-
-                    actual_func = openai_embed.func if isinstance(openai_embed, EmbeddingFunc) else openai_embed
-                    # Pass model only if provided, let function use its default (text-embedding-3-small)
-                    kwargs = {
-                        'texts': texts,
-                        'base_url': host,
-                        'api_key': api_key,
-                        'embedding_dim': embedding_dim,
-                    }
-                    if model:
-                        kwargs['model'] = model
-                    return await actual_func(**kwargs)
-            except ImportError as e:
-                raise Exception(f'Failed to import {binding} embedding: {e}') from e
+            actual_func = openai_embed.func if isinstance(openai_embed, EmbeddingFunc) else openai_embed
+            # Pass model only if provided, let function use its default (text-embedding-3-small)
+            kwargs = {
+                'texts': texts,
+                'base_url': host,
+                'api_key': api_key,
+                'embedding_dim': embedding_dim,
+            }
+            if model:
+                kwargs['model'] = model
+            return await actual_func(**kwargs)
 
         # Step 4: Wrap in EmbeddingFunc and return
         embedding_func_instance = EmbeddingFunc(
@@ -707,11 +631,6 @@ def create_app(args):
     else:
         logger.info('Reranking is disabled')
 
-    # Create ollama_server_infos from command line arguments
-    from lightrag.api.config import OllamaServerInfos
-
-    ollama_server_infos = OllamaServerInfos(name=args.simulated_model_name, tag=args.simulated_model_tag)
-
     # Initialize RAG with unified configuration
     try:
         # Create chunking function with configured preset (default: semantic)
@@ -749,7 +668,6 @@ def create_app(args):
                 'language': args.summary_language,
                 'entity_types': args.entity_types,
             },
-            ollama_server_infos=ollama_server_infos,
             entity_resolution_config=create_entity_resolution_config(args),
         )
     except Exception as e:
@@ -778,10 +696,6 @@ def create_app(args):
     )
     if all_postgres_storages:
         app.include_router(create_table_routes(rag, api_key), prefix='/tables')
-
-    # Add Ollama API routes
-    ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)
-    app.include_router(ollama_api.router, prefix='/api')
 
     # Register upload routes and S3 browser if S3 is configured
     if s3_client is not None:
@@ -991,6 +905,7 @@ def create_app(args):
                     'embedding_func_max_async': args.embedding_func_max_async,
                     'embedding_batch_num': args.embedding_batch_num,
                     'auto_connect_orphans': args.auto_connect_orphans,
+                    'enable_s3': s3_client is not None,
                 },
                 'auth_mode': auth_mode,
                 'pipeline_busy': pipeline_busy,

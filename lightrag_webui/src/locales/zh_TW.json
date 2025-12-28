@@ -197,7 +197,12 @@
       "title": "LightRAG 伺服器設定",
       "description": "查看目前系統狀態和連線資訊"
     },
-    "legend": "圖例",
+    "legend": {
+      "shapes": "形狀",
+      "colors": "顏色",
+      "connectedNode": "已連接節點",
+      "orphanNode": "孤立節點（無連接）"
+    },
     "nodeTypes": {
       "person": "人物角色",
       "category": "分類",
@@ -374,13 +379,20 @@
     },
     "graphLabels": {
       "selectTooltip": "獲取節點(標籤)子圖",
+      "selectLabelTooltip": "選擇標籤過濾圖形",
       "noLabels": "未找到匹配的節點",
       "label": "搜尋節點名稱",
       "placeholder": "搜尋節點名稱...",
+      "searchPlaceholder": "搜尋標籤...",
       "andOthers": "還有 {{count}} 個",
       "refreshGlobalTooltip": "重新整理全圖資料和重置搜尋歷史",
       "refreshCurrentLabelTooltip": "重新整理目前頁面圖形資料",
-      "refreshingTooltip": "正在重新整理資料..."
+      "refreshingTooltip": "正在重新整理資料...",
+      "allLabels": "所有標籤",
+      "searchResults": "搜尋結果",
+      "noResults": "未找到標籤",
+      "recent": "最近使用",
+      "popular": "熱門"
     },
     "emptyGraph": "無數據(請重載圖形數據)"
   },

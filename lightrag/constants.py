@@ -118,13 +118,6 @@ DEFAULT_LOG_MAX_BYTES = 10485760  # Default 10MB
 DEFAULT_LOG_BACKUP_COUNT = 5  # Default 5 backups
 DEFAULT_LOG_FILENAME = 'lightrag.log'  # Default log filename
 
-# Ollama server configuration defaults
-DEFAULT_OLLAMA_MODEL_NAME = 'lightrag'
-DEFAULT_OLLAMA_MODEL_TAG = 'latest'
-DEFAULT_OLLAMA_MODEL_SIZE = 7365960935
-DEFAULT_OLLAMA_CREATED_AT = '2024-01-15T00:00:00Z'
-DEFAULT_OLLAMA_DIGEST = 'sha256:lightrag'
-
 # Full-text search cache configuration
 # Shorter TTL than embedding cache since document content changes more frequently
 DEFAULT_FTS_CACHE_TTL = 300  # 5 minutes

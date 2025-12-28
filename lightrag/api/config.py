@@ -5,11 +5,9 @@ Configs for the LightRAG API.
 import argparse
 import logging
 import os
-import sys
 
 from dotenv import load_dotenv
 
-from lightrag.base import OllamaServerInfos
 from lightrag.constants import (
     DEFAULT_CHUNK_TOP_K,
     DEFAULT_COSINE_THRESHOLD,
@@ -22,8 +20,6 @@ from lightrag.constants import (
     DEFAULT_MAX_RELATION_TOKENS,
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_MIN_RERANK_SCORE,
-    DEFAULT_OLLAMA_MODEL_NAME,
-    DEFAULT_OLLAMA_MODEL_TAG,
     DEFAULT_RELATED_CHUNK_NUMBER,
     DEFAULT_SUMMARY_CONTEXT_SIZE,
     DEFAULT_SUMMARY_LANGUAGE,
@@ -34,8 +30,6 @@ from lightrag.constants import (
     DEFAULT_WOKERS,
 )
 from lightrag.llm.binding_options import (
-    OllamaEmbeddingOptions,
-    OllamaLLMOptions,
     OpenAILLMOptions,
 )
 from lightrag.utils import get_env_value
@@ -44,9 +38,6 @@ from lightrag.utils import get_env_value
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path='.env', override=False)
-
-
-ollama_server_infos = OllamaServerInfos()
 
 
 class DefaultRAGStorageConfig:
@@ -58,13 +49,8 @@ class DefaultRAGStorageConfig:
 
 
 def get_default_host(binding_type: str) -> str:
-    default_hosts = {
-        'ollama': os.getenv('LLM_BINDING_HOST', 'http://localhost:11434'),
-        'openai': os.getenv('LLM_BINDING_HOST', 'https://api.openai.com/v1'),
-    }
-    return default_hosts.get(
-        binding_type, os.getenv('LLM_BINDING_HOST', 'http://localhost:11434')
-    )  # fallback to ollama if unknown
+    """Get default host URL for the binding type."""
+    return os.getenv('LLM_BINDING_HOST', 'https://api.openai.com/v1')
 
 
 def parse_args() -> argparse.Namespace:
@@ -177,21 +163,6 @@ def parse_args() -> argparse.Namespace:
         help='Path to SSL private key file (required if --ssl is enabled)',
     )
 
-    # Ollama model configuration
-    parser.add_argument(
-        '--simulated-model-name',
-        type=str,
-        default=get_env_value('OLLAMA_EMULATING_MODEL_NAME', DEFAULT_OLLAMA_MODEL_NAME),
-        help='Name for the simulated Ollama model (default: from env or lightrag)',
-    )
-
-    parser.add_argument(
-        '--simulated-model-tag',
-        type=str,
-        default=get_env_value('OLLAMA_EMULATING_MODEL_TAG', DEFAULT_OLLAMA_MODEL_TAG),
-        help='Tag for the simulated Ollama model (default: from env or latest)',
-    )
-
     # Namespace
     parser.add_argument(
         '--workspace',
@@ -212,23 +183,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--llm-binding',
         type=str,
-        default=get_env_value('LLM_BINDING', 'ollama'),
-        choices=[
-            'ollama',
-            'openai',
-            'openai-ollama',
-        ],
-        help='LLM binding type (default: from env or ollama)',
+        default=get_env_value('LLM_BINDING', 'openai'),
+        choices=['openai'],
+        help='LLM binding type (default: openai - supports OpenAI-compatible APIs)',
     )
     parser.add_argument(
         '--embedding-binding',
         type=str,
-        default=get_env_value('EMBEDDING_BINDING', 'ollama'),
-        choices=[
-            'ollama',
-            'openai',
-        ],
-        help='Embedding binding type (default: from env or ollama)',
+        default=get_env_value('EMBEDDING_BINDING', 'openai'),
+        choices=['openai'],
+        help='Embedding binding type (default: openai - supports OpenAI-compatible APIs)',
     )
     parser.add_argument(
         '--enable-rerank',
@@ -244,39 +208,8 @@ def parse_args() -> argparse.Namespace:
     )
 
 
-    # Conditionally add binding options defined in binding_options module
-    # This will add command line arguments for all binding options (e.g., --ollama-embedding-num_ctx)
-    # and corresponding environment variables (e.g., OLLAMA_EMBEDDING_NUM_CTX)
-    if '--llm-binding' in sys.argv:
-        try:
-            idx = sys.argv.index('--llm-binding')
-            if idx + 1 < len(sys.argv) and sys.argv[idx + 1] == 'ollama':
-                OllamaLLMOptions.add_args(parser)
-        except IndexError:
-            pass
-    elif os.environ.get('LLM_BINDING') == 'ollama':
-        OllamaLLMOptions.add_args(parser)
-
-    if '--embedding-binding' in sys.argv:
-        try:
-            idx = sys.argv.index('--embedding-binding')
-            if idx + 1 < len(sys.argv) and sys.argv[idx + 1] == 'ollama':
-                OllamaEmbeddingOptions.add_args(parser)
-        except IndexError:
-            pass
-    elif os.environ.get('EMBEDDING_BINDING') == 'ollama':
-        OllamaEmbeddingOptions.add_args(parser)
-
-    # Add OpenAI LLM options when llm-binding is openai
-    if '--llm-binding' in sys.argv:
-        try:
-            idx = sys.argv.index('--llm-binding')
-            if idx + 1 < len(sys.argv) and sys.argv[idx + 1] == 'openai':
-                OpenAILLMOptions.add_args(parser)
-        except IndexError:
-            pass
-    elif os.environ.get('LLM_BINDING') == 'openai':
-        OpenAILLMOptions.add_args(parser)
+    # Add OpenAI LLM options (always available since openai is the only binding)
+    OpenAILLMOptions.add_args(parser)
 
     args, _unknown = parser.parse_known_args()
 
@@ -296,14 +229,6 @@ def parse_args() -> argparse.Namespace:
     # Get MAX_GRAPH_NODES from environment
     args.max_graph_nodes = get_env_value('MAX_GRAPH_NODES', 1000, int)
 
-    # Handle openai-ollama special case
-    if args.llm_binding == 'openai-ollama':
-        args.llm_binding = 'openai'
-        args.embedding_binding = 'ollama'
-
-    # Ollama ctx_num
-    args.ollama_num_ctx = get_env_value('OLLAMA_NUM_CTX', 32768, int)
-
     args.llm_binding_host = get_env_value('LLM_BINDING_HOST', get_default_host(args.llm_binding))
     args.embedding_binding_host = get_env_value('EMBEDDING_BINDING_HOST', get_default_host(args.embedding_binding))
     args.llm_binding_api_key = get_env_value('LLM_BINDING_API_KEY', None)
@@ -311,8 +236,7 @@ def parse_args() -> argparse.Namespace:
 
     # Inject model configuration
     args.llm_model = get_env_value('LLM_MODEL', 'mistral-nemo:latest')
-    # EMBEDDING_MODEL defaults to None - each binding will use its own default model
-    # e.g., OpenAI uses "text-embedding-3-small", Ollama uses "bge-m3:latest"
+    # EMBEDDING_MODEL defaults to None - uses binding default (e.g., "text-embedding-3-small" for OpenAI)
     args.embedding_model = get_env_value('EMBEDDING_MODEL', None, special_none=True)
     # EMBEDDING_DIM defaults to None - each binding will use its own default dimension
     # Value is inherited from provider defaults via wrap_embedding_func_with_attrs decorator
@@ -396,9 +320,6 @@ def parse_args() -> argparse.Namespace:
     args.entity_resolution_fuzzy_threshold = get_env_value('ENTITY_RESOLUTION_FUZZY_THRESHOLD', 0.85, float)
     args.entity_resolution_vector_threshold = get_env_value('ENTITY_RESOLUTION_VECTOR_THRESHOLD', 0.5, float)
     args.entity_resolution_max_candidates = get_env_value('ENTITY_RESOLUTION_MAX_CANDIDATES', 3, int)
-
-    ollama_server_infos.LIGHTRAG_NAME = args.simulated_model_name
-    ollama_server_infos.LIGHTRAG_TAG = args.simulated_model_tag
 
     return args
 

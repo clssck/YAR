@@ -1,6 +1,6 @@
-from collections.abc import AsyncIterator
 import logging
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pipmaster as pm
@@ -15,8 +15,8 @@ if not pm.is_installed('openai'):
 import base64
 from typing import cast
 
-from dotenv import load_dotenv
 import numpy as np
+from dotenv import load_dotenv
 from openai import (
     APIConnectionError,
     APITimeoutError,

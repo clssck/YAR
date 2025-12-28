@@ -328,13 +328,19 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
             useGraphStore.getState().setSelectedNode(node.id, true)
           }}
         />
-        {/* Degree row with db_degree badge */}
-        <div className="flex items-center justify-between py-0.5 text-xs">
-          <Text size="xs" weight="semibold" className="pr-2">
+        {/* Degree row - styled consistently with PropertyRow */}
+        <div className="flex items-center gap-2">
+          <span className="text-primary/60 tracking-wide whitespace-nowrap">
             {t('graphPanel.propertiesView.node.degree')}
-          </Text>
-          <div className="flex items-center gap-2">
-            <Text size="xs">{node.degree}</Text>
+          </span>
+          :
+          <span className="flex items-center gap-2">
+            <Text
+              className="hover:bg-primary/20 rounded p-1"
+              text={String(node.degree)}
+              tooltip={t('graphPanel.propertiesView.node.degreeTooltip', 'Visible connections in this graph')}
+              side="left"
+            />
             {asNumber(node.properties?.db_degree) > node.degree && (
               <Badge
                 variant="outline"
@@ -344,7 +350,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
                 {t('graphPanel.propertiesView.node.inDatabase')}
               </Badge>
             )}
-          </div>
+          </span>
         </div>
       </div>
       {/* Load Hidden Connections button for nodes with hidden database connections */}

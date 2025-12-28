@@ -6,9 +6,9 @@ bindings and integrations.
 """
 
 import argparse
+import json
 from argparse import ArgumentParser, Namespace
 from dataclasses import asdict, dataclass, field
-import json
 from typing import Any, ClassVar, cast, get_args, get_origin
 
 from lightrag.constants import DEFAULT_TEMPERATURE
@@ -310,8 +310,8 @@ class BindingOptions:
             dict[str, Any]: Dictionary mapping option names (without prefix) to their values
 
         Example:
-            If args contains {'ollama_num_ctx': 512, 'other_option': 'value'}
-            and this is called on OllamaOptions, it returns {'num_ctx': 512}
+            If args contains {'openai_llm_temperature': 0.7, 'other_option': 'value'}
+            and this is called on OpenAILLMOptions, it returns {'temperature': 0.7}
         """
         prefix = cls._binding_name + '_'
         skipchars = len(prefix)
@@ -330,123 +330,6 @@ class BindingOptions:
             dict[str, Any]: Dictionary representation of the binding options instance
         """
         return asdict(self)
-
-
-# =============================================================================
-# Binding Options for Ollama
-# =============================================================================
-#
-# Ollama binding options provide configuration for the Ollama local LLM server.
-# These options control model behavior, sampling parameters, hardware utilization,
-# and performance settings. The parameters are based on Ollama's API specification
-# and provide fine-grained control over model inference and generation.
-#
-# The _OllamaOptionsMixin defines the complete set of available options, while
-# OllamaEmbeddingOptions and OllamaLLMOptions provide specialized configurations
-# for embedding and language model tasks respectively.
-# =============================================================================
-@dataclass
-class _OllamaOptionsMixin:
-    """Options for Ollama bindings."""
-
-    # Core context and generation parameters
-    num_ctx: int = 32768  # Context window size (number of tokens)
-    num_predict: int = 128  # Maximum number of tokens to predict
-    num_keep: int = 0  # Number of tokens to keep from the initial prompt
-    seed: int = -1  # Random seed for generation (-1 for random)
-
-    # Sampling parameters
-    temperature: float = DEFAULT_TEMPERATURE  # Controls randomness (0.0-2.0)
-    top_k: int = 40  # Top-k sampling parameter
-    top_p: float = 0.9  # Top-p (nucleus) sampling parameter
-    tfs_z: float = 1.0  # Tail free sampling parameter
-    typical_p: float = 1.0  # Typical probability mass
-    min_p: float = 0.0  # Minimum probability threshold
-
-    # Repetition control
-    repeat_last_n: int = 64  # Number of tokens to consider for repetition penalty
-    repeat_penalty: float = 1.1  # Penalty for repetition
-    presence_penalty: float = 0.0  # Penalty for token presence
-    frequency_penalty: float = 0.0  # Penalty for token frequency
-
-    # Mirostat sampling
-    mirostat: int = (
-        # Mirostat sampling algorithm (0=disabled, 1=Mirostat 1.0, 2=Mirostat 2.0)
-        0
-    )
-    mirostat_tau: float = 5.0  # Mirostat target entropy
-    mirostat_eta: float = 0.1  # Mirostat learning rate
-
-    # Hardware and performance parameters
-    numa: bool = False  # Enable NUMA optimization
-    num_batch: int = 512  # Batch size for processing
-    num_gpu: int = -1  # Number of GPUs to use (-1 for auto)
-    main_gpu: int = 0  # Main GPU index
-    low_vram: bool = False  # Optimize for low VRAM
-    num_thread: int = 0  # Number of CPU threads (0 for auto)
-
-    # Memory and model parameters
-    f16_kv: bool = True  # Use half-precision for key/value cache
-    logits_all: bool = False  # Return logits for all tokens
-    vocab_only: bool = False  # Only load vocabulary
-    use_mmap: bool = True  # Use memory mapping for model files
-    use_mlock: bool = False  # Lock model in memory
-    embedding_only: bool = False  # Only use for embeddings
-
-    # Output control
-    penalize_newline: bool = True  # Penalize newline tokens
-    stop: list[str] = field(default_factory=list)  # Stop sequences
-
-    # optional help strings
-    _help: ClassVar[dict[str, str]] = {
-        'num_ctx': 'Context window size (number of tokens)',
-        'num_predict': 'Maximum number of tokens to predict',
-        'num_keep': 'Number of tokens to keep from the initial prompt',
-        'seed': 'Random seed for generation (-1 for random)',
-        'temperature': 'Controls randomness (0.0-2.0, higher = more creative)',
-        'top_k': 'Top-k sampling parameter (0 = disabled)',
-        'top_p': 'Top-p (nucleus) sampling parameter (0.0-1.0)',
-        'tfs_z': 'Tail free sampling parameter (1.0 = disabled)',
-        'typical_p': 'Typical probability mass (1.0 = disabled)',
-        'min_p': 'Minimum probability threshold (0.0 = disabled)',
-        'repeat_last_n': 'Number of tokens to consider for repetition penalty',
-        'repeat_penalty': 'Penalty for repetition (1.0 = no penalty)',
-        'presence_penalty': 'Penalty for token presence (-2.0 to 2.0)',
-        'frequency_penalty': 'Penalty for token frequency (-2.0 to 2.0)',
-        'mirostat': 'Mirostat sampling algorithm (0=disabled, 1=Mirostat 1.0, 2=Mirostat 2.0)',
-        'mirostat_tau': 'Mirostat target entropy',
-        'mirostat_eta': 'Mirostat learning rate',
-        'numa': 'Enable NUMA optimization',
-        'num_batch': 'Batch size for processing',
-        'num_gpu': 'Number of GPUs to use (-1 for auto)',
-        'main_gpu': 'Main GPU index',
-        'low_vram': 'Optimize for low VRAM',
-        'num_thread': 'Number of CPU threads (0 for auto)',
-        'f16_kv': 'Use half-precision for key/value cache',
-        'logits_all': 'Return logits for all tokens',
-        'vocab_only': 'Only load vocabulary',
-        'use_mmap': 'Use memory mapping for model files',
-        'use_mlock': 'Lock model in memory',
-        'embedding_only': 'Only use for embeddings',
-        'penalize_newline': 'Penalize newline tokens',
-        'stop': 'Stop sequences (JSON array of strings, e.g., \'["</s>", "\\n\\n"]\')',
-    }
-
-
-@dataclass
-class OllamaEmbeddingOptions(_OllamaOptionsMixin, BindingOptions):
-    """Options for Ollama embeddings with specialized configuration for embedding tasks."""
-
-    # mandatory name of binding
-    _binding_name: ClassVar[str] = 'ollama_embedding'
-
-
-@dataclass
-class OllamaLLMOptions(_OllamaOptionsMixin, BindingOptions):
-    """Options for Ollama LLM with specialized configuration for LLM tasks."""
-
-    # mandatory name of binding
-    _binding_name: ClassVar[str] = 'ollama_llm'
 
 
 # =============================================================================
@@ -501,7 +384,7 @@ class OpenAILLMOptions(BindingOptions):
 #
 # When run as a script, this module:
 # 1. Generates and prints a sample .env file with all binding options
-# 2. If "test" argument is provided, demonstrates argument parsing with Ollama binding
+# 2. If "test" argument is provided, demonstrates argument parsing with OpenAI binding
 #
 # Usage:
 #   python -m lightrag.llm.binding_options           # Generate .env sample
@@ -513,30 +396,17 @@ if __name__ == '__main__':
     import sys
 
     import dotenv
-    # from io import StringIO
 
     dotenv.load_dotenv(dotenv_path='.env', override=False)
 
-    # env_strstream = StringIO(
-    #     ("OLLAMA_LLM_TEMPERATURE=0.1\nOLLAMA_EMBEDDING_TEMPERATURE=0.2\n")
-    # )
-    # # Load environment variables from .env file
-    # dotenv.load_dotenv(stream=env_strstream)
-
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
-        # Add arguments for OllamaEmbeddingOptions, OllamaLLMOptions, and OpenAILLMOptions
+        # Add arguments for OpenAILLMOptions
         parser = ArgumentParser(description='Test binding options')
-        OllamaEmbeddingOptions.add_args(parser)
-        OllamaLLMOptions.add_args(parser)
         OpenAILLMOptions.add_args(parser)
 
         # Parse arguments test
         args = parser.parse_args(
             [
-                '--ollama-embedding-num_ctx',
-                '1024',
-                '--ollama-llm-num_ctx',
-                '2048',
                 '--openai-llm-temperature',
                 '0.7',
                 '--openai-llm-max_completion_tokens',
@@ -547,16 +417,10 @@ if __name__ == '__main__':
                 '{"effort": "high", "max_tokens": 2000, "exclude": false, "enabled": true}',
             ]
         )
-        print('Final args for LLM and Embedding:')
+        print('Final args for LLM:')
         print(f'{args}\n')
 
-        print('Ollama LLM options:')
-        print(OllamaLLMOptions.options_dict(args))
-
-        print('\nOllama Embedding options:')
-        print(OllamaEmbeddingOptions.options_dict(args))
-
-        print('\nOpenAI LLM options:')
+        print('OpenAI LLM options:')
         print(OpenAILLMOptions.options_dict(args))
 
         # Test creating OpenAI options instance

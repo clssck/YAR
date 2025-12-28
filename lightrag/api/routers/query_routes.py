@@ -253,6 +253,10 @@ class ReferenceItem(BaseModel):
 
     reference_id: str = Field(description='Unique reference identifier')
     file_path: str = Field(description='Path to the source file')
+    document_title: str | None = Field(default=None, description='Human-readable document title')
+    s3_key: str | None = Field(default=None, description='S3 object key for source document')
+    presigned_url: str | None = Field(default=None, description='Presigned URL for direct document access')
+    excerpt: str | None = Field(default=None, description='Brief excerpt from the source')
     content: list[str] | None = Field(
         default=None,
         description='List of chunk contents from this file (only present when include_chunk_content=True)',
@@ -681,6 +685,16 @@ def create_query_routes(
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
+            # Generate presigned URLs for references with s3_key
+            if s3_client and request.include_references:
+                for ref in references:
+                    s3_key = ref.get('s3_key')
+                    if s3_key:
+                        try:
+                            ref['presigned_url'] = await s3_client.get_presigned_url(s3_key)
+                        except Exception as e:
+                            logger.debug(f'Failed to generate presigned URL for {s3_key}: {e}')
+
             # Return response with or without references based on request
             if request.include_references:
                 return QueryResponse(response=response_content, references=references)
@@ -929,6 +943,16 @@ def create_query_routes(
                             ref_copy['content'] = ref_id_to_content[ref_id]
                         enriched_references.append(ref_copy)
                     references = enriched_references
+
+                # Generate presigned URLs for references with s3_key
+                if s3_client and request.include_references:
+                    for ref in references:
+                        s3_key = ref.get('s3_key')
+                        if s3_key:
+                            try:
+                                ref['presigned_url'] = await s3_client.get_presigned_url(s3_key)
+                            except Exception as e:
+                                logger.debug(f'Failed to generate presigned URL for {s3_key}: {e}')
 
                 # Track collected response for citation extraction
                 collected_response = []

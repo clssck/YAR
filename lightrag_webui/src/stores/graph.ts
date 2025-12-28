@@ -19,6 +19,8 @@ export type RawNodeType = {
   color: string
 
   degree: number
+  // Node type for rendering: 'orphan' for disconnected nodes (diamond shape), 'default' for connected (circle)
+  type?: 'default' | 'orphan'
 }
 
 export type RawEdgeType = {

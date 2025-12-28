@@ -1,5 +1,5 @@
 """
-Async S3 client wrapper for RustFS/MinIO/AWS S3 compatible object storage.
+Async S3 client wrapper for S3-compatible object storage (RustFS, AWS S3, Cloudflare R2).
 
 This module provides staging and archive functionality for documents:
 - Upload to staging: s3://bucket/staging/{workspace}/{doc_id}

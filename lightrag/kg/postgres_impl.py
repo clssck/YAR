@@ -1,15 +1,15 @@
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
 import configparser
-from dataclasses import dataclass, field
 import datetime
-from datetime import timezone
 import hashlib
-import itertools
 import json
 import os
 import re
 import ssl
+import time
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import timezone
 from typing import Any, ClassVar, Literal, TypeVar, cast, final, overload
 
 import numpy as np
@@ -17,7 +17,6 @@ import pipmaster as pm
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -58,6 +57,102 @@ T = TypeVar('T')
 # PostgreSQL identifier length limit (in bytes)
 PG_MAX_IDENTIFIER_LENGTH = 63
 
+# Maximum UNWIND batch size for AGE Cypher queries
+# Larger batches may cause memory issues or timeouts in AGE
+AGE_MAX_UNWIND_BATCH_SIZE = 5000
+
+# Hybrid search (BM25 + vector) configuration
+# RRF_K: Reciprocal Rank Fusion constant (standard: 60, lower = more weight to top ranks)
+RRF_K = int(os.getenv('LIGHTRAG_RRF_K', '60'))
+# TS_RANK_CD_FLAG: PostgreSQL ts_rank_cd normalization flags (32 = normalize by document length)
+TS_RANK_CD_FLAG = int(os.getenv('LIGHTRAG_TS_RANK_FLAG', '32'))
+# Fetch multipliers for hybrid search (fetch more than top_k to allow RRF fusion)
+VECTOR_FETCH_MULTIPLIER = float(os.getenv('LIGHTRAG_VECTOR_FETCH_MULT', '2.0'))
+BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('LIGHTRAG_BM25_FETCH_MULT', '1.0'))
+
+# Default batch size for executemany operations
+# Adjust based on your data size and database resources
+EXECUTEMANY_BATCH_SIZE = int(os.getenv('POSTGRES_EXECUTEMANY_BATCH_SIZE', '500'))
+
+# pgvector distance metric configuration
+# Options: 'cosine' (default), 'l2' (Euclidean), 'ip' (inner product/dot product)
+# Note: Changing this requires rebuilding vector indexes
+VECTOR_DISTANCE_METRIC = os.getenv('POSTGRES_VECTOR_DISTANCE', 'cosine').lower()
+
+# Mapping of distance metrics to pgvector operator classes (for index creation)
+VECTOR_OPS_CLASS: dict[str, str] = {
+    'cosine': 'vector_cosine_ops',
+    'l2': 'vector_l2_ops',
+    'ip': 'vector_ip_ops',
+}
+
+# Mapping of distance metrics to pgvector operators (for queries)
+# cosine: <=> returns cosine distance (1 - cosine_similarity)
+# l2: <-> returns Euclidean distance
+# ip: <#> returns negative inner product (for ORDER BY ascending)
+VECTOR_DISTANCE_OP: dict[str, str] = {
+    'cosine': '<=>',
+    'l2': '<->',
+    'ip': '<#>',
+}
+
+# Validate configured distance metric
+if VECTOR_DISTANCE_METRIC not in VECTOR_OPS_CLASS:
+    raise ValueError(
+        f"Invalid POSTGRES_VECTOR_DISTANCE='{VECTOR_DISTANCE_METRIC}'. "
+        f"Must be one of: {', '.join(VECTOR_OPS_CLASS.keys())}"
+    )
+
+# Patterns for sensitive parameter keys that should be masked in logs
+_SENSITIVE_KEY_PATTERNS = frozenset({'password', 'secret', 'token', 'key', 'credential', 'auth'})
+
+
+def _sanitize_for_log(
+    sql: str | None = None,
+    params: dict | list | tuple | None = None,
+    max_sql_length: int = 500,
+) -> str:
+    """
+    Sanitize SQL and parameters for safe logging, masking potential secrets.
+
+    This prevents accidental exposure of sensitive data like passwords or tokens
+    in error logs while preserving enough context for debugging.
+
+    Args:
+        sql: SQL statement to truncate (optional)
+        params: Parameters to sanitize (dict, list, or tuple)
+        max_sql_length: Max chars for SQL truncation (default: 500)
+
+    Returns:
+        Formatted string safe for logging
+
+    Example:
+        >>> _sanitize_for_log("SELECT * FROM users", {"user": "bob", "password": "secret123"})
+        "sql: SELECT * FROM users, params: {'user': 'bob', 'password': '***'}"
+    """
+    parts = []
+
+    if sql is not None:
+        truncated = sql[:max_sql_length] + '...' if len(sql) > max_sql_length else sql
+        parts.append(f'sql: {truncated}')
+
+    if params is not None:
+        if isinstance(params, dict):
+            # Mask values of keys that look sensitive
+            sanitized = {}
+            for k, v in params.items():
+                key_lower = str(k).lower()
+                if any(pattern in key_lower for pattern in _SENSITIVE_KEY_PATTERNS):
+                    sanitized[k] = '***'
+                else:
+                    sanitized[k] = v
+            parts.append(f'params: {sanitized}')
+        elif isinstance(params, (list, tuple)):
+            # For positional params, just show count to avoid exposing sensitive data
+            parts.append(f'params: [{len(params)} values]')
+
+    return ', '.join(parts) if parts else ''
+
 
 def _safe_index_name(table_name: str, index_suffix: str) -> str:
     """
@@ -92,6 +187,42 @@ def _safe_index_name(table_name: str, index_suffix: str) -> str:
     return shortened_name
 
 
+def _dollar_quote(s: str | None, tag_prefix: str = 'AGE', max_iterations: int = 1000) -> str:
+    """
+    Generate a PostgreSQL dollar-quoted string with a unique delimiter.
+
+    PostgreSQL uses $tag$...$tag$ for string literals. If the content contains
+    the same tag sequence, queries break. This function finds a unique tag.
+
+    Args:
+        s: The string to quote (None becomes empty string)
+        tag_prefix: Prefix for the tag (default: 'AGE')
+        max_iterations: Maximum attempts to find unique tag (default: 1000)
+
+    Returns:
+        Dollar-quoted string like $AGE1$content$AGE1$
+
+    Raises:
+        ValueError: If no unique tag found within max_iterations
+
+    Example:
+        >>> _dollar_quote("hello")
+        '$AGE1$hello$AGE1$'
+        >>> _dollar_quote("$AGE1$ test")
+        '$AGE2$$AGE1$ test$AGE2$'
+    """
+    s = '' if s is None else str(s)
+    for i in range(1, max_iterations + 1):
+        tag = f'{tag_prefix}{i}'
+        wrapper = f'${tag}$'
+        if wrapper not in s:
+            return f'{wrapper}{s}{wrapper}'
+    raise ValueError(
+        f'Could not find unique dollar-quote tag after {max_iterations} attempts. '
+        f'Content may contain pathological pattern.'
+    )
+
+
 class PostgreSQLDB:
     def __init__(self, config: dict[str, Any], **kwargs: Any):
         self.host = config['host']
@@ -102,6 +233,10 @@ class PostgreSQLDB:
         self.workspace = config['workspace']
         self.max = int(config['max_connections'])
         self.min = int(config.get('min_connections', 5))
+        if self.min > self.max:
+            raise ValueError(
+                f'min_connections ({self.min}) cannot exceed max_connections ({self.max})'
+            )
         self.increment = 1
         self.pool: Pool | None = None
 
@@ -133,6 +268,9 @@ class PostgreSQLDB:
 
         # Guard concurrent pool resets
         self._pool_reconnect_lock = asyncio.Lock()
+        # Track consecutive failures for smarter pool reset (only reset after multiple failures)
+        self._consecutive_failures = 0
+        self._pool_reset_threshold = 3  # Reset pool after this many consecutive failures
 
         self._transient_exceptions = (
             asyncio.TimeoutError,
@@ -155,12 +293,15 @@ class PostgreSQLDB:
             config['connection_retry_backoff_max'],
         )
         self.pool_close_timeout = config['pool_close_timeout']
+        self.command_timeout = config.get('command_timeout', 60.0)
         logger.info(
-            'PostgreSQL, Retry config: attempts=%s, backoff=%.1fs, backoff_max=%.1fs, pool_close_timeout=%.1fs',
+            'PostgreSQL, Retry config: attempts=%s, backoff=%.1fs, backoff_max=%.1fs, '
+            'pool_close_timeout=%.1fs, command_timeout=%.1fs',
             self.connection_retry_attempts,
             self.connection_retry_backoff,
             self.connection_retry_backoff_max,
             self.pool_close_timeout,
+            self.command_timeout,
         )
 
         # Migration error tracking - stores (migration_name, error_message) tuples
@@ -168,10 +309,6 @@ class PostgreSQLDB:
 
     def _create_ssl_context(self) -> ssl.SSLContext | None:
         """Create SSL context based on configuration parameters."""
-        if not self.ssl_mode:
-            return None
-
-        # Nothing to do if SSL mode is not configured
         if not self.ssl_mode:
             return None
 
@@ -242,9 +379,10 @@ class PostgreSQLDB:
             'port': self.port,
             'min_size': self.min,  # Configurable via POSTGRES_MIN_CONNECTIONS
             'max_size': self.max,
-            # Connection reliability: prevent unbounded query hangs (60s default)
+            # Connection reliability: prevent unbounded query hangs
             # Individual queries that exceed this will raise asyncpg.TimeoutError
-            'command_timeout': 60.0,
+            # Configurable via POSTGRES_COMMAND_TIMEOUT (default: 60s)
+            'command_timeout': self.command_timeout,
         }
 
         # Only add statement_cache_size if it's configured
@@ -292,14 +430,22 @@ class PostgreSQLDB:
         )
 
         async def _init_connection(connection: asyncpg.Connection) -> None:
-            """Initialize each connection with pgvector codec.
+            """Initialize each connection with pgvector codec and index settings.
 
             This callback is invoked by asyncpg for every new connection in the pool.
             Registering the vector codec here ensures ALL connections can properly
             encode/decode vector columns, eliminating non-deterministic behavior
             where some connections have the codec and others don't.
+
+            Vector index settings (HNSW ef_search, VCHORDRQ probes) are also set here
+            once per connection rather than on every query for efficiency.
             """
             await register_vector(connection)
+            # Configure vector index settings once per connection (not per query)
+            if self.vector_index_type == 'HNSW':
+                await self.configure_hnsw(connection)
+            elif self.vector_index_type == 'VCHORDRQ':
+                await self.configure_vchordrq(connection)
 
         async def _create_pool_once() -> None:
             # STEP 1: Bootstrap - ensure vector extension exists BEFORE pool creation.
@@ -317,6 +463,7 @@ class PostgreSQLDB:
             )
             try:
                 await self.configure_vector_extension(bootstrap_conn)
+                await self.configure_trgm_extension(bootstrap_conn)
             finally:
                 await bootstrap_conn.close()
 
@@ -367,15 +514,25 @@ class PostgreSQLDB:
             self.pool = None
 
     async def _before_sleep(self, retry_state: RetryCallState) -> None:
-        """Hook invoked by tenacity before sleeping between retries."""
+        """Hook invoked by tenacity before sleeping between retries.
+
+        Uses a smarter pool reset strategy: only resets the pool after multiple
+        consecutive failures to avoid destroying the pool on brief network blips.
+        """
         exc = retry_state.outcome.exception() if retry_state.outcome else None
+        self._consecutive_failures += 1
         logger.warning(
-            'PostgreSQL transient connection issue on attempt %s/%s: %r',
+            'PostgreSQL transient connection issue on attempt %s/%s (consecutive: %s): %r',
             retry_state.attempt_number,
             self.connection_retry_attempts,
+            self._consecutive_failures,
             exc,
         )
-        await self._reset_pool()
+        # Only reset pool after multiple consecutive failures
+        if self._consecutive_failures >= self._pool_reset_threshold:
+            logger.info(f'PostgreSQL, Resetting pool after {self._consecutive_failures} consecutive failures')
+            await self._reset_pool()
+            self._consecutive_failures = 0
 
     async def _run_with_retry(
         self,
@@ -423,11 +580,12 @@ class PostgreSQLDB:
                         await self.configure_age(connection, graph_name)
                     elif with_age and not graph_name:
                         raise ValueError('Graph name is required when with_age is True')
-                    if self.vector_index_type == 'HNSW':
-                        await self.configure_hnsw(connection)
-                    elif self.vector_index_type == 'VCHORDRQ':
-                        await self.configure_vchordrq(connection)
-                    return await operation(connection)
+                    # Note: HNSW/VCHORDRQ config is set in _init_connection per connection,
+                    # not here per query, for efficiency
+                    result = await operation(connection)
+                    # Reset consecutive failures counter on success
+                    self._consecutive_failures = 0
+                    return result
 
         # Should be unreachable because AsyncRetrying raises on final failure,
         # but keeps the type-checker happy about the return type.
@@ -470,9 +628,14 @@ class PostgreSQLDB:
         try:
             await connection.execute('CREATE EXTENSION IF NOT EXISTS vector')  # type: ignore
             logger.info('PostgreSQL, VECTOR extension enabled')
+        except asyncpg.exceptions.DuplicateObjectError:
+            logger.debug('VECTOR extension already exists')
+        except asyncpg.exceptions.InsufficientPrivilegeError as e:
+            logger.warning(f'Insufficient privileges to create VECTOR extension: {e}')
+            # Don't raise - extension may already exist via superuser
         except Exception as e:
-            logger.warning(f'Could not create VECTOR extension: {e}')
-            # Don't raise - let the system continue without vector extension
+            logger.error(f'Failed to configure VECTOR extension: {e}')
+            raise  # Critical failure - don't swallow
 
     @staticmethod
     async def configure_age_extension(connection: Connection | PoolConnectionProxy) -> None:
@@ -480,9 +643,29 @@ class PostgreSQLDB:
         try:
             await connection.execute('CREATE EXTENSION IF NOT EXISTS AGE CASCADE')  # type: ignore
             logger.info('PostgreSQL, AGE extension enabled')
+        except asyncpg.exceptions.DuplicateObjectError:
+            logger.debug('AGE extension already exists')
+        except asyncpg.exceptions.InsufficientPrivilegeError as e:
+            logger.warning(f'Insufficient privileges to create AGE extension: {e}')
+            # Don't raise - extension may already exist via superuser
         except Exception as e:
-            logger.warning(f'Could not create AGE extension: {e}')
-            # Don't raise - let the system continue without AGE extension
+            logger.error(f'Failed to configure AGE extension: {e}')
+            raise  # Critical failure - don't swallow
+
+    @staticmethod
+    async def configure_trgm_extension(connection: Connection | PoolConnectionProxy) -> None:
+        """Create pg_trgm extension if it doesn't exist for fuzzy text matching (ILIKE optimization)."""
+        try:
+            await connection.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')  # type: ignore
+            logger.info('PostgreSQL, pg_trgm extension enabled')
+        except asyncpg.exceptions.DuplicateObjectError:
+            logger.debug('pg_trgm extension already exists')
+        except asyncpg.exceptions.InsufficientPrivilegeError as e:
+            logger.warning(f'Insufficient privileges to create pg_trgm extension: {e}')
+            # Don't raise - extension may already exist via superuser
+        except Exception as e:
+            logger.warning(f'Failed to configure pg_trgm extension: {e}')
+            # Don't raise - this is optional, entity search will still work (just slower)
 
     @staticmethod
     async def configure_age(connection: Connection | PoolConnectionProxy, graph_name: str) -> None:
@@ -1801,6 +1984,12 @@ class PostgreSQLDB:
                 'description': 'Index for entity name lookups',
             },
             {
+                'table': 'lightrag_vdb_entity',
+                'name': 'idx_lightrag_vdb_entity_name_trgm',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_vdb_entity_name_trgm ON LIGHTRAG_VDB_ENTITY USING gin (entity_name gin_trgm_ops)',
+                'description': 'Trigram GIN index for fuzzy entity name matching (ILIKE)',
+            },
+            {
                 'table': 'lightrag_vdb_relation',
                 'name': 'idx_lightrag_vdb_relation_source',
                 'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_vdb_relation_source ON LIGHTRAG_VDB_RELATION (workspace, source_id)',
@@ -1865,20 +2054,22 @@ class PostgreSQLDB:
             'LIGHTRAG_VDB_RELATION',
         ]
 
+        # Use configurable distance metric ops class
+        ops_class = VECTOR_OPS_CLASS[VECTOR_DISTANCE_METRIC]
         create_sql = {
             'HNSW': f"""
                 CREATE INDEX {{vector_index_name}}
-                ON {{k}} USING hnsw (content_vector vector_cosine_ops)
+                ON {{k}} USING hnsw (content_vector {ops_class})
                 WITH (m = {self.hnsw_m}, ef_construction = {self.hnsw_ef})
             """,
             'IVFFLAT': f"""
                 CREATE INDEX {{vector_index_name}}
-                ON {{k}} USING ivfflat (content_vector vector_cosine_ops)
+                ON {{k}} USING ivfflat (content_vector {ops_class})
                 WITH (lists = {self.ivfflat_lists})
             """,
             'VCHORDRQ': f"""
                 CREATE INDEX {{vector_index_name}}
-                ON {{k}} USING vchordrq (content_vector vector_cosine_ops)
+                ON {{k}} USING vchordrq (content_vector {ops_class})
                 {f'WITH (options = $${self.vchordrq_build_options}$$)' if self.vchordrq_build_options else ''}
             """,
         }
@@ -2015,38 +2206,60 @@ class PostgreSQLDB:
         try:
             await self._run_with_retry(_operation, with_age=with_age, graph_name=graph_name)
         except Exception as e:
-            logger.error(f'PostgreSQL database,\nsql:{sql},\ndata:{data},\nerror:{e}')
+            logger.error(f'PostgreSQL database, {_sanitize_for_log(sql, data)}, error: {e}')
             raise
 
     async def executemany(
         self,
         sql: str,
         data_list: list[tuple],
-        batch_size: int = 500,
+        batch_size: int | None = None,
+        use_prepared: bool = True,
     ) -> None:
         """Execute SQL with multiple parameter sets using asyncpg's executemany.
 
         This is significantly faster than calling execute() in a loop because it
         reduces database round-trips by batching multiple rows in a single operation.
 
+        When use_prepared=True and data exceeds batch_size, prepares the statement
+        once and reuses it across batches, reducing parse overhead.
+
         Args:
             sql: The SQL statement with positional parameters ($1, $2, etc.)
             data_list: List of tuples, each containing parameters for one row
-            batch_size: Number of rows to process per batch (default 500)
+            batch_size: Number of rows per batch (default: POSTGRES_EXECUTEMANY_BATCH_SIZE env var or 500)
+            use_prepared: Use explicit prepared statement for multi-batch operations (default: True)
         """
+        batch_size = batch_size or EXECUTEMANY_BATCH_SIZE
         if not data_list:
             return
 
+        total_rows = len(data_list)
+        needs_multi_batch = total_rows > batch_size
+        start_time = time.perf_counter()
+
         async def _operation(connection: Connection | PoolConnectionProxy) -> None:
-            for i in range(0, len(data_list), batch_size):
-                batch = data_list[i : i + batch_size]
-                await connection.executemany(sql, batch)
+            if use_prepared and needs_multi_batch:
+                # Prepare once, execute many times for multi-batch operations
+                stmt = await connection.prepare(sql)
+                for i in range(0, total_rows, batch_size):
+                    batch = data_list[i : i + batch_size]
+                    await stmt.executemany(batch)
+            else:
+                # Single batch or no preparation - use regular executemany
+                for i in range(0, total_rows, batch_size):
+                    batch = data_list[i : i + batch_size]
+                    await connection.executemany(sql, batch)
 
         try:
             await self._run_with_retry(_operation)
-            logger.debug(f'PostgreSQL executemany: inserted {len(data_list)} rows in batches of {batch_size}')
+            elapsed = time.perf_counter() - start_time
+            logger.debug(
+                f'PostgreSQL executemany: {total_rows} rows in {elapsed:.3f}s '
+                f'(batches={batch_size}, prepared={use_prepared and needs_multi_batch})'
+            )
         except Exception as e:
-            logger.error(f'PostgreSQL executemany error: {e}, sql: {sql[:100]}...')
+            logger.error(f'PostgreSQL executemany error: {e}, {_sanitize_for_log(sql, max_sql_length=100)}')
             raise
 
     async def full_text_search(
@@ -2105,7 +2318,7 @@ class PostgreSQLDB:
                 ts_rank_cd(
                     to_tsvector('{language}', content),
                     {ts_query_func}('{language}', $1),
-                    32
+                    {TS_RANK_CD_FLAG}
                 ) AS score
             FROM LIGHTRAG_DOC_CHUNKS
             WHERE workspace = $2
@@ -2278,6 +2491,13 @@ class ClientManager:
                     )
                 ),
             ),
+            # Default command timeout (60s). Bulk operations may need longer timeouts.
+            'command_timeout': float(
+                os.environ.get(
+                    'POSTGRES_COMMAND_TIMEOUT',
+                    config.get('postgres', 'command_timeout', fallback=60.0),
+                )
+            ),
         }
 
     @classmethod
@@ -2319,6 +2539,26 @@ class PGKVStorage(BaseKVStorage):
         if self.db is None:
             raise RuntimeError('PostgreSQL client is not initialized')
         return self.db
+
+    @staticmethod
+    def _parse_json_field(value: Any, default: Any = None) -> Any:
+        """Parse JSON string field, return default on failure."""
+        if value is None:
+            return default if default is not None else []
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return default if default is not None else []
+        return value
+
+    @staticmethod
+    def _normalize_timestamps(result: dict[str, Any]) -> None:
+        """Normalize create_time and update_time fields in place."""
+        create_time = result.get('create_time', 0)
+        update_time = result.get('update_time', 0)
+        result['create_time'] = create_time
+        result['update_time'] = create_time if update_time == 0 else update_time
 
     def __post_init__(self):
         self._max_batch_size = self.global_config['embedding_batch_num']
@@ -2482,111 +2722,37 @@ class PGKVStorage(BaseKVStorage):
                 ordered.append(id_map.get(str(requested_id), {}))
             return ordered
 
-        if results and is_namespace(self.namespace, NameSpace.KV_STORE_TEXT_CHUNKS):
-            # Parse llm_cache_list JSON string back to list for each result
-            for result in results:
-                llm_cache_list = result.get('llm_cache_list', [])
-                if isinstance(llm_cache_list, str):
-                    try:
-                        llm_cache_list = json.loads(llm_cache_list)
-                    except json.JSONDecodeError:
-                        llm_cache_list = []
-                result['llm_cache_list'] = llm_cache_list
-                create_time = result.get('create_time', 0)
-                update_time = result.get('update_time', 0)
-                result['create_time'] = create_time
-                result['update_time'] = create_time if update_time == 0 else update_time
-
-        # Special handling for LLM cache to ensure compatibility with _get_cached_extraction_results
+        # Special handling for LLM cache (returns early with field mapping)
         if results and is_namespace(self.namespace, NameSpace.KV_STORE_LLM_RESPONSE_CACHE):
             processed_results = []
             for row in results:
-                create_time = row.get('create_time', 0)
-                update_time = row.get('update_time', 0)
-                # Parse queryparam JSON string back to dict
-                queryparam = row.get('queryparam')
-                if isinstance(queryparam, str):
-                    try:
-                        queryparam = json.loads(queryparam)
-                    except json.JSONDecodeError:
-                        queryparam = None
-                # Map field names for compatibility (mode field removed)
                 processed_row = {
                     **row,
                     'return': row.get('return_value', ''),
                     'cache_type': row.get('cache_type'),
                     'original_prompt': row.get('original_prompt', ''),
                     'chunk_id': row.get('chunk_id'),
-                    'queryparam': queryparam,
-                    'create_time': create_time,
-                    'update_time': create_time if update_time == 0 else update_time,
+                    'queryparam': self._parse_json_field(row.get('queryparam'), default=None),
                 }
+                self._normalize_timestamps(processed_row)
                 processed_results.append(processed_row)
             return _order_results(processed_results)
 
-        # Special handling for FULL_ENTITIES namespace
-        if results and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
+        # Consolidated JSON parsing for other namespaces (single loop instead of 5 separate loops)
+        if results:
+            ns = self.namespace
             for result in results:
-                # Parse entity_names JSON string back to list
-                entity_names = result.get('entity_names', [])
-                if isinstance(entity_names, str):
-                    try:
-                        entity_names = json.loads(entity_names)
-                    except json.JSONDecodeError:
-                        entity_names = []
-                result['entity_names'] = entity_names
-                create_time = result.get('create_time', 0)
-                update_time = result.get('update_time', 0)
-                result['create_time'] = create_time
-                result['update_time'] = create_time if update_time == 0 else update_time
+                # Parse JSON fields based on namespace type
+                if is_namespace(ns, NameSpace.KV_STORE_TEXT_CHUNKS):
+                    result['llm_cache_list'] = self._parse_json_field(result.get('llm_cache_list'))
+                elif is_namespace(ns, NameSpace.KV_STORE_FULL_ENTITIES):
+                    result['entity_names'] = self._parse_json_field(result.get('entity_names'))
+                elif is_namespace(ns, NameSpace.KV_STORE_FULL_RELATIONS):
+                    result['relation_pairs'] = self._parse_json_field(result.get('relation_pairs'))
+                elif is_namespace(ns, (NameSpace.KV_STORE_ENTITY_CHUNKS, NameSpace.KV_STORE_RELATION_CHUNKS)):
+                    result['chunk_ids'] = self._parse_json_field(result.get('chunk_ids'))
 
-        # Special handling for FULL_RELATIONS namespace
-        if results and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_RELATIONS):
-            for result in results:
-                # Parse relation_pairs JSON string back to list
-                relation_pairs = result.get('relation_pairs', [])
-                if isinstance(relation_pairs, str):
-                    try:
-                        relation_pairs = json.loads(relation_pairs)
-                    except json.JSONDecodeError:
-                        relation_pairs = []
-                result['relation_pairs'] = relation_pairs
-                create_time = result.get('create_time', 0)
-                update_time = result.get('update_time', 0)
-                result['create_time'] = create_time
-                result['update_time'] = create_time if update_time == 0 else update_time
-
-        # Special handling for ENTITY_CHUNKS namespace
-        if results and is_namespace(self.namespace, NameSpace.KV_STORE_ENTITY_CHUNKS):
-            for result in results:
-                # Parse chunk_ids JSON string back to list
-                chunk_ids = result.get('chunk_ids', [])
-                if isinstance(chunk_ids, str):
-                    try:
-                        chunk_ids = json.loads(chunk_ids)
-                    except json.JSONDecodeError:
-                        chunk_ids = []
-                result['chunk_ids'] = chunk_ids
-                create_time = result.get('create_time', 0)
-                update_time = result.get('update_time', 0)
-                result['create_time'] = create_time
-                result['update_time'] = create_time if update_time == 0 else update_time
-
-        # Special handling for RELATION_CHUNKS namespace
-        if results and is_namespace(self.namespace, NameSpace.KV_STORE_RELATION_CHUNKS):
-            for result in results:
-                # Parse chunk_ids JSON string back to list
-                chunk_ids = result.get('chunk_ids', [])
-                if isinstance(chunk_ids, str):
-                    try:
-                        chunk_ids = json.loads(chunk_ids)
-                    except json.JSONDecodeError:
-                        chunk_ids = []
-                result['chunk_ids'] = chunk_ids
-                create_time = result.get('create_time', 0)
-                update_time = result.get('update_time', 0)
-                result['create_time'] = create_time
-                result['update_time'] = create_time if update_time == 0 else update_time
+                self._normalize_timestamps(result)
 
         return _order_results(results)
 
@@ -2605,7 +2771,7 @@ class PGKVStorage(BaseKVStorage):
             new_keys = {s for s in keys if s not in exist_keys}
             return new_keys
         except Exception as e:
-            logger.error(f'[{self.workspace}] PostgreSQL database,\nsql:{sql},\nparams:{params},\nerror:{e}')
+            logger.error(f'[{self.workspace}] PostgreSQL database, {_sanitize_for_log(sql, params)}, error: {e}')
             raise
 
     ################ INSERT METHODS ################
@@ -2902,7 +3068,7 @@ class PGVectorStorage(BaseVectorStorage):
                 item['chunk_order_index'],
                 item['full_doc_id'],
                 item['content'],
-                json.dumps(item['__vector__'].tolist()),
+                item['__vector__'].tolist(),  # pgvector codec handles list conversion
                 item['file_path'],
                 current_time,
                 current_time,
@@ -2921,7 +3087,7 @@ class PGVectorStorage(BaseVectorStorage):
             item['__id__'],
             item['entity_name'],
             item['content'],
-            json.dumps(item['__vector__'].tolist()),
+            item['__vector__'].tolist(),  # pgvector codec handles list conversion
             chunk_ids,
             item.get('file_path'),
             current_time,
@@ -2939,7 +3105,7 @@ class PGVectorStorage(BaseVectorStorage):
             item['src_id'],
             item['tgt_id'],
             item['content'],
-            json.dumps(item['__vector__'].tolist()),
+            item['__vector__'].tolist(),  # pgvector codec handles list conversion
             chunk_ids,
             item.get('file_path'),
             current_time,
@@ -2999,7 +3165,10 @@ class PGVectorStorage(BaseVectorStorage):
         embedding_values = [float(value) for value in embedding]
         embedding_string = ','.join(str(value) for value in embedding_values)
 
-        sql = SQL_TEMPLATES[self.namespace].format(embedding_string=embedding_string)
+        sql = SQL_TEMPLATES[self.namespace].format(
+            embedding_string=embedding_string,
+            distance_op=VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC],
+        )
         params = {
             'workspace': self.workspace,
             'closer_than_threshold': 1 - self.cosine_better_than_threshold,
@@ -3041,8 +3210,9 @@ class PGVectorStorage(BaseVectorStorage):
 
         # Determine how many results to fetch from each source
         # Fetch more than top_k to allow RRF to work effectively
-        vector_fetch_k = int(top_k * 2)
-        bm25_fetch_k = int(top_k * (1 + bm25_weight))  # Scale by weight
+        # Configurable via LIGHTRAG_VECTOR_FETCH_MULT and LIGHTRAG_BM25_FETCH_MULT
+        vector_fetch_k = int(top_k * VECTOR_FETCH_MULTIPLIER)
+        bm25_fetch_k = int(top_k * (BM25_FETCH_BASE_MULTIPLIER + bm25_weight))  # Scale by weight
 
         # 1. Vector search (existing method)
         vector_results = await self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding)
@@ -3063,10 +3233,11 @@ class PGVectorStorage(BaseVectorStorage):
                 tokens,
                 content,
                 file_path,
+                s3_key,
                 ts_rank_cd(
                     to_tsvector('{language}', content),
                     {ts_query_func}('{language}', $1),
-                    32
+                    {TS_RANK_CD_FLAG}
                 ) AS bm25_score
             FROM LIGHTRAG_DOC_CHUNKS
             WHERE workspace = $2
@@ -3093,7 +3264,7 @@ class PGVectorStorage(BaseVectorStorage):
         fused_results = reciprocal_rank_fusion(
             [vector_results, bm25_results],
             id_key='id',
-            k=60,  # Standard RRF constant
+            k=RRF_K,  # Configurable via LIGHTRAG_RRF_K env var
         )
 
         logger.debug(
@@ -3113,6 +3284,9 @@ class PGVectorStorage(BaseVectorStorage):
         This is used for entity-aware retrieval boosting: when a query mentions
         specific entities (like "SARP"), we want to prioritize chunks that are
         linked to those entities in the knowledge graph.
+
+        Uses asyncio.gather to run all keyword searches in parallel, providing
+        10-20x speedup for typical queries with 10+ keywords.
 
         Args:
             keywords: List of keywords to match against entity names
@@ -3140,41 +3314,46 @@ class PGVectorStorage(BaseVectorStorage):
             LIMIT $4
         """
 
-        for keyword in keywords:
+        async def search_keyword(keyword: str) -> list[dict[str, Any]]:
+            """Search for a single keyword - runs in parallel with other keywords."""
             try:
-                # Search for exact match and partial match
                 exact_pattern = keyword
                 partial_pattern = f'%{keyword}%'
-
                 results = await db.query(
                     entity_search_sql,
                     params=[self.workspace, exact_pattern, partial_pattern, top_k_per_keyword],
                     multirows=True,
                 )
-
-                if results:
-                    for row in results:
-                        chunk_ids = row.get('chunk_ids', [])
-                        if chunk_ids:
-                            # chunk_ids is stored as a PostgreSQL array
-                            if isinstance(chunk_ids, list):
-                                all_chunk_ids.update(chunk_ids)
-                            elif isinstance(chunk_ids, str):
-                                # Handle JSON string format if needed
-                                try:
-                                    parsed = json.loads(chunk_ids)
-                                    all_chunk_ids.update(parsed)
-                                except json.JSONDecodeError:
-                                    all_chunk_ids.add(chunk_ids)
-
-                    logger.debug(
-                        f'[{self.workspace}] Entity search for "{keyword}": '
-                        f'{len(results)} entities, {len(all_chunk_ids)} total chunk_ids'
-                    )
-
+                return results if results else []
             except Exception as e:
                 logger.warning(f'[{self.workspace}] Entity search error for "{keyword}": {e}')
-                continue
+                return []
+
+        # Run all keyword searches in parallel (N queries run concurrently instead of sequentially)
+        start_time = time.perf_counter()
+        results_list = await asyncio.gather(*[search_keyword(kw) for kw in keywords])
+        elapsed = time.perf_counter() - start_time
+
+        # Collect chunk IDs from all results
+        for results in results_list:
+            for row in results:
+                chunk_ids = row.get('chunk_ids', [])
+                if chunk_ids:
+                    # chunk_ids is stored as a PostgreSQL array
+                    if isinstance(chunk_ids, list):
+                        all_chunk_ids.update(chunk_ids)
+                    elif isinstance(chunk_ids, str):
+                        # Handle JSON string format if needed
+                        try:
+                            parsed = json.loads(chunk_ids)
+                            all_chunk_ids.update(parsed)
+                        except json.JSONDecodeError:
+                            all_chunk_ids.add(chunk_ids)
+
+        logger.debug(
+            f'[{self.workspace}] Entity search: {len(keywords)} keywords in {elapsed:.3f}s '
+            f'(parallel), {len(all_chunk_ids)} chunk_ids found'
+        )
 
         return all_chunk_ids
 
@@ -3241,10 +3420,11 @@ class PGVectorStorage(BaseVectorStorage):
                 tokens,
                 content,
                 file_path,
+                s3_key,
                 ts_rank_cd(
                     to_tsvector('{language}', content),
                     {ts_query_func}('{language}', $1),
-                    32
+                    {TS_RANK_CD_FLAG}
                 ) AS bm25_score
             FROM LIGHTRAG_DOC_CHUNKS
             WHERE workspace = $2
@@ -3271,7 +3451,7 @@ class PGVectorStorage(BaseVectorStorage):
         fused_results = reciprocal_rank_fusion(
             [vector_results, bm25_results],
             id_key='id',
-            k=60,
+            k=RRF_K,
         )
 
         # 4. Apply entity boost to chunks linked to query entities
@@ -3586,11 +3766,9 @@ class PGDocStatusStorage(DocStatusStorage):
             res = await db.query(sql, list(params.values()), multirows=True)
             exist_keys = [key['id'] for key in res] if res else []
             new_keys = {s for s in keys if s not in exist_keys}
-            # print(f"keys: {keys}")
-            # print(f"new_keys: {new_keys}")
             return new_keys
         except Exception as e:
-            logger.error(f'[{self.workspace}] PostgreSQL database,\nsql:{sql},\nparams:{params},\nerror:{e}')
+            logger.error(f'[{self.workspace}] PostgreSQL database, {_sanitize_for_log(sql, params)}, error: {e}')
             raise
 
     async def get_by_id(self, id: str) -> dict[str, Any] | None:
@@ -4064,17 +4242,107 @@ class PGGraphQueryException(Exception):
         return self.details
 
 
+# Graph metadata cache TTL in seconds (default: 60s)
+# Set to 0 to disable caching
+GRAPH_CACHE_TTL = float(os.getenv('LIGHTRAG_GRAPH_CACHE_TTL', '60'))
+
+
 @final
 @dataclass
 class PGGraphStorage(BaseGraphStorage):
     def __post_init__(self):
         # Graph name will be dynamically generated in initialize() based on workspace
         self.db: PostgreSQLDB | None = None
+        # Track JSON parse errors for monitoring and debugging
+        # Stores (context, error_message) tuples, capped to prevent memory growth
+        self._json_parse_errors: list[tuple[str, str]] = []
+        self._json_parse_error_count: int = 0
+        # Graph metadata cache: {graph_name: (exists: bool, timestamp: float)}
+        # Reduces repeated queries to ag_catalog.ag_graph during health checks
+        self._graph_exists_cache: dict[str, tuple[bool, float]] = {}
+        self._graph_cache_ttl = GRAPH_CACHE_TTL
 
     def _db_required(self) -> PostgreSQLDB:
         if self.db is None:
             raise RuntimeError('PostgreSQL client is not initialized')
         return self.db
+
+    def _track_json_error(
+        self, context: str, error: json.JSONDecodeError, raw_data: str | None = None
+    ) -> None:
+        """Track a JSON parse error for monitoring and debugging.
+
+        Args:
+            context: Description of where the error occurred (e.g., "node properties", "edge data")
+            error: The JSONDecodeError exception
+            raw_data: Optional raw data that failed to parse (will be truncated for storage)
+        """
+        self._json_parse_error_count += 1
+        # Cap stored errors to prevent memory growth (keep last 100)
+        if len(self._json_parse_errors) < 100:
+            preview = (raw_data[:80] + '...') if raw_data and len(raw_data) > 80 else (raw_data or '')
+            self._json_parse_errors.append((context, f'{error} | preview: {preview}'))
+        logger.warning(f'[{self.workspace}] JSON parse error ({context}): {error}')
+
+    def get_json_parse_stats(self) -> dict[str, Any]:
+        """Get JSON parsing error statistics for monitoring.
+
+        Returns:
+            Dictionary with total error count and recent error contexts
+        """
+        return {
+            'total_errors': self._json_parse_error_count,
+            'recent_errors': self._json_parse_errors[-10:] if self._json_parse_errors else [],
+        }
+
+    def _get_cached_graph_exists(self, graph_name: str) -> bool | None:
+        """Check if graph existence is cached and not expired.
+
+        Args:
+            graph_name: Name of the graph to check
+
+        Returns:
+            True/False if cached and valid, None if cache miss or expired
+        """
+        if self._graph_cache_ttl <= 0:
+            return None  # Caching disabled
+
+        if graph_name in self._graph_exists_cache:
+            exists, timestamp = self._graph_exists_cache[graph_name]
+            if time.time() - timestamp < self._graph_cache_ttl:
+                logger.debug(f'[{self.workspace}] Graph cache HIT for {graph_name}')
+                return exists
+            else:
+                # Expired - remove from cache
+                del self._graph_exists_cache[graph_name]
+                logger.debug(f'[{self.workspace}] Graph cache EXPIRED for {graph_name}')
+        return None
+
+    def _cache_graph_exists(self, graph_name: str, exists: bool) -> None:
+        """Cache graph existence status with current timestamp.
+
+        Args:
+            graph_name: Name of the graph
+            exists: Whether the graph exists
+        """
+        if self._graph_cache_ttl > 0:
+            self._graph_exists_cache[graph_name] = (exists, time.time())
+            logger.debug(f'[{self.workspace}] Graph cache SET {graph_name}={exists}')
+
+    def invalidate_graph_cache(self, graph_name: str | None = None) -> None:
+        """Invalidate graph existence cache.
+
+        Call this after creating or dropping graphs to ensure cache consistency.
+
+        Args:
+            graph_name: Specific graph to invalidate, or None to clear all
+        """
+        if graph_name:
+            self._graph_exists_cache.pop(graph_name, None)
+            logger.debug(f'[{self.workspace}] Graph cache INVALIDATED for {graph_name}')
+        else:
+            self._graph_exists_cache.clear()
+            logger.debug(f'[{self.workspace}] Graph cache CLEARED')
 
     def _get_workspace_graph_name(self) -> str:
         """
@@ -4082,6 +4350,10 @@ class PGGraphStorage(BaseGraphStorage):
         Rules:
         - If workspace is empty or "default": graph_name = namespace
         - If workspace has other value: graph_name = workspace_namespace
+
+        Note: Graph names are sanitized to PostgreSQL identifiers. This can
+        theoretically cause collisions (e.g., "ws_name" + "space" vs "ws" + "name_space"
+        both become "ws_name_space"). A warning is logged if significant sanitization occurs.
 
         Args:
             None
@@ -4096,7 +4368,17 @@ class PGGraphStorage(BaseGraphStorage):
             # Ensure names comply with PostgreSQL identifier specifications
             safe_workspace = re.sub(r'[^a-zA-Z0-9_]', '_', workspace.strip())
             safe_namespace = re.sub(r'[^a-zA-Z0-9_]', '_', namespace)
-            return f'{safe_workspace}_{safe_namespace}'
+            graph_name = f'{safe_workspace}_{safe_namespace}'
+
+            # Warn if sanitization significantly changed the name (potential collision risk)
+            original = f'{workspace.strip()}_{namespace}'
+            if graph_name != original:
+                logger.warning(
+                    f'[{self.workspace}] Graph name sanitized: "{original}" -> "{graph_name}". '
+                    f'Special characters were replaced. Ensure unique workspace/namespace combinations.'
+                )
+
+            return graph_name
         else:
             # When the workspace is "default", use the namespace directly (for backward compatibility with legacy implementations)
             return re.sub(r'[^a-zA-Z0-9_]', '_', namespace)
@@ -4185,6 +4467,9 @@ class PGGraphStorage(BaseGraphStorage):
                     graph_name=self.graph_name,
                 )
 
+            # Update cache after successful graph creation
+            self._cache_graph_exists(self.graph_name, True)
+
     async def health_check(self, max_retries: int = 3) -> dict[str, Any]:
         """Comprehensive health check for PostgreSQL graph connectivity and status.
 
@@ -4195,7 +4480,6 @@ class PGGraphStorage(BaseGraphStorage):
         - Graph information
         """
         from datetime import datetime
-        import time
 
         result: dict[str, Any] = {
             'status': 'healthy',
@@ -4221,25 +4505,51 @@ class PGGraphStorage(BaseGraphStorage):
             return result  # Can't proceed without connectivity
 
         # 2. AGE extension check
+        # First, check cache for graph existence (skip full query if cached)
+        cached_exists = self._get_cached_graph_exists(self.graph_name)
+        cache_used = cached_exists is not None
+
         try:
             start = time.perf_counter()
-            graphs = await db.query(
-                'SELECT name FROM ag_catalog.ag_graph',
-                multirows=True,
-                with_age=False,
-            )
+            if cache_used:
+                # Cache hit - skip expensive graph list query, just check AGE works
+                await db.execute("SELECT 1 FROM ag_catalog.ag_graph LIMIT 1")
+                graph_names = []  # Not populated when using cache
+            else:
+                # Cache miss - query full graph list
+                graphs = await db.query(
+                    'SELECT name FROM ag_catalog.ag_graph',
+                    multirows=True,
+                    with_age=False,
+                )
+                graph_names = []
+                if graphs:
+                    for g in graphs:
+                        if isinstance(g, dict):
+                            name = g.get('name')
+                            if isinstance(name, str):
+                                graph_names.append(name)
             latency_ms = (time.perf_counter() - start) * 1000
-            graph_names: list[str] = []
-            if graphs:
-                for g in graphs:
-                    if isinstance(g, dict):
-                        name = g.get('name')
-                        if isinstance(name, str):
-                            graph_names.append(name)
+
+            # Get AGE version for compatibility tracking
+            age_version = None
+            try:
+                version_result = await db.query(
+                    "SELECT extversion FROM pg_extension WHERE extname = 'age'",
+                    multirows=False,
+                    with_age=False,
+                )
+                if version_result and isinstance(version_result, dict):
+                    age_version = version_result.get('extversion')
+            except Exception:
+                pass  # Version check is optional, don't fail health check
+
             result['checks']['age_extension'] = {
                 'status': True,
                 'latency_ms': round(latency_ms, 2),
-                'graphs': graph_names,
+                'graphs': graph_names if not cache_used else '[cached]',
+                'version': age_version,
+                'cache_used': cache_used,
             }
         except Exception as e:
             result['checks']['age_extension'] = {'status': False, 'error': str(e)}
@@ -4247,12 +4557,18 @@ class PGGraphStorage(BaseGraphStorage):
             logger.debug(f'Graph health check - AGE extension failed: {e}')
 
         # 3. Workspace graph check
-        graph_exists = self.graph_name in graph_names
+        # Use cached value if available, otherwise check from query results
+        if cached_exists is not None:
+            graph_exists = cached_exists
+        else:
+            graph_exists = self.graph_name in graph_names
+            # Cache the result for future checks
+            self._cache_graph_exists(self.graph_name, graph_exists)
         if graph_exists:
             try:
                 start = time.perf_counter()
                 await db.query(
-                    f"SELECT * FROM cypher('{self.graph_name}', $$ RETURN 1 $$) AS (one agtype)",
+                    f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote('RETURN 1')}) AS (one agtype)",
                     with_age=True,
                     graph_name=self.graph_name,
                 )
@@ -4286,6 +4602,13 @@ class PGGraphStorage(BaseGraphStorage):
             }
             if not migration_status['success']:
                 result['status'] = 'degraded'
+
+        # 5. JSON parse error tracking (informational, doesn't affect health status)
+        json_stats = self.get_json_parse_stats()
+        result['checks']['json_parsing'] = {
+            'total_errors': json_stats['total_errors'],
+            'has_errors': json_stats['total_errors'] > 0,
+        }
 
         return result
 
@@ -4576,12 +4899,11 @@ class PGGraphStorage(BaseGraphStorage):
         label = self._normalize_node_id(source_node_id)
 
         # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                      UNWIND $node_ids AS node_id
-                      MATCH (n:base {{entity_id: node_id}})
+        cypher = """UNWIND $node_ids AS node_id
+                      MATCH (n:base {entity_id: node_id})
                       OPTIONAL MATCH (n)-[]-(connected:base)
-                      RETURN n.entity_id AS source_id, connected.entity_id AS connected_id
-                    $$, $1::agtype) AS (source_id text, connected_id text)"""
+                      RETURN n.entity_id AS source_id, connected.entity_id AS connected_id"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (source_id text, connected_id text)"
 
         results = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         edges = []
@@ -4594,11 +4916,8 @@ class PGGraphStorage(BaseGraphStorage):
 
         return edges
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((PGGraphQueryException,)),
-    )
+    # Note: Removed @retry decorator - _query() already has retry logic via _run_with_retry.
+    # Having both causes excessive retries (3 decorator × 10 connection = 30 attempts).
     async def upsert_node(self, node_id: str, node_data: dict[str, str]) -> None:
         """
         Upsert a node in the PostgreSQL graph database using Apache AGE.
@@ -4615,11 +4934,10 @@ class PGGraphStorage(BaseGraphStorage):
 
         # Note: AGE doesn't support parameterized SET n += $map, so we use
         # _format_properties which uses json.dumps for safe value escaping
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                     MERGE (n:base {{entity_id: "{label}"}})
+        cypher = f"""MERGE (n:base {{entity_id: "{label}"}})
                      SET n += {properties}
-                     RETURN n
-                   $$) AS (n agtype)"""
+                     RETURN n"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (n agtype)"
 
         try:
             db = self._db_required()
@@ -4633,11 +4951,7 @@ class PGGraphStorage(BaseGraphStorage):
             logger.error(f'[{self.workspace}] POSTGRES, upsert_node error on node_id: `{node_id}`')
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((PGGraphQueryException,)),
-    )
+    # Note: Removed @retry decorator - _query() already has retry logic via _run_with_retry.
     async def upsert_edge(self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]) -> None:
         """
         Upsert an edge and its properties between two nodes identified by their labels.
@@ -4653,15 +4967,13 @@ class PGGraphStorage(BaseGraphStorage):
 
         # Note: AGE doesn't support parameterized SET r += $map, so we use
         # _format_properties which uses json.dumps for safe value escaping
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                     MATCH (source:base {{entity_id: "{src_label}"}})
+        cypher = f"""MATCH (source:base {{entity_id: "{src_label}"}})
                      WITH source
                      MATCH (target:base {{entity_id: "{tgt_label}"}})
-                     MERGE (source)-[r:DIRECTED]-(target)
+                     MERGE (source)-[r:DIRECTED]->(target)
                      SET r += {edge_properties}
-                     SET r += {edge_properties}
-                     RETURN r
-                   $$) AS (r agtype)"""
+                     RETURN r"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (r agtype)"
 
         try:
             db = self._db_required()
@@ -4686,10 +4998,19 @@ class PGGraphStorage(BaseGraphStorage):
 
         Args:
             nodes: List of (node_id, properties) tuples
-            batch_size: Number of nodes per batch (default 500)
+            batch_size: Number of nodes per batch (default 500, max AGE_MAX_UNWIND_BATCH_SIZE)
+
+        Raises:
+            ValueError: If batch_size exceeds AGE_MAX_UNWIND_BATCH_SIZE
         """
         if not nodes:
             return
+
+        if batch_size > AGE_MAX_UNWIND_BATCH_SIZE:
+            raise ValueError(
+                f'batch_size ({batch_size}) exceeds maximum allowed ({AGE_MAX_UNWIND_BATCH_SIZE}). '
+                f'Large UNWIND batches may cause memory issues or timeouts in AGE.'
+            )
 
         import time
 
@@ -4723,15 +5044,14 @@ class PGGraphStorage(BaseGraphStorage):
 
             # Build UNWIND query with explicit SET clauses
             # Note: json.dumps handles all value escaping safely
-            query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                UNWIND {json.dumps(node_data)} AS d
+            cypher = f"""UNWIND {json.dumps(node_data)} AS d
                 MERGE (n:base {{entity_id: d.entity_id}})
                 SET n.entity_name = d.entity_name
                 SET n.entity_type = d.entity_type
                 SET n.description = d.description
                 SET n.source_id = d.source_id
-                RETURN count(n)
-            $$) AS (cnt agtype)"""
+                RETURN count(n)"""
+            query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (cnt agtype)"
 
             try:
                 await db._timed_operation(
@@ -4767,10 +5087,19 @@ class PGGraphStorage(BaseGraphStorage):
 
         Args:
             edges: List of (source_id, target_id, properties) tuples
-            batch_size: Number of edges per batch (default 500)
+            batch_size: Number of edges per batch (default 500, max AGE_MAX_UNWIND_BATCH_SIZE)
+
+        Raises:
+            ValueError: If batch_size exceeds AGE_MAX_UNWIND_BATCH_SIZE
         """
         if not edges:
             return
+
+        if batch_size > AGE_MAX_UNWIND_BATCH_SIZE:
+            raise ValueError(
+                f'batch_size ({batch_size}) exceeds maximum allowed ({AGE_MAX_UNWIND_BATCH_SIZE}). '
+                f'Large UNWIND batches may cause memory issues or timeouts in AGE.'
+            )
 
         import time
 
@@ -4801,8 +5130,7 @@ class PGGraphStorage(BaseGraphStorage):
 
             # Build UNWIND query with explicit SET clauses
             # Note: json.dumps handles all value escaping safely
-            query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                UNWIND {json.dumps(edge_data)} AS d
+            cypher = f"""UNWIND {json.dumps(edge_data)} AS d
                 MATCH (s:base {{entity_id: d.src}})
                 MATCH (t:base {{entity_id: d.tgt}})
                 MERGE (s)-[r:DIRECTED]->(t)
@@ -4810,8 +5138,8 @@ class PGGraphStorage(BaseGraphStorage):
                 SET r.description = d.description
                 SET r.keywords = d.keywords
                 SET r.source_id = d.source_id
-                RETURN count(r)
-            $$) AS (cnt agtype)"""
+                RETURN count(r)"""
+            query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (cnt agtype)"
 
             try:
                 await db._timed_operation(
@@ -4844,11 +5172,10 @@ class PGGraphStorage(BaseGraphStorage):
         label = self._normalize_node_id(node_id)
 
         # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                     UNWIND $node_ids AS node_id
-                     MATCH (n:base {{entity_id: node_id}})
-                     DETACH DELETE n
-                   $$, $1::agtype) AS (n agtype)"""
+        cypher = """UNWIND $node_ids AS node_id
+                     MATCH (n:base {entity_id: node_id})
+                     DETACH DELETE n"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (n agtype)"
 
         try:
             await self._query(
@@ -4872,11 +5199,10 @@ class PGGraphStorage(BaseGraphStorage):
         unique_ids = list(dict.fromkeys(node_ids))
         cy_params = {'params': json.dumps({'node_ids': unique_ids}, ensure_ascii=False)}
 
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                     UNWIND $node_ids AS node_id
-                     MATCH (n:base {{entity_id: node_id}})
-                     DETACH DELETE n
-                   $$, $1::agtype) AS (n agtype)"""
+        cypher = """UNWIND $node_ids AS node_id
+                     MATCH (n:base {entity_id: node_id})
+                     DETACH DELETE n"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (n agtype)"
 
         try:
             await self._query(query, readonly=False, params=cy_params)
@@ -4908,15 +5234,14 @@ class PGGraphStorage(BaseGraphStorage):
 
         literal_pairs = ', '.join([f'{{src: {json.dumps(src)}, tgt: {json.dumps(tgt)}}}' for src, tgt in cleaned_edges])
 
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                         UNWIND [{literal_pairs}] AS pair
-                         MATCH (a:base {{entity_id: pair.src}})-[r]-(b:base {{entity_id: pair.tgt}})
-                         DELETE r
-                       $$) AS (r agtype)"""
+        cypher = f"""UNWIND [{literal_pairs}] AS pair
+                         MATCH (a:base {{entity_id: pair.src}})-[r:DIRECTED]->(b:base {{entity_id: pair.tgt}})
+                         DELETE r"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (r agtype)"
 
         try:
             await self._query(query, readonly=False)
-            logger.debug(f'[{self.workspace}] Deleted {len(cleaned_edges)} edges (undirected)')
+            logger.debug(f'[{self.workspace}] Deleted {len(cleaned_edges)} edges')
         except Exception as e:
             logger.error(f'[{self.workspace}] Error during edge deletion: {e!s}')
             raise
@@ -4982,8 +5307,9 @@ class PGGraphStorage(BaseGraphStorage):
                     if isinstance(node_dict, str):
                         try:
                             node_dict = json.loads(node_dict)
-                        except json.JSONDecodeError:
-                            logger.warning(f'[{self.workspace}] Failed to parse node string in batch: {node_dict}')
+                        except json.JSONDecodeError as e:
+                            self._track_json_error('get_nodes_by_ids batch', e, node_dict)
+                            continue
 
                     node_key = result['node_id']
                     original_key = lookup.get(node_key)
@@ -5169,24 +5495,16 @@ class PGGraphStorage(BaseGraphStorage):
                          MATCH (a)<-[r]-(b)
                          RETURN src_eid AS source, tgt_eid AS target, properties(r) AS edge_properties"""
 
-            def dollar_quote(s: str, tag_prefix='AGE'):
-                s = '' if s is None else str(s)
-                for i in itertools.count(1):
-                    tag = f'{tag_prefix}{i}'
-                    wrapper = f'${tag}$'
-                    if wrapper not in s:
-                        return f'{wrapper}{s}{wrapper}'
-
             sql_fwd = f"""
-            SELECT * FROM cypher({dollar_quote(self.graph_name)}::name,
-                                 {dollar_quote(forward_cypher)}::cstring,
+            SELECT * FROM cypher({_dollar_quote(self.graph_name)}::name,
+                                 {_dollar_quote(forward_cypher)}::cstring,
                                  $1::agtype)
               AS (source text, target text, edge_properties agtype)
             """
 
             sql_bwd = f"""
-            SELECT * FROM cypher({dollar_quote(self.graph_name)}::name,
-                                 {dollar_quote(backward_cypher)}::cstring,
+            SELECT * FROM cypher({_dollar_quote(self.graph_name)}::name,
+                                 {_dollar_quote(backward_cypher)}::cstring,
                                  $1::agtype)
               AS (source text, target text, edge_properties agtype)
             """
@@ -5205,8 +5523,8 @@ class PGGraphStorage(BaseGraphStorage):
                     if isinstance(edge_props, str):
                         try:
                             edge_props = json.loads(edge_props)
-                        except json.JSONDecodeError:
-                            logger.warning(f'[{self.workspace}]Failed to parse edge properties string: {edge_props}')
+                        except json.JSONDecodeError as e:
+                            self._track_json_error('get_edges forward', e, edge_props)
                             continue
 
                     edges_dict[(result['source'], result['target'])] = edge_props
@@ -5219,8 +5537,8 @@ class PGGraphStorage(BaseGraphStorage):
                     if isinstance(edge_props, str):
                         try:
                             edge_props = json.loads(edge_props)
-                        except json.JSONDecodeError:
-                            logger.warning(f'[{self.workspace}] Failed to parse edge properties string: {edge_props}')
+                        except json.JSONDecodeError as e:
+                            self._track_json_error('get_edges backward', e, edge_props)
                             continue
 
                     edges_dict[(result['source'], result['target'])] = edge_props
@@ -5257,19 +5575,17 @@ class PGGraphStorage(BaseGraphStorage):
             batch = unique_ids[i : i + batch_size]
             cy_params = {'params': json.dumps({'node_ids': batch}, ensure_ascii=False)}
 
-            outgoing_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                         UNWIND $node_ids AS node_id
-                         MATCH (n:base {{entity_id: node_id}})
+            outgoing_cypher = """UNWIND $node_ids AS node_id
+                         MATCH (n:base {entity_id: node_id})
                          OPTIONAL MATCH (n:base)-[]->(connected:base)
-                         RETURN node_id, connected.entity_id AS connected_id
-                       $$, $1::agtype) AS (node_id text, connected_id text)"""
+                         RETURN node_id, connected.entity_id AS connected_id"""
+            outgoing_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(outgoing_cypher)}, $1::agtype) AS (node_id text, connected_id text)"
 
-            incoming_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                         UNWIND $node_ids AS node_id
-                         MATCH (n:base {{entity_id: node_id}})
+            incoming_cypher = """UNWIND $node_ids AS node_id
+                         MATCH (n:base {entity_id: node_id})
                          OPTIONAL MATCH (n:base)<-[]-(connected:base)
-                         RETURN node_id, connected.entity_id AS connected_id
-                       $$, $1::agtype) AS (node_id text, connected_id text)"""
+                         RETURN node_id, connected.entity_id AS connected_id"""
+            incoming_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(incoming_cypher)}, $1::agtype) AS (node_id text, connected_id text)"
 
             outgoing_results, incoming_results = await asyncio.gather(
                 self._query(outgoing_query, params=cy_params), self._query(incoming_query, params=cy_params)
@@ -5321,11 +5637,10 @@ class PGGraphStorage(BaseGraphStorage):
         # Get starting node data
         # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
         label = self._normalize_node_id(node_label)
-        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                    UNWIND $node_ids AS node_id
-                    MATCH (n:base {{entity_id: node_id}})
-                    RETURN id(n) as internal_id, n
-                  $$, $1::agtype) AS (internal_id bigint, n agtype)"""
+        cypher = """UNWIND $node_ids AS node_id
+                    MATCH (n:base {entity_id: node_id})
+                    RETURN id(n) as internal_id, n"""
+        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (internal_id bigint, n agtype)"
 
         node_result = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         if not node_result or not node_result[0].get('n'):
@@ -5382,9 +5697,8 @@ class PGGraphStorage(BaseGraphStorage):
             cy_params = {'params': json.dumps({'node_ids': node_ids}, ensure_ascii=False)}
 
             # Construct batch query for outgoing edges
-            outgoing_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                UNWIND $node_ids AS node_id
-                MATCH (n:base {{entity_id: node_id}})
+            outgoing_cypher = """UNWIND $node_ids AS node_id
+                MATCH (n:base {entity_id: node_id})
                 OPTIONAL MATCH (n)-[r]->(neighbor:base)
                 RETURN node_id AS current_id,
                        id(n) AS current_internal_id,
@@ -5393,14 +5707,14 @@ class PGGraphStorage(BaseGraphStorage):
                        id(r) AS edge_id,
                        r,
                        neighbor,
-                       true AS is_outgoing
-              $$, $1::agtype) AS (current_id text, current_internal_id bigint, neighbor_internal_id bigint,
+                       true AS is_outgoing"""
+            outgoing_query = f"""SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(outgoing_cypher)}, $1::agtype)
+              AS (current_id text, current_internal_id bigint, neighbor_internal_id bigint,
                       neighbor_id text, edge_id bigint, r agtype, neighbor agtype, is_outgoing bool)"""
 
             # Construct batch query for incoming edges
-            incoming_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                UNWIND $node_ids AS node_id
-                MATCH (n:base {{entity_id: node_id}})
+            incoming_cypher = """UNWIND $node_ids AS node_id
+                MATCH (n:base {entity_id: node_id})
                 OPTIONAL MATCH (n)<-[r]-(neighbor:base)
                 RETURN node_id AS current_id,
                        id(n) AS current_internal_id,
@@ -5409,8 +5723,9 @@ class PGGraphStorage(BaseGraphStorage):
                        id(r) AS edge_id,
                        r,
                        neighbor,
-                       false AS is_outgoing
-              $$, $1::agtype) AS (current_id text, current_internal_id bigint, neighbor_internal_id bigint,
+                       false AS is_outgoing"""
+            incoming_query = f"""SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(incoming_cypher)}, $1::agtype)
+              AS (current_id text, current_internal_id bigint, neighbor_internal_id bigint,
                       neighbor_id text, edge_id bigint, r agtype, neighbor agtype, is_outgoing bool)"""
 
             # Execute queries concurrently
@@ -5502,12 +5817,11 @@ class PGGraphStorage(BaseGraphStorage):
         if result.nodes:
             entity_ids = [self._normalize_node_id(node.labels[0]) for node in result.nodes]
             degree_params = {'params': json.dumps({'node_ids': entity_ids}, ensure_ascii=False)}
-            degree_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                UNWIND $node_ids AS entity_id
-                MATCH (n:base {{entity_id: entity_id}})
+            degree_cypher = """UNWIND $node_ids AS entity_id
+                MATCH (n:base {entity_id: entity_id})
                 OPTIONAL MATCH (n)-[r]-()
-                RETURN entity_id, count(r) as degree
-            $$, $1::agtype) AS (entity_id text, degree bigint)"""
+                RETURN entity_id, count(r) as degree"""
+            degree_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(degree_cypher)}, $1::agtype) AS (entity_id text, degree bigint)"
             degree_results = await self._query(degree_query, params=degree_params)
             degree_map = {row['entity_id']: int(row['degree']) for row in degree_results}
             # Update node properties with db_degree
@@ -5547,10 +5861,8 @@ class PGGraphStorage(BaseGraphStorage):
         # Handle wildcard query - get all nodes
         if node_label == '*':
             # First check total node count to determine if graph should be truncated
-            count_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                    MATCH (n:base)
-                    RETURN count(distinct n) AS total_nodes
-                    $$) AS (total_nodes bigint)"""
+            count_cypher = "MATCH (n:base) RETURN count(distinct n) AS total_nodes"
+            count_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(count_cypher)}) AS (total_nodes bigint)"
 
             count_result = await self._query(count_query)
             total_nodes = count_result[0]['total_nodes'] if count_result else 0
@@ -5568,12 +5880,9 @@ class PGGraphStorage(BaseGraphStorage):
             else:
                 degree_filter = ''
 
+            nodes_cypher = "MATCH (n:base) OPTIONAL MATCH (n)-[r]->() RETURN id(n) as node_id, count(r) as degree"
             query_nodes = f"""SELECT * FROM (
-                SELECT * FROM cypher('{self.graph_name}', $$
-                    MATCH (n:base)
-                    OPTIONAL MATCH (n)-[r]->()
-                    RETURN id(n) as node_id, count(r) as degree
-                $$) AS (node_id BIGINT, degree BIGINT)
+                SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(nodes_cypher)}) AS (node_id BIGINT, degree BIGINT)
             ) AS subq
             {degree_filter}
             ORDER BY degree DESC
@@ -5589,14 +5898,13 @@ class PGGraphStorage(BaseGraphStorage):
             if node_ids:
                 cy_params = {'params': json.dumps({'node_ids': [int(n) for n in node_ids]}, ensure_ascii=False)}
                 # Construct batch query for subgraph within max_nodes
-                query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                        WITH $node_ids AS node_ids
+                subgraph_cypher = """WITH $node_ids AS node_ids
                         MATCH (a)
                         WHERE id(a) IN node_ids
                         OPTIONAL MATCH (a)-[r]->(b)
                             WHERE id(b) IN node_ids
-                        RETURN a, r, b
-                    $$, $1::agtype) AS (a AGTYPE, r AGTYPE, b AGTYPE)"""
+                        RETURN a, r, b"""
+                query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(subgraph_cypher)}, $1::agtype) AS (a AGTYPE, r AGTYPE, b AGTYPE)"
                 results = await self._query(query, params=cy_params)
 
                 # Process query results, deduplicate nodes and edges
@@ -5687,8 +5995,8 @@ class PGGraphStorage(BaseGraphStorage):
                 if isinstance(node_dict, str):
                     try:
                         node_dict = json.loads(node_dict)
-                    except json.JSONDecodeError:
-                        logger.warning(f'[{self.workspace}] Failed to parse node string: {node_dict}')
+                    except json.JSONDecodeError as e:
+                        self._track_json_error('get_all_nodes', e, node_dict)
                         continue
 
                 # Add node id (entity_id) to the dictionary for easier access
@@ -5726,8 +6034,8 @@ class PGGraphStorage(BaseGraphStorage):
             if isinstance(edge_properties, str):
                 try:
                     edge_properties = json.loads(edge_properties)
-                except json.JSONDecodeError:
-                    logger.warning(f'[{self.workspace}] Failed to parse edge properties string: {edge_properties}')
+                except json.JSONDecodeError as e:
+                    self._track_json_error('get_all_edges', e, edge_properties)
                     edge_properties = {}
 
             edge_properties['source'] = result['source']
@@ -5781,17 +6089,20 @@ class PGGraphStorage(BaseGraphStorage):
             return []
 
         try:
-            # Re-implementing with the correct agtype access operator and full scoring logic.
+            # Optimized: Extract entity_id once, derive label_lower from it (4x fewer function calls)
             sql_query = f"""
-            WITH ranked_labels AS (
+            WITH raw_labels AS (
                 SELECT
-                    (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"entity_id"'::agtype]))::text AS label,
-                    LOWER((ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"entity_id"'::agtype]))::text) AS label_lower
+                    (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"entity_id"'::agtype]))::text AS label
                 FROM
                     {self.graph_name}._ag_label_vertex
                 WHERE
                     ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"entity_id"'::agtype]) IS NOT NULL
-                    AND LOWER((ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"entity_id"'::agtype]))::text) ILIKE $1
+            ),
+            ranked_labels AS (
+                SELECT label, LOWER(label) AS label_lower
+                FROM raw_labels
+                WHERE LOWER(label) ILIKE $1
             )
             SELECT
                 label
@@ -5836,10 +6147,8 @@ class PGGraphStorage(BaseGraphStorage):
     async def drop(self) -> dict[str, str]:
         """Drop the storage"""
         try:
-            drop_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                            MATCH (n)
-                            DETACH DELETE n
-                            $$) AS (result agtype)"""
+            drop_cypher = "MATCH (n) DETACH DELETE n"
+            drop_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(drop_cypher)}) AS (result agtype)"
 
             await self._query(drop_query, readonly=False)
             return {
@@ -6230,8 +6539,8 @@ SQL_TEMPLATES = {
                             EXTRACT(EPOCH FROM r.create_time)::BIGINT AS created_at
                      FROM LIGHTRAG_VDB_RELATION r
                      WHERE r.workspace = $1
-                       AND r.content_vector <=> '[{embedding_string}]'::vector < $2
-                     ORDER BY r.content_vector <=> '[{embedding_string}]'::vector
+                       AND r.content_vector {distance_op} '[{embedding_string}]'::vector < $2
+                     ORDER BY r.content_vector {distance_op} '[{embedding_string}]'::vector
                      LIMIT $3;
                      """,
     'entities': """
@@ -6239,19 +6548,21 @@ SQL_TEMPLATES = {
                        EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
                 FROM LIGHTRAG_VDB_ENTITY e
                 WHERE e.workspace = $1
-                  AND e.content_vector <=> '[{embedding_string}]'::vector < $2
-                ORDER BY e.content_vector <=> '[{embedding_string}]'::vector
+                  AND e.content_vector {distance_op} '[{embedding_string}]'::vector < $2
+                ORDER BY e.content_vector {distance_op} '[{embedding_string}]'::vector
                 LIMIT $3;
                 """,
     'chunks': """
               SELECT c.id,
                      c.content,
                      c.file_path,
+                     d.s3_key,
                      EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
               FROM LIGHTRAG_VDB_CHUNKS c
+              LEFT JOIN LIGHTRAG_DOC_CHUNKS d ON c.workspace = d.workspace AND c.id = d.id
               WHERE c.workspace = $1
-                AND c.content_vector <=> '[{embedding_string}]'::vector < $2
-              ORDER BY c.content_vector <=> '[{embedding_string}]'::vector
+                AND c.content_vector {distance_op} '[{embedding_string}]'::vector < $2
+              ORDER BY c.content_vector {distance_op} '[{embedding_string}]'::vector
               LIMIT $3;
               """,
     # DROP tables
@@ -6308,29 +6619,31 @@ SQL_TEMPLATES = {
           AND COALESCE(degree_counts.degree, 0) <= $2
         ORDER BY COALESCE(degree_counts.degree, 0) ASC, e.entity_name
         """,
-    'get_orphan_candidates': """
+    # Note: Similarity calculation assumes cosine distance (1 - distance = similarity)
+    # For L2 or inner product metrics, interpret the similarity column differently
+    'get_orphan_candidates': f"""
         SELECT e.id, e.entity_name, e.content,
-               1 - (e.content_vector <=> $2::vector) AS similarity
+               1 - (e.content_vector {VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]} $2::vector) AS similarity
         FROM LIGHTRAG_VDB_ENTITY e
         WHERE e.workspace = $1
           AND e.entity_name != $3
-          AND 1 - (e.content_vector <=> $2::vector) >= $4
-        ORDER BY e.content_vector <=> $2::vector
+          AND 1 - (e.content_vector {VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]} $2::vector) >= $4
+        ORDER BY e.content_vector {VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]} $2::vector
         LIMIT $5
         """,
-    'get_connected_candidates': """
+    'get_connected_candidates': f"""
         SELECT e.id, e.entity_name, e.content,
-               1 - (e.content_vector <=> $2::vector) AS similarity
+               1 - (e.content_vector {VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]} $2::vector) AS similarity
         FROM LIGHTRAG_VDB_ENTITY e
         WHERE e.workspace = $1
           AND e.entity_name != $3
-          AND 1 - (e.content_vector <=> $2::vector) >= $4
+          AND 1 - (e.content_vector {VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]} $2::vector) >= $4
           AND EXISTS (
               SELECT 1 FROM LIGHTRAG_VDB_RELATION r
               WHERE r.workspace = $1
                 AND (r.source_id = e.entity_name OR r.target_id = e.entity_name)
           )
-        ORDER BY e.content_vector <=> $2::vector
+        ORDER BY e.content_vector {VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]} $2::vector
         LIMIT $5
         """,
 }

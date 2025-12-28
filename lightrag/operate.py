@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Callable
 from functools import partial
-import json
 from pathlib import Path
-import time
 from typing import Any, Literal, overload
 
-from dotenv import load_dotenv
 import json_repair
+from dotenv import load_dotenv
 
 from lightrag.base import (
     BaseGraphStorage,
@@ -3408,6 +3408,7 @@ async def _get_vector_context(
                     'file_path': result.get('file_path', 'unknown_source'),
                     'source_type': result.get('source_type', 'vector'),  # Preserve source from hybrid search
                     'chunk_id': result.get('id'),  # Add chunk_id for deduplication
+                    's3_key': result.get('s3_key'),  # Preserve S3 key for presigned URL generation
                 }
                 valid_chunks.append(chunk_with_metadata)
 
@@ -3831,6 +3832,7 @@ async def _merge_all_chunks(
                         'content': chunk['content'],
                         'file_path': chunk.get('file_path', 'unknown_source'),
                         'chunk_id': chunk_id,
+                        's3_key': chunk.get('s3_key'),
                     }
                 )
 
@@ -3845,6 +3847,7 @@ async def _merge_all_chunks(
                         'content': chunk['content'],
                         'file_path': chunk.get('file_path', 'unknown_source'),
                         'chunk_id': chunk_id,
+                        's3_key': chunk.get('s3_key'),
                     }
                 )
 
@@ -3859,6 +3862,7 @@ async def _merge_all_chunks(
                         'content': chunk['content'],
                         'file_path': chunk.get('file_path', 'unknown_source'),
                         'chunk_id': chunk_id,
+                        's3_key': chunk.get('s3_key'),
                     }
                 )
 

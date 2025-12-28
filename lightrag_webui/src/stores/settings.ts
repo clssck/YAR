@@ -427,7 +427,8 @@ const useSettingsStoreBase = create<SettingsState>()(
         }
         if (version < 25) {
           if (state.querySettings) {
-            delete state.querySettings.history_turns
+            // Remove deprecated history_turns property from old versions
+            delete (state.querySettings as Record<string, unknown>).history_turns
           }
         }
         return state

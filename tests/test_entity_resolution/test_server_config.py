@@ -48,31 +48,41 @@ class TestApiKeyIsolation:
         )
 
     def test_rerank_uses_separate_variable(self):
-        """Verify rerank config uses 'rerank_api_key' variable name."""
+        """Verify rerank module uses dedicated RERANK_BINDING_API_KEY env var."""
         from pathlib import Path
 
-        server_file = Path(__file__).parent.parent.parent / 'lightrag' / 'api' / 'lightrag_server.py'
-        source = server_file.read_text()
+        # Rerank API key is handled in the rerank module, not lightrag_server.py
+        # The server delegates to create_rerank_func() which handles API key internally
+        rerank_file = Path(__file__).parent.parent.parent / 'lightrag' / 'rerank.py'
+        source = rerank_file.read_text()
 
-        # Should find rerank_api_key assignments for each rerank binding
-        assert 'rerank_api_key = os.getenv' in source, (
-            "Rerank setup should use 'rerank_api_key' variable name"
+        # Should find RERANK_BINDING_API_KEY usage in rerank module
+        assert 'RERANK_BINDING_API_KEY' in source, (
+            "Rerank module should use 'RERANK_BINDING_API_KEY' env variable"
         )
 
-        # Should NOT find api_key assignments in rerank section
-        # Check that between 'if args.enable_rerank:' and the local reranker,
-        # there are no bare 'api_key =' assignments
-        rerank_section_start = source.find('if args.enable_rerank:')
-        rerank_section_end = source.find('else:  # local', rerank_section_start)
+        # Server should use create_rerank_func factory (not inline api_key handling)
+        server_file = Path(__file__).parent.parent.parent / 'lightrag' / 'api' / 'lightrag_server.py'
+        server_source = server_file.read_text()
 
-        if rerank_section_start != -1 and rerank_section_end != -1:
-            rerank_section = source[rerank_section_start:rerank_section_end]
-            # Count 'api_key = ' (not 'rerank_api_key = ')
+        assert 'create_rerank_func' in server_source, (
+            "Server should use create_rerank_func factory for rerank setup"
+        )
+
+        # Should NOT find bare api_key assignments in rerank section of server
+        rerank_section_start = server_source.find('if args.enable_rerank:')
+        if rerank_section_start != -1:
+            # Find end of rerank section (next major block)
+            rerank_section_end = server_source.find('rerank_model_func = None', rerank_section_start + 1)
+            if rerank_section_end == -1:
+                rerank_section_end = len(server_source)
+            rerank_section = server_source[rerank_section_start:rerank_section_end]
+            # Count 'api_key = os.getenv' (should be 0 - delegated to rerank module)
             import re
             bare_api_key = re.findall(r'\bapi_key\s*=\s*os\.getenv', rerank_section)
             assert len(bare_api_key) == 0, (
-                f"Found {len(bare_api_key)} bare 'api_key = os.getenv' in rerank section. "
-                "Should use 'rerank_api_key' instead."
+                f"Found {len(bare_api_key)} bare 'api_key = os.getenv' in server rerank section. "
+                "API key should be handled by rerank module."
             )
 
 

@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 import contextlib
 import csv
-from dataclasses import dataclass
-from datetime import datetime
-from functools import wraps
-from hashlib import md5
 import html
 import importlib
 import inspect
@@ -19,17 +14,22 @@ import re
 import sys
 import time
 import traceback
+import uuid
+import weakref
+from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from functools import wraps
+from hashlib import md5
 from typing import (
     TYPE_CHECKING,
     Any,
     Protocol,
     cast,
 )
-import uuid
-import weakref
 
-from dotenv import load_dotenv
 import numpy as np
+from dotenv import load_dotenv
 
 from lightrag.constants import (
     DEFAULT_LOG_BACKUP_COUNT,
@@ -387,17 +387,17 @@ class EmbeddingFunc:
     Using functools.partial for parameter binding:
         A common pattern is to use functools.partial to pre-bind model and host parameters
         to an embedding function. When the base embedding function is already decorated with
-        @wrap_embedding_func_with_attrs (e.g., ollama_embed), use `.func` to access the
-        original unwrapped function to avoid double wrapping:
+        @wrap_embedding_func_with_attrs, use `.func` to access the original unwrapped
+        function to avoid double wrapping:
 
         Example:
             from functools import partial
 
             # ❌ Wrong - causes double wrapping (inner EmbeddingFunc still executes)
-            func=partial(ollama_embed, embed_model="bge-m3:latest", host="http://localhost:11434")
+            func=partial(decorated_embed, embed_model="model", host="http://localhost:8080")
 
             # ✅ Correct - access the unwrapped function via .func
-            func=partial(ollama_embed.func, embed_model="bge-m3:latest", host="http://localhost:11434")
+            func=partial(decorated_embed.func, embed_model="model", host="http://localhost:8080")
 
     Args:
         embedding_dim: Expected dimension of the embeddings (for dimension checking and workspace data isolation in vector DB)

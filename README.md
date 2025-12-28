@@ -25,7 +25,7 @@
 
 This repository is a specialized fork of [LightRAG](https://github.com/HKUDS/LightRAG), designed to bridge the gap between research and production. While preserving the core "Simple and Fast" philosophy, we have added critical infrastructure components:
 
-- **☁️ S3 Storage Integration**: Native support for S3-compatible object storage (AWS, MinIO, Cloudflare R2) for scalable document and artifact management.
+- **☁️ S3 Storage Integration**: Native support for S3-compatible object storage (RustFS, AWS S3, Cloudflare R2) for scalable document and artifact management.
 - **🖥️ Modern Web UI**: A completely redesigned interface featuring:
   - **S3 Browser**: Integrated file management system.
   - **File Viewers**: Built-in PDF and text viewers.

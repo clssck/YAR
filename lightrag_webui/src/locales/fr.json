@@ -197,7 +197,12 @@
       "title": "Paramètres du Serveur LightRAG",
       "description": "Afficher l'état actuel du système et les informations de connexion"
     },
-    "legend": "Légende",
+    "legend": {
+      "shapes": "Formes",
+      "colors": "Couleurs",
+      "connectedNode": "Nœud connecté",
+      "orphanNode": "Nœud orphelin (aucune connexion)"
+    },
     "nodeTypes": {
       "person": "Personne",
       "category": "Catégorie",
@@ -374,13 +379,20 @@
     },
     "graphLabels": {
       "selectTooltip": "Obtenir le sous-graphe d'un nœud (étiquette)",
+      "selectLabelTooltip": "Sélectionner une étiquette pour filtrer le graphe",
       "noLabels": "Aucun nœud correspondant trouvé",
       "label": "Rechercher le nom du nœud",
       "placeholder": "Rechercher le nom du nœud...",
+      "searchPlaceholder": "Rechercher des étiquettes...",
       "andOthers": "Et {{count}} autres",
       "refreshGlobalTooltip": "Actualiser les données du graphe global et réinitialiser l'historique de recherche",
       "refreshCurrentLabelTooltip": "Actualiser les données du graphe de la page actuelle",
-      "refreshingTooltip": "Actualisation des données en cours..."
+      "refreshingTooltip": "Actualisation des données en cours...",
+      "allLabels": "Toutes les étiquettes",
+      "searchResults": "Résultats de recherche",
+      "noResults": "Aucune étiquette trouvée",
+      "recent": "Récent",
+      "popular": "Populaire"
     },
     "emptyGraph": "Vide (Essayez de recharger)"
   },

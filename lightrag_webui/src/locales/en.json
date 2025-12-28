@@ -242,7 +242,12 @@
       "degree2": "Include sparse nodes (≤2)",
       "degree3": "Include sparse nodes (≤3)"
     },
-    "legend": "Legend",
+    "legend": {
+      "shapes": "Shapes",
+      "colors": "Colors",
+      "connectedNode": "Connected node",
+      "orphanNode": "Orphan node (no connections)"
+    },
     "nodeTypes": {
       "person": "Person",
       "category": "Category",
@@ -426,13 +431,20 @@
     },
     "graphLabels": {
       "selectTooltip": "Get subgraph of a node (label)",
+      "selectLabelTooltip": "Select label to filter graph",
       "noLabels": "No matching nodes found",
       "label": "Search node name",
       "placeholder": "Search node name...",
+      "searchPlaceholder": "Search labels...",
       "andOthers": "And {{count}} others",
       "refreshGlobalTooltip": "Refresh global graph data and reset search history",
       "refreshCurrentLabelTooltip": "Refresh current page graph data",
-      "refreshingTooltip": "Refreshing data..."
+      "refreshingTooltip": "Refreshing data...",
+      "allLabels": "All labels",
+      "searchResults": "Search Results",
+      "noResults": "No labels found",
+      "recent": "Recent",
+      "popular": "Popular"
     },
     "emptyGraph": "Empty(Try Reload Again)"
   },

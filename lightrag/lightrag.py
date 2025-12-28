@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
-from functools import partial
 import inspect
 import json
 import os
 import time
 import traceback
+import warnings
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timezone
+from functools import partial
 from typing import (
     Any,
     Literal,
     cast,
     final,
 )
-import warnings
 
 from dotenv import load_dotenv
 
@@ -28,7 +28,6 @@ from lightrag.base import (
     DocProcessingStatus,
     DocStatus,
     DocStatusStorage,
-    OllamaServerInfos,
     QueryParam,
     QueryResult,
     StorageNameSpace,
@@ -415,9 +414,6 @@ class LightRAG:
 
     cosine_better_than_threshold: float = field(default=float(os.getenv('COSINE_THRESHOLD', 0.2)))
 
-    ollama_server_infos: OllamaServerInfos | None = field(default=None)
-    """Configuration for Ollama server information."""
-
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
 
     def __post_init__(self):
@@ -478,10 +474,6 @@ class LightRAG:
                 self.tokenizer = TiktokenTokenizer(self.tiktoken_model_name)
             else:
                 self.tokenizer = TiktokenTokenizer()
-
-        # Initialize ollama_server_infos if not provided
-        if self.ollama_server_infos is None:
-            self.ollama_server_infos = OllamaServerInfos()
 
         # Validate config
         if self.force_llm_summary_on_merge < 3:

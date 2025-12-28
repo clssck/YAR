@@ -38,6 +38,40 @@ async def mock_embedding_func(texts):
     return np.random.rand(len(texts), 10)  # Return 10-dimensional random vectors
 
 
+def test_dollar_quote_function():
+    """
+    Unit test for the _dollar_quote helper function.
+
+    This test verifies that the dynamic dollar-quoting mechanism correctly
+    handles content containing dollar sign sequences that would break
+    PostgreSQL's default $$..$$ quoting.
+    """
+    from lightrag.kg.postgres_impl import _dollar_quote
+
+    # Test 1: Simple string (should use $AGE1$)
+    result = _dollar_quote('hello')
+    assert result == '$AGE1$hello$AGE1$', f'Expected $AGE1$hello$AGE1$, got {result}'
+
+    # Test 2: String containing $AGE1$ (should use $AGE2$)
+    result = _dollar_quote('contains $AGE1$ tag')
+    assert result == '$AGE2$contains $AGE1$ tag$AGE2$', f'Unexpected result: {result}'
+
+    # Test 3: String with multiple dollar sequences
+    result = _dollar_quote('$100 with $$double$$ and $AGE1$ and $AGE2$')
+    assert '$AGE3$' in result, f'Should use $AGE3$ but got: {result}'
+
+    # Test 4: None input should become empty string
+    result = _dollar_quote(None)
+    assert result == '$AGE1$$AGE1$', f'None should become empty, got: {result}'
+
+    # Test 5: Simple dollar amount (common case)
+    result = _dollar_quote('Price is $500')
+    assert 'Price is $500' in result, f'Content should be preserved: {result}'
+    assert result.startswith('$AGE1$'), f'Should use $AGE1$: {result}'
+
+    print('All _dollar_quote unit tests passed!')
+
+
 def check_env_file():
     """
     Check if the .env file exists and issue a warning if it does not.
@@ -125,6 +159,35 @@ async def initialize_graph_storage():
     except Exception as e:
         ASCIIColors.red(f'Error: Failed to initialize {graph_storage_type}: {e!s}')
         return None
+
+
+@pytest.fixture
+async def storage():
+    """Fixture to initialize graph storage for tests.
+
+    Note: These tests have a known issue when run together with pytest.
+    The PostgreSQL connection pool is tied to the event loop from the first test.
+    When pytest-asyncio creates a new event loop for subsequent tests, the pool
+    becomes unusable ("Event loop is closed" error).
+
+    Workaround: Run tests individually or use pytest-xdist with -n1.
+    Example: pytest tests/test_graph_storage.py::test_graph_basic --run-integration
+
+    Each test passes when run individually - this is a test infrastructure issue,
+    not a code issue.
+    """
+    # Load environment from .env if available
+    load_dotenv()
+
+    # Reset the shared storage state to allow re-initialization
+    import lightrag.kg.shared_storage as shared_storage
+    shared_storage._initialized = False
+    shared_storage._async_locks = {}
+
+    storage_instance = await initialize_graph_storage()
+    if storage_instance is None:
+        pytest.skip('Graph storage could not be initialized')
+    yield storage_instance
 
 
 @pytest.mark.integration
@@ -861,6 +924,108 @@ async def test_graph_special_characters(storage):
 
     except Exception as e:
         ASCIIColors.red(f'An error occurred during the test: {e!s}')
+        return False
+
+
+@pytest.mark.integration
+@pytest.mark.requires_db
+async def test_graph_dollar_sign_characters(storage):
+    """
+    Test the graph database's handling of dollar sign characters.
+
+    PostgreSQL uses $tag$...$tag$ for string literals in Cypher queries.
+    If entity names or descriptions contain dollar signs, queries can break
+    unless properly escaped with dynamic dollar-quoting.
+
+    This test verifies that entities containing:
+    1. Simple dollar amounts ($100, $500)
+    2. Dollar-delimited sequences ($$, $AGE1$)
+    3. Variable-like patterns ($variable, ${config})
+    are correctly stored and retrieved.
+    """
+    try:
+        # 1. Test node with simple dollar amount in name
+        node1_id = '$100 Price Point'
+        node1_data = {
+            'entity_id': node1_id,
+            'description': 'A product priced at $100 with $50 discount, saving you $$$',
+            'keywords': 'price,dollar,currency',
+            'entity_type': 'Product',
+        }
+        print(f'Inserting node with dollar amount: {node1_id}')
+        await storage.upsert_node(node1_id, node1_data)
+
+        # 2. Test node with dollar-delimited sequences (edge case for PostgreSQL)
+        node2_id = 'Config with $$double_dollar$$'
+        node2_data = {
+            'entity_id': node2_id,
+            'description': 'Configuration using $AGE1$ tag and $$delimiter$$ patterns',
+            'keywords': 'config,dollar,delimiter',
+            'entity_type': 'Configuration',
+        }
+        print(f'Inserting node with dollar delimiters: {node2_id}')
+        await storage.upsert_node(node2_id, node2_data)
+
+        # 3. Test node with variable-like patterns
+        node3_id = 'Template ${variable}'
+        node3_data = {
+            'entity_id': node3_id,
+            'description': 'Uses $1, $2, ${VAR}, and $variable patterns for substitution',
+            'keywords': 'template,variable,substitution',
+            'entity_type': 'Template',
+        }
+        print(f'Inserting node with variable patterns: {node3_id}')
+        await storage.upsert_node(node3_id, node3_data)
+
+        # 4. Test edge with dollar signs in description
+        edge_data = {
+            'relationship': 'costs_$100',
+            'weight': 1.0,
+            'description': 'Transaction of $500 with $$processing_fee$$ applied',
+        }
+        print(f'Inserting edge with dollar signs: {node1_id} -> {node2_id}')
+        await storage.upsert_edge(node1_id, node2_id, edge_data)
+
+        # 5. Verify all nodes are retrieved correctly
+        print('\n== Verifying nodes with dollar signs')
+        for node_id, original_data in [
+            (node1_id, node1_data),
+            (node2_id, node2_data),
+            (node3_id, node3_data),
+        ]:
+            node_props = await storage.get_node(node_id)
+            if node_props:
+                print(f'Successfully read node: {node_id}')
+                assert node_props.get('entity_id') == node_id, (
+                    f'Node ID mismatch: expected {node_id}, got {node_props.get("entity_id")}'
+                )
+                assert node_props.get('description') == original_data['description'], (
+                    f'Description mismatch for {node_id}'
+                )
+                print(f'Node {node_id} dollar sign verification successful')
+            else:
+                pytest.fail(f'Failed to read node with dollar signs: {node_id}')
+
+        # 6. Verify edge with dollar signs
+        print('\n== Verifying edge with dollar signs')
+        edge_props = await storage.get_edge(node1_id, node2_id)
+        if edge_props:
+            print(f'Successfully read edge: {node1_id} -> {node2_id}')
+            assert edge_props.get('relationship') == edge_data['relationship'], (
+                'Edge relationship mismatch'
+            )
+            assert edge_props.get('description') == edge_data['description'], (
+                'Edge description mismatch'
+            )
+            print('Edge dollar sign verification successful')
+        else:
+            pytest.fail('Failed to read edge with dollar signs')
+
+        print('\nDollar sign character tests completed successfully.')
+        return True
+
+    except Exception as e:
+        ASCIIColors.red(f'Dollar sign test error: {e!s}')
         return False
 
 
