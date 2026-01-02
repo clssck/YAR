@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from lightrag.api.utils_api import get_combined_auth_dependency, handle_api_error
+from lightrag.api.utils_api import QueryBuilder, get_combined_auth_dependency, handle_api_error
 from lightrag.utils import logger
 
 # --- Request/Response Models ---
@@ -171,40 +171,36 @@ def create_alias_routes(rag, api_key: str | None = None):
         workspace = rag.workspace
 
         # Build query with optional filters
-        conditions = ['workspace = $1']
-        params: list[Any] = [workspace]
-        param_idx = 2
+        qb = QueryBuilder()
+        qb.add_condition('workspace = {}', workspace)
 
         if canonical:
-            conditions.append(f'canonical_entity = ${param_idx}')
-            params.append(canonical)
-            param_idx += 1
+            qb.add_condition('canonical_entity = {}', canonical)
 
         if method:
-            conditions.append(f'method = ${param_idx}')
-            params.append(method)
-            param_idx += 1
+            qb.add_condition('method = {}', method)
 
-        where_clause = ' AND '.join(conditions)
+        where_clause = qb.where_clause()
 
-        # Count total
+        # Count total (use copy of params since we'll add more for pagination)
         count_sql = f'SELECT COUNT(*) as total FROM LIGHTRAG_ENTITY_ALIASES WHERE {where_clause}'
-        count_result = await db.query(count_sql, params=params)
+        count_result = await db.query(count_sql, params=qb.params.copy())
         total = count_result.get('total', 0) if count_result else 0
 
-        # Get page
+        # Get page with LIMIT/OFFSET
         offset = (page - 1) * page_size
-        params.extend([page_size, offset])
+        limit_param = qb.add_param(page_size)
+        offset_param = qb.add_param(offset)
 
         list_sql = f"""
             SELECT alias, canonical_entity, method, confidence, create_time, update_time
             FROM LIGHTRAG_ENTITY_ALIASES
             WHERE {where_clause}
             ORDER BY create_time DESC
-            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            LIMIT {limit_param} OFFSET {offset_param}
         """
 
-        rows = await db.query(list_sql, params=params, multirows=True)
+        rows = await db.query(list_sql, params=qb.params, multirows=True)
 
         aliases = []
         for row in rows or []:
@@ -276,30 +272,25 @@ def create_alias_routes(rag, api_key: str | None = None):
         db = rag.entities_vdb._db_required()
         workspace = rag.workspace
 
-        conditions = ['workspace = $1']
-        params: list[Any] = [workspace]
-        param_idx = 2
+        qb = QueryBuilder()
+        qb.add_condition('workspace = {}', workspace)
 
         if min_confidence > 0:
-            conditions.append(f'confidence < ${param_idx}')
-            params.append(min_confidence)
-            param_idx += 1
+            qb.add_condition('confidence < {}', min_confidence)
 
         if method:
-            conditions.append(f'method = ${param_idx}')
-            params.append(method)
-            param_idx += 1
+            qb.add_condition('method = {}', method)
 
-        where_clause = ' AND '.join(conditions)
+        where_clause = qb.where_clause()
 
         # Count first
         count_sql = f'SELECT COUNT(*) as count FROM LIGHTRAG_ENTITY_ALIASES WHERE {where_clause}'
-        count_result = await db.query(count_sql, params=params)
+        count_result = await db.query(count_sql, params=qb.params)
         count = count_result.get('count', 0) if count_result else 0
 
         # Delete using query (supports params list)
         delete_sql = f'DELETE FROM LIGHTRAG_ENTITY_ALIASES WHERE {where_clause}'
-        await db.query(delete_sql, params=params)
+        await db.query(delete_sql, params=qb.params)
 
         return {
             'status': 'success',

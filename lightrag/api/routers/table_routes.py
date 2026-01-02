@@ -4,7 +4,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from lightrag import LightRAG
-from lightrag.api.utils_api import get_combined_auth_dependency, handle_api_error
+from lightrag.api.utils_api import (
+    get_combined_auth_dependency,
+    get_workspace_from_request,
+    handle_api_error,
+)
 from lightrag.kg.postgres_impl import TABLES
 
 
@@ -27,10 +31,6 @@ def get_order_clause(ddl: str) -> str:
 def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
     router = APIRouter(tags=['Tables'])
     combined_auth = get_combined_auth_dependency(api_key)
-
-    def get_workspace_from_request(request: Request) -> str | None:
-        workspace = request.headers.get('LIGHTRAG-WORKSPACE', '').strip()
-        return workspace if workspace else None
 
     @router.get('/list', dependencies=[Depends(combined_auth)])
     @handle_api_error('listing tables')
@@ -71,7 +71,7 @@ def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
         # full_docs is a KV storage that has the db connection when using PostgreSQL
         db = getattr(rag.full_docs, 'db', None)
         if db is None:
-            raise HTTPException(status_code=500, detail='PostgreSQL storage not available')
+            raise HTTPException(status_code=503, detail='PostgreSQL storage not available')
 
         offset = (page - 1) * page_size
 

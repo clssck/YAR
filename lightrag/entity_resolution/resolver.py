@@ -73,11 +73,7 @@ async def get_cached_alias(
     Returns:
         Tuple of (canonical_entity, method, confidence) if found, None otherwise
     """
-    import logging
-
     from lightrag.kg.postgres_impl import SQL_TEMPLATES
-
-    logger = logging.getLogger(__name__)
     # Apply Unicode normalization before cache lookup for consistent matching
     normalized_alias = normalize_unicode_for_entity_matching(alias).lower().strip()
 
@@ -119,12 +115,9 @@ async def store_alias(
         source_doc_id: Document ID that triggered this resolution
         entity_type: Type of the entity (e.g., "Organization")
     """
-    import logging
     from datetime import datetime, timezone
 
     from lightrag.kg.postgres_impl import SQL_TEMPLATES
-
-    logger = logging.getLogger(__name__)
     # Apply Unicode normalization before storing for consistent matching
     normalized_alias = normalize_unicode_for_entity_matching(alias).lower().strip()
 
@@ -237,8 +230,9 @@ async def llm_review_entities_batch(
             try:
                 # Query for similar entities - prefer hybrid search (VDB + pg_trgm)
                 # for better typo/abbreviation detection, fall back to VDB-only
-                if hasattr(entity_vdb, 'hybrid_entity_search'):
-                    candidates = await entity_vdb.hybrid_entity_search(
+                hybrid_search = getattr(entity_vdb, 'hybrid_entity_search', None)
+                if hybrid_search is not None:
+                    candidates = await hybrid_search(
                         entity_name, top_k=config.candidates_per_entity
                     )
                 else:
@@ -263,8 +257,8 @@ async def llm_review_entities_batch(
                 if candidate_names:
                     for candidate_name in candidate_names[:3]:  # Limit to top 3 for efficiency
                         try:
-                            if hasattr(entity_vdb, 'hybrid_entity_search'):
-                                reverse_results = await entity_vdb.hybrid_entity_search(
+                            if hybrid_search is not None:
+                                reverse_results = await hybrid_search(
                                     candidate_name, top_k=5
                                 )
                             else:

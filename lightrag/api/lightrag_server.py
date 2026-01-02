@@ -47,6 +47,7 @@ from lightrag.api.utils_api import (
     check_env_file,
     display_splash_screen,
     get_combined_auth_dependency,
+    get_workspace_from_request,
 )
 from lightrag.constants import (
     DEFAULT_EMBEDDING_TIMEOUT,
@@ -389,28 +390,6 @@ def create_app(args):
 
     # Create combined auth dependency for all endpoints
     combined_auth = get_combined_auth_dependency(api_key)
-
-    def get_workspace_from_request(request: Request) -> str | None:
-        """
-        Extract workspace from HTTP request header or use default.
-
-        This enables multi-workspace API support by checking the custom
-        'LIGHTRAG-WORKSPACE' header. If not present, falls back to the
-        server's default workspace configuration.
-
-        Args:
-            request: FastAPI Request object
-
-        Returns:
-            Workspace identifier (may be empty string for global namespace)
-        """
-        # Check custom header first
-        workspace = request.headers.get('LIGHTRAG-WORKSPACE', '').strip()
-
-        if not workspace:
-            workspace = None
-
-        return workspace
 
     # Create working directory if it doesn't exist
     Path(args.working_dir).mkdir(parents=True, exist_ok=True)

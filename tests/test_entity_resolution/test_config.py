@@ -139,39 +139,34 @@ class TestEntityResolutionConfigEdgeCases:
 class TestConfigValidation:
     """Tests for config value validation and boundary conditions.
 
-    Dataclasses don't validate by default, so these tests verify
-    that edge/invalid values are handled appropriately.
+    The EntityResolutionConfig uses __post_init__ to validate values,
+    rejecting invalid configurations at construction time.
     """
 
-    def test_negative_confidence_accepted(self):
-        """Negative threshold is accepted by dataclass (no validation).
+    def test_negative_confidence_rejected(self):
+        """Negative threshold raises ValueError."""
+        with pytest.raises(ValueError, match='min_confidence must be between 0 and 1'):
+            EntityResolutionConfig(min_confidence=-0.5)
 
-        This documents current behavior - dataclasses don't validate.
-        A future improvement could add validation.
-        """
-        config = EntityResolutionConfig(min_confidence=-0.5)
-        # Dataclass accepts it - validation would need __post_init__
-        assert config.min_confidence == -0.5
+    def test_confidence_above_one_rejected(self):
+        """Threshold > 1.0 raises ValueError."""
+        with pytest.raises(ValueError, match='min_confidence must be between 0 and 1'):
+            EntityResolutionConfig(min_confidence=1.5)
 
-    def test_confidence_above_one_accepted(self):
-        """Threshold > 1.0 is accepted by dataclass (no validation)."""
-        config = EntityResolutionConfig(min_confidence=1.5)
-        assert config.min_confidence == 1.5
+    def test_zero_batch_size_rejected(self):
+        """Zero batch size raises ValueError."""
+        with pytest.raises(ValueError, match='batch_size must be positive'):
+            EntityResolutionConfig(batch_size=0)
 
-    def test_zero_batch_size_accepted(self):
-        """Zero batch size is accepted (would cause issues at runtime)."""
-        config = EntityResolutionConfig(batch_size=0)
-        assert config.batch_size == 0
+    def test_negative_batch_size_rejected(self):
+        """Negative batch size raises ValueError."""
+        with pytest.raises(ValueError, match='batch_size must be positive'):
+            EntityResolutionConfig(batch_size=-10)
 
-    def test_negative_batch_size_accepted(self):
-        """Negative batch size is accepted by dataclass."""
-        config = EntityResolutionConfig(batch_size=-10)
-        assert config.batch_size == -10
-
-    def test_zero_candidates_accepted(self):
-        """Zero candidates is accepted."""
-        config = EntityResolutionConfig(candidates_per_entity=0)
-        assert config.candidates_per_entity == 0
+    def test_zero_candidates_rejected(self):
+        """Zero candidates raises ValueError."""
+        with pytest.raises(ValueError, match='candidates_per_entity must be positive'):
+            EntityResolutionConfig(candidates_per_entity=0)
 
     def test_default_config_values_all_valid(self):
         """Verify all default values are within valid ranges."""

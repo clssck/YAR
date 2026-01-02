@@ -10,8 +10,8 @@ import functools
 import os
 import sys
 import traceback
-from collections.abc import Callable
-from typing import ParamSpec, TypeVar, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, ParamSpec, TypeVar, cast
 
 from ascii_colors import ASCIIColors
 from fastapi import HTTPException, Request, Security, status
@@ -28,6 +28,77 @@ from .config import get_env_value, global_args
 
 P = ParamSpec('P')
 T = TypeVar('T')
+
+
+def get_workspace_from_request(request: Request) -> str | None:
+    """Extract workspace from request header.
+
+    Reads the 'LIGHTRAG-WORKSPACE' header to determine which workspace
+    to use for the request. Returns None if header is not present or empty.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        Workspace name if provided, None otherwise
+    """
+    workspace = request.headers.get('LIGHTRAG-WORKSPACE', '').strip()
+    return workspace if workspace else None
+
+
+class QueryBuilder:
+    """Helper for building parameterized SQL queries.
+
+    Manages parameter indices automatically to avoid manual tracking errors.
+
+    Usage:
+        qb = QueryBuilder()
+        qb.add_condition('workspace = {}', workspace)
+        if canonical:
+            qb.add_condition('canonical_entity = {}', canonical)
+        where = qb.where_clause()
+        params = qb.params
+
+        # For LIMIT/OFFSET
+        limit_param = qb.add_param(page_size)
+        offset_param = qb.add_param(offset)
+        sql = f'SELECT * FROM table WHERE {where} LIMIT {limit_param} OFFSET {offset_param}'
+    """
+
+    def __init__(self) -> None:
+        self._conditions: list[str] = []
+        self._params: list = []
+        self._idx = 1
+
+    def add_condition(self, condition_template: str, value) -> None:
+        """Add a condition with a parameter placeholder.
+
+        Args:
+            condition_template: SQL condition with {} placeholder (e.g., 'name = {}')
+            value: The parameter value
+        """
+        self._conditions.append(condition_template.format(f'${self._idx}'))
+        self._params.append(value)
+        self._idx += 1
+
+    def add_param(self, value) -> str:
+        """Add a standalone parameter (for LIMIT, OFFSET, etc.).
+
+        Returns the $N placeholder string.
+        """
+        placeholder = f'${self._idx}'
+        self._params.append(value)
+        self._idx += 1
+        return placeholder
+
+    def where_clause(self) -> str:
+        """Return the WHERE clause (conditions joined with AND)."""
+        return ' AND '.join(self._conditions) if self._conditions else '1=1'
+
+    @property
+    def params(self) -> list:
+        """Return the accumulated parameters."""
+        return self._params
 
 
 def handle_api_error(operation: str | None = None) -> Callable[[Callable[P, T]], Callable[P, T]]:
@@ -54,12 +125,12 @@ def handle_api_error(operation: str | None = None) -> Callable[[Callable[P, T]],
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
-        op_name = operation or func.__name__
+        op_name = operation or getattr(func, '__name__', 'unknown')
 
         @functools.wraps(func)
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             try:
-                return await func(*args, **kwargs)
+                return await cast(Awaitable[T], func(*args, **kwargs))
             except HTTPException:
                 # Re-raise HTTPException to preserve status codes (4xx, etc.)
                 raise

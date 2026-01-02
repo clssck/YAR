@@ -13,7 +13,12 @@ from dataclasses import dataclass
 
 @dataclass
 class EntityResolutionConfig:
-    """Configuration for the LLM-based entity resolution system."""
+    """Configuration for the LLM-based entity resolution system.
+
+    Raises:
+        ValueError: If batch_size <= 0, candidates_per_entity <= 0,
+                    or min_confidence is not in [0, 1].
+    """
 
     # Whether entity resolution is enabled
     enabled: bool = True
@@ -39,6 +44,19 @@ class EntityResolutionConfig:
     # When True: Matching entities are merged automatically
     # When False: Aliases are stored but require manual verification
     auto_apply: bool = True
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.batch_size <= 0:
+            raise ValueError(f'batch_size must be positive, got {self.batch_size}')
+        if self.candidates_per_entity <= 0:
+            raise ValueError(
+                f'candidates_per_entity must be positive, got {self.candidates_per_entity}'
+            )
+        if not 0 <= self.min_confidence <= 1:
+            raise ValueError(
+                f'min_confidence must be between 0 and 1, got {self.min_confidence}'
+            )
 
 
 # Default configuration
