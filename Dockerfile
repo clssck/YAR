@@ -23,12 +23,16 @@ ENV UV_COMPILE_BYTECODE=1
 
 WORKDIR /app
 
-# Install system deps (Rust is required by some wheels)
+# Install system deps (Rust + build tools for native packages like kreuzberg)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
         build-essential \
         pkg-config \
+        libssl-dev \
+        libffi-dev \
+        python3-dev \
+        cmake \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
