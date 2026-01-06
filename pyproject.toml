@@ -24,9 +24,6 @@ dependencies = [
     "aiohttp",
     "configparser",
     "dspy>=3.0.4",
-    "flashrank>=0.2.10",
-    "google-api-core>=2.0.0,<3.0.0",
-    "google-genai>=1.0.0,<2.0.0",
     "json_repair",
     "numpy>=2.0.0",
     "pandas>=2.0.0,<2.4.0",
@@ -69,8 +66,6 @@ api = [
     "tenacity",
     "tiktoken",
     "xlsxwriter>=3.1.0",
-    "google-api-core>=2.0.0,<3.0.0",
-    "google-genai>=1.0.0,<2.0.0",
     # API-specific dependencies
     "aiofiles",
     "ascii_colors",
