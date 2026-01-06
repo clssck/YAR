@@ -1,15 +1,22 @@
-import { CopyIcon, EraserIcon, SendIcon } from 'lucide-react'
+import { ChevronDown, CopyIcon, DownloadIcon, EraserIcon, SendIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import type { CitationsMetadata, QueryMode } from '@/api/lightrag'
+import type { CitationsMetadata, QueryMode, StreamReference } from '@/api/lightrag'
 import { queryText, queryTextStream } from '@/api/lightrag'
 import { ChatMessage, type MessageWithError } from '@/components/retrieval/ChatMessage'
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/Popover'
 import Textarea from '@/components/ui/Textarea'
+import { cn } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { errorMessage, throttle } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -99,11 +106,127 @@ const parseCOTContent = (content: string) => {
   }
 }
 
+/**
+ * Deduplicate references in LLM-generated References section.
+ * The LLM sometimes generates duplicate reference lines like:
+ * - [2] Document.pdf
+ * - [2] Document.pdf
+ * This keeps only the first occurrence of each reference.
+ */
+const deduplicateReferencesSection = (text: string): string => {
+  if (!text) return text
+
+  // Match References section (### References or ## References)
+  const refsPattern = /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+
+  return text.replace(refsPattern, (match, header, refsBlock) => {
+    const refLinePattern = /[-*]\s*\[(\d+)\]\s*([^\n]+)/
+    const seenRefs = new Set<string>()
+    const uniqueLines: string[] = []
+
+    for (const line of refsBlock.trim().split('\n')) {
+      const trimmedLine = line.trim()
+      if (!trimmedLine) continue
+
+      const refMatch = trimmedLine.match(refLinePattern)
+      if (refMatch) {
+        const refKey = `${refMatch[1]}:${refMatch[2].trim()}`
+        if (!seenRefs.has(refKey)) {
+          seenRefs.add(refKey)
+          uniqueLines.push(trimmedLine)
+        }
+      } else {
+        uniqueLines.push(trimmedLine)
+      }
+    }
+
+    return `${header}\n${uniqueLines.join('\n')}\n`
+  })
+}
+
+/**
+ * Strip the References section from the response if user has disabled it.
+ */
+const stripReferencesSection = (text: string): string => {
+  if (!text) return text
+  // Match References section and everything after it
+  const refsPattern = /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  return text.replace(refsPattern, '').trim()
+}
+
+/**
+ * Renumber citation markers to be sequential (1, 2, 3...) instead of sparse (2, 5, 9...).
+ * The LLM generates citations using original chunk indices which can be sparse.
+ * This function renumbers them to be sequential for better UX.
+ *
+ * Uses placeholder tokens to avoid replacement collisions (e.g., [5]→[1] then [1]→[3]).
+ */
+const renumberReferencesSequential = (text: string): string => {
+  if (!text) return text
+
+  // Find all unique reference numbers in the text
+  const refPattern = /\[(\d+)\]/g
+  const allRefs: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = refPattern.exec(text)) !== null) {
+    allRefs.push(match[1])
+  }
+
+  if (allRefs.length === 0) return text
+
+  // Get unique reference numbers in order of first appearance
+  const seen = new Set<string>()
+  const uniqueRefs: string[] = []
+  for (const ref of allRefs) {
+    if (!seen.has(ref)) {
+      seen.add(ref)
+      uniqueRefs.push(ref)
+    }
+  }
+
+  // Create mapping: old_number -> new_sequential_number
+  const refMapping = new Map<string, string>()
+  uniqueRefs.forEach((oldNum, index) => {
+    refMapping.set(oldNum, String(index + 1))
+  })
+
+  // Two-pass replacement using placeholder tokens to avoid collisions
+  // e.g., [5]→[1] then [1]→[3] would incorrectly change original [5] to [3]
+  const placeholder = '\x00REF_'
+  let result = text
+
+  // First pass: replace all [n] with placeholder tokens
+  for (const oldNum of refMapping.keys()) {
+    result = result.replace(new RegExp(`\\[${oldNum}\\]`, 'g'), `${placeholder}${oldNum}\x00`)
+  }
+
+  // Second pass: replace placeholder tokens with new sequential numbers
+  for (const [oldNum, newNum] of refMapping.entries()) {
+    result = result.replace(new RegExp(`${placeholder}${oldNum}\x00`, 'g'), `[${newNum}]`)
+  }
+
+  return result
+}
+
+// Mode configuration with descriptions for the selector
+const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
+  { value: 'hybrid', labelKey: 'retrievePanel.mode.hybrid', descKey: 'retrievePanel.mode.hybridDesc' },
+  { value: 'mix', labelKey: 'retrievePanel.mode.mix', descKey: 'retrievePanel.mode.mixDesc' },
+  { value: 'local', labelKey: 'retrievePanel.mode.local', descKey: 'retrievePanel.mode.localDesc' },
+  { value: 'global', labelKey: 'retrievePanel.mode.global', descKey: 'retrievePanel.mode.globalDesc' },
+  { value: 'naive', labelKey: 'retrievePanel.mode.naive', descKey: 'retrievePanel.mode.naiveDesc' },
+  { value: 'bypass', labelKey: 'retrievePanel.mode.bypass', descKey: 'retrievePanel.mode.bypassDesc' },
+]
+
 export default function RetrievalTesting() {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
   const currentTab = useSettingsStore.use.currentTab()
   const isRetrievalTabActive = currentTab === 'retrieval'
+
+  // Mode override state - null means use settings default
+  const [modeOverride, setModeOverride] = useState<QueryMode | null>(null)
+  const [modePopoverOpen, setModePopoverOpen] = useState(false)
 
   const [messages, setMessages] = useState<MessageWithError[]>(() => {
     try {
@@ -178,10 +301,10 @@ export default function RetrievalTesting() {
       e.preventDefault()
       if (!inputValue.trim() || isLoading) return
 
-      // Parse query mode prefix
+      // Parse query mode prefix (legacy support - prefix overrides selector)
       const allowedModes: QueryMode[] = ['naive', 'local', 'global', 'hybrid', 'mix', 'bypass']
       const prefixMatch = inputValue.match(/^\/(\w+)\s+([\s\S]+)/)
-      let modeOverride: QueryMode | undefined
+      let effectiveMode: QueryMode | undefined = modeOverride ?? undefined
       let actualQuery = inputValue
 
       // If input starts with a slash, but does not match the valid prefix pattern, treat as error
@@ -201,7 +324,8 @@ export default function RetrievalTesting() {
           )
           return
         }
-        modeOverride = mode
+        // Prefix always overrides the selector
+        effectiveMode = mode
         actualQuery = query
       }
 
@@ -218,12 +342,14 @@ export default function RetrievalTesting() {
         id: generateUniqueId(), // Use browser-compatible ID generation
         content: inputValue,
         role: 'user',
+        timestamp: Date.now(), // Add timestamp for history display
       }
 
       const assistantMessage: MessageWithError = {
         id: generateUniqueId(), // Use browser-compatible ID generation
         content: '',
         role: 'assistant',
+        timestamp: Date.now(), // Add timestamp
         mermaidRendered: false,
         latexRendered: false, // Explicitly initialize to false
         thinkingTime: null, // Explicitly initialize to null
@@ -289,7 +415,17 @@ export default function RetrievalTesting() {
         if (cotResult.isThinking) {
           assistantMessage.displayContent = ''
         } else {
-          assistantMessage.displayContent = cotResult.displayContent || assistantMessage.content
+          // Deduplicate LLM-generated References section and renumber to sequential
+          const rawContent = cotResult.displayContent || assistantMessage.content
+          let processedContent = renumberReferencesSequential(
+            deduplicateReferencesSection(rawContent)
+          )
+          // Strip References section if user has disabled it
+          const showRefs = useSettingsStore.getState().querySettings.show_references_section ?? true
+          if (!showRefs) {
+            processedContent = stripReferencesSection(processedContent)
+          }
+          assistantMessage.displayContent = processedContent
         }
 
         // Detect if the assistant message contains a complete mermaid code block
@@ -356,7 +492,7 @@ export default function RetrievalTesting() {
           prevMessages
             .filter((m) => m.isError !== true)
             .map((m) => ({ role: m.role, content: m.content })),
-        ...(modeOverride ? { mode: modeOverride } : {}),
+        ...(effectiveMode ? { mode: effectiveMode } : {}),
       }
 
       try {
@@ -421,7 +557,21 @@ export default function RetrievalTesting() {
                 assistantMessage.displayContent = finalContent
                 assistantMessage.citationsProcessed = true
               }
-            })()
+            })(),
+            // References callback - handle references with S3 presigned URLs
+            (references: StreamReference[]) => {
+              // Store references in the message for rendering links
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessage.id
+                    ? {
+                        ...msg,
+                        references: references,
+                      }
+                    : msg
+                )
+              )
+            }
           )
           if (errorMessage) {
             if (assistantMessage.content) {
@@ -462,7 +612,15 @@ export default function RetrievalTesting() {
           // Ensure display content is correctly set based on final parsing
           // BUT skip if citations were processed (they already set displayContent)
           if (!assistantMessage.citationsProcessed && finalCotResult.displayContent !== undefined) {
-            assistantMessage.displayContent = finalCotResult.displayContent
+            let processedContent = renumberReferencesSequential(
+              deduplicateReferencesSection(finalCotResult.displayContent)
+            )
+            // Strip References section if user has disabled it
+            const showRefs = useSettingsStore.getState().querySettings.show_references_section ?? true
+            if (!showRefs) {
+              processedContent = stripReferencesSection(processedContent)
+            }
+            assistantMessage.displayContent = processedContent
           }
         } catch (error) {
           console.error('Error in final COT state validation:', error)
@@ -483,7 +641,7 @@ export default function RetrievalTesting() {
         }
       }
     },
-    [inputValue, isLoading, messages, t, scrollToBottom]
+    [inputValue, isLoading, messages, modeOverride, t, scrollToBottom]
   )
 
   const handleKeyDown = useCallback(
@@ -677,9 +835,109 @@ export default function RetrievalTesting() {
   }, [debouncedMessages, scrollToBottom])
 
   const clearMessages = useCallback(() => {
-    setMessages([])
-    useSettingsStore.getState().setRetrievalHistory([])
-  }, [])
+    if (messages.length === 0) return
+    // Show confirmation toast before clearing
+    toast(t('retrievePanel.retrieval.clearConfirm', 'Clear chat history?'), {
+      action: {
+        label: t('retrievePanel.retrieval.clearConfirmYes', 'Clear'),
+        onClick: () => {
+          setMessages([])
+          useSettingsStore.getState().setRetrievalHistory([])
+          toast.success(t('retrievePanel.retrieval.cleared', 'Chat history cleared'))
+        },
+      },
+    })
+  }, [messages.length, t])
+
+  // Export chat history
+  const exportHistory = useCallback(
+    (format: 'json' | 'markdown') => {
+      if (messages.length === 0) {
+        toast.error(t('retrievePanel.retrieval.exportEmpty', 'No messages to export'))
+        return
+      }
+
+      let content: string
+      let filename: string
+      const timestamp = new Date().toISOString().split('T')[0]
+
+      if (format === 'json') {
+        content = JSON.stringify(
+          messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            isError: m.isError,
+          })),
+          null,
+          2
+        )
+        filename = `lightrag-chat-${timestamp}.json`
+      } else {
+        // Markdown format
+        content = messages
+          .map((m) => {
+            const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : ''
+            const prefix = m.role === 'user' ? '**You**' : '**Assistant**'
+            const timeStr = time ? ` (${time})` : ''
+            return `### ${prefix}${timeStr}\n\n${m.content}\n`
+          })
+          .join('\n---\n\n')
+        filename = `lightrag-chat-${timestamp}.md`
+      }
+
+      // Download file
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+
+      toast.success(t('retrievePanel.retrieval.exported', 'Chat exported as {{format}}', { format }))
+    },
+    [messages, t]
+  )
+
+  // ==================== KEYBOARD SHORTCUTS ====================
+  // Cmd/Ctrl+K: Focus input (only when retrieval tab is active)
+  useKeyboardShortcut({
+    key: 'k',
+    modifiers: { meta: true },
+    callback: useCallback(() => {
+      if (isRetrievalTabActive && inputRef.current) {
+        inputRef.current.focus()
+      }
+    }, [isRetrievalTabActive]),
+    description: 'shortcutHelp.focusInput',
+    category: 'retrieval',
+    ignoreInputs: false, // Allow this shortcut even when input is focused
+  })
+
+  // Cmd/Ctrl+Shift+C: Copy last response
+  useKeyboardShortcut({
+    key: 'c',
+    modifiers: { meta: true, shift: true },
+    callback: useCallback(async () => {
+      if (!isRetrievalTabActive) return
+      // Find the last assistant message
+      const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant')
+      if (lastAssistantMessage) {
+        const content = lastAssistantMessage.displayContent || lastAssistantMessage.content
+        if (content) {
+          const result = await copyToClipboard(content)
+          if (result.success) {
+            toast.success(t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard'))
+          }
+        }
+      }
+    }, [isRetrievalTabActive, messages, t]),
+    description: 'shortcutHelp.copyResponse',
+    category: 'retrieval',
+    ignoreInputs: false, // Allow this shortcut even when input is focused
+  })
+  // ==================== END KEYBOARD SHORTCUTS ====================
 
   // Handle copying message content with robust clipboard support
   const handleCopyMessage = useCallback(
@@ -834,12 +1092,120 @@ export default function RetrievalTesting() {
               type="button"
               variant="outline"
               onClick={clearMessages}
-              disabled={isLoading}
+              disabled={isLoading || messages.length === 0}
               size="sm"
             >
               <EraserIcon />
               {t('retrievePanel.retrieval.clear')}
             </Button>
+
+            {/* Export Button */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={messages.length === 0}
+                  className="gap-1"
+                >
+                  <DownloadIcon className="h-4 w-4" />
+                  <span className="hidden sm:inline">{t('retrievePanel.retrieval.export', 'Export')}</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-40 p-1" align="start" side="top">
+                <button
+                  type="button"
+                  onClick={() => exportHistory('markdown')}
+                  className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors"
+                >
+                  {t('retrievePanel.retrieval.exportMarkdown', 'Markdown (.md)')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportHistory('json')}
+                  className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors"
+                >
+                  {t('retrievePanel.retrieval.exportJson', 'JSON (.json)')}
+                </button>
+              </PopoverContent>
+            </Popover>
+
+            {/* Mode Selector */}
+            <Popover open={modePopoverOpen} onOpenChange={setModePopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant={modeOverride ? 'default' : 'outline'}
+                  size="sm"
+                  className={cn(
+                    'gap-1 min-w-[90px]',
+                    modeOverride && 'bg-primary/90 hover:bg-primary'
+                  )}
+                  disabled={isLoading}
+                >
+                  <span className="text-xs font-medium">
+                    {modeOverride
+                      ? t(
+                          QUERY_MODES.find((m) => m.value === modeOverride)?.labelKey ||
+                            'retrievePanel.mode.hybrid',
+                          modeOverride
+                        )
+                      : t('retrievePanel.mode.default', 'Default')}
+                  </span>
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start" side="top">
+                <div className="space-y-1">
+                  {/* Default option - uses settings */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModeOverride(null)
+                      setModePopoverOpen(false)
+                    }}
+                    className={cn(
+                      'w-full text-left px-3 py-2 rounded-md text-sm transition-colors',
+                      modeOverride === null
+                        ? 'bg-primary/10 text-primary'
+                        : 'hover:bg-muted'
+                    )}
+                  >
+                    <div className="font-medium">{t('retrievePanel.mode.default', 'Default')}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {t('retrievePanel.mode.defaultDesc', 'Use mode from settings panel')}
+                    </div>
+                  </button>
+
+                  <div className="h-px bg-border my-1" />
+
+                  {/* Mode options */}
+                  {QUERY_MODES.map((mode) => (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => {
+                        setModeOverride(mode.value)
+                        setModePopoverOpen(false)
+                      }}
+                      className={cn(
+                        'w-full text-left px-3 py-2 rounded-md text-sm transition-colors',
+                        modeOverride === mode.value
+                          ? 'bg-primary/10 text-primary'
+                          : 'hover:bg-muted'
+                      )}
+                    >
+                      <div className="font-medium">{t(mode.labelKey, mode.value)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {t(mode.descKey, '')}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+
             <div className="flex-1 relative">
               <label htmlFor="query-input" className="sr-only">
                 {t('retrievePanel.retrieval.placeholder')}

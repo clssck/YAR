@@ -938,9 +938,9 @@ class PostgreSQLDB:
                     continue  # Table doesn't exist yet, will be created with correct dim
 
                 # Get the vector column dimension from pg_attribute
-                # atttypmod for vector type = dimension + 4 (pgvector internal offset)
+                # pgvector stores dimension directly in atttypmod (no offset)
                 dim_result = await self.query(
-                    """SELECT atttypmod - 4 as dimension
+                    """SELECT atttypmod as dimension
                        FROM pg_attribute
                        WHERE attrelid = $1::regclass
                        AND attname = $2
@@ -1927,6 +1927,12 @@ class PostgreSQLDB:
             'Failed to add unique constraints for data integrity',
         )
 
+        await self._run_migration(
+            self._migrate_add_entity_type_column(),
+            'entity_type_column',
+            'Failed to add entity_type column to VDB entity table',
+        )
+
         # Log migration summary
         if self._migration_failures:
             logger.warning(
@@ -2218,6 +2224,46 @@ class PostgreSQLDB:
             except Exception as e:
                 # Log but don't fail - the table still works without the constraint
                 logger.warning(f'PostgreSQL, Failed to add UNIQUE constraint to {table}: {e}')
+
+    async def _migrate_add_entity_type_column(self):
+        """Add entity_type column to LIGHTRAG_VDB_ENTITY table.
+
+        This enables type-aware entity resolution - preventing merges between
+        entities of incompatible types (e.g., Person vs Organization).
+        """
+        table_name = 'LIGHTRAG_VDB_ENTITY'
+        column_name = 'entity_type'
+
+        # Check if table exists
+        check_table_sql = """
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = $1 AND table_schema = 'public'
+        """
+        exists = await self.query(check_table_sql, [table_name.lower()])
+        if not exists:
+            logger.debug(f'PostgreSQL, Table {table_name} does not exist, skipping migration')
+            return
+
+        # Check if column already exists
+        check_column_sql = """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = $1 AND column_name = $2 AND table_schema = 'public'
+        """
+        column_exists = await self.query(check_column_sql, [table_name.lower(), column_name])
+        if column_exists:
+            logger.debug(f'PostgreSQL, Column {column_name} already exists in {table_name}')
+            return
+
+        try:
+            # Add the entity_type column
+            alter_sql = f"""
+            ALTER TABLE {table_name}
+            ADD COLUMN {column_name} VARCHAR(100) NULL
+            """
+            await self.execute(alter_sql)
+            logger.info(f'PostgreSQL, Added {column_name} column to {table_name}')
+        except Exception as e:
+            logger.warning(f'PostgreSQL, Failed to add {column_name} column to {table_name}: {e}')
 
     async def _create_pagination_indexes(self):
         """Create indexes to optimize pagination queries for LIGHTRAG_DOC_STATUS"""
@@ -3394,6 +3440,7 @@ class PGVectorStorage(BaseVectorStorage):
             self.workspace,
             item['__id__'],
             item['entity_name'],
+            item.get('entity_type'),  # Entity type for type-aware resolution
             item['content'],
             item['__vector__'].tolist(),  # pgvector codec handles list conversion
             chunk_ids,
@@ -3521,6 +3568,8 @@ class PGVectorStorage(BaseVectorStorage):
         Returns:
             List of chunks with content, metadata, and rrf_score
         """
+        import asyncio
+
         from lightrag.utils import reciprocal_rank_fusion
 
         # Determine how many results to fetch from each source
@@ -3529,10 +3578,7 @@ class PGVectorStorage(BaseVectorStorage):
         vector_fetch_k = int(top_k * VECTOR_FETCH_MULTIPLIER)
         bm25_fetch_k = int(top_k * (BM25_FETCH_BASE_MULTIPLIER + bm25_weight))  # Scale by weight
 
-        # 1. Vector search (existing method)
-        vector_results = await self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding)
-
-        # 2. BM25 full-text search (query LIGHTRAG_DOC_CHUNKS directly)
+        # Build BM25 SQL query
         # Choose query parser based on syntax (same logic as full_text_search)
         advanced_syntax_chars = ('"', ' OR ', ' AND ', ' NOT ')
         if any(c in query for c in advanced_syntax_chars) or query.startswith('-'):
@@ -3561,13 +3607,21 @@ class PGVectorStorage(BaseVectorStorage):
             LIMIT $3
         """
 
+        # Run vector search and BM25 search in parallel for better performance
         db = self._db_required()
-        bm25_results = await db.query(
-            bm25_sql,
-            params=[query, self.workspace, bm25_fetch_k],
-            multirows=True,
+
+        async def run_bm25() -> list[dict[str, Any]]:
+            results = await db.query(
+                bm25_sql,
+                params=[query, self.workspace, bm25_fetch_k],
+                multirows=True,
+            )
+            return results if results else []
+
+        vector_results, bm25_results = await asyncio.gather(
+            self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
+            run_bm25(),
         )
-        bm25_results = bm25_results if bm25_results else []
 
         # Mark source type for debugging
         for r in vector_results:
@@ -3625,6 +3679,8 @@ class PGVectorStorage(BaseVectorStorage):
         # 2. pg_trgm character-level search on entity_name
         trigram_sql = """
             SELECT entity_name,
+                   entity_type,
+                   content,
                    EXTRACT(EPOCH FROM create_time)::BIGINT AS created_at,
                    similarity(LOWER(entity_name), LOWER($1)) AS trgm_score
             FROM LIGHTRAG_VDB_ENTITY
@@ -6644,6 +6700,7 @@ TABLES = {
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     entity_name VARCHAR(512),
+                    entity_type VARCHAR(100) NULL,
                     content TEXT,
                     content_vector VECTOR({os.environ.get('EMBEDDING_DIM', 1024)}),
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
@@ -6927,11 +6984,12 @@ SQL_TEMPLATES = {
                       file_path=EXCLUDED.file_path,
                       update_time = EXCLUDED.update_time
                      """,
-    'upsert_entity': """INSERT INTO LIGHTRAG_VDB_ENTITY (workspace, id, entity_name, content,
+    'upsert_entity': """INSERT INTO LIGHTRAG_VDB_ENTITY (workspace, id, entity_name, entity_type, content,
                       content_vector, chunk_ids, file_path, create_time, update_time)
-                      VALUES ($1, $2, $3, $4, $5, $6::varchar[], $7, $8, $9)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8, $9, $10)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET entity_name=EXCLUDED.entity_name,
+                      entity_type=EXCLUDED.entity_type,
                       content=EXCLUDED.content,
                       content_vector=EXCLUDED.content_vector,
                       chunk_ids=EXCLUDED.chunk_ids,
@@ -6962,6 +7020,8 @@ SQL_TEMPLATES = {
                      """,
     'entities': """
                 SELECT e.entity_name,
+                       e.entity_type,
+                       e.content,
                        EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
                 FROM LIGHTRAG_VDB_ENTITY e
                 WHERE e.workspace = $1

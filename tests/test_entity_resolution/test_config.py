@@ -36,6 +36,11 @@ class TestEntityResolutionConfigDefaults:
         config = EntityResolutionConfig()
         assert config.min_confidence == 0.85
 
+    def test_default_soft_match_threshold(self):
+        """Default soft match threshold should be 0.70."""
+        config = EntityResolutionConfig()
+        assert config.soft_match_threshold == 0.70
+
     def test_default_auto_apply(self):
         """Auto apply should be enabled by default."""
         config = EntityResolutionConfig()
@@ -111,9 +116,10 @@ class TestEntityResolutionConfigEdgeCases:
     """Edge case tests for configuration."""
 
     def test_zero_min_confidence(self):
-        """Zero min confidence should be allowed."""
-        config = EntityResolutionConfig(min_confidence=0.0)
+        """Zero min confidence should be allowed (with matching soft threshold)."""
+        config = EntityResolutionConfig(min_confidence=0.0, soft_match_threshold=0.0)
         assert config.min_confidence == 0.0
+        assert config.soft_match_threshold == 0.0
 
     def test_one_min_confidence(self):
         """Max min confidence of 1.0 should be allowed."""
@@ -211,3 +217,28 @@ class TestConfigValidation:
         # But dataclass allows it
         assert config.enabled is False
         assert config.auto_resolve_on_extraction is True
+
+    def test_soft_match_threshold_negative_rejected(self):
+        """Negative soft_match_threshold raises ValueError."""
+        with pytest.raises(ValueError, match='soft_match_threshold must be between 0 and 1'):
+            EntityResolutionConfig(soft_match_threshold=-0.1)
+
+    def test_soft_match_threshold_above_one_rejected(self):
+        """soft_match_threshold > 1.0 raises ValueError."""
+        with pytest.raises(ValueError, match='soft_match_threshold must be between 0 and 1'):
+            EntityResolutionConfig(soft_match_threshold=1.5)
+
+    def test_soft_match_threshold_above_min_confidence_rejected(self):
+        """soft_match_threshold > min_confidence raises ValueError."""
+        with pytest.raises(ValueError, match='soft_match_threshold.*must be <= min_confidence'):
+            EntityResolutionConfig(min_confidence=0.80, soft_match_threshold=0.90)
+
+    def test_soft_match_threshold_equal_to_min_confidence_allowed(self):
+        """soft_match_threshold == min_confidence is allowed (disables soft matching)."""
+        config = EntityResolutionConfig(min_confidence=0.85, soft_match_threshold=0.85)
+        assert config.soft_match_threshold == config.min_confidence
+
+    def test_custom_soft_match_threshold(self):
+        """Custom soft_match_threshold should be accepted."""
+        config = EntityResolutionConfig(soft_match_threshold=0.60)
+        assert config.soft_match_threshold == 0.60

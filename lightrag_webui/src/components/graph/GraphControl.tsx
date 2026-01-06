@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Sigma } from 'sigma'
 
 import type { EdgeType, NodeType } from '@/hooks/useLightragGraph'
+import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import useTheme from '@/hooks/useTheme'
 import * as Constants from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
@@ -393,6 +394,75 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
       edgeReducer,
     })
   }, [setSettings, enableEdgeEvents, renderEdgeLabels, renderLabels, nodeReducer, edgeReducer])
+
+  // ==================== KEYBOARD SHORTCUTS ====================
+  // Escape: Clear selection
+  useKeyboardShortcut({
+    key: 'Escape',
+    callback: useCallback(() => {
+      useGraphStore.getState().clearSelection()
+    }, []),
+    description: 'Deselect node or edge',
+  })
+
+  // + or =: Zoom in
+  useKeyboardShortcut({
+    key: '=',
+    callback: useCallback(() => {
+      if (sigma) {
+        const camera = sigma.getCamera()
+        camera.animatedZoom({ duration: 200 })
+      }
+    }, [sigma]),
+    description: 'Zoom in',
+  })
+
+  // -: Zoom out
+  useKeyboardShortcut({
+    key: '-',
+    callback: useCallback(() => {
+      if (sigma) {
+        const camera = sigma.getCamera()
+        camera.animatedUnzoom({ duration: 200 })
+      }
+    }, [sigma]),
+    description: 'Zoom out',
+  })
+
+  // 0: Reset zoom to fit graph
+  useKeyboardShortcut({
+    key: '0',
+    callback: useCallback(() => {
+      if (sigma) {
+        const camera = sigma.getCamera()
+        camera.animatedReset({ duration: 300 })
+      }
+    }, [sigma]),
+    description: 'Reset zoom',
+  })
+
+  // P: Toggle properties panel
+  useKeyboardShortcut({
+    key: 'p',
+    callback: useCallback(() => {
+      useSettingsStore.setState((prev) => ({
+        showPropertyPanel: !prev.showPropertyPanel,
+      }))
+    }, []),
+    description: 'Toggle properties panel',
+  })
+
+  // S: Toggle search bar
+  useKeyboardShortcut({
+    key: 's',
+    callback: useCallback(() => {
+      useSettingsStore.setState((prev) => ({
+        showNodeSearchBar: !prev.showNodeSearchBar,
+      }))
+    }, []),
+    description: 'Toggle search bar',
+  })
+  // ==================== END KEYBOARD SHORTCUTS ====================
 
   return null
 }

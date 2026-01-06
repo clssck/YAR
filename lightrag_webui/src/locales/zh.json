@@ -1,4 +1,12 @@
 {
+  "app": {
+    "loading": {
+      "graph": "加载知识图谱...",
+      "api": "加载 API 文档...",
+      "tables": "加载数据表...",
+      "storage": "加载存储浏览器..."
+    }
+  },
   "settings": {
     "language": "语言",
     "theme": "主题",
@@ -414,7 +422,16 @@
       "copyManualInstruction": "请手动选择并复制文本",
       "thinking": "正在思考...",
       "thinkingTime": "思考用时 {{time}} 秒",
-      "thinkingInProgress": "思考进行中..."
+      "thinkingInProgress": "思考进行中...",
+      "streamingThinking": "思考中...",
+      "streamingGenerating": "生成中...",
+      "chars": "字符",
+      "errorTimeout": "请求超时",
+      "errorAuth": "认证错误",
+      "errorServer": "服务器错误",
+      "errorNetwork": "网络错误",
+      "errorUnknown": "错误",
+      "retry": "重试"
     },
     "retrieval": {
       "startPrompt": "输入查询开始检索",
@@ -423,7 +440,15 @@
       "placeholder": "输入查询内容 (支持模式前缀: /<Query Mode>)",
       "error": "错误：获取响应失败",
       "queryModeError": "仅支持以下查询模式：{{modes}}",
-      "queryModePrefixInvalid": "无效的查询模式前缀。请使用：/<模式> [空格] 查询内容"
+      "queryModePrefixInvalid": "无效的查询模式前缀。请使用：/<模式> [空格] 查询内容",
+      "clearConfirm": "清空聊天记录？",
+      "clearConfirmYes": "清空",
+      "cleared": "聊天记录已清空",
+      "export": "导出",
+      "exportMarkdown": "Markdown (.md)",
+      "exportJson": "JSON (.json)",
+      "exportEmpty": "没有消息可导出",
+      "exported": "聊天记录已导出为 {{format}}"
     },
     "querySettings": {
       "parametersTitle": "参数",
@@ -471,6 +496,37 @@
       "userPromptPlaceholder": "输入自定义提示词（可选）",
       "enableRerank": "启用重排",
       "enableRerankTooltip": "为检索到的文本块启用重排。如果为True但未配置重排模型，将发出警告。默认为True。"
+    },
+    "mode": {
+      "default": "默认",
+      "defaultDesc": "使用设置面板中的模式",
+      "hybrid": "混合",
+      "hybridDesc": "本地 + 全局搜索结合",
+      "mix": "综合",
+      "mixDesc": "混合 + 朴素文本检索",
+      "local": "本地",
+      "localDesc": "以实体为中心的邻域搜索",
+      "global": "全局",
+      "globalDesc": "以关系为中心的广泛搜索",
+      "naive": "朴素",
+      "naiveDesc": "传统文本块搜索",
+      "bypass": "跳过",
+      "bypassDesc": "跳过检索，直接使用LLM"
+    },
+    "citation": {
+      "clickToView": "点击查看来源",
+      "openDocument": "在新标签页中打开文档",
+      "untitled": "无标题文档",
+      "section": "章节",
+      "pages": "页码",
+      "matchConfidence": "匹配置信度",
+      "summary": "引用自 {{count}} 个来源",
+      "references": "个引用",
+      "confidence": {
+        "high": "高",
+        "medium": "中",
+        "low": "低"
+      }
     }
   },
   "apiSite": {
@@ -523,5 +579,23 @@
     "prevPage": "上一页",
     "nextPage": "下一页",
     "lastPage": "末页"
+  },
+  "shortcutHelp": {
+    "title": "键盘快捷键",
+    "openHelp": "打开快捷键帮助",
+    "noShortcuts": "暂无快捷键",
+    "hint": "按 Shift+? 可随时打开此对话框",
+    "category": {
+      "global": "全局",
+      "navigation": "导航",
+      "documents": "文档",
+      "graph": "图谱",
+      "retrieval": "对话"
+    },
+    "focusInput": "聚焦输入框",
+    "copyResponse": "复制上次回复",
+    "focusSearch": "聚焦搜索",
+    "toggleSettings": "切换设置面板",
+    "clearHistory": "清空对话历史"
   }
 }

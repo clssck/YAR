@@ -167,6 +167,7 @@ class S3Client:
             connect_timeout=self.config.connect_timeout,
             read_timeout=self.config.read_timeout,
             retries={'max_attempts': S3_RETRY_ATTEMPTS},
+            signature_version='s3v4',  # Required for MinIO and modern S3
         )
 
         async with self._session.client(  # type: ignore

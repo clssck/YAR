@@ -28,6 +28,98 @@ def strip_reasoning_tags(text: str) -> str:
     return REASONING_TAG_PATTERN.sub('', text).strip()
 
 
+# Pattern to match References section (### References or ## References or References:)
+REFERENCES_SECTION_PATTERN = re.compile(
+    r'(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def deduplicate_references_section(text: str) -> str:
+    """Remove duplicate reference entries from LLM-generated References section.
+
+    The LLM sometimes generates duplicate reference lines like:
+    - [2] Document.pdf
+    - [2] Document.pdf
+
+    This function keeps only the first occurrence of each reference.
+    """
+    if not text:
+        return text
+
+    def dedupe_refs(match: re.Match) -> str:
+        header = match.group(1)
+        refs_block = match.group(2)
+
+        # Parse reference lines
+        ref_pattern = re.compile(r'[-*]\s*\[(\d+)\]\s*([^\n]+)')
+        seen_refs: set[str] = set()
+        unique_lines: list[str] = []
+
+        for line in refs_block.strip().split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            ref_match = ref_pattern.match(line)
+            if ref_match:
+                ref_key = f'{ref_match.group(1)}:{ref_match.group(2).strip()}'
+                if ref_key not in seen_refs:
+                    seen_refs.add(ref_key)
+                    unique_lines.append(line)
+            else:
+                unique_lines.append(line)
+
+        return f'{header}\n' + '\n'.join(unique_lines) + '\n'
+
+    return REFERENCES_SECTION_PATTERN.sub(dedupe_refs, text)
+
+
+def renumber_references_sequential(text: str) -> str:
+    """Renumber citation markers to be sequential (1, 2, 3...) instead of sparse (2, 5, 9...).
+
+    The LLM generates citations using original chunk indices which can be sparse.
+    This function renumbers them to be sequential for better UX.
+
+    Example: [2], [5], [9] → [1], [2], [3]
+    """
+    if not text:
+        return text
+
+    # Find all unique reference numbers in order of first appearance
+    ref_pattern = re.compile(r'\[(\d+)\]')
+    all_refs = ref_pattern.findall(text)
+
+    if not all_refs:
+        return text
+
+    # Get unique reference numbers in order of first appearance
+    seen: set[str] = set()
+    unique_refs: list[str] = []
+    for ref in all_refs:
+        if ref not in seen:
+            seen.add(ref)
+            unique_refs.append(ref)
+
+    # Create mapping: old_number -> new_sequential_number
+    ref_mapping: dict[str, str] = {}
+    for new_num, old_num in enumerate(unique_refs, start=1):
+        ref_mapping[old_num] = str(new_num)
+
+    # Replace using placeholder tokens to avoid conflicts (e.g., [1] -> [2] -> [1])
+    result = text
+    placeholder = '\x00REF_'  # Use null byte prefix as unlikely collision
+
+    # First pass: replace all refs with placeholders
+    for old_num in ref_mapping.keys():
+        result = re.sub(rf'\[{old_num}\]', f'{placeholder}{old_num}\x00', result)
+
+    # Second pass: replace placeholders with new sequential numbers
+    for old_num, new_num in ref_mapping.items():
+        result = result.replace(f'{placeholder}{old_num}\x00', f'[{new_num}]')
+
+    return result
+
+
 async def filter_reasoning_stream(response_stream):
     """Filter <think>...</think> blocks from streaming response in real-time.
 
@@ -662,6 +754,12 @@ def create_query_routes(
             # Strip reasoning tags like <think>...</think>
             response_content = strip_reasoning_tags(response_content)
 
+            # Deduplicate LLM-generated References section
+            response_content = deduplicate_references_section(response_content)
+
+            # Renumber references to be sequential (1, 2, 3...) instead of sparse
+            response_content = renumber_references_sequential(response_content)
+
             # Enrich references with chunk content if requested
             if request.include_references and request.include_chunk_content:
                 chunks = data.get('chunks', [])
@@ -996,6 +1094,12 @@ def create_query_routes(
 
                     # Strip reasoning tags like <think>...</think>
                     response_content = strip_reasoning_tags(response_content)
+
+                    # Deduplicate LLM-generated References section
+                    response_content = deduplicate_references_section(response_content)
+
+                    # Renumber references to be sequential (1, 2, 3...) instead of sparse
+                    response_content = renumber_references_sequential(response_content)
 
                     # Create complete response object
                     complete_response: dict[str, Any] = {'response': response_content}

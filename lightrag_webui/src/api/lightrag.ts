@@ -135,6 +135,8 @@ export type CitationSource = {
   section_title: string | null
   page_range: string | null
   excerpt: string | null
+  s3_key: string | null
+  presigned_url: string | null
 }
 
 /**
@@ -155,6 +157,7 @@ export type Message = {
   thinkingTime?: number | null
   citationsProcessed?: boolean
   citationsMetadata?: CitationsMetadata // New consolidated citation data
+  references?: StreamReference[] // References with S3 presigned URLs
 }
 
 export type QueryRequest = {
@@ -192,6 +195,8 @@ export type QueryRequest = {
   citation_mode?: 'none' | 'inline' | 'footnotes'
   /** Minimum similarity threshold (0.0-1.0) for matching response sentences to source chunks. Higher = stricter matching. Default is 0.7 */
   citation_threshold?: number
+  /** Show or hide the References section at the bottom of responses. Default is true. Frontend-only setting. */
+  show_references_section?: boolean
 }
 
 export type QueryResponse = {
@@ -452,11 +457,24 @@ export const queryText = async (request: QueryRequest): Promise<QueryResponse> =
   return response.data
 }
 
+/**
+ * Reference with S3 metadata from the backend
+ */
+export type StreamReference = {
+  reference_id: string
+  file_path: string
+  document_title: string
+  s3_key: string | null
+  excerpt: string | null
+  presigned_url: string | null
+}
+
 export const queryTextStream = async (
   request: QueryRequest,
   onChunk: (chunk: string) => void,
   onError?: (error: string) => void,
-  onCitations?: (metadata: CitationsMetadata) => void
+  onCitations?: (metadata: CitationsMetadata) => void,
+  onReferences?: (references: StreamReference[]) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
@@ -534,10 +552,13 @@ export const queryTextStream = async (
             } else if (parsed.error && onError) {
               onError(parsed.error)
             } else if (parsed.citations_metadata && onCitations) {
-              // NEW: Handle consolidated citations_metadata object
+              // Handle consolidated citations_metadata object
               onCitations(parsed.citations_metadata as CitationsMetadata)
+            } else if (parsed.references && onReferences) {
+              // Handle references with S3 presigned URLs
+              onReferences(parsed.references as StreamReference[])
             }
-            // Silently ignore references and other events
+            // Silently ignore other events
           } catch (error) {
             console.error('Error parsing stream chunk:', line, error)
             if (onError) onError(`Error parsing server response: ${line}`)

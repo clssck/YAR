@@ -4,11 +4,12 @@ import {
   type GraphSearchInputProps,
 } from '@react-sigma/graph-search'
 import MiniSearch from 'minisearch'
-import { type FC, useCallback, useEffect } from 'react'
+import { type FC, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AsyncSearch } from '@/components/ui/AsyncSearch'
 import { searchResultLimit } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
+import { useKeyboardShortcut, formatShortcut } from '@/hooks/useKeyboardShortcut'
 
 // Message item identifier for search results
 export const messageId = '__message_item'
@@ -74,6 +75,29 @@ export const GraphSearchInput = ({
   const { t } = useTranslation()
   const graph = useGraphStore.use.sigmaGraph()
   const searchEngine = useGraphStore.use.searchEngine()
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Focus the search input inside the container
+  const focusSearch = useCallback(() => {
+    const input = containerRef.current?.querySelector('input')
+    input?.focus()
+  }, [])
+
+  // Keyboard shortcut to focus search (Cmd/Ctrl + K)
+  useKeyboardShortcut({
+    key: 'k',
+    modifiers: { ctrl: true },
+    callback: focusSearch,
+    description: t('graphPanel.search.focusShortcut', 'Focus node search'),
+  })
+
+  // Also support Cmd+K on Mac
+  useKeyboardShortcut({
+    key: 'k',
+    modifiers: { meta: true },
+    callback: focusSearch,
+    description: t('graphPanel.search.focusShortcut', 'Focus node search'),
+  })
 
   // Reset search engine when graph changes
   useEffect(() => {
@@ -207,23 +231,36 @@ export const GraphSearchInput = ({
     [graph, searchEngine, onFocus, t]
   )
 
+  // Build placeholder with keyboard shortcut hint
+  const shortcutHint = formatShortcut('K', { meta: true })
+  const placeholderWithShortcut = `${t('graphPanel.search.placeholder')} (${shortcutHint})`
+
+  // Get total node count for context
+  const totalNodes = graph?.order ?? 0
+
   return (
-    <AsyncSearch
-      className="bg-background/60 w-24 rounded-xl border-1 opacity-60 backdrop-blur-lg transition-all hover:w-fit hover:opacity-100 w-full"
-      fetcher={loadOptions}
-      renderOption={OptionComponent}
-      getOptionValue={(item) => item.id}
-      value={value && value.type !== 'message' ? value.id : null}
-      onChange={(id) => {
-        if (id !== messageId) onChange(id ? { id, type: 'nodes' } : null)
-      }}
-      onFocus={(id) => {
-        if (id !== messageId && onFocus) onFocus(id ? { id, type: 'nodes' } : null)
-      }}
-      ariaLabel={t('graphPanel.search.placeholder')}
-      placeholder={t('graphPanel.search.placeholder')}
-      noResultsMessage={t('graphPanel.search.placeholder')}
-    />
+    <div ref={containerRef}>
+      <AsyncSearch
+        className="bg-background/60 w-40 rounded-xl border-1 opacity-70 backdrop-blur-lg transition-all focus-within:w-56 focus-within:opacity-100 hover:opacity-100"
+        fetcher={loadOptions}
+        renderOption={OptionComponent}
+        getOptionValue={(item) => item.id}
+        value={value && value.type !== 'message' ? value.id : null}
+        onChange={(id) => {
+          if (id !== messageId) onChange(id ? { id, type: 'nodes' } : null)
+        }}
+        onFocus={(id) => {
+          if (id !== messageId && onFocus) onFocus(id ? { id, type: 'nodes' } : null)
+        }}
+        ariaLabel={t('graphPanel.search.placeholder')}
+        placeholder={placeholderWithShortcut}
+        noResultsMessage={
+          totalNodes > 0
+            ? t('graphPanel.search.noResults', 'No matching nodes')
+            : t('graphPanel.search.noNodes', 'No nodes in graph')
+        }
+      />
+    </div>
   )
 }
 

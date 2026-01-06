@@ -2,6 +2,7 @@ import { BrainIcon, LogOutIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { LightragConfiguration } from '@/api/lightrag'
 import AppSettings from '@/components/AppSettings'
+import KeyboardShortcutHelp from '@/components/KeyboardShortcutHelp'
 import StatusIndicator from '@/components/status/StatusIndicator'
 import Button from '@/components/ui/Button'
 import { TabsList, TabsTrigger } from '@/components/ui/Tabs'
@@ -117,6 +118,7 @@ export default function SiteHeader() {
       <nav className="w-[200px] flex items-center justify-end">
         <div className="flex items-center gap-2">
           {enableHealthCheck && <StatusIndicator />}
+          <KeyboardShortcutHelp />
           <AppSettings />
           {!isGuestMode && (
             <Button

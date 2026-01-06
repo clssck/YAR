@@ -1,4 +1,4 @@
-import { BrainIcon, ChevronDownIcon, LoaderIcon } from 'lucide-react'
+import { AlertCircleIcon, BrainIcon, ChevronDownIcon, LoaderIcon, RefreshCwIcon } from 'lucide-react'
 import mermaid from 'mermaid'
 import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -9,7 +9,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeReact from 'rehype-react'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import type { CitationsMetadata, Message } from '@/api/lightrag'
+import type { CitationsMetadata, Message, StreamReference } from '@/api/lightrag'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import { remarkFootnotes } from '@/utils/remarkFootnotes'
@@ -41,7 +41,9 @@ interface CodeComponentProps {
 export type MessageWithError = Message & {
   id: string // Unique identifier for stable React keys
   isError?: boolean
+  errorType?: 'timeout' | 'auth' | 'server' | 'network' | 'unknown' // Error categorization
   isThinking?: boolean // Flag to indicate if the message is in a "thinking" state
+  timestamp?: number // Unix timestamp when message was created
   /**
    * Indicates if the mermaid diagram in this message has been rendered.
    * Used to persist the rendering state across updates and prevent flickering.
@@ -124,9 +126,11 @@ function TextWithCitations({
 export const ChatMessage = ({
   message,
   isTabActive = true,
+  onRetry,
 }: {
   message: MessageWithError
   isTabActive?: boolean
+  onRetry?: () => void
 }) => {
   const { t } = useTranslation()
   const { theme } = useTheme()
@@ -171,8 +175,9 @@ export const ChatMessage = ({
     loadKaTeX()
   }, [])
 
-  // Get citationsMetadata from message for use in markdown components
+  // Get citationsMetadata and references from message for use in markdown components
   const citationsMetadata = message.citationsMetadata
+  const references = message.references
 
   const mainMarkdownComponents = useMemo(
     (): Components => ({
@@ -236,9 +241,52 @@ export const ChatMessage = ({
       ol: ({ children }: { children?: ReactNode }) => (
         <ol className="list-decimal pl-5 my-2">{children}</ol>
       ),
-      li: ({ children }: { children?: ReactNode }) => <li className="my-1">{children}</li>,
+      li: ({ children }: { children?: ReactNode }) => {
+        // Check if this is a reference line like "[3] filename.pdf"
+        if (references && references.length > 0) {
+          // Extract text content from children
+          const textContent = typeof children === 'string'
+            ? children
+            : Array.isArray(children)
+              ? children.map((c) => (typeof c === 'string' ? c : '')).join('')
+              : ''
+
+          // Match reference pattern: [n] followed by filename
+          const refMatch = textContent.match(/^\[(\d+)\]\s*(.+)$/)
+          if (refMatch) {
+            const refNumber = refMatch[1]
+            const fileName = refMatch[2].trim()
+
+            // Find matching reference by file_path or document_title
+            const matchingRef = references.find(
+              (ref) =>
+                ref.file_path === fileName ||
+                ref.document_title === fileName ||
+                ref.file_path?.includes(fileName) ||
+                fileName.includes(ref.file_path || '')
+            )
+
+            if (matchingRef?.presigned_url) {
+              return (
+                <li className="my-1">
+                  <span>[{refNumber}] </span>
+                  <a
+                    href={matchingRef.presigned_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    {fileName}
+                  </a>
+                </li>
+              )
+            }
+          }
+        }
+        return <li className="my-1">{children}</li>
+      },
     }),
-    [message.mermaidRendered, message.role, citationsMetadata]
+    [message.mermaidRendered, message.role, citationsMetadata, references]
   )
 
   const thinkingMarkdownComponents = useMemo(
@@ -254,16 +302,69 @@ export const ChatMessage = ({
     [message.mermaidRendered, message.role]
   )
 
+  // Determine if we're in a streaming state (content is being received)
+  const isStreaming = message.role === 'assistant' && !message.isError && (
+    isThinking || (!finalDisplayContent && !thinkingTime)
+  )
+
+  // Categorize error type from error message content
+  const errorType = useMemo(() => {
+    if (!message.isError) return null
+    if (message.errorType) return message.errorType
+    const content = (message.content || '').toLowerCase()
+    if (content.includes('timeout') || content.includes('timed out')) return 'timeout'
+    if (content.includes('401') || content.includes('403') || content.includes('unauthorized') || content.includes('forbidden')) return 'auth'
+    if (content.includes('500') || content.includes('502') || content.includes('503') || content.includes('server')) return 'server'
+    if (content.includes('network') || content.includes('fetch') || content.includes('connection')) return 'network'
+    return 'unknown'
+  }, [message.isError, message.errorType, message.content])
+
+  // Get error label for display
+  const errorLabel = useMemo(() => {
+    if (!errorType) return null
+    const labels: Record<string, string> = {
+      timeout: t('retrievePanel.chatMessage.errorTimeout', 'Request timed out'),
+      auth: t('retrievePanel.chatMessage.errorAuth', 'Authentication error'),
+      server: t('retrievePanel.chatMessage.errorServer', 'Server error'),
+      network: t('retrievePanel.chatMessage.errorNetwork', 'Network error'),
+      unknown: t('retrievePanel.chatMessage.errorUnknown', 'Error'),
+    }
+    return labels[errorType]
+  }, [errorType, t])
+
   return (
     <div
-      className={`${
+      className={cn(
+        'rounded-lg px-4 py-2 transition-all duration-200',
         message.role === 'user'
           ? 'max-w-[80%] bg-primary text-primary-foreground'
           : message.isError
             ? 'w-[95%] bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400'
-            : 'w-[95%] bg-muted'
-      } rounded-lg px-4 py-2`}
+            : 'w-[95%] bg-muted',
+        // Reserve minimum height during streaming to prevent layout jumps
+        isStreaming && 'min-h-[60px]'
+      )}
     >
+      {/* Error Header - shown for error messages */}
+      {message.isError && errorLabel && (
+        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-2">
+            <AlertCircleIcon className="h-4 w-4 shrink-0" />
+            <span className="font-medium text-sm">{errorLabel}</span>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-red-200 hover:bg-red-300 dark:bg-red-900 dark:hover:bg-red-800 transition-colors"
+            >
+              <RefreshCwIcon className="h-3 w-3" />
+              {t('retrievePanel.chatMessage.retry', 'Retry')}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Thinking Pill - collapsible bubble UI */}
       {message.role === 'assistant' && (isThinking || thinkingTime !== null) && (
         <div className={cn('mb-3', !isTabActive && 'opacity-50')}>
@@ -363,13 +464,22 @@ export const ChatMessage = ({
       {/* Main content display */}
       {finalDisplayContent && (
         <div
-          className={`relative prose dark:prose-invert max-w-none text-sm break-words prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 [&_.katex]:text-current [&_.katex-display]:my-4 [&_.katex-display]:max-w-full [&_.katex-display_>.base]:overflow-x-auto [&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0] [&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0] [&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800 [&_u]:underline [&_del]:line-through [&_ins]:underline [&_ins]:decoration-green-500 [&_.footnotes]:mt-8 [&_.footnotes]:pt-4 [&_.footnotes]:border-t [&_.footnotes_ol]:text-sm [&_.footnotes_li]:my-1 ${
-            message.role === 'user' ? 'text-primary-foreground' : 'text-foreground'
-          } ${
+          className={cn(
+            'relative prose dark:prose-invert max-w-none text-sm break-words',
+            'prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1',
+            '[&_.katex]:text-current [&_.katex-display]:my-4 [&_.katex-display]:max-w-full [&_.katex-display_>.base]:overflow-x-auto',
+            '[&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0]',
+            '[&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0]',
+            '[&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800',
+            '[&_u]:underline [&_del]:line-through [&_ins]:underline [&_ins]:decoration-green-500',
+            '[&_.footnotes]:mt-8 [&_.footnotes]:pt-4 [&_.footnotes]:border-t [&_.footnotes_ol]:text-sm [&_.footnotes_li]:my-1',
+            // Smooth content appearance animation
+            'animate-in fade-in-0 duration-200',
+            message.role === 'user' ? 'text-primary-foreground' : 'text-foreground',
             message.role === 'user'
               ? '[&_.footnotes]:border-primary-foreground/30 [&_a[href^="#fn"]]:text-primary-foreground [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary-foreground [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline'
               : '[&_.footnotes]:border-border [&_a[href^="#fn"]]:text-primary [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline'
-          }`}
+          )}
         >
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkFootnotes, remarkMath]}
@@ -410,14 +520,22 @@ export const ChatMessage = ({
           </ReactMarkdown>
         </div>
       )}
-      {/* Loading indicator - only show in active tab */}
-      {isTabActive &&
-        (() => {
-          // More comprehensive loading state check
-          const hasVisibleContent = finalDisplayContent && finalDisplayContent.trim() !== ''
-          const isLoadingState = !hasVisibleContent && !isThinking && !thinkingTime
-          return isLoadingState && <LoaderIcon className="animate-spin duration-2000" />
-        })()}
+      {/* Streaming progress indicator - only show in active tab */}
+      {isTabActive && isStreaming && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground animate-in fade-in-0 duration-200">
+          <LoaderIcon className="h-4 w-4 animate-spin" />
+          <span>
+            {isThinking
+              ? t('retrievePanel.chatMessage.streamingThinking', 'Thinking...')
+              : t('retrievePanel.chatMessage.streamingGenerating', 'Generating...')}
+          </span>
+          {message.content && message.content.length > 0 && (
+            <span className="opacity-70">
+              ({message.content.length.toLocaleString()} {t('retrievePanel.chatMessage.chars', 'chars')})
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

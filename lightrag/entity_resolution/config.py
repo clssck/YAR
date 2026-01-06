@@ -40,6 +40,12 @@ class EntityResolutionConfig:
     # Below this: alias is suggested but not auto-applied
     min_confidence: float = 0.85
 
+    # Lower threshold for "soft" matches - logged for review but not auto-applied
+    # Matches between soft_match_threshold and min_confidence are logged as
+    # potential matches that may warrant manual review
+    # Set equal to min_confidence to disable soft match logging
+    soft_match_threshold: float = 0.70
+
     # Automatically apply LLM alias decisions
     # When True: Matching entities are merged automatically
     # When False: Aliases are stored but require manual verification
@@ -56,6 +62,15 @@ class EntityResolutionConfig:
         if not 0 <= self.min_confidence <= 1:
             raise ValueError(
                 f'min_confidence must be between 0 and 1, got {self.min_confidence}'
+            )
+        if not 0 <= self.soft_match_threshold <= 1:
+            raise ValueError(
+                f'soft_match_threshold must be between 0 and 1, got {self.soft_match_threshold}'
+            )
+        if self.soft_match_threshold > self.min_confidence:
+            raise ValueError(
+                f'soft_match_threshold ({self.soft_match_threshold}) must be <= '
+                f'min_confidence ({self.min_confidence})'
             )
 
 

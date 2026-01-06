@@ -39,12 +39,14 @@ i18n.use(initReactI18next).init({
   returnNull: false,
 })
 
-// Subscribe to language changes
-useSettingsStore.subscribe((state) => {
-  const currentLanguage = state.language
-  if (i18n.language !== currentLanguage) {
-    i18n.changeLanguage(currentLanguage)
-  }
+// Subscribe to language changes (deferred to avoid TDZ issues during module initialization)
+queueMicrotask(() => {
+  useSettingsStore.subscribe((state) => {
+    const currentLanguage = state.language
+    if (i18n.language !== currentLanguage) {
+      i18n.changeLanguage(currentLanguage)
+    }
+  })
 })
 
 export default i18n

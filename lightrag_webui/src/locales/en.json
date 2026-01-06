@@ -1,4 +1,12 @@
 {
+  "app": {
+    "loading": {
+      "graph": "Loading Knowledge Graph...",
+      "api": "Loading API Documentation...",
+      "tables": "Loading Table Explorer...",
+      "storage": "Loading Storage Browser..."
+    }
+  },
   "settings": {
     "language": "Language",
     "theme": "Theme",
@@ -460,7 +468,16 @@
       "copyManualInstruction": "Please select and copy the text manually",
       "thinking": "Thinking...",
       "thinkingTime": "Thinking time {{time}}s",
-      "thinkingInProgress": "Thinking in progress..."
+      "thinkingInProgress": "Thinking in progress...",
+      "streamingThinking": "Thinking...",
+      "streamingGenerating": "Generating...",
+      "chars": "chars",
+      "errorTimeout": "Request timed out",
+      "errorAuth": "Authentication error",
+      "errorServer": "Server error",
+      "errorNetwork": "Network error",
+      "errorUnknown": "Error",
+      "retry": "Retry"
     },
     "retrieval": {
       "startPrompt": "Start a retrieval by typing your query below",
@@ -469,7 +486,15 @@
       "placeholder": "Enter your query (Support prefix: /<Query Mode>)",
       "error": "Error: Failed to get response",
       "queryModeError": "Only supports the following query modes: {{modes}}",
-      "queryModePrefixInvalid": "Invalid query mode prefix. Use: /<mode> [space] your query"
+      "queryModePrefixInvalid": "Invalid query mode prefix. Use: /<mode> [space] your query",
+      "clearConfirm": "Clear chat history?",
+      "clearConfirmYes": "Clear",
+      "cleared": "Chat history cleared",
+      "export": "Export",
+      "exportMarkdown": "Markdown (.md)",
+      "exportJson": "JSON (.json)",
+      "exportEmpty": "No messages to export",
+      "exported": "Chat exported as {{format}}"
     },
     "querySettings": {
       "parametersTitle": "Parameters",
@@ -525,7 +550,40 @@
         "footnotes": "Footnotes"
       },
       "citationThreshold": "Citation Threshold",
-      "citationThresholdTooltip": "Minimum similarity score (0-1) for matching sentences to sources. Higher = stricter matching, fewer citations. Default: 0.7"
+      "citationThresholdTooltip": "Minimum similarity score (0-1) for matching sentences to sources. Higher = stricter matching, fewer citations. Default: 0.7",
+      "citationThresholdMore": "More",
+      "citationThresholdFewer": "Fewer"
+    },
+    "mode": {
+      "default": "Default",
+      "defaultDesc": "Use mode from settings panel",
+      "hybrid": "Hybrid",
+      "hybridDesc": "Local + Global search combined",
+      "mix": "Mix",
+      "mixDesc": "Hybrid + naive text retrieval",
+      "local": "Local",
+      "localDesc": "Entity-focused neighborhood search",
+      "global": "Global",
+      "globalDesc": "Relationship-focused broad search",
+      "naive": "Naive",
+      "naiveDesc": "Traditional text chunk search",
+      "bypass": "Bypass",
+      "bypassDesc": "Skip retrieval, use LLM directly"
+    },
+    "citation": {
+      "clickToView": "Click to view source",
+      "openDocument": "Open document in new tab",
+      "untitled": "Untitled Document",
+      "section": "Section",
+      "pages": "Pages",
+      "matchConfidence": "Match confidence",
+      "summary": "Cited from {{count}} source(s)",
+      "references": "references",
+      "confidence": {
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      }
     }
   },
   "apiSite": {
@@ -578,5 +636,23 @@
     "prevPage": "Previous Page",
     "nextPage": "Next Page",
     "lastPage": "Last Page"
+  },
+  "shortcutHelp": {
+    "title": "Keyboard Shortcuts",
+    "openHelp": "Open keyboard shortcuts help",
+    "noShortcuts": "No shortcuts registered",
+    "hint": "Press Shift+? to open this dialog anytime",
+    "category": {
+      "global": "Global",
+      "navigation": "Navigation",
+      "documents": "Documents",
+      "graph": "Graph",
+      "retrieval": "Chat"
+    },
+    "focusInput": "Focus chat input",
+    "copyResponse": "Copy last response",
+    "focusSearch": "Focus search",
+    "toggleSettings": "Toggle settings panel",
+    "clearHistory": "Clear chat history"
   }
 }

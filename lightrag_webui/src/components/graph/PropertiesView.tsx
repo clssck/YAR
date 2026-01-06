@@ -1,11 +1,14 @@
-import { GitBranchPlus, Link, Scissors } from 'lucide-react'
+import { GitBranchPlus, Link, Scissors, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PropertyValue } from '@/api/lightrag'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Text from '@/components/ui/Text'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
 import useLightragGraph from '@/hooks/useLightragGraph'
+import { useResponsive } from '@/hooks/useBreakpoint'
+import { cn } from '@/lib/utils'
 import { type RawEdgeType, type RawNodeType, useGraphStore } from '@/stores/graph'
 import EditablePropertyRow from './EditablePropertyRow'
 
@@ -38,8 +41,20 @@ const PropertiesView = () => {
   const graphDataVersion = useGraphStore.use.graphDataVersion()
   void graphDataVersion
 
+  const { isMobile } = useResponsive()
   const [currentElement, setCurrentElement] = useState<NodeType | EdgeType | null>(null)
   const [currentType, setCurrentType] = useState<'node' | 'edge' | null>(null)
+
+  // Close handler to deselect current element
+  const handleClose = () => {
+    if (focusedNode || selectedNode) {
+      useGraphStore.getState().setSelectedNode(null, false)
+      useGraphStore.getState().setFocusedNode(null)
+    } else if (focusedEdge || selectedEdge) {
+      useGraphStore.getState().setSelectedEdge(null)
+      useGraphStore.getState().setFocusedEdge(null)
+    }
+  }
 
   // This effect will run when selection changes or when graph data is updated
   useEffect(() => {
@@ -75,13 +90,32 @@ const PropertiesView = () => {
   if (!currentElement) {
     return null
   }
+
+  // Mobile: bottom sheet style, Desktop: side panel
+  const containerClasses = cn(
+    'bg-background/90 rounded-lg border-2 p-3 text-xs backdrop-blur-lg shadow-lg',
+    isMobile
+      ? 'fixed bottom-0 left-0 right-0 max-h-[50vh] rounded-b-none border-b-0 animate-in slide-in-from-bottom duration-200'
+      : 'max-w-sm'
+  )
+
   return (
-    <div className="bg-background/80 max-w-xs rounded-lg border-2 p-2 text-xs backdrop-blur-lg">
-      {currentType === 'node' ? (
-        <NodePropertiesView node={currentElement as NodeType} />
-      ) : (
-        <EdgePropertiesView edge={currentElement as EdgeType} />
-      )}
+    <div className={cn(containerClasses, 'relative')}>
+      {/* Close button */}
+      <button
+        onClick={handleClose}
+        className="absolute top-2 right-2 z-10 p-1 rounded-full hover:bg-primary/10 transition-colors"
+        aria-label="Close properties panel"
+      >
+        <X className="h-4 w-4 text-muted-foreground" />
+      </button>
+      <div className={cn(isMobile && 'overflow-y-auto max-h-[calc(50vh-2rem)]')}>
+        {currentType === 'node' ? (
+          <NodePropertiesView node={currentElement as NodeType} />
+        ) : (
+          <EdgePropertiesView edge={currentElement as EdgeType} />
+        )}
+      </div>
     </div>
   )
 }
@@ -293,33 +327,36 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex justify-between items-center">
-        <h3 className="text-md pl-1 font-bold tracking-wide text-blue-700">
+    <div className="flex flex-col gap-3">
+      {/* Header with title and action buttons */}
+      <div className="flex justify-between items-center pr-6">
+        <h3 className="text-sm font-semibold tracking-wide text-blue-600 dark:text-blue-400">
           {t('graphPanel.propertiesView.node.title')}
         </h3>
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7 border border-gray-400 hover:bg-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
+            className="h-6 w-6 border border-gray-300 hover:bg-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
             onClick={handleExpandNode}
             tooltip={t('graphPanel.propertiesView.node.expandNode')}
           >
-            <GitBranchPlus className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+            <GitBranchPlus className="h-3.5 w-3.5 text-gray-600 dark:text-gray-300" />
           </Button>
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7 border border-gray-400 hover:bg-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
+            className="h-6 w-6 border border-gray-300 hover:bg-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
             onClick={handlePruneNode}
             tooltip={t('graphPanel.propertiesView.node.pruneNode')}
           >
-            <Scissors className="h-4 w-4 text-gray-900 dark:text-gray-300" />
+            <Scissors className="h-3.5 w-3.5 text-gray-600 dark:text-gray-300" />
           </Button>
         </div>
       </div>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+
+      {/* Node Info Section */}
+      <div className="bg-blue-50/50 dark:bg-blue-950/30 rounded-md p-2 border border-blue-100 dark:border-blue-900/50">
         <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
         <PropertyRow
           name={t('graphPanel.propertiesView.node.labels')}
@@ -342,37 +379,55 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
               side="left"
             />
             {asNumber(node.properties?.db_degree) > node.degree && (
-              <Badge
-                variant="outline"
-                className="text-xs px-1.5 py-0 text-amber-600 border-amber-400"
-              >
-                {asNumber(node.properties.db_degree)}{' '}
-                {t('graphPanel.propertiesView.node.inDatabase')}
-              </Badge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="text-xs px-1.5 py-0 text-amber-600 border-amber-400 cursor-help animate-pulse"
+                  >
+                    +{asNumber(node.properties.db_degree) - node.degree}{' '}
+                    {t('graphPanel.propertiesView.node.hidden', 'hidden')}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-64">
+                  {t(
+                    'graphPanel.propertiesView.node.hiddenConnectionsTooltip',
+                    'This node has {{count}} additional connections in the database that are not currently visible. Click "Load connections" below to expand.',
+                    { count: asNumber(node.properties.db_degree) - node.degree }
+                  )}
+                </TooltipContent>
+              </Tooltip>
             )}
           </span>
         </div>
       </div>
+
       {/* Load Hidden Connections button for nodes with hidden database connections */}
       {asNumber(node.properties?.db_degree) > node.degree && (
-        <div className="py-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full text-amber-600 border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950"
-            onClick={handleExpandNode}
-          >
-            <Link className="h-4 w-4 mr-2" />
-            {t('graphPanel.propertiesView.node.loadConnections', {
-              count: asNumber(node.properties.db_degree) - node.degree,
-            })}
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full text-amber-600 border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950 font-medium"
+          onClick={handleExpandNode}
+          tooltip={t(
+            'graphPanel.propertiesView.node.loadConnectionsTooltip',
+            'Fetch and display {{count}} hidden connections from the database',
+            { count: asNumber(node.properties.db_degree) - node.degree }
+          )}
+        >
+          <Link className="h-4 w-4 mr-2" />
+          {t('graphPanel.propertiesView.node.loadConnections', {
+            count: asNumber(node.properties.db_degree) - node.degree,
+          })}
+        </Button>
       )}
-      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">
-        {t('graphPanel.propertiesView.node.properties')}
-      </h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+
+      {/* Properties Section */}
+      <div>
+        <h4 className="text-xs font-semibold tracking-wide text-amber-600 dark:text-amber-400 mb-1.5 px-1">
+          {t('graphPanel.propertiesView.node.properties')}
+        </h4>
+        <div className="bg-amber-50/50 dark:bg-amber-950/30 rounded-md p-2 border border-amber-100 dark:border-amber-900/50 max-h-48 overflow-auto">
         {Object.keys(node.properties)
           .sort()
           .map((name) => {
@@ -392,13 +447,16 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
               />
             )
           })}
+        </div>
       </div>
+
+      {/* Relationships Section */}
       {node.relationships.length > 0 && (
-        <>
-          <h3 className="text-md pl-1 font-bold tracking-wide text-emerald-700">
+        <div>
+          <h4 className="text-xs font-semibold tracking-wide text-emerald-600 dark:text-emerald-400 mb-1.5 px-1">
             {t('graphPanel.propertiesView.node.relationships')}
-          </h3>
-          <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+          </h4>
+          <div className="bg-emerald-50/50 dark:bg-emerald-950/30 rounded-md p-2 border border-emerald-100 dark:border-emerald-900/50 max-h-32 overflow-auto">
             {node.relationships.map(({ type, id, label }) => {
               return (
                 <PropertyRow
@@ -412,7 +470,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
               )
             })}
           </div>
-        </>
+        </div>
       )}
     </div>
   )
@@ -421,11 +479,14 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
 const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
   const { t } = useTranslation()
   return (
-    <div className="flex flex-col gap-2">
-      <h3 className="text-md pl-1 font-bold tracking-wide text-plum">
+    <div className="flex flex-col gap-3">
+      {/* Header */}
+      <h3 className="text-sm font-semibold tracking-wide text-purple-600 dark:text-purple-400 pr-6">
         {t('graphPanel.propertiesView.edge.title')}
       </h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+
+      {/* Edge Info Section */}
+      <div className="bg-purple-50/50 dark:bg-purple-950/30 rounded-md p-2 border border-purple-100 dark:border-purple-900/50">
         <PropertyRow name={t('graphPanel.propertiesView.edge.id')} value={edge.id} />
         {edge.type && (
           <PropertyRow name={t('graphPanel.propertiesView.edge.type')} value={edge.type} />
@@ -445,29 +506,33 @@ const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
           }}
         />
       </div>
-      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">
-        {t('graphPanel.propertiesView.edge.properties')}
-      </h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
-        {Object.keys(edge.properties)
-          .sort()
-          .map((name) => {
-            if (name === 'created_at' || name === 'truncate') return null // Hide created_at and truncate properties
-            return (
-              <PropertyRow
-                key={name}
-                name={name}
-                value={edge.properties[name]}
-                edgeId={String(edge.id)}
-                dynamicId={String(edge.dynamicId)}
-                entityType="edge"
-                sourceId={asString(edge.sourceNode?.properties.entity_id) || edge.source}
-                targetId={asString(edge.targetNode?.properties.entity_id) || edge.target}
-                isEditable={name === 'description' || name === 'keywords'}
-                truncate={asString(edge.properties.truncate)}
-              />
-            )
-          })}
+
+      {/* Properties Section */}
+      <div>
+        <h4 className="text-xs font-semibold tracking-wide text-amber-600 dark:text-amber-400 mb-1.5 px-1">
+          {t('graphPanel.propertiesView.edge.properties')}
+        </h4>
+        <div className="bg-amber-50/50 dark:bg-amber-950/30 rounded-md p-2 border border-amber-100 dark:border-amber-900/50 max-h-48 overflow-auto">
+          {Object.keys(edge.properties)
+            .sort()
+            .map((name) => {
+              if (name === 'created_at' || name === 'truncate') return null // Hide created_at and truncate properties
+              return (
+                <PropertyRow
+                  key={name}
+                  name={name}
+                  value={edge.properties[name]}
+                  edgeId={String(edge.id)}
+                  dynamicId={String(edge.dynamicId)}
+                  entityType="edge"
+                  sourceId={asString(edge.sourceNode?.properties.entity_id) || edge.source}
+                  targetId={asString(edge.targetNode?.properties.entity_id) || edge.target}
+                  isEditable={name === 'description' || name === 'keywords'}
+                  truncate={asString(edge.properties.truncate)}
+                />
+              )
+            })}
+        </div>
       </div>
     </div>
   )

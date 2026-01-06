@@ -6,14 +6,18 @@ import {
   Brain,
   CheckCircle2,
   CheckSquareIcon,
+  ChevronDown,
+  ChevronRight,
   FileText,
   Info,
   Loader2,
   RefreshCwIcon,
+  RotateCcw,
+  Search,
   Shell,
   XIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -25,6 +29,7 @@ import {
   type PaginatedDocsResponse,
   type PaginationInfo,
   type PropertyValue,
+  reprocessFailedDocuments,
   scanNewDocuments,
 } from '@/api/lightrag'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
@@ -34,8 +39,11 @@ import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
 import Button from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import Checkbox from '@/components/ui/Checkbox'
-import EmptyCard from '@/components/ui/EmptyCard'
+import Input from '@/components/ui/Input'
+import { EmptyDocuments } from '@/components/ui/EmptyState'
 import PaginationControls from '@/components/ui/PaginationControls'
+import { DocumentStatusBadge } from '@/components/ui/StatusBadge'
+import LastUpdated from '@/components/ui/LastUpdated'
 import {
   Table,
   TableBody,
@@ -44,11 +52,101 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/Table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
+import { useResponsive } from '@/hooks/useBreakpoint'
 import { cn, errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
 
 type StatusFilter = DocStatus | 'all'
+
+// Timeline stages for document processing
+const TIMELINE_STAGES = ['pending', 'preprocessed', 'processing', 'processed'] as const
+
+interface StatusTimelineProps {
+  currentStatus: DocStatus
+}
+
+function StatusTimeline({ currentStatus }: StatusTimelineProps) {
+  const { t } = useTranslation()
+  const getStageIndex = (status: DocStatus): number => {
+    if (status === 'failed') return -1 // Failed can happen at any stage
+    return TIMELINE_STAGES.indexOf(status as typeof TIMELINE_STAGES[number])
+  }
+
+  const currentIndex = getStageIndex(currentStatus)
+  const isFailed = currentStatus === 'failed'
+
+  const stageLabels: Record<string, string> = {
+    pending: t('documentPanel.documentManager.status.pending', 'Pending'),
+    preprocessed: t('documentPanel.documentManager.status.preprocessed', 'Preprocessed'),
+    processing: t('documentPanel.documentManager.status.processing', 'Processing'),
+    processed: t('documentPanel.documentManager.status.completed', 'Processed'),
+  }
+
+  return (
+    <div className="flex flex-col gap-1 min-w-[140px]">
+      <div className="text-xs font-medium text-muted-foreground mb-1">
+        {t('documentPanel.documentManager.timeline.title', 'Processing Timeline')}
+      </div>
+      <div className="flex items-center gap-1">
+        {TIMELINE_STAGES.map((stage, index) => {
+          const isPast = currentIndex > index
+          const isCurrent = currentIndex === index
+          const isAfter = currentIndex < index
+
+          return (
+            <React.Fragment key={stage}>
+              {/* Stage circle */}
+              <div
+                className={cn(
+                  'w-3 h-3 rounded-full border-2 flex-shrink-0 transition-colors',
+                  isPast && 'bg-emerald-500 border-emerald-500',
+                  isCurrent && !isFailed && 'bg-blue-500 border-blue-500 animate-pulse',
+                  isFailed && stage === TIMELINE_STAGES[Math.max(0, currentIndex)] && 'bg-red-500 border-red-500',
+                  isAfter && 'bg-transparent border-muted-foreground/30'
+                )}
+                title={stageLabels[stage]}
+              />
+              {/* Connector line (not after last) */}
+              {index < TIMELINE_STAGES.length - 1 && (
+                <div
+                  className={cn(
+                    'h-0.5 w-3 flex-shrink-0',
+                    isPast ? 'bg-emerald-500' : 'bg-muted-foreground/20'
+                  )}
+                />
+              )}
+            </React.Fragment>
+          )
+        })}
+      </div>
+      {/* Stage labels */}
+      <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
+        <span>{stageLabels.pending}</span>
+        <span>{stageLabels.processed}</span>
+      </div>
+      {/* Current status indicator */}
+      <div className={cn(
+        'text-xs font-medium mt-1 px-2 py-0.5 rounded-full text-center',
+        currentStatus === 'processed' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+        currentStatus === 'processing' && 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+        currentStatus === 'preprocessed' && 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+        currentStatus === 'pending' && 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+        currentStatus === 'failed' && 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+      )}>
+        {currentStatus === 'failed'
+          ? t('documentPanel.documentManager.status.failed', 'Failed')
+          : stageLabels[currentStatus]}
+      </div>
+    </div>
+  )
+}
 
 // Utility functions defined outside component for better performance and to avoid dependency issues
 const getCountValue = (counts: Record<string, number>, ...keys: string[]): number => {
@@ -262,6 +360,11 @@ export default function DocumentManager() {
   })
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({ all: 0 })
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [lastFetchTime, setLastFetchTime] = useState<number | null>(null)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const deferredSearchQuery = useDeferredValue(searchQuery)
+  const { isMobile, isTablet, isDesktop } = useResponsive()
 
   // Sort state
   const [sortField, setSortField] = useState<SortField>('updated_at')
@@ -283,6 +386,12 @@ export default function DocumentManager() {
   // State for document selection
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const isSelectionMode = selectedDocIds.length > 0
+
+  // State for expanded error details (track which document IDs are expanded)
+  const [expandedErrorIds, setExpandedErrorIds] = useState<Set<string>>(new Set())
+
+  // State for retry operation
+  const [isRetrying, setIsRetrying] = useState(false)
 
   // Add refs to track previous pipelineBusy state and current interval
   const prevPipelineBusyRef = useRef<boolean | undefined>(undefined)
@@ -311,6 +420,19 @@ export default function DocumentManager() {
       } else {
         return prev.filter((id) => id !== docId)
       }
+    })
+  }, [])
+
+  // Toggle expanded error details for a document
+  const toggleErrorExpanded = useCallback((docId: string) => {
+    setExpandedErrorIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(docId)) {
+        next.delete(docId)
+      } else {
+        next.add(docId)
+      }
+      return next
     })
   }, [])
 
@@ -381,14 +503,28 @@ export default function DocumentManager() {
     [sortField, sortDirection, showFileName]
   )
 
+  // Filter documents based on search query
+  const filteredDocs = useMemo(() => {
+    if (!deferredSearchQuery.trim()) {
+      return currentPageDocs
+    }
+    const query = deferredSearchQuery.toLowerCase()
+    return currentPageDocs.filter(
+      (doc) =>
+        doc.id.toLowerCase().includes(query) ||
+        doc.file_path.toLowerCase().includes(query) ||
+        doc.content_summary?.toLowerCase().includes(query)
+    )
+  }, [currentPageDocs, deferredSearchQuery])
+
   // Define a new type that includes status information
   type DocStatusWithStatus = DocStatusResponse & { status: DocStatus }
 
   const filteredAndSortedDocs = useMemo(() => {
-    // Use currentPageDocs directly if available (from paginated API)
+    // Use filteredDocs (search-filtered currentPageDocs) if available
     // This preserves the backend's sort order and prevents status grouping
-    if (currentPageDocs && currentPageDocs.length > 0) {
-      return currentPageDocs.map((doc) => ({
+    if (filteredDocs && filteredDocs.length > 0) {
+      return filteredDocs.map((doc) => ({
         ...doc,
         status: doc.status as DocStatus,
       })) as DocStatusWithStatus[]
@@ -427,7 +563,7 @@ export default function DocumentManager() {
     }
 
     return allDocuments
-  }, [currentPageDocs, docs, sortField, sortDirection, statusFilter, sortDocuments])
+  }, [filteredDocs, docs, sortField, sortDirection, statusFilter, sortDocuments])
 
   // Calculate current page selection state (after filteredAndSortedDocs is defined)
   const currentPageDocIds = useMemo(() => {
@@ -664,6 +800,7 @@ export default function DocumentManager() {
     setPagination(response.pagination)
     setCurrentPageDocs(response.documents)
     setStatusCounts(response.status_counts)
+    setLastFetchTime(Date.now())
 
     // Update legacy docs state for backward compatibility
     const legacyDocs: DocsStatusesResponse = {
@@ -1008,6 +1145,47 @@ export default function DocumentManager() {
     }
   }, [t, startPollingInterval, currentTab, health, statusCounts])
 
+  // Retry failed documents
+  const retryFailedDocuments = useCallback(async () => {
+    try {
+      if (!isMountedRef.current || isRetrying) return
+
+      setIsRetrying(true)
+      const { status, message } = await reprocessFailedDocuments()
+
+      if (!isMountedRef.current) return
+
+      if (status === 'reprocessing_started') {
+        toast.success(t('documentPanel.documentManager.retrySuccess', 'Retrying failed documents...'))
+
+        // Reset health check timer and start fast polling
+        useBackendState.getState().resetHealthCheckTimerDelayed(1000)
+        startPollingInterval(2000)
+
+        // Restore normal polling after 15 seconds
+        setTimeout(() => {
+          if (isMountedRef.current && currentTab === 'documents' && health) {
+            const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
+            const normalInterval = hasActiveDocuments ? 5000 : 30000
+            startPollingInterval(normalInterval)
+          }
+        }, 15000)
+      } else {
+        toast.error(message || t('documentPanel.documentManager.retryFailed', 'Failed to retry documents'))
+      }
+    } catch (err) {
+      if (isMountedRef.current) {
+        toast.error(
+          t('documentPanel.documentManager.errors.retryFailed', { error: errorMessage(err) })
+        )
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsRetrying(false)
+      }
+    }
+  }, [t, isRetrying, startPollingInterval, currentTab, health, statusCounts])
+
   // Handle page size change - update state and save to store
   const handlePageSizeChange = useCallback(
     (newPageSize: number) => {
@@ -1204,8 +1382,29 @@ export default function DocumentManager() {
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col min-h-0 overflow-auto">
-        {/* Modern Interactive Stats Bar */}
-        <div className="bg-muted/20 p-2 rounded-xl flex flex-wrap gap-2 mb-6">
+        {/* Search Bar */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder={t('documentPanel.documentManager.searchPlaceholder', 'Search documents...')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 pr-9"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground"
+            >
+              <XIcon className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Status Filter Chips */}
+        <div className="flex flex-wrap gap-2 mb-4">
           {statItems.map((item) => {
             const isActive = statusFilter === item.id
             const Icon = item.icon
@@ -1218,39 +1417,51 @@ export default function DocumentManager() {
                 onClick={() => handleStatusFilterChange(item.id)}
                 aria-pressed={isActive}
                 className={cn(
-                  'flex-1 min-w-[140px] flex flex-col gap-1 p-3 rounded-lg transition-all cursor-pointer border select-none text-left',
+                  'inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer border select-none',
                   isActive
-                    ? 'bg-background shadow-sm border-border ring-1 ring-black/5 dark:ring-white/5'
-                    : 'bg-background/80 border-border/40 hover:bg-background hover:border-border/60'
+                    ? 'bg-primary text-primary-foreground border-primary ring-2 ring-primary/20'
+                    : 'bg-muted/50 text-muted-foreground border-transparent hover:bg-muted hover:text-foreground'
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <span
+                {showIcon && (
+                  <Icon
                     className={cn(
-                      'text-xs font-medium',
-                      isActive ? 'text-foreground' : 'text-muted-foreground'
+                      'h-3.5 w-3.5',
+                      isActive ? 'text-primary-foreground' : item.color,
+                      item.spin && item.count > 0 && 'animate-spin'
                     )}
-                  >
-                    {item.label}
-                  </span>
-                  {showIcon && (
-                    <Icon
-                      className={cn(
-                        'h-4 w-4',
-                        isActive ? item.activeColor : item.color,
-                        item.spin && item.count > 0 && 'animate-spin'
-                      )}
-                    />
-                  )}
-                </div>
-                <div
+                  />
+                )}
+                <span>{item.label}</span>
+                <span
                   className={cn(
-                    'text-2xl font-bold',
-                    isActive ? 'text-foreground' : 'text-muted-foreground/80'
+                    'px-1.5 py-0.5 text-xs rounded-full',
+                    isActive
+                      ? 'bg-primary-foreground/20 text-primary-foreground'
+                      : 'bg-muted-foreground/20 text-muted-foreground'
                   )}
                 >
                   {item.count}
-                </div>
+                </span>
+                {isActive && item.id !== 'all' && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleStatusFilterChange('all')
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation()
+                        handleStatusFilterChange('all')
+                      }
+                    }}
+                    className="ml-0.5 hover:bg-primary-foreground/20 rounded-full p-0.5"
+                  >
+                    <XIcon className="h-3 w-3" />
+                  </span>
+                )}
               </button>
             )
           })}
@@ -1278,6 +1489,28 @@ export default function DocumentManager() {
               <Shell className="h-4 w-4" />{' '}
               {t('documentPanel.documentManager.pipelineStatusButton')}
             </Button>
+            {failedCount > 0 && (
+              <Button
+                variant="outline"
+                onClick={retryFailedDocuments}
+                side="bottom"
+                tooltip={t('documentPanel.documentManager.retryFailedTooltip', 'Retry all failed documents')}
+                size="sm"
+                disabled={pipelineBusy || isRetrying || processingCount > 0}
+                className={cn(
+                  'text-destructive border-destructive/50 hover:bg-destructive/10',
+                  isRetrying && 'animate-pulse'
+                )}
+              >
+                <RotateCcw className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
+                {isRetrying
+                  ? t('documentPanel.documentManager.retryingButton', 'Retrying...')
+                  : t('documentPanel.documentManager.retryFailedButton', {
+                      count: failedCount,
+                      defaultValue: `Retry ${failedCount} Failed`,
+                    })}
+              </Button>
+            )}
           </div>
 
           {/* Pagination Controls in the middle */}
@@ -1345,7 +1578,11 @@ export default function DocumentManager() {
             ) : !isSelectionMode ? (
               <ClearDocumentsDialog onDocumentsCleared={handleDocumentsCleared} />
             ) : null}
-            <UploadDocumentsDialog onDocumentsUploaded={fetchDocuments} />
+            <UploadDocumentsDialog
+              onDocumentsUploaded={fetchDocuments}
+              open={uploadDialogOpen}
+              onOpenChange={setUploadDialogOpen}
+            />
             <PipelineStatusDialog open={showPipelineStatus} onOpenChange={setShowPipelineStatus} />
           </div>
         </div>
@@ -1354,6 +1591,11 @@ export default function DocumentManager() {
           <CardHeader className="flex-none py-2 px-4">
             <div className="flex justify-between items-center">
               <CardTitle>{t('documentPanel.documentManager.uploadedTitle')}</CardTitle>
+              <LastUpdated
+                timestamp={lastFetchTime}
+                onRefresh={fetchDocuments}
+                isRefreshing={isRefreshing}
+              />
             </div>
             <CardDescription aria-hidden="true" className="hidden">
               {t('documentPanel.documentManager.uploadedDescription')}
@@ -1363,203 +1605,330 @@ export default function DocumentManager() {
           <CardContent className="flex-1 relative p-0" ref={cardContentRef}>
             {!docs && (
               <div className="absolute inset-0 p-0">
-                <EmptyCard
-                  title={t('documentPanel.documentManager.emptyTitle')}
-                  description={t('documentPanel.documentManager.emptyDescription')}
-                />
+                <EmptyDocuments onUpload={() => setUploadDialogOpen(true)} />
               </div>
             )}
             {docs && (
               <div className="absolute inset-0 flex flex-col p-0">
                 <div className="absolute inset-[-1px] flex flex-col p-0 border rounded-md border-gray-200 dark:border-gray-700 overflow-hidden">
-                  <Table className="w-full">
-                    <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
-                      <TableRow className="border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
-                        <TableHead
-                          onClick={() => handleSort('id')}
-                          className="cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 select-none"
-                        >
-                          <div className="flex items-center">
-                            {showFileName
-                              ? t('documentPanel.documentManager.columns.fileName')
-                              : t('documentPanel.documentManager.columns.id')}
-                            {((sortField === 'id' && !showFileName) ||
-                              (sortField === 'file_path' && showFileName)) && (
-                              <span className="ml-1">
-                                {sortDirection === 'asc' ? (
-                                  <ArrowUpIcon size={14} />
-                                ) : (
-                                  <ArrowDownIcon size={14} />
-                                )}
-                              </span>
-                            )}
-                          </div>
-                        </TableHead>
-                        <TableHead>{t('documentPanel.documentManager.columns.summary')}</TableHead>
-                        <TableHead>{t('documentPanel.documentManager.columns.status')}</TableHead>
-                        <TableHead>{t('documentPanel.documentManager.columns.length')}</TableHead>
-                        <TableHead>{t('documentPanel.documentManager.columns.chunks')}</TableHead>
-                        <TableHead>{t('documentPanel.documentManager.columns.s3Key')}</TableHead>
-                        <TableHead
-                          onClick={() => handleSort('created_at')}
-                          className="cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 select-none"
-                        >
-                          <div className="flex items-center">
-                            {t('documentPanel.documentManager.columns.created')}
-                            {sortField === 'created_at' && (
-                              <span className="ml-1">
-                                {sortDirection === 'asc' ? (
-                                  <ArrowUpIcon size={14} />
-                                ) : (
-                                  <ArrowDownIcon size={14} />
-                                )}
-                              </span>
-                            )}
-                          </div>
-                        </TableHead>
-                        <TableHead
-                          onClick={() => handleSort('updated_at')}
-                          className="cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 select-none"
-                        >
-                          <div className="flex items-center">
-                            {t('documentPanel.documentManager.columns.updated')}
-                            {sortField === 'updated_at' && (
-                              <span className="ml-1">
-                                {sortDirection === 'asc' ? (
-                                  <ArrowUpIcon size={14} />
-                                ) : (
-                                  <ArrowDownIcon size={14} />
-                                )}
-                              </span>
-                            )}
-                          </div>
-                        </TableHead>
-                        <TableHead className="w-16 text-center">
-                          {t('documentPanel.documentManager.columns.select')}
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody className="text-sm overflow-auto">
+                  {/* Mobile: Card Layout */}
+                  {isMobile && (
+                    <div className="overflow-auto p-2 space-y-2">
                       {filteredAndSortedDocs?.map((doc) => (
-                        <TableRow key={doc.id}>
-                          <TableCell className="truncate font-mono overflow-visible max-w-[250px]">
-                            {showFileName ? (
-                              <>
-                                <div className="group relative overflow-visible tooltip-container">
-                                  <div className="truncate">{getDisplayFileName(doc, 30)}</div>
-                                  <div className="invisible group-hover:visible tooltip">
-                                    {doc.file_path}
-                                  </div>
-                                </div>
-                                <div className="text-xs text-gray-500">{doc.id}</div>
-                              </>
-                            ) : (
-                              <div className="group relative overflow-visible tooltip-container">
-                                <div className="truncate">{doc.id}</div>
-                                <div className="invisible group-hover:visible tooltip">
-                                  {doc.file_path}
-                                </div>
+                        <div
+                          key={doc.id}
+                          className={cn(
+                            'p-3 rounded-lg border bg-card transition-colors',
+                            selectedDocIds.includes(doc.id) && 'ring-2 ring-primary/50 bg-primary/5'
+                          )}
+                        >
+                          {/* Header: Name + Checkbox */}
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">
+                                {showFileName ? getDisplayFileName(doc, 25) : doc.id}
                               </div>
-                            )}
-                          </TableCell>
-                          <TableCell className="max-w-xs min-w-45 truncate overflow-visible">
-                            <div className="group relative overflow-visible tooltip-container">
-                              <div className="truncate">{doc.content_summary}</div>
-                              <div className="invisible group-hover:visible tooltip">
-                                {doc.content_summary}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="group relative flex items-center overflow-visible tooltip-container">
-                              {doc.status === 'processed' && (
-                                <span className="text-green-600">
-                                  {t('documentPanel.documentManager.status.completed')}
-                                </span>
-                              )}
-                              {doc.status === 'preprocessed' && (
-                                <span className="text-purple-600">
-                                  {t('documentPanel.documentManager.status.preprocessed')}
-                                </span>
-                              )}
-                              {doc.status === 'processing' && (
-                                <span className="text-blue-600">
-                                  {t('documentPanel.documentManager.status.processing')}
-                                </span>
-                              )}
-                              {doc.status === 'pending' && (
-                                <span className="text-yellow-600">
-                                  {t('documentPanel.documentManager.status.pending')}
-                                </span>
-                              )}
-                              {doc.status === 'failed' && (
-                                <span className="text-red-600">
-                                  {t('documentPanel.documentManager.status.failed')}
-                                </span>
-                              )}
-
-                              {/* Icon rendering logic */}
-                              {doc.error_msg ? (
-                                <AlertTriangle className="ml-2 h-4 w-4 text-yellow-500" />
-                              ) : (
-                                doc.metadata &&
-                                Object.keys(doc.metadata).length > 0 && (
-                                  <Info className="ml-2 h-4 w-4 text-blue-500" />
-                                )
-                              )}
-
-                              {/* Tooltip rendering logic */}
-                              {(doc.error_msg ||
-                                (doc.metadata && Object.keys(doc.metadata).length > 0) ||
-                                doc.track_id) && (
-                                <div className="invisible group-hover:visible tooltip">
-                                  {doc.track_id && (
-                                    <div className="mt-1">Track ID: {doc.track_id}</div>
-                                  )}
-                                  {doc.metadata && Object.keys(doc.metadata).length > 0 && (
-                                    <pre>{formatMetadata(doc.metadata)}</pre>
-                                  )}
-                                  {doc.error_msg && <pre>{doc.error_msg}</pre>}
+                              {showFileName && (
+                                <div className="text-xs text-muted-foreground font-mono truncate">
+                                  {doc.id}
                                 </div>
                               )}
                             </div>
-                          </TableCell>
-                          <TableCell>{doc.content_length ?? '-'}</TableCell>
-                          <TableCell>{doc.chunks_count ?? '-'}</TableCell>
-                          <TableCell className="max-w-[150px] truncate overflow-visible">
-                            {doc.s3_key ? (
-                              <div className="group relative overflow-visible tooltip-container">
-                                <div className="truncate text-xs text-muted-foreground font-mono">
-                                  {doc.s3_key.split('/').slice(-2).join('/')}
-                                </div>
-                                <div className="invisible group-hover:visible tooltip">
-                                  {doc.s3_key}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="truncate">
-                            {new Date(doc.created_at).toLocaleString()}
-                          </TableCell>
-                          <TableCell className="truncate">
-                            {new Date(doc.updated_at).toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-center">
                             <Checkbox
                               checked={selectedDocIds.includes(doc.id)}
                               onCheckedChange={(checked) =>
                                 handleDocumentSelect(doc.id, checked === true)
                               }
-                              // disabled={doc.status !== 'processed'}
-                              className="mx-auto"
                             />
-                          </TableCell>
-                        </TableRow>
+                          </div>
+
+                          {/* Status + Summary */}
+                          <div className="flex items-center gap-2 mb-2">
+                            <TooltipProvider delayDuration={300}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="cursor-help">
+                                    {doc.status === 'processed' && <DocumentStatusBadge.Processed />}
+                                    {doc.status === 'preprocessed' && <DocumentStatusBadge.Preprocessed />}
+                                    {doc.status === 'processing' && <DocumentStatusBadge.Processing />}
+                                    {doc.status === 'pending' && <DocumentStatusBadge.Pending />}
+                                    {doc.status === 'failed' && <DocumentStatusBadge.Failed />}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" align="start" className="p-2">
+                                  <StatusTimeline currentStatus={doc.status} />
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            {doc.error_msg && (
+                              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                            )}
+                          </div>
+
+                          {/* Summary */}
+                          {doc.content_summary && (
+                            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                              {doc.content_summary}
+                            </p>
+                          )}
+
+                          {/* Stats Row */}
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            {doc.content_length != null && (
+                              <span>{doc.content_length.toLocaleString()} chars</span>
+                            )}
+                            {doc.chunks_count != null && (
+                              <span>{doc.chunks_count} chunks</span>
+                            )}
+                            <span>{new Date(doc.updated_at).toLocaleDateString()}</span>
+                          </div>
+
+                          {/* Error Message (if failed) */}
+                          {doc.error_msg && (
+                            <div className="mt-2 p-2 rounded bg-destructive/10 text-destructive text-xs">
+                              <pre className="whitespace-pre-wrap break-words">{doc.error_msg}</pre>
+                            </div>
+                          )}
+                        </div>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  )}
+
+                  {/* Tablet/Desktop: Table Layout */}
+                  {!isMobile && (
+                    <Table className="w-full">
+                      <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
+                        <TableRow className="border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                          <TableHead
+                            onClick={() => handleSort('id')}
+                            className="cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 select-none"
+                          >
+                            <div className="flex items-center">
+                              {showFileName
+                                ? t('documentPanel.documentManager.columns.fileName')
+                                : t('documentPanel.documentManager.columns.id')}
+                              {((sortField === 'id' && !showFileName) ||
+                                (sortField === 'file_path' && showFileName)) && (
+                                <span className="ml-1">
+                                  {sortDirection === 'asc' ? (
+                                    <ArrowUpIcon size={14} />
+                                  ) : (
+                                    <ArrowDownIcon size={14} />
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </TableHead>
+                          <TableHead>{t('documentPanel.documentManager.columns.summary')}</TableHead>
+                          <TableHead>{t('documentPanel.documentManager.columns.status')}</TableHead>
+                          <TableHead>{t('documentPanel.documentManager.columns.length')}</TableHead>
+                          <TableHead>{t('documentPanel.documentManager.columns.chunks')}</TableHead>
+                          {/* S3 Key: Hidden on tablet, shown on desktop */}
+                          {isDesktop && (
+                            <TableHead>{t('documentPanel.documentManager.columns.s3Key')}</TableHead>
+                          )}
+                          <TableHead
+                            onClick={() => handleSort('created_at')}
+                            className="cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 select-none"
+                          >
+                            <div className="flex items-center">
+                              {t('documentPanel.documentManager.columns.created')}
+                              {sortField === 'created_at' && (
+                                <span className="ml-1">
+                                  {sortDirection === 'asc' ? (
+                                    <ArrowUpIcon size={14} />
+                                  ) : (
+                                    <ArrowDownIcon size={14} />
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </TableHead>
+                          <TableHead
+                            onClick={() => handleSort('updated_at')}
+                            className="cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 select-none"
+                          >
+                            <div className="flex items-center">
+                              {t('documentPanel.documentManager.columns.updated')}
+                              {sortField === 'updated_at' && (
+                                <span className="ml-1">
+                                  {sortDirection === 'asc' ? (
+                                    <ArrowUpIcon size={14} />
+                                  ) : (
+                                    <ArrowDownIcon size={14} />
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </TableHead>
+                          <TableHead className="w-16 text-center">
+                            {t('documentPanel.documentManager.columns.select')}
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="text-sm overflow-auto">
+                        {filteredAndSortedDocs?.map((doc) => {
+                          const hasExpandableDetails = doc.error_msg || (doc.metadata && Object.keys(doc.metadata).length > 0) || doc.track_id
+                          const isExpanded = expandedErrorIds.has(doc.id)
+                          const columnCount = isDesktop ? 9 : 8
+
+                          return (
+                            <React.Fragment key={doc.id}>
+                              <TableRow className={cn(hasExpandableDetails && isExpanded && 'border-b-0')}>
+                                <TableCell className={cn(
+                                  'truncate font-mono overflow-visible',
+                                  isTablet ? 'max-w-[180px]' : 'max-w-[250px]'
+                                )}>
+                                  {showFileName ? (
+                                    <>
+                                      <div className="group relative overflow-visible tooltip-container">
+                                        <div className="truncate">{getDisplayFileName(doc, isTablet ? 20 : 30)}</div>
+                                        <div className="invisible group-hover:visible tooltip">
+                                          {doc.file_path}
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-gray-500">{doc.id}</div>
+                                    </>
+                                  ) : (
+                                    <div className="group relative overflow-visible tooltip-container">
+                                      <div className="truncate">{doc.id}</div>
+                                      <div className="invisible group-hover:visible tooltip">
+                                        {doc.file_path}
+                                      </div>
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell className={cn(
+                                  'truncate overflow-visible',
+                                  isTablet ? 'max-w-[120px]' : 'max-w-xs min-w-45'
+                                )}>
+                                  <div className="group relative overflow-visible tooltip-container">
+                                    <div className="truncate">{doc.content_summary}</div>
+                                    <div className="invisible group-hover:visible tooltip">
+                                      {doc.content_summary}
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-1">
+                                    {/* Status badge with timeline tooltip */}
+                                    <TooltipProvider delayDuration={300}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span className="cursor-help">
+                                            {doc.status === 'processed' && <DocumentStatusBadge.Processed />}
+                                            {doc.status === 'preprocessed' && <DocumentStatusBadge.Preprocessed />}
+                                            {doc.status === 'processing' && <DocumentStatusBadge.Processing />}
+                                            {doc.status === 'pending' && <DocumentStatusBadge.Pending />}
+                                            {doc.status === 'failed' && <DocumentStatusBadge.Failed />}
+                                          </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top" align="start" className="p-2">
+                                          <StatusTimeline currentStatus={doc.status} />
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+
+                                    {/* Clickable expand button for documents with details */}
+                                    {hasExpandableDetails && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleErrorExpanded(doc.id)}
+                                        className={cn(
+                                          'ml-1 p-1 rounded-md transition-colors hover:bg-muted',
+                                          doc.error_msg ? 'text-yellow-500 hover:text-yellow-600' : 'text-blue-500 hover:text-blue-600'
+                                        )}
+                                        title={isExpanded ? t('documentPanel.documentManager.collapseDetails', 'Collapse details') : t('documentPanel.documentManager.expandDetails', 'View details')}
+                                      >
+                                        {doc.error_msg ? (
+                                          <AlertTriangle className="h-4 w-4" />
+                                        ) : (
+                                          <Info className="h-4 w-4" />
+                                        )}
+                                        {isExpanded ? (
+                                          <ChevronDown className="h-3 w-3 inline-block ml-0.5" />
+                                        ) : (
+                                          <ChevronRight className="h-3 w-3 inline-block ml-0.5" />
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>{doc.content_length ?? '-'}</TableCell>
+                                <TableCell>{doc.chunks_count ?? '-'}</TableCell>
+                                {/* S3 Key: Hidden on tablet, shown on desktop */}
+                                {isDesktop && (
+                                  <TableCell className="max-w-[150px] truncate overflow-visible">
+                                    {doc.s3_key ? (
+                                      <div className="group relative overflow-visible tooltip-container">
+                                        <div className="truncate text-xs text-muted-foreground font-mono">
+                                          {doc.s3_key.split('/').slice(-2).join('/')}
+                                        </div>
+                                        <div className="invisible group-hover:visible tooltip">
+                                          {doc.s3_key}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">—</span>
+                                    )}
+                                  </TableCell>
+                                )}
+                                <TableCell className="truncate">
+                                  {new Date(doc.created_at).toLocaleString()}
+                                </TableCell>
+                                <TableCell className="truncate">
+                                  {new Date(doc.updated_at).toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <Checkbox
+                                    checked={selectedDocIds.includes(doc.id)}
+                                    onCheckedChange={(checked) =>
+                                      handleDocumentSelect(doc.id, checked === true)
+                                    }
+                                    className="mx-auto"
+                                  />
+                                </TableCell>
+                              </TableRow>
+
+                              {/* Expanded details row */}
+                              {hasExpandableDetails && isExpanded && (
+                                <TableRow className="bg-muted/30 hover:bg-muted/40">
+                                  <TableCell colSpan={columnCount} className="py-3 px-4">
+                                    <div className="space-y-2 text-sm">
+                                      {doc.track_id && (
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-muted-foreground font-medium">Track ID:</span>
+                                          <code className="px-2 py-0.5 bg-muted rounded text-xs font-mono">
+                                            {doc.track_id}
+                                          </code>
+                                        </div>
+                                      )}
+                                      {doc.metadata && Object.keys(doc.metadata).length > 0 && (
+                                        <div>
+                                          <span className="text-muted-foreground font-medium">Metadata:</span>
+                                          <pre className="mt-1 p-2 bg-muted rounded text-xs font-mono overflow-x-auto">
+                                            {formatMetadata(doc.metadata)}
+                                          </pre>
+                                        </div>
+                                      )}
+                                      {doc.error_msg && (
+                                        <div>
+                                          <span className="text-destructive font-medium">Error:</span>
+                                          <pre className="mt-1 p-2 bg-destructive/10 border border-destructive/20 rounded text-xs font-mono text-destructive whitespace-pre-wrap break-words">
+                                            {doc.error_msg}
+                                          </pre>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </React.Fragment>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
                 </div>
               </div>
             )}

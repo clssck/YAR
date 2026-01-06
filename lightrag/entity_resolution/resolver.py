@@ -19,6 +19,83 @@ from lightrag.utils import logger, normalize_unicode_for_entity_matching
 
 from .config import DEFAULT_CONFIG, EntityResolutionConfig
 
+
+# Types that should never be merged together
+# These represent fundamentally different categories of entities
+INCOMPATIBLE_TYPE_PAIRS: set[frozenset[str]] = {
+    frozenset({'person', 'organization'}),
+    frozenset({'person', 'location'}),
+    frozenset({'person', 'event'}),
+    frozenset({'person', 'concept'}),
+    frozenset({'location', 'organization'}),
+    frozenset({'location', 'event'}),
+    frozenset({'organization', 'concept'}),
+}
+
+
+def _types_are_compatible(type_a: str, type_b: str) -> bool:
+    """Check if two entity types could plausibly refer to the same entity.
+
+    This provides a safety net against LLM errors - if types are clearly
+    incompatible (e.g., Person vs Organization), reject the match even
+    if the LLM said they're the same.
+
+    Args:
+        type_a: First entity type
+        type_b: Second entity type
+
+    Returns:
+        True if types are compatible (could be same entity), False if clearly incompatible
+    """
+    if not type_a or not type_b:
+        return True
+
+    type_a_lower = type_a.lower().strip()
+    type_b_lower = type_b.lower().strip()
+
+    # Unknown types are always compatible (can't make a judgment)
+    if type_a_lower == 'unknown' or type_b_lower == 'unknown':
+        return True
+
+    # Same type is always compatible
+    if type_a_lower == type_b_lower:
+        return True
+
+    # Check incompatible pairs
+    pair = frozenset({type_a_lower, type_b_lower})
+    return pair not in INCOMPATIBLE_TYPE_PAIRS
+
+
+def _extract_type_from_content(content: str | None) -> str:
+    """Extract entity type from content string.
+
+    Entity content is typically formatted as:
+        "ENTITY_NAME\\nentity_type: description..."
+
+    For example:
+        "Apple Inc\\nOrganization: Apple Inc is a technology company..."
+
+    Args:
+        content: The entity content string from VDB
+
+    Returns:
+        Extracted entity type, or 'Unknown' if not found
+    """
+    if not content:
+        return 'Unknown'
+
+    lines = content.split('\n', 2)
+    if len(lines) >= 2:
+        # Second line often starts with "type: description"
+        second_line = lines[1].strip()
+        if ':' in second_line:
+            potential_type = second_line.split(':')[0].strip()
+            # Valid types are short identifiers (e.g., "Organization", "Person")
+            if potential_type and len(potential_type) < 50 and ' ' not in potential_type:
+                return potential_type
+
+    return 'Unknown'
+
 if TYPE_CHECKING:
     from lightrag.base import BaseVectorStorage
 
@@ -223,7 +300,8 @@ async def llm_review_entities_batch(
         return BatchReviewResult(results=[], reviewed_count=0, match_count=0, new_count=0)
 
     # Step 1: Build candidate lists for each new entity
-    entity_candidates: dict[str, list[str]] = {}
+    # Store candidates as list of (name, type) tuples for type-aware prompting
+    entity_candidates: dict[str, list[tuple[str, str]]] = {}
 
     if entity_vdb is not None:
         for entity_name in new_entities:
@@ -240,22 +318,27 @@ async def llm_review_entities_batch(
                         entity_name, top_k=config.candidates_per_entity
                     )
 
-                # Extract candidate names, filtering duplicates
-                candidate_names: list[str] = []
+                # Extract candidate names and types, filtering duplicates
+                candidate_info: list[tuple[str, str]] = []
                 seen = {entity_name.lower().strip()}
                 if candidates:
                     for c in candidates:
                         if isinstance(c, dict):
                             name = c.get('entity_name')
                             if name and name.lower().strip() not in seen:
-                                candidate_names.append(name)
+                                # Prefer stored entity_type, fall back to extracting from content
+                                cand_type = c.get('entity_type')
+                                if not cand_type:
+                                    content = c.get('content')
+                                    cand_type = _extract_type_from_content(content)
+                                candidate_info.append((name, cand_type))
                                 seen.add(name.lower().strip())
 
                 # Bidirectional lookup: query FROM each candidate's perspective
                 # This catches abbreviation-expansion pairs where forward search fails
                 # Example: "FDA" → "US FDA" may fail, but "US FDA" → "FDA" may succeed
-                if candidate_names:
-                    for candidate_name in candidate_names[:3]:  # Limit to top 3 for efficiency
+                if candidate_info:
+                    for candidate_name, _ in candidate_info[:3]:  # Limit to top 3 for efficiency
                         try:
                             if hybrid_search is not None:
                                 reverse_results = await hybrid_search(
@@ -272,13 +355,17 @@ async def llm_review_entities_batch(
                                 if isinstance(r, dict):
                                     rev_name = r.get('entity_name')
                                     if rev_name and rev_name.lower().strip() not in seen:
-                                        # Add reverse-discovered candidates
-                                        candidate_names.append(rev_name)
+                                        # Prefer stored entity_type, fall back to extracting from content
+                                        rev_type = r.get('entity_type')
+                                        if not rev_type:
+                                            content = r.get('content')
+                                            rev_type = _extract_type_from_content(content)
+                                        candidate_info.append((rev_name, rev_type))
                                         seen.add(rev_name.lower().strip())
                         except Exception as e:
                             logger.debug(f"Reverse VDB query failed for '{candidate_name}': {e}")
 
-                entity_candidates[entity_name] = candidate_names
+                entity_candidates[entity_name] = candidate_info
             except Exception as e:
                 logger.debug(f"VDB query failed for '{entity_name}': {e}")
                 entity_candidates[entity_name] = []
@@ -287,12 +374,20 @@ async def llm_review_entities_batch(
         for entity_name in new_entities:
             entity_candidates[entity_name] = []
 
-    # Step 2: Format prompt for LLM
+    # Step 2: Format prompt for LLM with candidate types for better type-aware matching
+    # Also build a type map for post-LLM validation
+    candidate_type_map: dict[str, str] = {}  # canonical_name -> type
     prompt_parts = []
     for i, (entity_name, candidates) in enumerate(entity_candidates.items(), 1):
         entity_type = entity_types.get(entity_name, 'Unknown') if entity_types else 'Unknown'
         if candidates:
-            candidates_str = ', '.join(f'"{c}"' for c in candidates[:5])
+            # Include candidate types to help LLM make type-aware decisions
+            candidates_str = ', '.join(
+                f'"{name}" (type: {ctype})' for name, ctype in candidates[:5]
+            )
+            # Build type map for post-validation
+            for name, ctype in candidates:
+                candidate_type_map[name] = ctype
             prompt_parts.append(
                 f'{i}. New: "{entity_name}" (type: {entity_type})\n'
                 f'   Candidates: [{candidates_str}]'
@@ -353,10 +448,29 @@ async def llm_review_entities_batch(
         confidence = float(item.get('confidence', 0.5))
         reasoning = item.get('reasoning', '')
 
-        # Apply confidence threshold
+        # Apply confidence threshold with soft match logging
         if matches and confidence < config.min_confidence:
+            if confidence >= config.soft_match_threshold:
+                # Log as soft match - potential match that may warrant review
+                logger.info(
+                    f'Soft match detected: "{new_entity}" → "{canonical}" '
+                    f'(confidence: {confidence:.2f}, threshold: {config.min_confidence})'
+                )
             matches = False
             canonical = new_entity
+
+        # Apply type compatibility validation as safety net
+        # Even if LLM says match, reject if types are clearly incompatible
+        if matches and candidate_type_map:
+            new_type = entity_types.get(new_entity, 'Unknown') if entity_types else 'Unknown'
+            canonical_type = candidate_type_map.get(canonical, 'Unknown')
+            if not _types_are_compatible(new_type, canonical_type):
+                logger.warning(
+                    f'Type mismatch override: "{new_entity}" ({new_type}) '
+                    f'cannot match "{canonical}" ({canonical_type})'
+                )
+                matches = False
+                canonical = new_entity
 
         results.append(
             LLMReviewResult(

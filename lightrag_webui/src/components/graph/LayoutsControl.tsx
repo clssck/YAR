@@ -10,14 +10,17 @@ import { useLayoutForce, useWorkerLayoutForce } from '@react-sigma/layout-force'
 import { useLayoutForceAtlas2, useWorkerLayoutForceAtlas2 } from '@react-sigma/layout-forceatlas2'
 import { useLayoutNoverlap, useWorkerLayoutNoverlap } from '@react-sigma/layout-noverlap'
 import { useLayoutRandom } from '@react-sigma/layout-random'
-import { GripIcon, PauseIcon, PlayIcon } from 'lucide-react'
+import { GripIcon, Loader2, PlayIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { animateNodes } from 'sigma/utils'
+import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/Command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import { controlButtonVariant } from '@/lib/constants'
+import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 
 type LayoutName =
@@ -31,19 +34,30 @@ type LayoutName =
 // Extend WorkerLayoutControlProps to include mainLayout
 interface ExtendedWorkerLayoutControlProps extends WorkerLayoutControlProps {
   mainLayout: LayoutHook
+  layoutName?: string
+  onRunningChange?: (isRunning: boolean) => void
 }
 
 const WorkerLayoutControl = ({
   layout,
   autoRunFor,
   mainLayout,
+  layoutName,
+  onRunningChange,
 }: ExtendedWorkerLayoutControlProps) => {
   const sigma = useSigma()
   // Use local state to track animation running status
   const [isRunning, setIsRunning] = useState(false)
+  // Track iteration count for progress display
+  const [iterationCount, setIterationCount] = useState(0)
   // Timer reference for animation
   const animationTimerRef = useRef<number | null>(null)
   const { t } = useTranslation()
+
+  // Notify parent when running state changes
+  useEffect(() => {
+    onRunningChange?.(isRunning)
+  }, [isRunning, onRunningChange])
 
   // Function to update node positions using the layout algorithm
   const updatePositions = useCallback(() => {
@@ -54,12 +68,13 @@ const WorkerLayoutControl = ({
       if (!graph || graph.order === 0) return
 
       // Use mainLayout to get positions, similar to refreshLayout function
-      // console.log('Getting positions from mainLayout')
       const positions = mainLayout.positions()
 
       // Animate nodes to new positions
-      // console.log('Updating node positions with layout algorithm')
-      animateNodes(graph, positions, { duration: 300 }) // Reduced duration for more frequent updates
+      animateNodes(graph, positions, { duration: 300 })
+
+      // Increment iteration count
+      setIterationCount((prev) => prev + 1)
     } catch (error) {
       console.error('Error updating positions:', error)
       // Stop animation if there's an error
@@ -67,6 +82,7 @@ const WorkerLayoutControl = ({
         window.clearInterval(animationTimerRef.current)
         animationTimerRef.current = null
         setIsRunning(false)
+        setIterationCount(0)
       }
     }
   }, [sigma, mainLayout])
@@ -94,10 +110,23 @@ const WorkerLayoutControl = ({
         console.error('Error stopping layout algorithm:', error)
       }
 
+      // Show completion toast with layout name
+      toast.success(
+        layoutName
+          ? t('graphPanel.sideBar.layoutsControl.layoutStoppedNamed', '{{name}} stopped', {
+              name: layoutName,
+            })
+          : t('graphPanel.sideBar.layoutsControl.layoutStopped', 'Layout stopped')
+      )
+
       setIsRunning(false)
+      setIterationCount(0)
     } else {
       // Start the animation
       console.log('Starting layout animation')
+
+      // Reset iteration count
+      setIterationCount(0)
 
       // Initial position update
       updatePositions()
@@ -116,6 +145,7 @@ const WorkerLayoutControl = ({
           window.clearInterval(animationTimerRef.current)
           animationTimerRef.current = null
           setIsRunning(false)
+          setIterationCount(0)
 
           // Try to stop the layout algorithm
           try {
@@ -127,10 +157,20 @@ const WorkerLayoutControl = ({
           } catch (error) {
             console.error('Error stopping layout algorithm:', error)
           }
+
+          // Show completion toast with layout name
+          toast.success(
+            layoutName
+              ? t('graphPanel.sideBar.layoutsControl.layoutCompleteNamed', '{{name}} complete', {
+                  name: layoutName,
+                })
+              : t('graphPanel.sideBar.layoutsControl.layoutComplete', 'Layout complete'),
+            { duration: 2000 }
+          )
         }
       }, 3000)
     }
-  }, [isRunning, layout, updatePositions])
+  }, [isRunning, layout, updatePositions, t, layoutName])
 
   /**
    * Init component when Sigma or component settings change.
@@ -184,18 +224,34 @@ const WorkerLayoutControl = ({
   }, [autoRunFor, sigma, updatePositions])
 
   return (
-    <Button
-      size="icon"
-      onClick={handleClick}
-      tooltip={
-        isRunning
-          ? t('graphPanel.sideBar.layoutsControl.stopAnimation')
-          : t('graphPanel.sideBar.layoutsControl.startAnimation')
-      }
-      variant={controlButtonVariant}
-    >
-      {isRunning ? <PauseIcon /> : <PlayIcon />}
-    </Button>
+    <div className="relative">
+      <Button
+        size="icon"
+        onClick={handleClick}
+        tooltip={
+          isRunning
+            ? `${t('graphPanel.sideBar.layoutsControl.stopAnimation')} (${iterationCount})`
+            : t('graphPanel.sideBar.layoutsControl.startAnimation')
+        }
+        variant={controlButtonVariant}
+        className={cn(isRunning && 'ring-2 ring-primary ring-offset-1 ring-offset-background')}
+      >
+        {isRunning ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <PlayIcon />
+        )}
+      </Button>
+      {/* Running indicator badge */}
+      {isRunning && (
+        <Badge
+          variant="default"
+          className="absolute -top-2 -right-2 h-5 min-w-5 px-1 text-[10px] font-medium animate-pulse"
+        >
+          {iterationCount}
+        </Badge>
+      )}
+    </div>
   )
 }
 
@@ -207,6 +263,7 @@ const LayoutsControl = () => {
   const { t } = useTranslation()
   const [layout, setLayout] = useState<LayoutName>('Circular')
   const [opened, setOpened] = useState<boolean>(false)
+  const [isLayoutRunning, setIsLayoutRunning] = useState(false)
 
   const maxIterations = useSettingsStore.use.graphLayoutMaxIterations()
 
@@ -299,12 +356,26 @@ const LayoutsControl = () => {
   )
 
   return (
-    <div>
+    <div className="relative">
+      {/* Layout running indicator badge - shown at top of control panel */}
+      {isLayoutRunning && (
+        <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap">
+          <Badge
+            variant="secondary"
+            className="text-[10px] px-2 py-0.5 animate-pulse bg-primary/10 text-primary border-primary/20"
+          >
+            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            {t('graphPanel.sideBar.layoutsControl.running', 'Layout running...')}
+          </Badge>
+        </div>
+      )}
       <div>
         {layouts[layout] && 'worker' in layouts[layout] && layouts[layout].worker && (
           <WorkerLayoutControl
             layout={layouts[layout].worker}
             mainLayout={layouts[layout].layout}
+            layoutName={layout}
+            onRunningChange={setIsLayoutRunning}
           />
         )}
       </div>
@@ -315,7 +386,7 @@ const LayoutsControl = () => {
               size="icon"
               variant={controlButtonVariant}
               onClick={() => setOpened((e: boolean) => !e)}
-              tooltip={t('graphPanel.sideBar.layoutsControl.layoutGraph')}
+              tooltip={`${t('graphPanel.sideBar.layoutsControl.layoutGraph')}: ${t(`graphPanel.sideBar.layoutsControl.layouts.${layout}`)}`}
             >
               <GripIcon />
             </Button>
@@ -337,9 +408,15 @@ const LayoutsControl = () => {
                         runLayout(name as LayoutName)
                       }}
                       key={name}
-                      className="cursor-pointer text-xs"
+                      className={cn(
+                        'cursor-pointer text-xs',
+                        name === layout && 'bg-accent'
+                      )}
                     >
                       {t(`graphPanel.sideBar.layoutsControl.layouts.${name}`)}
+                      {name === layout && (
+                        <span className="ml-auto text-muted-foreground">✓</span>
+                      )}
                     </CommandItem>
                   ))}
                 </CommandGroup>

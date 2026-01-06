@@ -163,6 +163,7 @@ const useSettingsStoreBase = create<SettingsState>()(
         enable_rerank: true,
         citation_mode: 'none',
         citation_threshold: 0.7,
+        show_references_section: true,
       },
 
       setTheme: (theme: Theme) => set({ theme }),

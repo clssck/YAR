@@ -18,7 +18,9 @@ import pytest
 
 from lightrag.entity_resolution.config import DEFAULT_CONFIG, EntityResolutionConfig
 from lightrag.entity_resolution.resolver import (
+    _extract_type_from_content,
     _parse_llm_json_response,
+    _types_are_compatible,
     get_cached_alias,
     llm_review_entities_batch,
     llm_review_entity_pairs,
@@ -62,7 +64,7 @@ def disabled_config():
 @pytest.fixture
 def config_low_confidence():
     """Configuration with low confidence threshold."""
-    return EntityResolutionConfig(min_confidence=0.5)
+    return EntityResolutionConfig(min_confidence=0.5, soft_match_threshold=0.3)
 
 
 @pytest.fixture
@@ -1256,6 +1258,102 @@ class TestResolutionFlow:
 
         new_result = next(r for r in result.results if r.new_entity == 'NewCorp')
         assert new_result.matches_existing is False
+
+
+# --- Type Compatibility Tests ---
+
+
+class TestTypesAreCompatible:
+    """Tests for _types_are_compatible function."""
+
+    def test_same_types_compatible(self):
+        """Same types should always be compatible."""
+        assert _types_are_compatible('Organization', 'Organization') is True
+        assert _types_are_compatible('Person', 'Person') is True
+        assert _types_are_compatible('Location', 'Location') is True
+
+    def test_unknown_types_compatible(self):
+        """Unknown types should always be compatible."""
+        assert _types_are_compatible('Unknown', 'Organization') is True
+        assert _types_are_compatible('Person', 'Unknown') is True
+        assert _types_are_compatible('Unknown', 'Unknown') is True
+
+    def test_empty_types_compatible(self):
+        """Empty or None types should be compatible."""
+        assert _types_are_compatible('', 'Organization') is True
+        assert _types_are_compatible('Person', '') is True
+
+    def test_person_organization_incompatible(self):
+        """Person and Organization types are incompatible."""
+        assert _types_are_compatible('Person', 'Organization') is False
+        assert _types_are_compatible('organization', 'person') is False  # case insensitive
+
+    def test_person_location_incompatible(self):
+        """Person and Location types are incompatible."""
+        assert _types_are_compatible('Person', 'Location') is False
+        assert _types_are_compatible('location', 'PERSON') is False
+
+    def test_location_organization_incompatible(self):
+        """Location and Organization types are incompatible."""
+        assert _types_are_compatible('Location', 'Organization') is False
+
+    def test_person_event_incompatible(self):
+        """Person and Event types are incompatible."""
+        assert _types_are_compatible('Person', 'Event') is False
+
+    def test_case_insensitive(self):
+        """Type comparison should be case insensitive."""
+        assert _types_are_compatible('PERSON', 'person') is True
+        assert _types_are_compatible('Organization', 'ORGANIZATION') is True
+
+    def test_whitespace_handling(self):
+        """Type comparison should handle whitespace."""
+        assert _types_are_compatible(' Person ', 'Person') is True
+        assert _types_are_compatible('Organization', ' Organization ') is True
+
+
+class TestExtractTypeFromContent:
+    """Tests for _extract_type_from_content function."""
+
+    def test_standard_format(self):
+        """Extract type from standard entity content format."""
+        content = "Apple Inc\nOrganization: Apple Inc is a technology company..."
+        assert _extract_type_from_content(content) == 'Organization'
+
+    def test_person_format(self):
+        """Extract Person type from content."""
+        content = "John Smith\nPerson: John Smith is a software engineer..."
+        assert _extract_type_from_content(content) == 'Person'
+
+    def test_location_format(self):
+        """Extract Location type from content."""
+        content = "New York City\nLocation: New York City is the largest city..."
+        assert _extract_type_from_content(content) == 'Location'
+
+    def test_no_type_returns_unknown(self):
+        """Return Unknown when no type can be extracted."""
+        content = "Just some random text without proper format"
+        assert _extract_type_from_content(content) == 'Unknown'
+
+    def test_empty_content(self):
+        """Return Unknown for empty content."""
+        assert _extract_type_from_content('') == 'Unknown'
+        assert _extract_type_from_content(None) == 'Unknown'
+
+    def test_single_line_content(self):
+        """Return Unknown for single-line content."""
+        content = "Apple Inc"
+        assert _extract_type_from_content(content) == 'Unknown'
+
+    def test_type_with_spaces_rejected(self):
+        """Types with spaces should not be extracted (likely not a type)."""
+        content = "Entity Name\nSome long description: with colon but not type"
+        assert _extract_type_from_content(content) == 'Unknown'
+
+    def test_very_long_type_rejected(self):
+        """Very long types should not be extracted."""
+        content = "Entity Name\nThisIsAVeryLongStringThatIsDefinitelyNotAnEntityTypeBecauseTypesAreShort: description"
+        assert _extract_type_from_content(content) == 'Unknown'
 
 
 if __name__ == '__main__':

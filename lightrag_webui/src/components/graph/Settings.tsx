@@ -3,9 +3,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
+import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import Input from '@/components/ui/Input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
-import Separator from '@/components/ui/Separator'
 import useRandomGraph from '@/hooks/useRandomGraph'
 import { controlButtonVariant } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
@@ -276,173 +276,207 @@ export default function Settings() {
         align="end"
         sideOffset={8}
         collisionPadding={5}
-        className="p-2 max-w-[200px]"
+        className="p-2 max-w-[220px] max-h-[80vh] overflow-y-auto"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="flex flex-col gap-2">
-          <LabeledCheckBox
-            checked={enableHealthCheck}
-            onCheckedChange={setEnableHealthCheck}
-            label={t('graphPanel.sideBar.settings.healthCheck')}
-          />
+        <div className="flex flex-col">
+          {/* Display Section - Always open */}
+          <CollapsibleSection
+            title={t('graphPanel.sideBar.settings.sections.display', 'Display')}
+            defaultOpen={true}
+            className="border-b-0"
+            contentClassName="space-y-2"
+          >
+            <LabeledCheckBox
+              checked={showPropertyPanel}
+              onCheckedChange={setShowPropertyPanel}
+              label={t('graphPanel.sideBar.settings.showPropertyPanel')}
+            />
+            <LabeledCheckBox
+              checked={showNodeSearchBar}
+              onCheckedChange={setShowNodeSearchBar}
+              label={t('graphPanel.sideBar.settings.showSearchBar')}
+            />
+            <LabeledCheckBox
+              checked={showNodeLabel}
+              onCheckedChange={setShowNodeLabel}
+              label={t('graphPanel.sideBar.settings.showNodeLabel')}
+            />
+            <LabeledCheckBox
+              checked={showEdgeLabel}
+              onCheckedChange={setShowEdgeLabel}
+              label={t('graphPanel.sideBar.settings.showEdgeLabel')}
+            />
+          </CollapsibleSection>
 
-          <Separator />
+          {/* Interaction Section */}
+          <CollapsibleSection
+            title={t('graphPanel.sideBar.settings.sections.interaction', 'Interaction')}
+            defaultOpen={false}
+            className="border-b-0"
+            contentClassName="space-y-2"
+          >
+            <LabeledCheckBox
+              checked={enableNodeDrag}
+              onCheckedChange={setEnableNodeDrag}
+              label={t('graphPanel.sideBar.settings.nodeDraggable')}
+            />
+            <LabeledCheckBox
+              checked={enableEdgeEvents}
+              onCheckedChange={setEnableEdgeEvents}
+              label={t('graphPanel.sideBar.settings.edgeEvents')}
+            />
+            <LabeledCheckBox
+              checked={enableHideUnselectedEdges}
+              onCheckedChange={setEnableHideUnselectedEdges}
+              label={t('graphPanel.sideBar.settings.hideUnselectedEdges')}
+            />
+          </CollapsibleSection>
 
-          <LabeledCheckBox
-            checked={showPropertyPanel}
-            onCheckedChange={setShowPropertyPanel}
-            label={t('graphPanel.sideBar.settings.showPropertyPanel')}
-          />
-          <LabeledCheckBox
-            checked={showNodeSearchBar}
-            onCheckedChange={setShowNodeSearchBar}
-            label={t('graphPanel.sideBar.settings.showSearchBar')}
-          />
-
-          <Separator />
-
-          <LabeledCheckBox
-            checked={showNodeLabel}
-            onCheckedChange={setShowNodeLabel}
-            label={t('graphPanel.sideBar.settings.showNodeLabel')}
-          />
-          <LabeledCheckBox
-            checked={enableNodeDrag}
-            onCheckedChange={setEnableNodeDrag}
-            label={t('graphPanel.sideBar.settings.nodeDraggable')}
-          />
-
-          <Separator />
-
-          <LabeledCheckBox
-            checked={showEdgeLabel}
-            onCheckedChange={setShowEdgeLabel}
-            label={t('graphPanel.sideBar.settings.showEdgeLabel')}
-          />
-          <LabeledCheckBox
-            checked={enableHideUnselectedEdges}
-            onCheckedChange={setEnableHideUnselectedEdges}
-            label={t('graphPanel.sideBar.settings.hideUnselectedEdges')}
-          />
-          <LabeledCheckBox
-            checked={enableEdgeEvents}
-            onCheckedChange={setEnableEdgeEvents}
-            label={t('graphPanel.sideBar.settings.edgeEvents')}
-          />
-
-          <div className="flex flex-col gap-2">
-            <label
-              htmlFor="edge-size-min"
-              className="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-            >
-              {t('graphPanel.sideBar.settings.edgeSizeRange')}
-            </label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="edge-size-min"
-                type="number"
-                value={minEdgeSize}
-                onChange={(e) => {
-                  const newValue = Number(e.target.value)
-                  if (!Number.isNaN(newValue) && newValue >= 1 && newValue <= maxEdgeSize) {
-                    useSettingsStore.setState({ minEdgeSize: newValue })
-                  }
-                }}
-                className="h-6 w-16 min-w-0 pr-1"
-                min={1}
-                max={Math.min(maxEdgeSize, 10)}
-              />
-              <span>-</span>
-              <div className="flex items-center gap-1">
+          {/* Edge Sizing Section */}
+          <CollapsibleSection
+            title={t('graphPanel.sideBar.settings.sections.edges', 'Edge Sizing')}
+            defaultOpen={false}
+            className="border-b-0"
+            contentClassName="space-y-2"
+          >
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor="edge-size-min"
+                className="text-xs leading-none font-medium text-muted-foreground"
+              >
+                {t('graphPanel.sideBar.settings.edgeSizeRange')}
+              </label>
+              <div className="flex items-center gap-2">
                 <Input
-                  id="edge-size-max"
+                  id="edge-size-min"
                   type="number"
-                  value={maxEdgeSize}
+                  value={minEdgeSize}
                   onChange={(e) => {
                     const newValue = Number(e.target.value)
-                    if (
-                      !Number.isNaN(newValue) &&
-                      newValue >= minEdgeSize &&
-                      newValue >= 1 &&
-                      newValue <= 10
-                    ) {
-                      useSettingsStore.setState({ maxEdgeSize: newValue })
+                    if (!Number.isNaN(newValue) && newValue >= 1 && newValue <= maxEdgeSize) {
+                      useSettingsStore.setState({ minEdgeSize: newValue })
                     }
                   }}
-                  className="h-6 w-16 min-w-0 pr-1"
-                  min={minEdgeSize}
-                  max={10}
+                  className="h-6 w-14 min-w-0 pr-1"
+                  min={1}
+                  max={Math.min(maxEdgeSize, 10)}
                 />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
-                  onClick={() => useSettingsStore.setState({ minEdgeSize: 1, maxEdgeSize: 5 })}
-                  type="button"
-                  title={t('graphPanel.sideBar.settings.resetToDefault')}
-                >
-                  <Undo2 className="h-3.5 w-3.5" />
-                </Button>
+                <span className="text-muted-foreground">-</span>
+                <div className="flex items-center gap-1">
+                  <Input
+                    id="edge-size-max"
+                    type="number"
+                    value={maxEdgeSize}
+                    onChange={(e) => {
+                      const newValue = Number(e.target.value)
+                      if (
+                        !Number.isNaN(newValue) &&
+                        newValue >= minEdgeSize &&
+                        newValue >= 1 &&
+                        newValue <= 10
+                      ) {
+                        useSettingsStore.setState({ maxEdgeSize: newValue })
+                      }
+                    }}
+                    className="h-6 w-14 min-w-0 pr-1"
+                    min={minEdgeSize}
+                    max={10}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
+                    onClick={() => useSettingsStore.setState({ minEdgeSize: 1, maxEdgeSize: 5 })}
+                    type="button"
+                    title={t('graphPanel.sideBar.settings.resetToDefault')}
+                  >
+                    <Undo2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
+          </CollapsibleSection>
 
-          <Separator />
-          <LabeledNumberInput
-            label={t('graphPanel.sideBar.settings.maxQueryDepth')}
-            min={1}
-            value={graphQueryMaxDepth}
-            defaultValue={3}
-            onEditFinished={setGraphQueryMaxDepth}
-          />
-          <LabeledNumberInput
-            label={`${t('graphPanel.sideBar.settings.maxNodes')} (≤ ${backendMaxGraphNodes || 1000})`}
-            min={1}
-            max={backendMaxGraphNodes || 1000}
-            value={graphMaxNodes}
-            defaultValue={backendMaxGraphNodes || 1000}
-            onEditFinished={setGraphMaxNodes}
-          />
-          <LabeledNumberInput
-            label={t('graphPanel.sideBar.settings.maxLayoutIterations')}
-            min={1}
-            max={30}
-            value={graphLayoutMaxIterations}
-            defaultValue={15}
-            onEditFinished={setGraphLayoutMaxIterations}
-          />
+          {/* Query Parameters Section */}
+          <CollapsibleSection
+            title={t('graphPanel.sideBar.settings.sections.query', 'Query')}
+            defaultOpen={false}
+            className="border-b-0"
+            contentClassName="space-y-3"
+          >
+            <LabeledNumberInput
+              label={t('graphPanel.sideBar.settings.maxQueryDepth')}
+              min={1}
+              value={graphQueryMaxDepth}
+              defaultValue={3}
+              onEditFinished={setGraphQueryMaxDepth}
+            />
+            <LabeledNumberInput
+              label={`${t('graphPanel.sideBar.settings.maxNodes')} (≤ ${backendMaxGraphNodes || 1000})`}
+              min={1}
+              max={backendMaxGraphNodes || 1000}
+              value={graphMaxNodes}
+              defaultValue={backendMaxGraphNodes || 1000}
+              onEditFinished={setGraphMaxNodes}
+            />
+            <LabeledNumberInput
+              label={t('graphPanel.sideBar.settings.maxLayoutIterations')}
+              min={1}
+              max={30}
+              value={graphLayoutMaxIterations}
+              defaultValue={15}
+              onEditFinished={setGraphLayoutMaxIterations}
+            />
+          </CollapsibleSection>
 
-          <Separator />
+          {/* Filtering Section */}
+          <CollapsibleSection
+            title={t('graphPanel.sideBar.settings.sections.filtering', 'Filtering')}
+            defaultOpen={false}
+            className="border-b-0"
+            contentClassName="space-y-3"
+          >
+            <LabeledNumberInput
+              label={t('graphPanel.sideBar.settings.minDegree')}
+              min={0}
+              max={5}
+              value={graphMinDegree}
+              defaultValue={0}
+              onEditFinished={setGraphMinDegree}
+            />
+            <LabeledCheckBox
+              checked={graphIncludeOrphans}
+              onCheckedChange={setGraphIncludeOrphans}
+              label={t('graphPanel.sideBar.settings.includeOrphans')}
+            />
+            <LabeledNumberInput
+              label={t('graphPanel.sideBar.settings.expandDepth')}
+              min={1}
+              max={5}
+              value={graphExpandDepth}
+              defaultValue={1}
+              onEditFinished={setGraphExpandDepth}
+            />
+          </CollapsibleSection>
 
-          <LabeledNumberInput
-            label={t('graphPanel.sideBar.settings.minDegree')}
-            min={0}
-            max={5}
-            value={graphMinDegree}
-            defaultValue={0}
-            onEditFinished={setGraphMinDegree}
-          />
-          <LabeledCheckBox
-            checked={graphIncludeOrphans}
-            onCheckedChange={setGraphIncludeOrphans}
-            label={t('graphPanel.sideBar.settings.includeOrphans')}
-          />
-          <LabeledNumberInput
-            label={t('graphPanel.sideBar.settings.expandDepth')}
-            min={1}
-            max={5}
-            value={graphExpandDepth}
-            defaultValue={1}
-            onEditFinished={setGraphExpandDepth}
-          />
+          {/* System Section */}
+          <CollapsibleSection
+            title={t('graphPanel.sideBar.settings.sections.system', 'System')}
+            defaultOpen={false}
+            className="border-b-0"
+            contentClassName="space-y-2"
+          >
+            <LabeledCheckBox
+              checked={enableHealthCheck}
+              onCheckedChange={setEnableHealthCheck}
+              label={t('graphPanel.sideBar.settings.healthCheck')}
+            />
 
-          {/* Development/Testing Section - Only visible in development mode */}
-          {import.meta.env.DEV && (
-            <>
-              <Separator />
-
-              <div className="flex flex-col gap-2">
-                <span className="text-sm leading-none font-medium text-muted-foreground">
+            {/* Development/Testing Section - Only visible in development mode */}
+            {import.meta.env.DEV && (
+              <div className="flex flex-col gap-2 pt-2 border-t border-border/30">
+                <span className="text-xs leading-none font-medium text-muted-foreground">
                   Dev Options
                 </span>
                 <Button
@@ -455,13 +489,15 @@ export default function Settings() {
                   Gen Random Graph
                 </Button>
               </div>
+            )}
+          </CollapsibleSection>
 
-              <Separator />
-            </>
-          )}
-          <Button onClick={saveSettings} variant="outline" size="sm" className="ml-auto px-4">
-            {t('graphPanel.sideBar.settings.save')}
-          </Button>
+          {/* Close button */}
+          <div className="pt-2 border-t border-border/50">
+            <Button onClick={saveSettings} variant="outline" size="sm" className="w-full">
+              {t('graphPanel.sideBar.settings.save')}
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

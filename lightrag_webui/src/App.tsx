@@ -1,22 +1,36 @@
-import { ZapIcon } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Loader2Icon, ZapIcon } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getAuthStatus, InvalidApiKeyError, RequireApiKeError } from '@/api/lightrag'
 import ApiKeyAlert from '@/components/ApiKeyAlert'
 import ThemeProvider from '@/components/ThemeProvider'
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 import TabVisibilityProvider from '@/contexts/TabVisibilityProvider'
-import ApiSite from '@/features/ApiSite'
 import DocumentManager from '@/features/DocumentManager'
-import GraphViewer from '@/features/GraphViewer'
 import RetrievalTesting from '@/features/RetrievalTesting'
-import S3Browser from '@/features/S3Browser'
 import SiteHeader from '@/features/SiteHeader'
-import TableExplorer from '@/features/TableExplorer'
 import { SiteInfo, webuiPrefix } from '@/lib/constants'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore, useBackendState } from '@/stores/state'
 
+// Lazy load heavy components for better initial load time
+const GraphViewer = lazy(() => import('@/features/GraphViewer'))
+const ApiSite = lazy(() => import('@/features/ApiSite'))
+const S3Browser = lazy(() => import('@/features/S3Browser'))
+const TableExplorer = lazy(() => import('@/features/TableExplorer'))
+
+// Loading skeleton for lazy-loaded tabs
+function TabLoadingSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+      <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
+      <p className="text-sm text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
 function App() {
+  const { t } = useTranslation()
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
   const currentTab = useSettingsStore.use.currentTab()
@@ -237,7 +251,9 @@ function App() {
                   value="knowledge-graph"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <GraphViewer />
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.graph')} />}>
+                    <GraphViewer />
+                  </Suspense>
                 </TabsContent>
                 <TabsContent
                   value="retrieval"
@@ -249,19 +265,25 @@ function App() {
                   value="api"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <ApiSite />
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.api')} />}>
+                    <ApiSite />
+                  </Suspense>
                 </TabsContent>
                 <TabsContent
                   value="table-explorer"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <TableExplorer />
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.tables')} />}>
+                    <TableExplorer />
+                  </Suspense>
                 </TabsContent>
                 <TabsContent
                   value="storage"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <S3Browser />
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.storage')} />}>
+                    <S3Browser />
+                  </Suspense>
                 </TabsContent>
               </div>
             </Tabs>

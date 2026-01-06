@@ -5,6 +5,7 @@ import { Route, HashRouter as Router, Routes, useNavigate } from 'react-router-d
 import { Toaster } from 'sonner'
 import ThemeProvider from '@/components/ThemeProvider'
 import LoginPage from '@/features/LoginPage'
+import ComponentDemo from '@/features/ComponentDemo'
 import { navigationService } from '@/services/navigation'
 import { useAuthStore } from '@/stores/state'
 import App from './App'
@@ -63,7 +64,9 @@ const AppContent = () => {
   useEffect(() => {
     if (!initializing && !isAuthenticated) {
       const currentPath = window.location.hash.slice(1)
-      if (currentPath !== '/login') {
+      // Don't redirect for public routes (login, demo)
+      const publicRoutes = ['/login', '/demo']
+      if (!publicRoutes.some((route) => currentPath.startsWith(route))) {
         console.log('Not authenticated, redirecting to login')
         navigate('/login')
       }
@@ -78,6 +81,8 @@ const AppContent = () => {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Component demo page - accessible without auth for testing */}
+      <Route path="/demo" element={<ComponentDemo />} />
       <Route path="/*" element={isAuthenticated ? <App /> : null} />
     </Routes>
   )

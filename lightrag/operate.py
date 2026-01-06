@@ -455,6 +455,142 @@ async def _summarize_descriptions(
     return summary
 
 
+# Prompt for batch entity type inference
+ENTITY_TYPE_INFERENCE_PROMPT = """Classify each entity into one of these types: {entity_types}
+
+If none fit well, use "other".
+
+Entities to classify:
+{entities}
+
+Respond with ONLY a JSON array:
+[{{"entity_name": "Example", "inferred_type": "organization"}}]"""
+
+
+async def _batch_infer_entity_types(
+    unknown_entities: list[dict[str, Any]],
+    global_config: dict,
+    knowledge_graph_inst: BaseGraphStorage | None = None,
+    entity_vdb: BaseVectorStorage | None = None,
+    batch_size: int = 20,
+) -> int:
+    """Batch infer types for UNKNOWN entities using LLM.
+
+    Args:
+        unknown_entities: List of entity dicts with entity_name, description, entity_type='UNKNOWN'
+        global_config: Global config with llm_model_func
+        knowledge_graph_inst: Graph storage to update
+        entity_vdb: VDB storage to update
+        batch_size: Number of entities per LLM call
+
+    Returns:
+        Number of entities successfully updated
+    """
+    if not unknown_entities:
+        return 0
+
+    # Filter to only UNKNOWN entities
+    to_infer = [e for e in unknown_entities if e.get('entity_type') == 'UNKNOWN']
+    if not to_infer:
+        return 0
+
+    use_llm_func: Callable[..., Any] = global_config['llm_model_func']
+    use_llm_func = partial(use_llm_func, _priority=6)  # Medium priority
+
+    entity_types = global_config['addon_params'].get('entity_types', DEFAULT_ENTITY_TYPES)
+    updated_count = 0
+
+    # Process in batches
+    for i in range(0, len(to_infer), batch_size):
+        batch = to_infer[i:i + batch_size]
+
+        # Format entities for prompt
+        entity_lines = []
+        for e in batch:
+            name = e.get('entity_name', '')
+            desc = str(e.get('description', ''))[:150]
+            entity_lines.append(f"- {name}: {desc}")
+
+        prompt = ENTITY_TYPE_INFERENCE_PROMPT.format(
+            entity_types=', '.join(entity_types + ['other']),
+            entities='\n'.join(entity_lines),
+        )
+
+        try:
+            response = await use_llm_func(prompt)
+
+            # Parse JSON from response
+            import re
+            text = response
+            if '```' in text:
+                match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+                if match:
+                    text = match.group(1)
+
+            data = json_repair.loads(text.strip())
+            if not isinstance(data, list):
+                data = [data]
+
+            # Apply inferred types
+            name_to_type = {
+                item.get('entity_name', ''): item.get('inferred_type', '').lower().replace(' ', '')
+                for item in data
+                if item.get('entity_name') and item.get('inferred_type')
+            }
+
+            for entity in batch:
+                entity_name = entity.get('entity_name', '')
+                inferred_type = name_to_type.get(entity_name)
+
+                if not inferred_type or inferred_type == 'unknown':
+                    continue
+
+                # Update graph
+                if knowledge_graph_inst is not None:
+                    try:
+                        existing = await knowledge_graph_inst.get_node(entity_name)
+                        if existing:
+                            existing['entity_type'] = inferred_type
+                            await knowledge_graph_inst.upsert_node(entity_name, existing)
+                    except Exception as e:
+                        logger.debug(f"Failed to update graph type for '{entity_name}': {e}")
+
+                # Update VDB
+                if entity_vdb is not None:
+                    try:
+                        entity_vdb_id = compute_mdhash_id(entity_name, prefix='ent-')
+                        # Get existing and update type
+                        results = await entity_vdb.query(entity_name, top_k=1)
+                        if results:
+                            for r in results:
+                                if r.get('entity_name', '').lower() == entity_name.lower():
+                                    # Re-upsert with new type
+                                    vdb_data = {
+                                        entity_vdb_id: {
+                                            'content': r.get('content', f'{entity_name}\n'),
+                                            'entity_name': entity_name,
+                                            'source_id': r.get('source_id', ''),
+                                            'entity_type': inferred_type,
+                                            'file_path': r.get('file_path', 'unknown_source'),
+                                        }
+                                    }
+                                    await entity_vdb.upsert(vdb_data)
+                                    break
+                    except Exception as e:
+                        logger.debug(f"Failed to update VDB type for '{entity_name}': {e}")
+
+                updated_count += 1
+
+        except Exception as e:
+            logger.warning(f"Batch type inference failed: {e}")
+            continue
+
+    if updated_count > 0:
+        logger.info(f"Inferred types for {updated_count}/{len(to_infer)} UNKNOWN entities")
+
+    return updated_count
+
+
 async def _handle_single_entity_extraction(
     record_attributes: list[str],
     chunk_key: str,
@@ -1172,11 +1308,13 @@ async def _rebuild_single_entity(
 
         # Collect relationship data to extract entity information
         relationship_descriptions = []
-        file_paths = set()
+        file_paths: set[str] = set()
 
-        # Get edge data for all connected relationships
-        for src_id, tgt_id in edges:
-            edge_data = await knowledge_graph_inst.get_edge(src_id, tgt_id)
+        # Get edge data for all connected relationships - batch to avoid N+1 queries
+        edge_pairs = [{'src': src_id, 'tgt': tgt_id} for src_id, tgt_id in edges]
+        edges_dict = await knowledge_graph_inst.get_edges_batch(edge_pairs)
+
+        for edge_data in edges_dict.values():
             if edge_data:
                 if edge_data.get('description'):
                     relationship_descriptions.append(edge_data['description'])
@@ -2669,6 +2807,21 @@ async def merge_nodes_and_edges(
 
         if first_exception is not None:
             raise first_exception
+
+    # ===== Phase 2.5: Batch infer types for UNKNOWN entities =====
+    if all_added_entities:
+        unknown_count = sum(1 for e in all_added_entities if e.get('entity_type') == 'UNKNOWN')
+        if unknown_count > 0:
+            log_message = f'Phase 2.5: Inferring types for {unknown_count} UNKNOWN entities'
+            logger.info(log_message)
+            await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
+
+            await _batch_infer_entity_types(
+                unknown_entities=all_added_entities,
+                global_config=global_config,
+                knowledge_graph_inst=knowledge_graph_inst,
+                entity_vdb=entity_vdb,
+            )
 
     # ===== Phase 3: Update full_entities and full_relations storage =====
     if full_entities_storage and full_relations_storage and doc_id:

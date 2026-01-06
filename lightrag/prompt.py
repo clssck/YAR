@@ -259,10 +259,12 @@ Consider the conversation history if provided to maintain conversational flow an
 
 4. References Section Format:
   - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
+  - Reference list entries should adhere to the format: `- [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
   - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line
-  - Provide maximum of 5 most relevant citations.
+  - Output each citation on an individual line.
+  - **IMPORTANT: Each document should appear ONLY ONCE in the references list. If the same document is cited multiple times in the response with the same [n], list it only once in references.**
+  - **IMPORTANT: EVERY citation [n] used in the response text MUST have a corresponding entry in the References list. Do not cite a document without listing it.**
+  - Provide maximum of 5 most relevant, unique citations.
   - Do not generate footnotes section or any comment, summary, or explanation after the references.
 
 5. Reference Section Example:
@@ -313,10 +315,12 @@ Consider the conversation history if provided to maintain conversational flow an
 
 4. References Section Format:
   - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
+  - Reference list entries should adhere to the format: `- [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
   - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line
-  - Provide maximum of 5 most relevant citations.
+  - Output each citation on an individual line.
+  - **IMPORTANT: Each document should appear ONLY ONCE in the references list. If the same document is cited multiple times in the response with the same [n], list it only once in references.**
+  - **IMPORTANT: EVERY citation [n] used in the response text MUST have a corresponding entry in the References list. Do not cite a document without listing it.**
+  - Provide maximum of 5 most relevant, unique citations.
   - Do not generate footnotes section or any comment, summary, or explanation after the references.
 
 5. Reference Section Example:

@@ -5,10 +5,12 @@
  * showing source metadata like document title, section, page, and excerpt.
  */
 
-import { FileTextIcon } from 'lucide-react'
+import { ExternalLinkIcon, FileTextIcon, LinkIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { CitationSource } from '@/api/lightrag'
 import Badge from '@/components/ui/Badge'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/HoverCard'
+import { cn } from '@/lib/utils'
 
 interface CitationMarkerProps {
   /** The citation marker text, e.g., "[1]" or "[1,2]" */
@@ -22,28 +24,67 @@ interface CitationMarkerProps {
 }
 
 /**
+ * Get confidence level and styling based on score
+ */
+function getConfidenceLevel(confidence: number) {
+  if (confidence >= 0.8) {
+    return {
+      level: 'high',
+      color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+      markerBg: 'bg-green-100/80 dark:bg-green-900/40',
+      markerBorder: 'border-green-300 dark:border-green-700',
+    }
+  }
+  if (confidence >= 0.6) {
+    return {
+      level: 'medium',
+      color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+      markerBg: 'bg-yellow-100/80 dark:bg-yellow-900/40',
+      markerBorder: 'border-yellow-300 dark:border-yellow-700',
+    }
+  }
+  return {
+    level: 'low',
+    color: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+    markerBg: 'bg-red-100/80 dark:bg-red-900/40',
+    markerBorder: 'border-red-300 dark:border-red-700',
+  }
+}
+
+/**
  * Interactive citation marker with hover card showing source metadata
  */
 export function CitationMarker({ marker, referenceIds, confidence, sources }: CitationMarkerProps) {
-  // Find sources matching our reference IDs
-  const matchingSources = sources.filter((s) => referenceIds.includes(s.reference_id))
+  const { t } = useTranslation()
+  // Find sources matching our reference IDs (deduplicated by reference_id)
+  const matchingSources = sources
+    .filter((s) => referenceIds.includes(s.reference_id))
+    .filter((source, index, arr) => arr.findIndex((s) => s.reference_id === source.reference_id) === index)
 
-  // Confidence badge color based on score
-  const confidenceColor =
-    confidence >= 0.8
-      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-      : confidence >= 0.6
-        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-        : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+  // Confidence styling
+  const confidenceInfo = getConfidenceLevel(confidence)
+  const confidenceLabel = t(
+    `retrievePanel.citation.confidence.${confidenceInfo.level}`,
+    confidenceInfo.level.charAt(0).toUpperCase() + confidenceInfo.level.slice(1)
+  )
 
   return (
     <HoverCard openDelay={200} closeDelay={100}>
       <HoverCardTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center text-primary hover:text-primary/80 hover:underline cursor-pointer font-medium text-sm mx-0.5 focus:outline-none focus:ring-2 focus:ring-primary/20 rounded"
+          className={cn(
+            'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border',
+            'text-primary hover:text-primary/80 cursor-pointer font-medium text-sm',
+            'mx-0.5 transition-colors',
+            'focus:outline-none focus:ring-2 focus:ring-primary/20',
+            confidenceInfo.markerBg,
+            confidenceInfo.markerBorder
+          )}
+          title={t('retrievePanel.citation.clickToView', 'Click to view source')}
         >
-          {marker}
+          <LinkIcon className="w-3 h-3 opacity-70" />
+          <span>{marker}</span>
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-80" side="top" align="center">
@@ -54,20 +95,22 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
               <div className="flex items-start gap-2">
                 <FileTextIcon className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
                 <h4 className="font-semibold text-sm leading-tight">
-                  {source.document_title || 'Untitled Document'}
+                  {source.document_title || t('retrievePanel.citation.untitled', 'Untitled Document')}
                 </h4>
               </div>
 
               {/* Section title */}
               {source.section_title && (
                 <p className="text-xs text-muted-foreground pl-6">
-                  Section: {source.section_title}
+                  {t('retrievePanel.citation.section', 'Section')}: {source.section_title}
                 </p>
               )}
 
               {/* Page range */}
               {source.page_range && (
-                <p className="text-xs text-muted-foreground pl-6">Pages: {source.page_range}</p>
+                <p className="text-xs text-muted-foreground pl-6">
+                  {t('retrievePanel.citation.pages', 'Pages')}: {source.page_range}
+                </p>
               )}
 
               {/* Excerpt */}
@@ -77,21 +120,36 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
                 </blockquote>
               )}
 
-              {/* File path */}
-              <p
-                className="text-xs text-muted-foreground/70 pl-6 truncate"
-                title={source.file_path}
-              >
-                {source.file_path}
-              </p>
+              {/* File path with optional link */}
+              {source.presigned_url ? (
+                <a
+                  href={source.presigned_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 pl-6 truncate group"
+                  title={t('retrievePanel.citation.openDocument', 'Open document in new tab')}
+                >
+                  <ExternalLinkIcon className="w-3 h-3 shrink-0 opacity-70 group-hover:opacity-100" />
+                  <span className="truncate underline underline-offset-2">{source.file_path}</span>
+                </a>
+              ) : (
+                <p
+                  className="text-xs text-muted-foreground/70 pl-6 truncate"
+                  title={source.file_path}
+                >
+                  {source.file_path}
+                </p>
+              )}
             </div>
           ))}
 
-          {/* Confidence badge */}
+          {/* Confidence badge with text label */}
           <div className="flex items-center justify-between pt-2 border-t">
-            <span className="text-xs text-muted-foreground">Match confidence</span>
-            <Badge variant="outline" className={confidenceColor}>
-              {(confidence * 100).toFixed(0)}%
+            <span className="text-xs text-muted-foreground">
+              {t('retrievePanel.citation.matchConfidence', 'Match confidence')}
+            </span>
+            <Badge variant="outline" className={confidenceInfo.color}>
+              {confidenceLabel} ({(confidence * 100).toFixed(0)}%)
             </Badge>
           </div>
         </div>
@@ -155,4 +213,36 @@ export function renderTextWithCitations(
   }
 
   return parts
+}
+
+/**
+ * Citation summary component shown at the end of messages with citations
+ */
+interface CitationSummaryProps {
+  /** Number of unique sources cited */
+  sourceCount: number
+  /** Total number of citation markers */
+  citationCount: number
+}
+
+export function CitationSummary({ sourceCount, citationCount }: CitationSummaryProps) {
+  const { t } = useTranslation()
+
+  if (sourceCount === 0) return null
+
+  return (
+    <div className="mt-3 pt-2 border-t border-muted flex items-center gap-2 text-xs text-muted-foreground">
+      <LinkIcon className="w-3.5 h-3.5" />
+      <span>
+        {t('retrievePanel.citation.summary', 'Cited from {{count}} source(s)', {
+          count: sourceCount,
+        })}
+        {citationCount > sourceCount && (
+          <span className="ml-1 opacity-70">
+            ({citationCount} {t('retrievePanel.citation.references', 'references')})
+          </span>
+        )}
+      </span>
+    </div>
+  )
 }

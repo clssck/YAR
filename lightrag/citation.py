@@ -389,11 +389,15 @@ class CitationExtractor:
     def _enhance_references(self, used_refs: set[str]) -> list[SourceReference]:
         """Build enhanced reference objects with metadata."""
         enhanced = []
+        seen_ref_ids: set[str] = set()  # Track seen reference_ids to prevent duplicates
 
         for ref in self.references:
             ref_id = ref.get('reference_id', '')
             if ref_id not in used_refs:
                 continue
+            if ref_id in seen_ref_ids:  # Skip duplicates
+                continue
+            seen_ref_ids.add(ref_id)  # Mark as seen
 
             file_path = ref.get('file_path', '')
             chunks = self.ref_to_chunks.get(ref_id, [])
