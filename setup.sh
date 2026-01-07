@@ -227,8 +227,8 @@ echo ""
 echo -e "${YELLOW}⏳ [Step 3/3] Waiting for services to be healthy...${NC}"
 echo ""
 
-# Service list for status tracking
-SERVICES=("postgres" "rustfs" "litellm" "lightrag")
+# Service list for status tracking (infra only, LightRAG runs locally)
+SERVICES=("postgres" "rustfs" "litellm")
 
 get_service_status() {
     local service=$1
@@ -271,7 +271,7 @@ while [ $WAITED -lt $MAX_WAIT ]; do
         fi
     done
 
-    if [ $HEALTHY_COUNT -ge 4 ]; then
+    if [ $HEALTHY_COUNT -ge 3 ]; then
         ALL_HEALTHY=true
         break
     fi
@@ -327,17 +327,21 @@ fi
 
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║                         Ready!                                   ║${NC}"
+echo -e "${BLUE}║                    Infrastructure Ready!                         ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${GREEN}WebUI:${NC}     http://localhost:9621/webui"
-echo -e "  ${GREEN}API Docs:${NC}  http://localhost:9621/docs"
-echo -e "  ${GREEN}Health:${NC}    curl http://localhost:9621/health"
+echo -e "  ${GREEN}Infra Services:${NC}"
+echo -e "    • PostgreSQL:  localhost:5432"
+echo -e "    • LiteLLM:     http://localhost:4000"
+echo -e "    • RustFS S3:   http://localhost:9000"
 echo ""
-echo -e "  ${BLUE}Commands:${NC}"
-echo -e "    docker compose logs -f lightrag    # View logs"
-echo -e "    docker compose down                # Stop stack"
-echo -e "    docker compose restart lightrag    # Restart API"
+echo -e "  ${YELLOW}Start LightRAG:${NC}"
+echo -e "    ./start.sh                # Start LightRAG API server"
+echo ""
+echo -e "  ${BLUE}Other Commands:${NC}"
+echo -e "    docker compose logs -f    # View infra logs"
+echo -e "    docker compose down       # Stop infra"
+echo -e "    ./cleanup.sh              # Full cleanup"
 echo ""
 if command -v bun &> /dev/null && [[ "$1" != "--proxy" ]]; then
     echo -e "  ${BLUE}Proxy (for K8s/code-server):${NC}"
