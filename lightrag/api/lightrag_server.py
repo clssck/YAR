@@ -951,17 +951,13 @@ def create_app(args):
         logger.info(f'WebUI static_dir exists: {static_dir.exists()}')
         logger.info(f'WebUI index.html exists: {(static_dir / "index.html").exists()}')
 
-        # Debug: Try mounting at /ui as well to test if it's path-specific
-        app.mount(
-            '/ui',
-            StaticFiles(directory=static_dir, html=True),
-            name='webui-test',
-        )
-        logger.info('WebUI assets also mounted at /ui for testing')
+        # Use string path instead of Path object for StaticFiles
+        static_dir_str = str(static_dir.resolve())
+        logger.info(f'WebUI using resolved path: {static_dir_str}')
 
         app.mount(
             '/webui',
-            StaticFiles(directory=static_dir, html=True),
+            StaticFiles(directory=static_dir_str, html=True),
             name='webui',
         )
         logger.info('WebUI assets mounted at /webui')
