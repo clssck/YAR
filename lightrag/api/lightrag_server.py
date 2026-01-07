@@ -738,8 +738,9 @@ def create_app(args):
     async def redirect_to_webui():
         """Redirect root path based on WebUI availability"""
         # Prepend root_path for correct redirects behind reverse proxy
+        # Use trailing slash so relative asset paths resolve correctly
         if webui_assets_exist:
-            return RedirectResponse(url=f'{root_path}/webui')
+            return RedirectResponse(url=f'{root_path}/webui/')
         else:
             return RedirectResponse(url=f'{root_path}/docs')
 
