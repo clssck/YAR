@@ -955,6 +955,12 @@ def create_app(args):
         static_dir_str = str(static_dir.resolve())
         logger.info(f'WebUI using resolved path: {static_dir_str}')
 
+        # Explicit route for /webui/ to serve index.html (fixes Starlette mount issue)
+        @app.get('/webui/')
+        async def serve_webui_index():
+            from fastapi.responses import FileResponse
+            return FileResponse(static_dir / 'index.html', media_type='text/html')
+
         app.mount(
             '/webui',
             StaticFiles(directory=static_dir_str, html=True),
