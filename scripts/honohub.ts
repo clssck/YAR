@@ -187,10 +187,11 @@ function createProxyApp(targetHost: string, targetPort: number) {
         headers.set("X-Forwarded-For", "127.0.0.1");
       }
 
-      // Forward request
+      // Forward request (don't follow redirects - pass them to browser)
       const response = await fetch(targetUrl, {
         method: c.req.method,
         headers,
+        redirect: "manual",
         body:
           c.req.method !== "GET" && c.req.method !== "HEAD"
             ? await c.req.raw.arrayBuffer()
