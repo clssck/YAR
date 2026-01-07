@@ -976,13 +976,12 @@ def create_app(args):
             html_content = html_content.replace("href='favicon", "href='./favicon")
             return HTMLResponse(content=html_content)
 
-        # Explicit route for static files (StaticFiles mount conflicts with explicit routes)
-        @app.get('/webui/{file_path:path}')
-        async def serve_webui_static(file_path: str):
+        # Serve static assets from /webui/assets/ (MUST be before catch-all)
+        @app.get('/webui/assets/{file_path:path}')
+        async def serve_webui_assets(file_path: str):
             from fastapi.responses import FileResponse
-            file = static_dir / file_path
+            file = static_dir / 'assets' / file_path
             if file.exists() and file.is_file():
-                # Determine content type
                 suffix = file.suffix.lower()
                 content_types = {
                     '.js': 'application/javascript',
@@ -994,10 +993,29 @@ def create_app(args):
                     '.woff2': 'font/woff2',
                     '.ttf': 'font/ttf',
                 }
-                content_type = content_types.get(suffix, 'application/octet-stream')
-                return FileResponse(file, media_type=content_type)
+                return FileResponse(file, media_type=content_types.get(suffix, 'application/octet-stream'))
             from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail='File not found')
+            raise HTTPException(status_code=404, detail='Asset not found')
+
+        # Serve other static files (favicon, logo)
+        @app.get('/webui/favicon.png')
+        async def serve_favicon():
+            from fastapi.responses import FileResponse
+            return FileResponse(static_dir / 'favicon.png', media_type='image/png')
+
+        @app.get('/webui/logo.svg')
+        async def serve_logo():
+            from fastapi.responses import FileResponse
+            return FileResponse(static_dir / 'logo.svg', media_type='image/svg+xml')
+
+        # Forward all other /webui/* requests to API (catch-all, MUST be last)
+        @app.api_route('/webui/{api_path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+        async def forward_webui_api(api_path: str, request: Request):
+            # Redirect to the actual API endpoint
+            return RedirectResponse(
+                url=f'{root_path}/{api_path}',
+                status_code=307  # Preserve method
+            )
         logger.info('WebUI assets mounted at /webui')
     else:
         logger.info('WebUI assets not available, /webui route not mounted')
