@@ -133,6 +133,11 @@ set_env "LOG_LEVEL" "${LOG_LEVEL:-INFO}"
 set_env "MAX_ASYNC" "${MAX_ASYNC:-96}"
 set_env "MAX_PARALLEL_INSERT" "${MAX_PARALLEL_INSERT:-10}"
 
+# Reverse proxy path prefix (for K8s/code-server environments)
+# Set ROOT_PATH env var before running setup.sh to configure
+# Example: ROOT_PATH="/oneai-rnd-transformerscmc-genai/janos/proxy/9621" ./setup.sh
+set_env "ROOT_PATH" "${ROOT_PATH:-}"
+
 echo -e "${GREEN}✓ Environment configured${NC}"
 
 # ══════════════════════════════════════════════════════════════════════════════
