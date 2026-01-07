@@ -168,13 +168,12 @@ function createProxyApp(targetHost: string, targetPort: number) {
       }
 
       // Build headers with proper proxy forwarding
+      // IMPORTANT: Preserve the original Host header so redirects go to the correct external URL
+      // (not to the internal 127.0.0.1:9622 address)
       const headers = new Headers();
       c.req.raw.headers.forEach((value, key) => {
-        if (key.toLowerCase() !== "host") {
-          headers.set(key, value);
-        }
+        headers.set(key, value);
       });
-      headers.set("host", `${targetHost}:${targetPort}`);
 
       // Pass X-Forwarded headers so FastAPI knows about the proxy
       // These help with correct redirect URL generation
