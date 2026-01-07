@@ -1,6 +1,8 @@
 import type { ButtonVariantType } from '@/components/ui/Button'
 
-export const backendBaseUrl = ''
+// API calls need to go one level up from /webui/ to reach the API at /
+// e.g., from /proxy/9621/webui/ -> /proxy/9621/health
+export const backendBaseUrl = '..'
 // Use relative base './' so assets work behind reverse proxies with path prefixes
 export const webuiPrefix = './'
 

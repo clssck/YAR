@@ -1004,11 +1004,12 @@ def create_app(args):
         # Forward all other /webui/* requests to API (catch-all, MUST be last)
         @app.api_route('/webui/{api_path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
         async def forward_webui_api(api_path: str, request: Request):
-            # Redirect to the actual API endpoint
-            return RedirectResponse(
-                url=f'{root_path}/{api_path}',
-                status_code=307  # Preserve method
-            )
+            # Redirect to the actual API endpoint, preserving query string
+            query = request.url.query
+            target = f'{root_path}/{api_path}'
+            if query:
+                target = f'{target}?{query}'
+            return RedirectResponse(url=target, status_code=307)
         logger.info('WebUI assets mounted at /webui')
     else:
         logger.info('WebUI assets not available, /webui route not mounted')

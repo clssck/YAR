@@ -236,17 +236,16 @@ function createProxyApp(targetHost: string, targetPort: number) {
         }
 
         // Inject fetch/XMLHttpRequest interceptor for SPA API calls
+        // Convert absolute paths /foo to ../foo so they go up from /webui/ to /
         const interceptorScript = `
     <script>
-      // Intercept fetch to rewrite absolute URLs to relative
+      // Intercept fetch to rewrite absolute URLs to relative (go up from /webui/)
       (function() {
         const originalFetch = window.fetch;
         window.fetch = function(url, options) {
           if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) {
-            // Don't rewrite API calls - they need to go through the proxy as-is
-            if (!url.startsWith('/api/')) {
-              url = '.' + url;
-            }
+            // Convert /foo -> ../foo so it resolves from /webui/ to /foo
+            url = '..' + url;
           }
           return originalFetch(url, options);
         };
@@ -255,9 +254,7 @@ function createProxyApp(targetHost: string, targetPort: number) {
         const originalOpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function(method, url, ...rest) {
           if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) {
-            if (!url.startsWith('/api/')) {
-              url = '.' + url;
-            }
+            url = '..' + url;
           }
           return originalOpen.call(this, method, url, ...rest);
         };
@@ -268,7 +265,7 @@ function createProxyApp(targetHost: string, targetPort: number) {
           Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
             set: function(value) {
               if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) {
-                value = '.' + value;
+                value = '..' + value;
               }
               iframeDescriptor.set.call(this, value);
             },
@@ -280,8 +277,8 @@ function createProxyApp(targetHost: string, targetPort: number) {
 
         html = html.replace(/<head>/i, "<head>" + interceptorScript);
 
-        // Rewrite absolute paths to relative paths
-        html = html.replace(/\s(src|href)="\/(?!\/)/gi, ' $1="./');
+        // Rewrite absolute paths to go up one level (from /webui/ to /)
+        html = html.replace(/\s(src|href)="\/(?!\/)/gi, ' $1="../');
 
         return new Response(html, {
           status: response.status,
