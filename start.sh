@@ -101,5 +101,5 @@ echo -e "  ${YELLOW}Starting server on http://localhost:$PORT${NC}"
 echo -e "  ${BLUE}Press Ctrl+C to stop${NC}"
 echo ""
 
-# Start LightRAG with uv
-exec uv run python -m lightrag.api.lightrag_server
+# Start LightRAG with uv (install API extras)
+exec uv run --extra api python -m lightrag.api.lightrag_server
