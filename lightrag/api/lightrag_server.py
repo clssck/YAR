@@ -737,10 +737,11 @@ def create_app(args):
     @app.get('/')
     async def redirect_to_webui():
         """Redirect root path based on WebUI availability"""
+        # Prepend root_path for correct redirects behind reverse proxy
         if webui_assets_exist:
-            return RedirectResponse(url='/webui')
+            return RedirectResponse(url=f'{root_path}/webui')
         else:
-            return RedirectResponse(url='/docs')
+            return RedirectResponse(url=f'{root_path}/docs')
 
     @app.get('/auth-status')
     async def get_auth_status():
@@ -954,6 +955,11 @@ def create_app(args):
         # Use string path instead of Path object for StaticFiles
         static_dir_str = str(static_dir.resolve())
         logger.info(f'WebUI using resolved path: {static_dir_str}')
+
+        # Explicit route for /webui to redirect with ROOT_PATH
+        @app.get('/webui')
+        async def redirect_webui_trailing_slash():
+            return RedirectResponse(url=f'{root_path}/webui/')
 
         # Explicit route for /webui/ to serve index.html (fixes Starlette mount issue)
         @app.get('/webui/')
