@@ -49,42 +49,29 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 2: Docker Network Setup
+# Step 2: Docker Network Configuration
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
-echo -e "${YELLOW}🔧 Setting up Docker network...${NC}"
+echo -e "${YELLOW}🔧 Configuring Docker network...${NC}"
 
 NETWORK_NAME="lightrag-stack_lightrag-network"
 
-# Check if network exists
+# Check if network already exists (from previous run)
 if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
     GATEWAY_IP=$(docker network inspect "$NETWORK_NAME" --format='{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null)
     if [ -n "$GATEWAY_IP" ] && [ "$GATEWAY_IP" != "null" ]; then
-        echo -e "${GREEN}✓ Existing network found: $NETWORK_NAME${NC}"
-        echo -e "  Gateway: $GATEWAY_IP"
+        echo -e "${GREEN}✓ Network exists: $NETWORK_NAME${NC}"
+        echo -e "  Gateway IP: $GATEWAY_IP"
     else
-        echo -e "${YELLOW}⚠ Network exists but no gateway found${NC}"
-        GATEWAY_IP="127.0.0.1"
+        GATEWAY_IP="172.19.0.1"
+        echo -e "${GREEN}✓ Network exists, using default gateway: $GATEWAY_IP${NC}"
     fi
 else
-    # Create network with fixed subnet for consistent gateway IP
-    echo -e "  Creating network with fixed subnet..."
-    docker network create "$NETWORK_NAME" \
-        --driver bridge \
-        --subnet=172.19.0.0/16 \
-        --gateway=172.19.0.1 \
-        --label com.docker.compose.project=lightrag-stack \
-        --label com.docker.compose.network=lightrag-network \
-        >/dev/null 2>&1 || true
-
-    GATEWAY_IP=$(docker network inspect "$NETWORK_NAME" --format='{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null)
-    if [ -n "$GATEWAY_IP" ] && [ "$GATEWAY_IP" != "null" ]; then
-        echo -e "${GREEN}✓ Created network with gateway: $GATEWAY_IP${NC}"
-    else
-        echo -e "${YELLOW}⚠ Could not detect gateway, using: 127.0.0.1${NC}"
-        GATEWAY_IP="127.0.0.1"
-    fi
+    # Network will be created by docker compose with fixed IPAM (172.19.0.0/16)
+    GATEWAY_IP="172.19.0.1"
+    echo -e "${BLUE}ℹ Network will be created by docker compose${NC}"
+    echo -e "  Gateway IP: $GATEWAY_IP (fixed in docker-compose.yml)"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -195,40 +182,125 @@ echo -e "  • RustFS Console        → http://localhost:9001"
 echo ""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 7: Start Stack
+# Step 7: Build Images
 # ══════════════════════════════════════════════════════════════════════════════
 
-echo -e "${YELLOW}🚀 Starting LightRAG stack...${NC}"
+echo -e "${YELLOW}🔨 [Step 1/3] Building Docker images...${NC}"
+echo -e "  This may take a few minutes on first run."
 echo ""
 
-docker compose build --quiet
-docker compose up -d
+# Build with progress output
+docker compose build 2>&1 | while IFS= read -r line; do
+    # Show key build events
+    if [[ "$line" == *"Building"* ]] || [[ "$line" == *"built"* ]] || [[ "$line" == *"CACHED"* ]] || [[ "$line" == *"exporting"* ]]; then
+        echo -e "  ${BLUE}▸${NC} $line"
+    fi
+done
 
 echo ""
-echo -e "${GREEN}✓ Stack started!${NC}"
+echo -e "${GREEN}✓ Images built${NC}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 8: Start Containers
+# ══════════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo -e "${YELLOW}🚀 [Step 2/3] Starting containers...${NC}"
 echo ""
 
-# Wait for health checks
-echo -e "${YELLOW}⏳ Waiting for services to be healthy...${NC}"
+docker compose up -d 2>&1 | while IFS= read -r line; do
+    echo -e "  ${BLUE}▸${NC} $line"
+done
 
-MAX_WAIT=120
+echo ""
+echo -e "${GREEN}✓ Containers started${NC}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 9: Wait for Health Checks
+# ══════════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo -e "${YELLOW}⏳ [Step 3/3] Waiting for services to be healthy...${NC}"
+echo ""
+
+# Service list for status tracking
+SERVICES=("postgres" "rustfs" "litellm" "lightrag")
+
+get_service_status() {
+    local service=$1
+    local status=$(docker compose ps --format "{{.Service}}:{{.Health}}" 2>/dev/null | grep "^${service}:" | cut -d: -f2)
+    echo "${status:-starting}"
+}
+
+print_status_line() {
+    local elapsed=$1
+    echo -ne "\r  "
+    for svc in "${SERVICES[@]}"; do
+        local status=$(get_service_status "$svc")
+        case "$status" in
+            healthy)
+                echo -ne "${GREEN}✓${NC} $svc  "
+                ;;
+            unhealthy)
+                echo -ne "${RED}✗${NC} $svc  "
+                ;;
+            *)
+                echo -ne "${YELLOW}◦${NC} $svc  "
+                ;;
+        esac
+    done
+    echo -ne " [${elapsed}s]    "
+}
+
+MAX_WAIT=180
 WAITED=0
-while [ $WAITED -lt $MAX_WAIT ]; do
-    HEALTHY=$(docker compose ps --format json 2>/dev/null | grep -c '"Health": "healthy"' || echo "0")
-    TOTAL=$(docker compose ps --format json 2>/dev/null | grep -c '"Service"' || echo "4")
+ALL_HEALTHY=false
 
-    if [ "$HEALTHY" -ge 4 ]; then
-        echo -e "${GREEN}✓ All services healthy!${NC}"
+while [ $WAITED -lt $MAX_WAIT ]; do
+    print_status_line $WAITED
+
+    # Count healthy services
+    HEALTHY_COUNT=0
+    for svc in "${SERVICES[@]}"; do
+        if [ "$(get_service_status "$svc")" == "healthy" ]; then
+            HEALTHY_COUNT=$((HEALTHY_COUNT + 1))
+        fi
+    done
+
+    if [ $HEALTHY_COUNT -ge 4 ]; then
+        ALL_HEALTHY=true
         break
     fi
 
-    echo -ne "  Healthy: $HEALTHY/4 (${WAITED}s)...\r"
-    sleep 5
-    WAITED=$((WAITED + 5))
+    sleep 3
+    WAITED=$((WAITED + 3))
 done
 
-if [ $WAITED -ge $MAX_WAIT ]; then
-    echo -e "${YELLOW}⚠ Timeout waiting for services. Check: docker compose logs${NC}"
+echo ""
+echo ""
+
+if [ "$ALL_HEALTHY" = true ]; then
+    echo -e "${GREEN}✓ All services healthy!${NC}"
+else
+    echo -e "${YELLOW}⚠ Some services not healthy after ${MAX_WAIT}s${NC}"
+    echo ""
+    echo -e "  Service status:"
+    for svc in "${SERVICES[@]}"; do
+        svc_status=$(get_service_status "$svc")
+        case "$svc_status" in
+            healthy)
+                echo -e "    ${GREEN}✓${NC} $svc: healthy"
+                ;;
+            unhealthy)
+                echo -e "    ${RED}✗${NC} $svc: unhealthy"
+                ;;
+            *)
+                echo -e "    ${YELLOW}◦${NC} $svc: $svc_status"
+                ;;
+        esac
+    done
+    echo ""
+    echo -e "  Check logs: ${BLUE}docker compose logs -f${NC}"
 fi
 
 echo ""

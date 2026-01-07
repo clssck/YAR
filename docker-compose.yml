@@ -11,7 +11,14 @@ name: lightrag-stack
 
 networks:
   lightrag-network:
+    # Use external network created by setup.sh (fixed gateway IP)
+    # Falls back to creating if doesn't exist
+    external: false
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
+          gateway: 172.19.0.1
 
 services:
   # ══════════════════════════════════════════════════════════════════════════════
