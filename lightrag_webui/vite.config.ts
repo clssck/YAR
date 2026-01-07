@@ -2,7 +2,6 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react-swc'
 import path from 'path'
 import { defineConfig } from 'vite'
-import { webuiPrefix } from '@/lib/constants'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -15,8 +14,9 @@ export default defineConfig({
     // This prevents "Invalid hook call" errors from duplicate React copies
     dedupe: ['react', 'react-dom', 'katex'],
   },
-  // base: import.meta.env.VITE_BASE_URL || '/webui/',
-  base: webuiPrefix,
+  // Use relative base so assets work behind reverse proxies with arbitrary path prefixes
+  // (e.g., K8s ingress with /oneai-rnd.../proxy/9621/ prefix)
+  base: './',
   build: {
     outDir: path.resolve(__dirname, '../lightrag/api/webui'),
     emptyOutDir: true,

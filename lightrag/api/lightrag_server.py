@@ -962,19 +962,12 @@ def create_app(args):
         async def redirect_webui_trailing_slash():
             return RedirectResponse(url=f'{root_path}/webui/')
 
-        # Explicit route for /webui/ to serve index.html (fixes Starlette mount issue)
+        # Explicit route for /webui/ to serve index.html
+        # WebUI is built with base='./' so all paths are relative
         @app.get('/webui/')
         async def serve_webui_index():
-            from fastapi.responses import HTMLResponse
-            index_path = static_dir / 'index.html'
-            html_content = index_path.read_text()
-            # Rewrite absolute asset paths to relative so they work behind proxy
-            # /webui/assets/... -> ./assets/...
-            html_content = html_content.replace('"/webui/assets/', '"./assets/')
-            html_content = html_content.replace("'/webui/assets/", "'./assets/")
-            html_content = html_content.replace('href="favicon', 'href="./favicon')
-            html_content = html_content.replace("href='favicon", "href='./favicon")
-            return HTMLResponse(content=html_content)
+            from fastapi.responses import FileResponse
+            return FileResponse(static_dir / 'index.html', media_type='text/html')
 
         # Serve static assets from /webui/assets/ (MUST be before catch-all)
         @app.get('/webui/assets/{file_path:path}')

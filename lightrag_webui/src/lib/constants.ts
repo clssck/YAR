@@ -1,7 +1,8 @@
 import type { ButtonVariantType } from '@/components/ui/Button'
 
 export const backendBaseUrl = ''
-export const webuiPrefix = '/webui/'
+// Use relative base './' so assets work behind reverse proxies with path prefixes
+export const webuiPrefix = './'
 
 export const controlButtonVariant: ButtonVariantType = 'ghost'
 
