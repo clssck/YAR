@@ -109,6 +109,9 @@ services:
       - AWS_SESSION_TOKEN
       # LiteLLM config
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
+    volumes:
+      # Mount EKS IRSA token for AWS Bedrock authentication
+      - /var/run/secrets/eks.amazonaws.com/serviceaccount:/var/run/secrets/eks.amazonaws.com/serviceaccount:ro
     healthcheck:
       test: ['CMD', 'python', '-c', 'import socket; s=socket.socket(); s.settimeout(2); s.connect(("localhost",4000)); s.close()']
       interval: 10s
