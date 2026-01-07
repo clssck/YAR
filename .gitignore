@@ -35,6 +35,10 @@ log/
 .history/
 temp/
 
+# Node/Bun dependencies (scripts/)
+node_modules/
+bun.lockb
+
 # IDE / Editor Files
 .idea/
 .vscode/

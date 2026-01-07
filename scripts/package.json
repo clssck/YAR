@@ -1,0 +1,15 @@
+{
+  "name": "lightrag-scripts",
+  "version": "1.0.0",
+  "description": "Utility scripts for LightRAG development",
+  "scripts": {
+    "honohub": "bun run honohub.ts",
+    "honohub:force": "HONOHUB_FORCE=true bun run honohub.ts"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0"
+  }
+}

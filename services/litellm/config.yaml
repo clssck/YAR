@@ -1,0 +1,65 @@
+# LiteLLM Unified Config for AWS Bedrock (Work Environment)
+# Provides both LLM and Embedding endpoints
+
+model_list:
+  # ══════════════════════════════════════════════════════════════════════════════
+  # LLM Models - Claude 3.5 Sonnet via Bedrock
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  # Primary LLM for RAG extraction and queries
+  - model_name: beepboop
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+      aws_region_name: us-east-1
+    model_info:
+      max_tokens: 200000
+      mode: chat
+      supports_function_calling: true
+
+  # Alias for compatibility
+  - model_name: bimbimbap
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+      aws_region_name: us-east-1
+    model_info:
+      max_tokens: 200000
+      mode: chat
+      supports_function_calling: true
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # Embedding Models - Bedrock Titan
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  # Titan Embed Text v2 - Primary embedding model
+  # 1024 dimensions, 8192 token limit, fast (~65ms latency)
+  - model_name: bedrock-titan-v2
+    litellm_params:
+      model: bedrock/amazon.titan-embed-text-v2:0
+      aws_region_name: us-east-1
+
+  # Cohere Multilingual - Alternative for multilingual content
+  - model_name: bedrock-cohere-multilingual
+    litellm_params:
+      model: bedrock/cohere.embed-multilingual-v3
+      aws_region_name: us-east-1
+      input_type: search_document
+      embedding_types: ["float"]
+
+general_settings:
+  master_key: ${LITELLM_MASTER_KEY}
+  complete_response_logging: false
+  allow_requests_on_db_unavailable: true
+  disable_spend_logs: true
+  disable_error_logs: true
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  ssl_verify: false
+  cache: false
+  json_logs: false
+  num_retries: 3
+  request_timeout: 120
+  stream_options: { 'include_usage': true }
+  default_litellm_params:
+    encoding_format: float
