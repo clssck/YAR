@@ -226,8 +226,10 @@ function createProxyApp(targetHost: string, targetPort: number) {
       });
 
       // Check if response is HTML and needs path rewriting
+      // Only rewrite for /webui/ pages - other pages like /docs use their own asset paths
       const contentType = response.headers.get("content-type");
-      if (contentType?.includes("text/html")) {
+      const isWebuiPage = pathname.startsWith("/webui");
+      if (contentType?.includes("text/html") && isWebuiPage) {
         let html = await response.text();
 
         // Inject base tag if not already present
