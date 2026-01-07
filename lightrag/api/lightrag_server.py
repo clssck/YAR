@@ -976,11 +976,28 @@ def create_app(args):
             html_content = html_content.replace("href='favicon", "href='./favicon")
             return HTMLResponse(content=html_content)
 
-        app.mount(
-            '/webui',
-            StaticFiles(directory=static_dir_str, html=True),
-            name='webui',
-        )
+        # Explicit route for static files (StaticFiles mount conflicts with explicit routes)
+        @app.get('/webui/{file_path:path}')
+        async def serve_webui_static(file_path: str):
+            from fastapi.responses import FileResponse
+            file = static_dir / file_path
+            if file.exists() and file.is_file():
+                # Determine content type
+                suffix = file.suffix.lower()
+                content_types = {
+                    '.js': 'application/javascript',
+                    '.css': 'text/css',
+                    '.png': 'image/png',
+                    '.svg': 'image/svg+xml',
+                    '.ico': 'image/x-icon',
+                    '.woff': 'font/woff',
+                    '.woff2': 'font/woff2',
+                    '.ttf': 'font/ttf',
+                }
+                content_type = content_types.get(suffix, 'application/octet-stream')
+                return FileResponse(file, media_type=content_type)
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail='File not found')
         logger.info('WebUI assets mounted at /webui')
     else:
         logger.info('WebUI assets not available, /webui route not mounted')
