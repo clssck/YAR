@@ -99,11 +99,13 @@ services:
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:4000:4000'
     environment:
-      # AWS credentials (inherited from host via IRSA or env vars)
+      # AWS credentials for IRSA (EKS Web Identity)
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
-      - AWS_WEB_IDENTITY_TOKEN_FILE
-      - AWS_ROLE_ARN
+      # Explicitly set token path since we mount it at this location
+      - AWS_WEB_IDENTITY_TOKEN_FILE=/var/run/secrets/eks.amazonaws.com/serviceaccount/token
+      - AWS_ROLE_ARN=${AWS_ROLE_ARN}
+      # Fallback for static credentials
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
       - AWS_SESSION_TOKEN
