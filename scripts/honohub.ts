@@ -37,10 +37,10 @@ if (existsSync(envPath)) {
 }
 
 // LightRAG service port mappings
-// For services with targetPort, HonoHub proxies port -> targetPort on localhost
+// For services with targetPort, HonoHub proxies port -> targetPort on specified host
 // For services without targetPort, HonoHub proxies port -> port on Docker gateway
 const PORT_MAPPINGS = [
-  { port: 9621, targetPort: 9622, targetHost: "localhost", name: "LightRAG API + WebUI" }, // Runs locally on 9622
+  { port: 9621, targetPort: 9622, targetHost: "127.0.0.1", name: "LightRAG API + WebUI" }, // Runs locally on 9622
   { port: 4000, name: "LiteLLM Proxy" },
   { port: 5173, name: "Vite Dev Server" },
   { port: 9100, name: "RustFS S3 API" },
