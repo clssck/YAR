@@ -133,7 +133,7 @@ function createProxyApp(targetHost: string, targetPort: number) {
         return c.text("WebSocket proxying not yet implemented", 501);
       }
 
-      // Build headers
+      // Build headers with proper proxy forwarding
       const headers = new Headers();
       c.req.raw.headers.forEach((value, key) => {
         if (key.toLowerCase() !== "host") {
@@ -141,6 +141,18 @@ function createProxyApp(targetHost: string, targetPort: number) {
         }
       });
       headers.set("host", `${targetHost}:${targetPort}`);
+
+      // Pass X-Forwarded headers so FastAPI knows about the proxy
+      // These help with correct redirect URL generation
+      if (!headers.has("X-Forwarded-Host")) {
+        headers.set("X-Forwarded-Host", c.req.header("host") || "localhost");
+      }
+      if (!headers.has("X-Forwarded-Proto")) {
+        headers.set("X-Forwarded-Proto", incomingUrl.protocol.replace(":", ""));
+      }
+      if (!headers.has("X-Forwarded-For")) {
+        headers.set("X-Forwarded-For", "127.0.0.1");
+      }
 
       // Forward request
       const response = await fetch(targetUrl, {

@@ -324,6 +324,11 @@ def create_app(args):
     swagger_description = (
         base_description + (' (API-Key Enabled)' if api_key else '') + '\n\n[View ReDoc documentation](/redoc)'
     )
+
+    # Support reverse proxy path prefix (e.g., /proxy/9621)
+    # This ensures redirects include the proxy path
+    root_path = os.environ.get('ROOT_PATH', '')
+
     app_kwargs = {
         'title': 'LightRAG Server API',
         'description': swagger_description,
@@ -332,6 +337,7 @@ def create_app(args):
         'docs_url': None,  # Disable default docs, we'll create custom endpoint
         'redoc_url': '/redoc',  # Explicitly set redoc URL
         'lifespan': lifespan,
+        'root_path': root_path,  # Proxy path prefix for correct redirect URLs
     }
 
     # Configure Swagger UI parameters

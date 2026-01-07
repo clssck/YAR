@@ -48,6 +48,10 @@ export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-9621}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
+# Reverse proxy support (set ROOT_PATH for proxied environments)
+# Example: ROOT_PATH="/oneai-rnd-transformerscmc-genai/janos/proxy/9621"
+export ROOT_PATH="${ROOT_PATH:-}"
+
 # LLM via LiteLLM proxy
 export LLM_BINDING="${LLM_BINDING:-openai}"
 export LLM_MODEL="${LLM_MODEL:-beepboop}"
