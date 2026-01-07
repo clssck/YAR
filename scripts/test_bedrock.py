@@ -287,24 +287,65 @@ def test_all_models(client, models: list[dict]) -> None:
     print_header("Summary")
 
     text_ok = sum(1 for _, ok, _ in results["text"] if ok)
+    text_fail = len(results["text"]) - text_ok
     embed_ok = sum(1 for _, ok, _ in results["embedding"] if ok)
+    embed_fail = len(results["embedding"]) - embed_ok
 
-    print(f"  Text Models:      {GREEN}{text_ok}{NC}/{len(results['text'])} working")
-    print(f"  Embedding Models: {GREEN}{embed_ok}{NC}/{len(results['embedding'])} working")
-    print(f"  Image Models:     {YELLOW}{len(results['skipped'])}{NC} skipped")
+    print(f"  {GREEN}Text/Chat Models:{NC}  {text_ok} working, {text_fail} failed")
+    print(f"  {GREEN}Embedding Models:{NC}  {embed_ok} working, {embed_fail} failed")
+    print(f"  {YELLOW}Image Models:{NC}      {len(results['skipped'])} skipped (not tested)")
 
-    # List working models
+    # List ALL working models
+    print_header("Working Models")
+
     if text_ok > 0:
-        print(f"\n  {GREEN}Working Text Models:{NC}")
+        print(f"  {CYAN}Text/Chat Models ({text_ok}):{NC}")
         for model_id, ok, msg in results["text"]:
             if ok:
-                print(f"    • {model_id}")
+                print(f"    ✓ {model_id}")
+        print()
 
     if embed_ok > 0:
-        print(f"\n  {GREEN}Working Embedding Models:{NC}")
+        print(f"  {CYAN}Embedding Models ({embed_ok}):{NC}")
         for model_id, ok, msg in results["embedding"]:
             if ok:
-                print(f"    • {model_id} ({msg})")
+                print(f"    ✓ {model_id} → {msg}")
+        print()
+
+    # List failed models
+    if text_fail > 0 or embed_fail > 0:
+        print_header("Failed Models (need to enable in Bedrock console)")
+
+        if text_fail > 0:
+            print(f"  {RED}Text/Chat Models ({text_fail}):{NC}")
+            for model_id, ok, msg in results["text"]:
+                if not ok:
+                    print(f"    ✗ {model_id}: {msg}")
+            print()
+
+        if embed_fail > 0:
+            print(f"  {RED}Embedding Models ({embed_fail}):{NC}")
+            for model_id, ok, msg in results["embedding"]:
+                if not ok:
+                    print(f"    ✗ {model_id}: {msg}")
+            print()
+
+    # Copy-paste ready list
+    print_header("Copy-Paste Ready (Working Model IDs)")
+
+    all_working = []
+    for model_id, ok, _ in results["text"]:
+        if ok:
+            all_working.append(model_id)
+    for model_id, ok, _ in results["embedding"]:
+        if ok:
+            all_working.append(model_id)
+
+    if all_working:
+        for model_id in all_working:
+            print(f"  {model_id}")
+    else:
+        print(f"  {RED}No working models found{NC}")
 
 
 def main():
