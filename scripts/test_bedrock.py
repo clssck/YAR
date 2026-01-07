@@ -8,10 +8,10 @@ Test AWS Bedrock Models
 Lists all available models and tests which ones work with your credentials.
 
 Usage:
-    uv run scripts/test_bedrock.py
+    uv run scripts/test_bedrock.py                  # Test ALL models (default)
     uv run scripts/test_bedrock.py --region us-west-2
-    uv run scripts/test_bedrock.py --test-all        # Test every model (slow)
-    uv run scripts/test_bedrock.py --test-configured # Test only beepboop + titan-embed
+    uv run scripts/test_bedrock.py --configured-only # Test only beepboop + titan-embed
+    uv run scripts/test_bedrock.py --list            # Just list models, don't test
 """
 
 import argparse
@@ -310,8 +310,7 @@ def test_all_models(client, models: list[dict]) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Test AWS Bedrock models")
     parser.add_argument("--region", default="us-east-1", help="AWS region (default: us-east-1)")
-    parser.add_argument("--test-all", action="store_true", help="Test all available models")
-    parser.add_argument("--test-configured", action="store_true", help="Test only LightRAG configured models")
+    parser.add_argument("--configured-only", action="store_true", help="Test only LightRAG configured models (beepboop, titan-embed)")
     parser.add_argument("--list", action="store_true", help="List available models without testing")
     args = parser.parse_args()
 
@@ -367,12 +366,11 @@ def main():
                 print(f"      Modalities: {modalities}")
         return
 
-    # Test configured models (default)
-    if args.test_configured or not args.test_all:
+    # Test models
+    if args.configured_only:
         test_configured_models(bedrock_runtime, args.region)
-
-    # Test all models
-    if args.test_all:
+    else:
+        # Default: test ALL models
         test_all_models(bedrock_runtime, models)
 
     print()
