@@ -16,14 +16,33 @@
 
 import { Hono } from "hono";
 import { $ } from "bun";
+import { existsSync, readFileSync } from "fs";
+import { join, dirname } from "path";
+
+// Load .env from parent directory (LightRAG root)
+const scriptDir = dirname(import.meta.path);
+const envPath = join(scriptDir, "..", ".env");
+if (existsSync(envPath)) {
+  const envContent = readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith("#")) {
+      const [key, ...valueParts] = trimmed.split("=");
+      const value = valueParts.join("=");
+      if (key && value !== undefined && !process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  }
+}
 
 // LightRAG service port mappings
 const PORT_MAPPINGS = [
   { port: 9621, name: "LightRAG API + WebUI" },
   { port: 4000, name: "LiteLLM Proxy" },
   { port: 5173, name: "Vite Dev Server" },
-  { port: 9000, name: "RustFS S3 API" },
-  { port: 9001, name: "RustFS Web Console" },
+  { port: 9100, name: "RustFS S3 API" },
+  { port: 9101, name: "RustFS Web Console" },
   { port: 5432, name: "PostgreSQL", skip: true }, // TCP, not HTTP - skip by default
 ];
 
@@ -299,12 +318,20 @@ async function main() {
   const forceProxy =
     process.env.HONOHUB_FORCE === "true" || process.env.HONOHUB_FORCE === "1";
 
+  // Auto-enable proxy when ROOT_PATH is set (indicates reverse proxy environment)
+  const hasRootPath = !!process.env.ROOT_PATH;
+
   const servicesOnLocalhost = await checkIfServicesAccessibleOnLocalhost();
 
-  if (forceProxy) {
-    console.log(
-      "ℹ️  HONOHUB_FORCE enabled - running proxy for path/redirect rewriting"
-    );
+  if (forceProxy || hasRootPath) {
+    if (hasRootPath) {
+      console.log(`ℹ️  ROOT_PATH detected (${process.env.ROOT_PATH})`);
+      console.log("ℹ️  Running proxy for path/redirect rewriting\n");
+    } else {
+      console.log(
+        "ℹ️  HONOHUB_FORCE enabled - running proxy for path/redirect rewriting"
+      );
+    }
   } else if (servicesOnLocalhost) {
     console.log("ℹ️  LightRAG services are already accessible on localhost");
     console.log("ℹ️  HonoHub proxy is not needed in this environment");
