@@ -947,9 +947,12 @@ def create_app(args):
     if webui_assets_exist:
         static_dir = Path(__file__).parent / 'webui'
         static_dir.mkdir(exist_ok=True)
+        logger.info(f'WebUI static_dir resolved to: {static_dir}')
+        logger.info(f'WebUI static_dir exists: {static_dir.exists()}')
+        logger.info(f'WebUI index.html exists: {(static_dir / "index.html").exists()}')
         app.mount(
             '/webui',
-            SmartStaticFiles(directory=static_dir, html=True, check_dir=True),  # Use SmartStaticFiles
+            StaticFiles(directory=static_dir, html=True),  # Use regular StaticFiles for debugging
             name='webui',
         )
         logger.info('WebUI assets mounted at /webui')
