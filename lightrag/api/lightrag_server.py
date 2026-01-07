@@ -719,13 +719,14 @@ def create_app(args):
     @app.get('/docs', include_in_schema=False)
     async def custom_swagger_ui_html():
         """Custom Swagger UI HTML with local static files"""
+        # Use root_path prefix for correct paths behind reverse proxy
         return get_swagger_ui_html(
-            openapi_url=app.openapi_url or '/openapi.json',
+            openapi_url=f'{root_path}/openapi.json',
             title=app.title + ' - Swagger UI',
-            oauth2_redirect_url='/docs/oauth2-redirect',
-            swagger_js_url='/static/swagger-ui/swagger-ui-bundle.js',
-            swagger_css_url='/static/swagger-ui/swagger-ui.css',
-            swagger_favicon_url='/static/swagger-ui/favicon-32x32.png',
+            oauth2_redirect_url=f'{root_path}/docs/oauth2-redirect',
+            swagger_js_url=f'{root_path}/static/swagger-ui/swagger-ui-bundle.js',
+            swagger_css_url=f'{root_path}/static/swagger-ui/swagger-ui.css',
+            swagger_favicon_url=f'{root_path}/static/swagger-ui/favicon-32x32.png',
             swagger_ui_parameters=app.swagger_ui_parameters,
         )
 
