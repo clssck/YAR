@@ -144,7 +144,20 @@ function createProxyApp(targetHost: string, targetPort: number) {
   // Proxy all requests
   app.all("*", async (c) => {
     const incomingUrl = new URL(c.req.raw.url);
-    const targetUrl = `http://${targetHost}:${targetPort}${incomingUrl.pathname}${incomingUrl.search}`;
+
+    // Strip ROOT_PATH prefix from incoming requests
+    // This handles K8s/proxy environments where the ingress doesn't strip the path prefix
+    let pathname = incomingUrl.pathname;
+    const rootPath = process.env.ROOT_PATH;
+    if (rootPath && pathname.startsWith(rootPath)) {
+      pathname = pathname.slice(rootPath.length) || "/";
+      // Ensure pathname starts with /
+      if (!pathname.startsWith("/")) {
+        pathname = "/" + pathname;
+      }
+    }
+
+    const targetUrl = `http://${targetHost}:${targetPort}${pathname}${incomingUrl.search}`;
 
     try {
       // Check if this is a WebSocket upgrade request
