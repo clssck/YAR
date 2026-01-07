@@ -149,10 +149,20 @@ mkdir -p data/rag_storage data/inputs
 echo -e "${GREEN}✓ Created data/rag_storage and data/inputs${NC}"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 5: Install HonoHub dependencies (optional)
+# Step 5: Build WebUI and install HonoHub dependencies
 # ══════════════════════════════════════════════════════════════════════════════
 
 if command -v bun &> /dev/null; then
+    # Build WebUI
+    echo ""
+    echo -e "${YELLOW}🔨 Building WebUI frontend...${NC}"
+    cd lightrag_webui
+    bun install --frozen-lockfile 2>/dev/null || bun install
+    bun run build
+    cd ..
+    echo -e "${GREEN}✓ WebUI built${NC}"
+
+    # Install HonoHub dependencies
     echo ""
     echo -e "${YELLOW}📦 Installing HonoHub proxy dependencies...${NC}"
     cd scripts
@@ -161,8 +171,8 @@ if command -v bun &> /dev/null; then
     echo -e "${GREEN}✓ HonoHub dependencies installed${NC}"
 else
     echo ""
-    echo -e "${YELLOW}ℹ Bun not found - skipping HonoHub setup${NC}"
-    echo -e "  Install bun to use the reverse proxy: curl -fsSL https://bun.sh/install | bash"
+    echo -e "${YELLOW}ℹ Bun not found - skipping WebUI build and HonoHub setup${NC}"
+    echo -e "  Install bun: curl -fsSL https://bun.sh/install | bash"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
