@@ -102,6 +102,12 @@ set_env "DOCKER_GATEWAY_IP" "$GATEWAY_IP"
 set_env "AWS_REGION" "${AWS_REGION:-us-east-1}"
 set_env "AWS_DEFAULT_REGION" "${AWS_DEFAULT_REGION:-us-east-1}"
 
+# IRSA credentials (for EKS pods running Docker)
+if [ -n "${AWS_ROLE_ARN}" ]; then
+    set_env "AWS_ROLE_ARN" "${AWS_ROLE_ARN}"
+    echo -e "  ${GREEN}✓${NC} Captured AWS_ROLE_ARN for Docker containers"
+fi
+
 # LiteLLM
 set_env "LITELLM_MASTER_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
