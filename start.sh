@@ -44,8 +44,9 @@ echo ""
 
 # Export environment variables for LightRAG
 # Server
+# Port 9622 internally - HonoHub proxies 9621 -> 9622 for path rewriting
 export HOST="${HOST:-0.0.0.0}"
-export PORT="${PORT:-9621}"
+export PORT="${PORT:-9622}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 # Reverse proxy support (set ROOT_PATH for proxied environments)

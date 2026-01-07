@@ -37,8 +37,10 @@ if (existsSync(envPath)) {
 }
 
 // LightRAG service port mappings
+// For services with targetPort, HonoHub proxies port -> targetPort on localhost
+// For services without targetPort, HonoHub proxies port -> port on Docker gateway
 const PORT_MAPPINGS = [
-  { port: 9621, name: "LightRAG API + WebUI" },
+  { port: 9621, targetPort: 9622, targetHost: "localhost", name: "LightRAG API + WebUI" }, // Runs locally on 9622
   { port: 4000, name: "LiteLLM Proxy" },
   { port: 5173, name: "Vite Dev Server" },
   { port: 9100, name: "RustFS S3 API" },
@@ -355,7 +357,11 @@ async function main() {
 
   for (const mapping of HTTP_PORTS) {
     try {
-      const app = createProxyApp(serviceHost, mapping.port);
+      // Use targetHost/targetPort if specified, otherwise use Docker gateway
+      const proxyHost = (mapping as any).targetHost || serviceHost;
+      const proxyPort = (mapping as any).targetPort || mapping.port;
+
+      const app = createProxyApp(proxyHost, proxyPort);
 
       const server = Bun.serve({
         port: mapping.port,
@@ -365,7 +371,7 @@ async function main() {
 
       servers.push({ port: mapping.port, server });
       console.log(
-        `→ Proxying localhost:${mapping.port} -> ${serviceHost}:${mapping.port} (${mapping.name})`
+        `→ Proxying localhost:${mapping.port} -> ${proxyHost}:${proxyPort} (${mapping.name})`
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
