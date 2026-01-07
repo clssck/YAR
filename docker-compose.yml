@@ -11,14 +11,11 @@ name: lightrag-stack
 
 networks:
   lightrag-network:
-    # Use external network created by setup.sh (fixed gateway IP)
-    # Falls back to creating if doesn't exist
-    external: false
     driver: bridge
     ipam:
       config:
-        - subnet: 172.19.0.0/16
-          gateway: 172.19.0.1
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
 
 services:
   # ══════════════════════════════════════════════════════════════════════════════
@@ -73,8 +70,8 @@ services:
     image: rustfs/rustfs:latest
     container_name: lightrag-rustfs
     ports:
-      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9000:9000'
-      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9001:9001'
+      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9100:9000'  # S3 API (mapped to 9100 to avoid conflicts)
+      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9101:9001'  # Web console
     environment:
       RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}

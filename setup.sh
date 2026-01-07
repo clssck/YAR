@@ -68,8 +68,8 @@ if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Network exists, using default gateway: $GATEWAY_IP${NC}"
     fi
 else
-    # Network will be created by docker compose with fixed IPAM (172.19.0.0/16)
-    GATEWAY_IP="172.19.0.1"
+    # Network will be created by docker compose with fixed IPAM (172.28.0.0/16)
+    GATEWAY_IP="172.28.0.1"
     echo -e "${BLUE}ℹ Network will be created by docker compose${NC}"
     echo -e "  Gateway IP: $GATEWAY_IP (fixed in docker-compose.yml)"
 fi
@@ -178,11 +178,11 @@ echo -e "  ${GREEN}Embedding Model:${NC}   titan-embed (Bedrock Titan v2, 1024 d
 echo -e "  ${GREEN}Chunking:${NC}          semantic (Kreuzberg, max 1600 tokens)"
 echo ""
 echo -e "${BLUE}Services:${NC}"
-echo -e "  • LightRAG API + WebUI  → http://localhost:9621"
+echo -e "  • LightRAG API + WebUI  → http://localhost:9621 (via ./start.sh)"
 echo -e "  • LiteLLM Proxy         → http://localhost:4000"
 echo -e "  • PostgreSQL            → localhost:5432"
-echo -e "  • RustFS S3             → http://localhost:9000"
-echo -e "  • RustFS Console        → http://localhost:9001"
+echo -e "  • RustFS S3             → http://localhost:9100"
+echo -e "  • RustFS Console        → http://localhost:9101"
 echo ""
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -333,7 +333,7 @@ echo ""
 echo -e "  ${GREEN}Infra Services:${NC}"
 echo -e "    • PostgreSQL:  localhost:5432"
 echo -e "    • LiteLLM:     http://localhost:4000"
-echo -e "    • RustFS S3:   http://localhost:9000"
+echo -e "    • RustFS S3:   http://localhost:9100"
 echo ""
 echo -e "  ${YELLOW}Start LightRAG:${NC}"
 echo -e "    ./start.sh                # Start LightRAG API server"

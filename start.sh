@@ -74,8 +74,8 @@ export CHUNKING_PRESET="${CHUNKING_PRESET:-semantic}"
 export CHUNK_SIZE="${CHUNK_SIZE:-1600}"
 export CHUNK_OVERLAP_SIZE="${CHUNK_OVERLAP_SIZE:-100}"
 
-# S3/RustFS
-export S3_ENDPOINT_URL="${S3_ENDPOINT_URL:-http://localhost:9000}"
+# S3/RustFS (port 9100 to avoid conflicts)
+export S3_ENDPOINT_URL="${S3_ENDPOINT_URL:-http://localhost:9100}"
 export S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-rustfsadmin}"
 export S3_SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY:-rustfsadmin}"
 export S3_BUCKET_NAME="${S3_BUCKET_NAME:-lightrag}"
