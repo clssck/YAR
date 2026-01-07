@@ -108,8 +108,8 @@ set_env "LITELLM_MASTER_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 # LLM Model (Bedrock Claude 3.5 Sonnet)
 set_env "LLM_MODEL" "beepboop"
 
-# Embedding (Bedrock Titan v2 - 1024 dims, 8192 token limit)
-set_env "EMBEDDING_MODEL" "bedrock-titan-v2"
+# Embedding (Bedrock Titan Embed v2 - 1024 dims, 8192 token limit)
+set_env "EMBEDDING_MODEL" "titan-embed"
 set_env "EMBEDDING_DIM" "1024"
 
 # Chunking (Kreuzberg semantic chunking by default)
@@ -174,7 +174,7 @@ echo ""
 echo -e "  ${GREEN}Docker Gateway:${NC}    $GATEWAY_IP"
 echo -e "  ${GREEN}AWS Environment:${NC}   ${AWS_ENV:-false}"
 echo -e "  ${GREEN}LLM Model:${NC}         beepboop (Bedrock Claude 3.5 Sonnet)"
-echo -e "  ${GREEN}Embedding Model:${NC}   bedrock-titan-v2 (1024 dims)"
+echo -e "  ${GREEN}Embedding Model:${NC}   titan-embed (Bedrock Titan v2, 1024 dims)"
 echo -e "  ${GREEN}Chunking:${NC}          semantic (Kreuzberg, max 1600 tokens)"
 echo ""
 echo -e "${BLUE}Services:${NC}"

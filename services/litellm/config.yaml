@@ -1,12 +1,15 @@
 # LiteLLM Unified Config for AWS Bedrock (Work Environment)
-# Provides both LLM and Embedding endpoints
+# Provides both LLM and Embedding endpoints via single proxy
+#
+# LightRAG uses:
+#   - LLM_MODEL=beepboop           → Claude 3.5 Sonnet (extraction, queries)
+#   - EMBEDDING_MODEL=titan-embed  → Titan Embed Text v2 (1024 dims)
 
 model_list:
   # ══════════════════════════════════════════════════════════════════════════════
-  # LLM Models - Claude 3.5 Sonnet via Bedrock
+  # LLM - Claude 3.5 Sonnet via Bedrock
   # ══════════════════════════════════════════════════════════════════════════════
 
-  # Primary LLM for RAG extraction and queries
   - model_name: beepboop
     litellm_params:
       model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
@@ -16,34 +19,15 @@ model_list:
       mode: chat
       supports_function_calling: true
 
-  # Alias for compatibility
-  - model_name: bimbimbap
-    litellm_params:
-      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
-      aws_region_name: us-east-1
-    model_info:
-      max_tokens: 200000
-      mode: chat
-      supports_function_calling: true
-
   # ══════════════════════════════════════════════════════════════════════════════
-  # Embedding Models - Bedrock Titan
+  # Embedding - Bedrock Titan Embed Text v2
+  # 1024 dimensions, 8192 token limit, ~65ms latency
   # ══════════════════════════════════════════════════════════════════════════════
 
-  # Titan Embed Text v2 - Primary embedding model
-  # 1024 dimensions, 8192 token limit, fast (~65ms latency)
-  - model_name: bedrock-titan-v2
+  - model_name: titan-embed
     litellm_params:
       model: bedrock/amazon.titan-embed-text-v2:0
       aws_region_name: us-east-1
-
-  # Cohere Multilingual - Alternative for multilingual content
-  - model_name: bedrock-cohere-multilingual
-    litellm_params:
-      model: bedrock/cohere.embed-multilingual-v3
-      aws_region_name: us-east-1
-      input_type: search_document
-      embedding_types: ["float"]
 
 general_settings:
   master_key: ${LITELLM_MASTER_KEY}

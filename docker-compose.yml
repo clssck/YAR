@@ -148,9 +148,9 @@ services:
       - LLM_BINDING_HOST=http://litellm:4000/v1
       - LLM_BINDING_API_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
 
-      # Embedding via LiteLLM proxy (Bedrock Titan v2)
+      # Embedding via LiteLLM proxy (Bedrock Titan Embed v2)
       - EMBEDDING_BINDING=openai
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-bedrock-titan-v2}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-titan-embed}
       - EMBEDDING_DIM=${EMBEDDING_DIM:-1024}
       - EMBEDDING_BINDING_HOST=http://litellm:4000/v1
       - EMBEDDING_BINDING_API_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
