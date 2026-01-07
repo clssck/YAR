@@ -157,10 +157,13 @@ if command -v bun &> /dev/null; then
     echo ""
     echo -e "${YELLOW}🔨 Building WebUI frontend...${NC}"
     cd lightrag_webui
-    bun install --frozen-lockfile 2>/dev/null || bun install
-    bun run build
+    bun install || { echo -e "${RED}✗ Failed to install WebUI dependencies${NC}"; cd ..; }
+    if bun run build; then
+        echo -e "${GREEN}✓ WebUI built${NC}"
+    else
+        echo -e "${RED}✗ WebUI build failed${NC}"
+    fi
     cd ..
-    echo -e "${GREEN}✓ WebUI built${NC}"
 
     # Install HonoHub dependencies
     echo ""
