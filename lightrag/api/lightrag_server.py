@@ -965,15 +965,14 @@ def create_app(args):
         @app.get('/webui/')
         async def serve_webui_index():
             from fastapi.responses import HTMLResponse
-            # Read and modify index.html to inject base tag for ROOT_PATH
             index_path = static_dir / 'index.html'
             html_content = index_path.read_text()
-            # Inject base tag so asset paths resolve correctly behind proxy
-            if root_path and '<base' not in html_content:
-                html_content = html_content.replace(
-                    '<head>',
-                    f'<head>\n    <base href="{root_path}/webui/">'
-                )
+            # Rewrite absolute asset paths to relative so they work behind proxy
+            # /webui/assets/... -> ./assets/...
+            html_content = html_content.replace('"/webui/assets/', '"./assets/')
+            html_content = html_content.replace("'/webui/assets/", "'./assets/")
+            html_content = html_content.replace('href="favicon', 'href="./favicon')
+            html_content = html_content.replace("href='favicon", "href='./favicon")
             return HTMLResponse(content=html_content)
 
         app.mount(
