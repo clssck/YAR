@@ -111,7 +111,11 @@ set_env "LLM_MODEL" "beepboop"
 # Embedding (Bedrock Titan v2 - 1024 dims, 8192 token limit)
 set_env "EMBEDDING_MODEL" "bedrock-titan-v2"
 set_env "EMBEDDING_DIM" "1024"
-set_env "CHUNK_SIZE" "1600"  # Titan v2 supports up to 8192 tokens
+
+# Chunking (Kreuzberg semantic chunking by default)
+set_env "CHUNKING_PRESET" "semantic"  # 'semantic', 'recursive', or '' for basic
+set_env "CHUNK_SIZE" "1600"           # Max tokens per semantic chunk
+set_env "CHUNK_OVERLAP_SIZE" "100"    # Overlap between chunks
 
 # PostgreSQL
 set_env "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-lightrag_pass}"
@@ -171,7 +175,7 @@ echo -e "  ${GREEN}Docker Gateway:${NC}    $GATEWAY_IP"
 echo -e "  ${GREEN}AWS Environment:${NC}   ${AWS_ENV:-false}"
 echo -e "  ${GREEN}LLM Model:${NC}         beepboop (Bedrock Claude 3.5 Sonnet)"
 echo -e "  ${GREEN}Embedding Model:${NC}   bedrock-titan-v2 (1024 dims)"
-echo -e "  ${GREEN}Chunk Size:${NC}        1600 tokens"
+echo -e "  ${GREEN}Chunking:${NC}          semantic (Kreuzberg, max 1600 tokens)"
 echo ""
 echo -e "${BLUE}Services:${NC}"
 echo -e "  • LightRAG API + WebUI  → http://localhost:9621"
