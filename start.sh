@@ -101,5 +101,10 @@ echo -e "  ${YELLOW}Starting server on http://localhost:$PORT${NC}"
 echo -e "  ${BLUE}Press Ctrl+C to stop${NC}"
 echo ""
 
-# Start LightRAG with uv (install API extras)
-exec uv run --extra api python -m lightrag.api.lightrag_server
+# Sync dependencies (api + aioboto3 for S3 client)
+echo -e "  ${BLUE}Installing dependencies...${NC}"
+uv sync --extra api --quiet
+uv pip install aioboto3 --quiet 2>/dev/null || true
+
+# Start LightRAG
+exec uv run python -m lightrag.api.lightrag_server
