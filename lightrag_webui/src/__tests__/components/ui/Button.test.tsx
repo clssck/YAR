@@ -2,6 +2,7 @@ import '../../../__tests__/setup'
 import { describe, expect, mock, test } from 'bun:test'
 import { render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createRef } from 'react'
 import Button, { type ButtonVariantType, buttonVariants } from '@/components/ui/Button'
 
 describe('Button Component', () => {
@@ -318,31 +319,19 @@ describe('Button Component', () => {
 
   describe('Ref Forwarding', () => {
     test('forwards ref to button element', () => {
-      let buttonRef: HTMLButtonElement | null = null
-      const ref = (el: HTMLButtonElement | null) => {
-        buttonRef = el
-      }
+      const buttonRef = createRef<HTMLButtonElement>()
+      render(<Button ref={buttonRef}>Button</Button>)
 
-      render(<Button ref={ref}>Button</Button>)
-
-      expect(buttonRef).not.toBeNull()
-      expect(buttonRef?.tagName.toLowerCase()).toBe('button')
+      expect(buttonRef.current).not.toBeNull()
+      expect(buttonRef.current?.tagName.toLowerCase()).toBe('button')
     })
 
     test('ref can be used to interact with button', () => {
-      let buttonRef: HTMLButtonElement | null = null
-      render(
-        <Button
-          ref={(el) => {
-            buttonRef = el
-          }}
-        >
-          Button
-        </Button>
-      )
+      const buttonRef = createRef<HTMLButtonElement>()
+      render(<Button ref={buttonRef}>Button</Button>)
 
-      expect(buttonRef).not.toBeNull()
-      expect(buttonRef?.textContent).toBe('Button')
+      expect(buttonRef.current).not.toBeNull()
+      expect(buttonRef.current?.textContent).toBe('Button')
     })
   })
 
