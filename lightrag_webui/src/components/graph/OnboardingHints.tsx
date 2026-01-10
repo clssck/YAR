@@ -118,6 +118,7 @@ const OnboardingHints = () => {
     >
       {/* Close button */}
       <button
+        type="button"
         onClick={handleSkip}
         className="absolute top-2 right-2 p-1 rounded-full hover:bg-primary/10 transition-colors"
         aria-label="Skip onboarding"
@@ -127,12 +128,12 @@ const OnboardingHints = () => {
 
       {/* Step indicator */}
       <div className="flex gap-1 mb-3">
-        {steps.map((_, index) => (
+        {steps.map((step) => (
           <div
-            key={index}
+            key={step.id}
             className={cn(
               'h-1 flex-1 rounded-full transition-colors',
-              index <= currentStep ? 'bg-primary' : 'bg-primary/20'
+              steps.indexOf(step) <= currentStep ? 'bg-primary' : 'bg-primary/20'
             )}
           />
         ))}
@@ -145,6 +146,7 @@ const OnboardingHints = () => {
       {/* Actions */}
       <div className="flex justify-between items-center">
         <button
+          type="button"
           onClick={handleSkip}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors"
         >

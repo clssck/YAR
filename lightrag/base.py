@@ -14,6 +14,26 @@ from typing import (
 
 from dotenv import load_dotenv
 
+__all__ = [
+    'BaseGraphStorage',
+    'BaseKVStorage',
+    'BaseVectorStorage',
+    'DeletionResult',
+    'DocProcessingStatus',
+    'DocStatus',
+    'DocStatusStorage',
+    'QueryContextResult',
+    'QueryExplainResult',
+    'QueryParam',
+    'QueryResult',
+    'QueryRetrievalStats',
+    'QueryTimingInfo',
+    'QueryTokenStats',
+    'StorageNameSpace',
+    'StoragesStatus',
+    'TextChunkSchema',
+]
+
 from .constants import (
     DEFAULT_CHECK_TOPIC_CONNECTIVITY,
     DEFAULT_CHUNK_TOP_K,
@@ -118,9 +138,13 @@ class QueryParam:
     It's purpose is the let user customize the way LLM generate the response.
     """
 
-    enable_rerank: bool = os.getenv('RERANK_BY_DEFAULT', 'true').lower() == 'true'
-    """Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued.
-    Default is True to enable reranking when rerank model is available.
+    enable_rerank: bool = (
+        os.getenv('RERANK_BINDING', 'null').lower() != 'null'
+        and os.getenv('RERANK_BY_DEFAULT', 'true').lower() == 'true'
+    )
+    """Enable reranking for retrieved text chunks.
+    Default is False when RERANK_BINDING=null (no reranker configured).
+    When a reranker is configured, defaults to True unless RERANK_BY_DEFAULT=false.
     """
 
     enable_hyde: bool = os.getenv('ENABLE_HYDE', 'false').lower() == 'true'

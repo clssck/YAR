@@ -4,13 +4,22 @@ import asyncio
 import json
 import time
 from collections import Counter, defaultdict
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
 import json_repair
 from dotenv import load_dotenv
+
+__all__ = [
+    'create_chunker',
+    'extract_entities',
+    'kg_query',
+    'merge_nodes_and_edges',
+    'naive_query',
+    'rebuild_knowledge_from_chunks',
+]
 
 from lightrag.base import (
     BaseGraphStorage,
@@ -393,8 +402,7 @@ async def _summarize_descriptions(
     Returns:
         Summarized description string
     """
-    use_llm_func: Callable[..., Any] = global_config['llm_model_func']
-    # Apply higher priority (8) to entity/relation summary tasks
+    use_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
     use_llm_func = partial(use_llm_func, _priority=8)
 
     language = global_config['addon_params'].get('language', DEFAULT_SUMMARY_LANGUAGE)
@@ -494,25 +502,25 @@ async def _batch_infer_entity_types(
     if not to_infer:
         return 0
 
-    use_llm_func: Callable[..., Any] = global_config['llm_model_func']
-    use_llm_func = partial(use_llm_func, _priority=6)  # Medium priority
+    use_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
+    use_llm_func = partial(use_llm_func, _priority=6)
 
     entity_types = global_config['addon_params'].get('entity_types', DEFAULT_ENTITY_TYPES)
     updated_count = 0
 
     # Process in batches
     for i in range(0, len(to_infer), batch_size):
-        batch = to_infer[i:i + batch_size]
+        batch = to_infer[i : i + batch_size]
 
         # Format entities for prompt
         entity_lines = []
         for e in batch:
             name = e.get('entity_name', '')
             desc = str(e.get('description', ''))[:150]
-            entity_lines.append(f"- {name}: {desc}")
+            entity_lines.append(f'- {name}: {desc}')
 
         prompt = ENTITY_TYPE_INFERENCE_PROMPT.format(
-            entity_types=', '.join(entity_types + ['other']),
+            entity_types=', '.join([*entity_types, 'other']),
             entities='\n'.join(entity_lines),
         )
 
@@ -521,6 +529,7 @@ async def _batch_infer_entity_types(
 
             # Parse JSON from response
             import re
+
             text = response
             if '```' in text:
                 match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
@@ -531,12 +540,13 @@ async def _batch_infer_entity_types(
             if not isinstance(data, list):
                 data = [data]
 
-            # Apply inferred types
-            name_to_type = {
-                item.get('entity_name', ''): item.get('inferred_type', '').lower().replace(' ', '')
-                for item in data
-                if item.get('entity_name') and item.get('inferred_type')
-            }
+            name_to_type: dict[str, str] = {}
+            for item in data:
+                if isinstance(item, dict):
+                    entity_name = item.get('entity_name')
+                    inferred_type = item.get('inferred_type')
+                    if entity_name and inferred_type:
+                        name_to_type[str(entity_name)] = str(inferred_type).lower().replace(' ', '')
 
             for entity in batch:
                 entity_name = entity.get('entity_name', '')
@@ -582,11 +592,11 @@ async def _batch_infer_entity_types(
                 updated_count += 1
 
         except Exception as e:
-            logger.warning(f"Batch type inference failed: {e}")
+            logger.warning(f'Batch type inference failed: {e}')
             continue
 
     if updated_count > 0:
-        logger.info(f"Inferred types for {updated_count}/{len(to_infer)} UNKNOWN entities")
+        logger.info(f'Inferred types for {updated_count}/{len(to_infer)} UNKNOWN entities')
 
     return updated_count
 
@@ -2898,7 +2908,7 @@ async def extract_entities(
     # Check for cancellation at the start of entity extraction
     await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'entity extraction')
 
-    use_llm_func: Callable[..., Any] = global_config['llm_model_func']
+    use_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
     entity_extract_max_gleaning = int(global_config.get('entity_extract_max_gleaning', 0))
 
     ordered_chunks = list(chunks.items())
@@ -3159,8 +3169,7 @@ async def kg_query(
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
-        use_model_func = global_config['llm_model_func']
-        # Apply higher priority (5) to query relation LLM function
+        use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
         use_model_func = partial(use_model_func, _priority=5)
 
     hl_keywords, ll_keywords = await get_keywords_from_query(query, query_param, global_config, hashing_kv)
@@ -3387,12 +3396,10 @@ async def extract_keywords_only(
     len_of_prompts = len(tokenizer.encode(kw_prompt))
     logger.debug(f'[extract_keywords] Sending to LLM: {len_of_prompts:,} tokens (Prompt: {len_of_prompts})')
 
-    # 4. Call the LLM for keyword extraction
     if param.model_func:
         use_model_func = param.model_func
     else:
-        use_model_func = global_config['llm_model_func']
-        # Apply higher priority (5) to query relation LLM function
+        use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
         use_model_func = partial(use_model_func, _priority=5)
 
     result = cast(str, await use_model_func(kw_prompt, keyword_extraction=True))
@@ -4877,8 +4884,7 @@ async def naive_query(
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
-        use_model_func = global_config['llm_model_func']
-        # Apply higher priority (5) to query relation LLM function
+        use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
         use_model_func = partial(use_model_func, _priority=5)
 
     tokenizer = global_config['tokenizer']

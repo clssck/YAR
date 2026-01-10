@@ -106,7 +106,7 @@ async def run_evaluation(
     try:
         await db.initdb()
         print(f'\n{"="*70}')
-        print(f'ENTITY CENTRALITY EVALUATION')
+        print('ENTITY CENTRALITY EVALUATION')
         print(f'{"="*70}')
         print(f'Query: "{query}"')
         print(f'Workspace: {workspace}')

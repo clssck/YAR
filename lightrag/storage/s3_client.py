@@ -11,9 +11,13 @@ import hashlib
 import logging
 import os
 import threading
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from types_aiobotocore_s3 import S3Client as S3ClientType
 
 import pipmaster as pm
 
@@ -158,7 +162,7 @@ class S3Client:
             logger.info('S3 client finalized')
 
     @asynccontextmanager
-    async def _get_client(self):
+    async def _get_client(self) -> AsyncIterator['S3ClientType']:
         """Get an S3 client from the session."""
         if self._session is None:
             raise RuntimeError('S3Client not initialized')
@@ -167,14 +171,14 @@ class S3Client:
             connect_timeout=self.config.connect_timeout,
             read_timeout=self.config.read_timeout,
             retries={'max_attempts': S3_RETRY_ATTEMPTS},
-            signature_version='s3v4',  # Required for MinIO and modern S3
+            signature_version='s3v4',
         )
 
-        async with self._session.client(  # type: ignore
+        async with self._session.client(
             's3',
             endpoint_url=self.config.endpoint_url if self.config.endpoint_url else None,
             config=boto_config,
-        ) as client:
+        ) as client:  # type: ignore[attr-defined]
             yield client
 
     async def _ensure_bucket_exists(self):

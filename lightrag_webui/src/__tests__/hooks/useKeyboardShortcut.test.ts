@@ -1,6 +1,6 @@
-import { describe, test, expect } from 'bun:test'
-import { formatShortcut } from '../../hooks/useKeyboardShortcut'
+import { describe, expect, test } from 'bun:test'
 import { BREAKPOINTS } from '../../hooks/useBreakpoint'
+import { formatShortcut } from '../../hooks/useKeyboardShortcut'
 
 describe('BREAKPOINTS', () => {
   test('has correct Tailwind default values', () => {
@@ -34,7 +34,9 @@ describe('formatShortcut', () => {
   })
 
   test('formats key with all modifiers (Mac)', () => {
-    expect(formatShortcut('k', { ctrl: true, alt: true, shift: true, meta: true }, true)).toBe('⌃⌥⇧⌘K')
+    expect(formatShortcut('k', { ctrl: true, alt: true, shift: true, meta: true }, true)).toBe(
+      '⌃⌥⇧⌘K'
+    )
   })
 
   test('formats key with multiple modifiers (non-Mac)', () => {

@@ -98,7 +98,7 @@ export function useKeyboardShortcut(config: ShortcutConfig) {
       })
       return () => useShortcutStore.getState().unregister(id)
     }
-  }, [id, config.key, config.modifiers, config.description, config.category])
+  }, [id, config])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

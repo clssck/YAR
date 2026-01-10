@@ -8,8 +8,6 @@ This module tests:
 
 from __future__ import annotations
 
-import pytest
-
 from lightrag.base import DeletionResult
 from lightrag.constants import GRAPH_FIELD_SEP
 from lightrag.utils_graph import _merge_attributes

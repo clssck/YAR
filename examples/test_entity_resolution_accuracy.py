@@ -164,7 +164,7 @@ async def run_evaluation(
         # Find groups with multiple types
         type_conflicts = []
         for norm_name, group in name_groups.items():
-            types_in_group = set(e['entity_type'] for e in group)
+            types_in_group = {e['entity_type'] for e in group}
             # Exclude Unknown from conflict detection
             known_types = types_in_group - {'Unknown'}
             if len(known_types) > 1:

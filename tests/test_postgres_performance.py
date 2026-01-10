@@ -19,7 +19,7 @@ Environment:
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import os
 import statistics
 import time
@@ -152,6 +152,7 @@ async def db_connection():
             'database': os.getenv('POSTGRES_DATABASE'),
             'workspace': f'benchmark_{int(time.time())}',
             'max_connections': int(os.getenv('POSTGRES_MAX_CONNECTIONS', '10')),
+            'min_connections': 1,
             'connection_retry_attempts': 3,
             'connection_retry_backoff': 0.5,
             'connection_retry_backoff_max': 5.0,
@@ -164,7 +165,8 @@ async def db_connection():
         yield db
     finally:
         if db.pool:
-            await db.pool.close()
+            with contextlib.suppress(Exception):
+                await db.pool.close()
 
 
 # Default embedding dimension (matches typical OpenAI models)
@@ -200,12 +202,10 @@ async def vector_storage(db_connection: PostgreSQLDB):
     yield storage
 
     # Cleanup: delete test data
-    try:
+    with contextlib.suppress(Exception):
         await db_connection.execute(
-            'DELETE FROM LIGHTRAG_VDB_CHUNKS WHERE workspace = $1', params=[workspace]
+            'DELETE FROM LIGHTRAG_VDB_CHUNKS WHERE workspace = $1', data={'workspace': workspace}
         )
-    except Exception:
-        pass
 
 
 @pytest.fixture(scope='function')
@@ -379,7 +379,7 @@ class TestBulkInsertPerformance:
             db = vector_storage._db_required()
             await db.execute(
                 "DELETE FROM LIGHTRAG_VDB_CHUNKS WHERE id LIKE 'throughput_test_%' AND workspace = $1",
-                params=[vector_storage.workspace],
+                data={'workspace': vector_storage.workspace},
             )
         except Exception:
             pass
@@ -399,19 +399,20 @@ class TestGraphOperationsPerformance:
 
         storage = PGGraphStorage(
             namespace='chunk_entity_relation',
-            global_config={'embedding_dim': 1024},
+            global_config={'embedding_dim': EMBEDDING_DIM},
             workspace=workspace,
+            embedding_func=mock_embedding_func,
         )
-        storage._db = db_connection
-
-        # Seed with test entities and edges
+        storage.db = db_connection
+        storage.graph_name = f'{workspace}_chunk_entity_relation'
         config, _ = get_benchmark_config()
 
-        # Create entities
         for i in range(config['entities']):
+            entity_id = f'entity_{i:04d}'
             await storage.upsert_node(
-                node_id=f'entity_{i:04d}',
+                node_id=entity_id,
                 node_data={
+                    'entity_id': entity_id,
                     'entity_type': 'TEST_ENTITY',
                     'description': f'Test entity {i} for benchmarking',
                     'source_id': f'chunk_{i % 100:06d}',
@@ -436,10 +437,8 @@ class TestGraphOperationsPerformance:
         yield storage
 
         # Cleanup
-        try:
+        with contextlib.suppress(Exception):
             await storage.delete_graph()
-        except Exception:
-            pass
 
     @pytest.mark.asyncio
     async def test_get_edge_single_vs_batch(self, graph_storage):

@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import { toast, type ExternalToast } from 'sonner'
+import { type ExternalToast, toast } from 'sonner'
 
 export type UndoableActionConfig = {
   /** Message to show in the toast */
@@ -7,7 +7,7 @@ export type UndoableActionConfig = {
   /** Description text below the message */
   description?: string
   /** The action to perform (can return a cleanup function) */
-  action: () => void | (() => void) | Promise<void | (() => void)>
+  action: () => void | (() => void) | Promise<undefined | (() => void)>
   /** Undo handler - called if user clicks undo within the timeout */
   onUndo?: () => void | Promise<void>
   /** Duration in ms before action becomes permanent (default: 5000) */
@@ -195,7 +195,11 @@ export function createDelayedAction(action: () => void | Promise<void>, delayMs:
       if (executed) return
       timeoutId = setTimeout(async () => {
         executed = true
-        await action()
+        try {
+          await action()
+        } catch {
+          // Errors are silently caught - the action is still marked as executed
+        }
       }, delayMs)
     },
     cancel: () => {

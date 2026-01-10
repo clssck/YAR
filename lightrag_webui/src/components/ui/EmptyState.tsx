@@ -1,13 +1,6 @@
-import {
-  FileUp,
-  Search,
-  Network,
-  MessageSquare,
-  FolderOpen,
-  type LucideIcon,
-} from 'lucide-react'
-import { Card, CardDescription, CardTitle } from '@/components/ui/Card'
+import { FileUp, FolderOpen, type LucideIcon, MessageSquare, Network, Search } from 'lucide-react'
 import Button from '@/components/ui/Button'
+import { Card, CardDescription, CardTitle } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
 
 export interface EmptyStateProps extends React.ComponentPropsWithoutRef<typeof Card> {
@@ -87,10 +80,7 @@ export default function EmptyState({
           styles.iconContainer
         )}
       >
-        <Icon
-          className={cn('text-muted-foreground/70', styles.icon)}
-          aria-hidden="true"
-        />
+        <Icon className={cn('text-muted-foreground/70', styles.icon)} aria-hidden="true" />
       </div>
 
       <div className="flex flex-col items-center gap-2 text-center max-w-sm">
@@ -105,10 +95,7 @@ export default function EmptyState({
       {(action || secondaryAction) && (
         <div className="flex flex-col items-center gap-2 mt-2">
           {action && (
-            <Button
-              variant={action.variant ?? 'default'}
-              onClick={action.onClick}
-            >
+            <Button variant={action.variant ?? 'default'} onClick={action.onClick}>
               {action.label}
             </Button>
           )}

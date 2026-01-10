@@ -15,6 +15,7 @@ Requires:
 """
 
 import asyncio
+import contextlib
 import os
 
 import pytest
@@ -35,10 +36,8 @@ async def db_client():
 
     # Close any existing DB instance from previous tests to avoid event loop issues
     if ClientManager._db_instance is not None and ClientManager._db_instance.pool is not None:
-        try:
+        with contextlib.suppress(Exception):
             await ClientManager._db_instance.pool.close()
-        except Exception:
-            pass  # Pool may already be closed
     ClientManager._db_instance = None
 
     db = await ClientManager.get_client()
@@ -62,7 +61,7 @@ class TestSchemaMigrationsTableIntegration:
             ) as exists"""
         )
         assert result is not None
-        assert result.get('exists') is True, "LIGHTRAG_SCHEMA_MIGRATIONS table should exist"
+        assert result.get('exists') is True, 'LIGHTRAG_SCHEMA_MIGRATIONS table should exist'
 
     async def test_migrations_table_has_correct_columns(self, db_client):
         """Verify the table has the expected schema."""
@@ -84,8 +83,8 @@ class TestSchemaMigrationsTableIntegration:
     async def test_record_and_retrieve_migration(self, db_client):
         """Test that we can record and retrieve a migration."""
         test_version = 99901
-        test_name = "integration_test_migration"
-        test_checksum = "abc123def456"
+        test_name = 'integration_test_migration'
+        test_checksum = 'abc123def456'
 
         try:
             # Record migration
@@ -95,14 +94,14 @@ class TestSchemaMigrationsTableIntegration:
             migrations = await db_client.get_applied_migrations()
             test_migration = [m for m in migrations if m['version'] == test_version]
 
-            assert len(test_migration) == 1, "Should find exactly one test migration"
+            assert len(test_migration) == 1, 'Should find exactly one test migration'
             assert test_migration[0]['name'] == test_name
             assert test_migration[0]['checksum'] == test_checksum
 
         finally:
             # Cleanup
             await db_client.execute(
-                "DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1",
+                'DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
                 data={'version': test_version},
             )
 
@@ -115,14 +114,14 @@ class TestSchemaMigrationsTableIntegration:
             assert not await db_client._is_migration_applied(test_version)
 
             # Record it
-            await db_client._record_migration(test_version, "check_test")
+            await db_client._record_migration(test_version, 'check_test')
 
             # Now should exist
             assert await db_client._is_migration_applied(test_version)
 
         finally:
             await db_client.execute(
-                "DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1",
+                'DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
                 data={'version': test_version},
             )
 
@@ -132,19 +131,19 @@ class TestSchemaMigrationsTableIntegration:
 
         try:
             # Record twice - should not raise
-            await db_client._record_migration(test_version, "first_insert")
-            await db_client._record_migration(test_version, "second_insert")
+            await db_client._record_migration(test_version, 'first_insert')
+            await db_client._record_migration(test_version, 'second_insert')
 
             # Should still have only one record
             result = await db_client.query(
-                "SELECT COUNT(*) as cnt FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1",
+                'SELECT COUNT(*) as cnt FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
                 [test_version],
             )
             assert result['cnt'] == 1
 
         finally:
             await db_client.execute(
-                "DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1",
+                'DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
                 data={'version': test_version},
             )
 
@@ -164,8 +163,8 @@ class TestAdvisoryLockingIntegration:
 
         lock_released = True
 
-        assert lock_acquired, "Lock should have been acquired"
-        assert lock_released, "Lock should have been released"
+        assert lock_acquired, 'Lock should have been acquired'
+        assert lock_released, 'Lock should have been released'
 
     async def test_advisory_lock_blocks_concurrent_access(self, db_client):
         """Test that advisory lock actually blocks concurrent access."""
@@ -201,8 +200,9 @@ class TestAdvisoryLockingIntegration:
         # Verify sequence
         assert 'holder_acquired' in events
         assert 'waiter_blocked' in events
-        assert events.index('holder_acquired') < events.index('waiter_blocked'), \
-            "Holder should acquire before waiter is blocked"
+        assert events.index('holder_acquired') < events.index('waiter_blocked'), (
+            'Holder should acquire before waiter is blocked'
+        )
 
     async def test_different_lock_names_dont_block(self, db_client):
         """Different lock names should not block each other."""
@@ -233,8 +233,9 @@ class TestVectorDimensionValidationIntegration:
     async def test_validate_dimensions_succeeds_when_matching(self, db_client):
         """Validation should pass when EMBEDDING_DIM matches database."""
         # Get actual dimension from database
+        # pgvector stores dimension directly in atttypmod (no -4 offset like varchar)
         result = await db_client.query(
-            """SELECT atttypmod - 4 as dimension
+            """SELECT atttypmod as dimension
                FROM pg_attribute
                WHERE attrelid = 'lightrag_vdb_entity'::regclass
                AND attname = 'content_vector'
@@ -260,9 +261,9 @@ class TestVectorDimensionValidationIntegration:
 
     async def test_validate_dimensions_fails_on_mismatch(self, db_client):
         """Validation should fail when EMBEDDING_DIM doesn't match database."""
-        # Get actual dimension from database
+        # Get actual dimension from database (pgvector uses atttypmod directly)
         result = await db_client.query(
-            """SELECT atttypmod - 4 as dimension
+            """SELECT atttypmod as dimension
                FROM pg_attribute
                WHERE attrelid = 'lightrag_vdb_entity'::regclass
                AND attname = 'content_vector'
@@ -299,7 +300,7 @@ class TestWorkspaceValidationIntegration:
 
     async def test_invalid_workspace_prevents_db_connection(self):
         """Invalid workspace name should prevent PostgreSQLDB instantiation."""
-        from lightrag.kg.postgres_impl import PostgreSQLDB, validate_workspace_name
+        from lightrag.kg.postgres_impl import validate_workspace_name
 
         # Direct validation should fail
         with pytest.raises(ValueError) as excinfo:
@@ -319,7 +320,7 @@ class TestWorkspaceValidationIntegration:
         """Valid workspace name should allow successful connection."""
         # db_client fixture already connected with valid workspace
         # Just verify we can query
-        result = await db_client.query("SELECT 1 as test")
+        result = await db_client.query('SELECT 1 as test')
         assert result is not None
         assert result.get('test') == 1
 
@@ -348,12 +349,12 @@ class TestFullInitializationFlow:
         # Get client again (should reuse existing from fixture)
         db2 = await ClientManager.get_client()
 
-        assert db_client is db2, "Should reuse the same client"
+        assert db_client is db2, 'Should reuse the same client'
 
         # Both should be functional
-        result = await db2.query("SELECT 1 as test")
+        result = await db2.query('SELECT 1 as test')
         assert result.get('test') == 1
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--run-integration"])
+if __name__ == '__main__':
+    pytest.main([__file__, '-v', '--run-integration'])

@@ -4,8 +4,10 @@ import { test, expect } from '@playwright/test'
  * Test to verify that citations/references are not duplicated in responses
  */
 test.describe('Citation Deduplication', () => {
-  // Increase timeout for LLM responses
-  test.setTimeout(120000)
+  test.beforeAll(() => {
+    // Increase timeout for LLM responses
+    test.setTimeout(120000)
+  })
 
   test('API response should not have duplicate references', async ({ request }) => {
     // Use non-streaming endpoint for simpler testing

@@ -15,7 +15,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { S3ObjectInfo } from '@/api/lightrag'
 import { s3Delete, s3Download, s3List, s3Upload } from '@/api/lightrag'
-import { useSettingsStore } from '@/stores/settings'
 import FileViewer from '@/components/storage/FileViewer'
 import {
   AlertDialog,
@@ -37,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/Table'
+import { useSettingsStore } from '@/stores/settings'
 
 // Format bytes to human readable size
 function formatBytes(bytes: number): string {

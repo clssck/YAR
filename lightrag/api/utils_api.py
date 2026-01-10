@@ -11,7 +11,7 @@ import os
 import sys
 import traceback
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import ParamSpec, TypeVar, cast
 
 from ascii_colors import ASCIIColors
 from fastapi import HTTPException, Request, Security, status

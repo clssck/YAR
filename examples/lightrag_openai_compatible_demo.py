@@ -5,9 +5,9 @@ import logging.config
 import os
 
 from dotenv import load_dotenv
+from lightrag.llm.ollama import ollama_embed
 
 from lightrag import LightRAG, QueryParam
-from lightrag.llm.ollama import ollama_embed
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc, logger, set_verbose_debug
 

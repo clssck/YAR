@@ -9,8 +9,6 @@ This module tests:
 
 from __future__ import annotations
 
-import pytest
-
 from lightrag.api.routers.table_routes import get_order_clause
 
 

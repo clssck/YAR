@@ -39,11 +39,11 @@ import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
 import Button from '@/components/ui/Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import Checkbox from '@/components/ui/Checkbox'
-import Input from '@/components/ui/Input'
 import { EmptyDocuments } from '@/components/ui/EmptyState'
+import Input from '@/components/ui/Input'
+import LastUpdated from '@/components/ui/LastUpdated'
 import PaginationControls from '@/components/ui/PaginationControls'
 import { DocumentStatusBadge } from '@/components/ui/StatusBadge'
-import LastUpdated from '@/components/ui/LastUpdated'
 import {
   Table,
   TableBody,
@@ -52,12 +52,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/Table'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/Tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useResponsive } from '@/hooks/useBreakpoint'
 import { cn, errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
@@ -76,7 +71,7 @@ function StatusTimeline({ currentStatus }: StatusTimelineProps) {
   const { t } = useTranslation()
   const getStageIndex = (status: DocStatus): number => {
     if (status === 'failed') return -1 // Failed can happen at any stage
-    return TIMELINE_STAGES.indexOf(status as typeof TIMELINE_STAGES[number])
+    return TIMELINE_STAGES.indexOf(status as (typeof TIMELINE_STAGES)[number])
   }
 
   const currentIndex = getStageIndex(currentStatus)
@@ -108,7 +103,9 @@ function StatusTimeline({ currentStatus }: StatusTimelineProps) {
                   'w-3 h-3 rounded-full border-2 flex-shrink-0 transition-colors',
                   isPast && 'bg-emerald-500 border-emerald-500',
                   isCurrent && !isFailed && 'bg-blue-500 border-blue-500 animate-pulse',
-                  isFailed && stage === TIMELINE_STAGES[Math.max(0, currentIndex)] && 'bg-red-500 border-red-500',
+                  isFailed &&
+                    stage === TIMELINE_STAGES[Math.max(0, currentIndex)] &&
+                    'bg-red-500 border-red-500',
                   isAfter && 'bg-transparent border-muted-foreground/30'
                 )}
                 title={stageLabels[stage]}
@@ -132,14 +129,21 @@ function StatusTimeline({ currentStatus }: StatusTimelineProps) {
         <span>{stageLabels.processed}</span>
       </div>
       {/* Current status indicator */}
-      <div className={cn(
-        'text-xs font-medium mt-1 px-2 py-0.5 rounded-full text-center',
-        currentStatus === 'processed' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-        currentStatus === 'processing' && 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-        currentStatus === 'preprocessed' && 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-        currentStatus === 'pending' && 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-        currentStatus === 'failed' && 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-      )}>
+      <div
+        className={cn(
+          'text-xs font-medium mt-1 px-2 py-0.5 rounded-full text-center',
+          currentStatus === 'processed' &&
+            'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+          currentStatus === 'processing' &&
+            'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+          currentStatus === 'preprocessed' &&
+            'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+          currentStatus === 'pending' &&
+            'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+          currentStatus === 'failed' &&
+            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+        )}
+      >
         {currentStatus === 'failed'
           ? t('documentPanel.documentManager.status.failed', 'Failed')
           : stageLabels[currentStatus]}
@@ -1156,7 +1160,9 @@ export default function DocumentManager() {
       if (!isMountedRef.current) return
 
       if (status === 'reprocessing_started') {
-        toast.success(t('documentPanel.documentManager.retrySuccess', 'Retrying failed documents...'))
+        toast.success(
+          t('documentPanel.documentManager.retrySuccess', 'Retrying failed documents...')
+        )
 
         // Reset health check timer and start fast polling
         useBackendState.getState().resetHealthCheckTimerDelayed(1000)
@@ -1171,7 +1177,9 @@ export default function DocumentManager() {
           }
         }, 15000)
       } else {
-        toast.error(message || t('documentPanel.documentManager.retryFailed', 'Failed to retry documents'))
+        toast.error(
+          message || t('documentPanel.documentManager.retryFailed', 'Failed to retry documents')
+        )
       }
     } catch (err) {
       if (isMountedRef.current) {
@@ -1387,7 +1395,10 @@ export default function DocumentManager() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
-            placeholder={t('documentPanel.documentManager.searchPlaceholder', 'Search documents...')}
+            placeholder={t(
+              'documentPanel.documentManager.searchPlaceholder',
+              'Search documents...'
+            )}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 pr-9"
@@ -1444,23 +1455,16 @@ export default function DocumentManager() {
                   {item.count}
                 </span>
                 {isActive && item.id !== 'all' && (
-                  <span
-                    role="button"
-                    tabIndex={0}
+                  <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation()
                       handleStatusFilterChange('all')
                     }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.stopPropagation()
-                        handleStatusFilterChange('all')
-                      }
-                    }}
                     className="ml-0.5 hover:bg-primary-foreground/20 rounded-full p-0.5"
                   >
                     <XIcon className="h-3 w-3" />
-                  </span>
+                  </button>
                 )}
               </button>
             )
@@ -1494,7 +1498,10 @@ export default function DocumentManager() {
                 variant="outline"
                 onClick={retryFailedDocuments}
                 side="bottom"
-                tooltip={t('documentPanel.documentManager.retryFailedTooltip', 'Retry all failed documents')}
+                tooltip={t(
+                  'documentPanel.documentManager.retryFailedTooltip',
+                  'Retry all failed documents'
+                )}
                 size="sm"
                 disabled={pipelineBusy || isRetrying || processingCount > 0}
                 className={cn(
@@ -1648,9 +1655,15 @@ export default function DocumentManager() {
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <span className="cursor-help">
-                                    {doc.status === 'processed' && <DocumentStatusBadge.Processed />}
-                                    {doc.status === 'preprocessed' && <DocumentStatusBadge.Preprocessed />}
-                                    {doc.status === 'processing' && <DocumentStatusBadge.Processing />}
+                                    {doc.status === 'processed' && (
+                                      <DocumentStatusBadge.Processed />
+                                    )}
+                                    {doc.status === 'preprocessed' && (
+                                      <DocumentStatusBadge.Preprocessed />
+                                    )}
+                                    {doc.status === 'processing' && (
+                                      <DocumentStatusBadge.Processing />
+                                    )}
                                     {doc.status === 'pending' && <DocumentStatusBadge.Pending />}
                                     {doc.status === 'failed' && <DocumentStatusBadge.Failed />}
                                   </span>
@@ -1660,9 +1673,7 @@ export default function DocumentManager() {
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
-                            {doc.error_msg && (
-                              <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                            )}
+                            {doc.error_msg && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
                           </div>
 
                           {/* Summary */}
@@ -1677,9 +1688,7 @@ export default function DocumentManager() {
                             {doc.content_length != null && (
                               <span>{doc.content_length.toLocaleString()} chars</span>
                             )}
-                            {doc.chunks_count != null && (
-                              <span>{doc.chunks_count} chunks</span>
-                            )}
+                            {doc.chunks_count != null && <span>{doc.chunks_count} chunks</span>}
                             <span>{new Date(doc.updated_at).toLocaleDateString()}</span>
                           </div>
 
@@ -1719,13 +1728,17 @@ export default function DocumentManager() {
                               )}
                             </div>
                           </TableHead>
-                          <TableHead>{t('documentPanel.documentManager.columns.summary')}</TableHead>
+                          <TableHead>
+                            {t('documentPanel.documentManager.columns.summary')}
+                          </TableHead>
                           <TableHead>{t('documentPanel.documentManager.columns.status')}</TableHead>
                           <TableHead>{t('documentPanel.documentManager.columns.length')}</TableHead>
                           <TableHead>{t('documentPanel.documentManager.columns.chunks')}</TableHead>
                           {/* S3 Key: Hidden on tablet, shown on desktop */}
                           {isDesktop && (
-                            <TableHead>{t('documentPanel.documentManager.columns.s3Key')}</TableHead>
+                            <TableHead>
+                              {t('documentPanel.documentManager.columns.s3Key')}
+                            </TableHead>
                           )}
                           <TableHead
                             onClick={() => handleSort('created_at')}
@@ -1768,21 +1781,30 @@ export default function DocumentManager() {
                       </TableHeader>
                       <TableBody className="text-sm overflow-auto">
                         {filteredAndSortedDocs?.map((doc) => {
-                          const hasExpandableDetails = doc.error_msg || (doc.metadata && Object.keys(doc.metadata).length > 0) || doc.track_id
+                          const hasExpandableDetails =
+                            doc.error_msg ||
+                            (doc.metadata && Object.keys(doc.metadata).length > 0) ||
+                            doc.track_id
                           const isExpanded = expandedErrorIds.has(doc.id)
                           const columnCount = isDesktop ? 9 : 8
 
                           return (
                             <React.Fragment key={doc.id}>
-                              <TableRow className={cn(hasExpandableDetails && isExpanded && 'border-b-0')}>
-                                <TableCell className={cn(
-                                  'truncate font-mono overflow-visible',
-                                  isTablet ? 'max-w-[180px]' : 'max-w-[250px]'
-                                )}>
+                              <TableRow
+                                className={cn(hasExpandableDetails && isExpanded && 'border-b-0')}
+                              >
+                                <TableCell
+                                  className={cn(
+                                    'truncate font-mono overflow-visible',
+                                    isTablet ? 'max-w-[180px]' : 'max-w-[250px]'
+                                  )}
+                                >
                                   {showFileName ? (
                                     <>
                                       <div className="group relative overflow-visible tooltip-container">
-                                        <div className="truncate">{getDisplayFileName(doc, isTablet ? 20 : 30)}</div>
+                                        <div className="truncate">
+                                          {getDisplayFileName(doc, isTablet ? 20 : 30)}
+                                        </div>
                                         <div className="invisible group-hover:visible tooltip">
                                           {doc.file_path}
                                         </div>
@@ -1798,10 +1820,12 @@ export default function DocumentManager() {
                                     </div>
                                   )}
                                 </TableCell>
-                                <TableCell className={cn(
-                                  'truncate overflow-visible',
-                                  isTablet ? 'max-w-[120px]' : 'max-w-xs min-w-45'
-                                )}>
+                                <TableCell
+                                  className={cn(
+                                    'truncate overflow-visible',
+                                    isTablet ? 'max-w-[120px]' : 'max-w-xs min-w-45'
+                                  )}
+                                >
                                   <div className="group relative overflow-visible tooltip-container">
                                     <div className="truncate">{doc.content_summary}</div>
                                     <div className="invisible group-hover:visible tooltip">
@@ -1816,11 +1840,21 @@ export default function DocumentManager() {
                                       <Tooltip>
                                         <TooltipTrigger asChild>
                                           <span className="cursor-help">
-                                            {doc.status === 'processed' && <DocumentStatusBadge.Processed />}
-                                            {doc.status === 'preprocessed' && <DocumentStatusBadge.Preprocessed />}
-                                            {doc.status === 'processing' && <DocumentStatusBadge.Processing />}
-                                            {doc.status === 'pending' && <DocumentStatusBadge.Pending />}
-                                            {doc.status === 'failed' && <DocumentStatusBadge.Failed />}
+                                            {doc.status === 'processed' && (
+                                              <DocumentStatusBadge.Processed />
+                                            )}
+                                            {doc.status === 'preprocessed' && (
+                                              <DocumentStatusBadge.Preprocessed />
+                                            )}
+                                            {doc.status === 'processing' && (
+                                              <DocumentStatusBadge.Processing />
+                                            )}
+                                            {doc.status === 'pending' && (
+                                              <DocumentStatusBadge.Pending />
+                                            )}
+                                            {doc.status === 'failed' && (
+                                              <DocumentStatusBadge.Failed />
+                                            )}
                                           </span>
                                         </TooltipTrigger>
                                         <TooltipContent side="top" align="start" className="p-2">
@@ -1836,9 +1870,21 @@ export default function DocumentManager() {
                                         onClick={() => toggleErrorExpanded(doc.id)}
                                         className={cn(
                                           'ml-1 p-1 rounded-md transition-colors hover:bg-muted',
-                                          doc.error_msg ? 'text-yellow-500 hover:text-yellow-600' : 'text-blue-500 hover:text-blue-600'
+                                          doc.error_msg
+                                            ? 'text-yellow-500 hover:text-yellow-600'
+                                            : 'text-blue-500 hover:text-blue-600'
                                         )}
-                                        title={isExpanded ? t('documentPanel.documentManager.collapseDetails', 'Collapse details') : t('documentPanel.documentManager.expandDetails', 'View details')}
+                                        title={
+                                          isExpanded
+                                            ? t(
+                                                'documentPanel.documentManager.collapseDetails',
+                                                'Collapse details'
+                                              )
+                                            : t(
+                                                'documentPanel.documentManager.expandDetails',
+                                                'View details'
+                                              )
+                                        }
                                       >
                                         {doc.error_msg ? (
                                           <AlertTriangle className="h-4 w-4" />
@@ -1897,7 +1943,9 @@ export default function DocumentManager() {
                                     <div className="space-y-2 text-sm">
                                       {doc.track_id && (
                                         <div className="flex items-center gap-2">
-                                          <span className="text-muted-foreground font-medium">Track ID:</span>
+                                          <span className="text-muted-foreground font-medium">
+                                            Track ID:
+                                          </span>
                                           <code className="px-2 py-0.5 bg-muted rounded text-xs font-mono">
                                             {doc.track_id}
                                           </code>
@@ -1905,7 +1953,9 @@ export default function DocumentManager() {
                                       )}
                                       {doc.metadata && Object.keys(doc.metadata).length > 0 && (
                                         <div>
-                                          <span className="text-muted-foreground font-medium">Metadata:</span>
+                                          <span className="text-muted-foreground font-medium">
+                                            Metadata:
+                                          </span>
                                           <pre className="mt-1 p-2 bg-muted rounded text-xs font-mono overflow-x-auto">
                                             {formatMetadata(doc.metadata)}
                                           </pre>
@@ -1913,7 +1963,9 @@ export default function DocumentManager() {
                                       )}
                                       {doc.error_msg && (
                                         <div>
-                                          <span className="text-destructive font-medium">Error:</span>
+                                          <span className="text-destructive font-medium">
+                                            Error:
+                                          </span>
                                           <pre className="mt-1 p-2 bg-destructive/10 border border-destructive/20 rounded text-xs font-mono text-destructive whitespace-pre-wrap break-words">
                                             {doc.error_msg}
                                           </pre>

@@ -15,6 +15,7 @@ Supported KV Storage Types:
 """
 
 import asyncio
+import configparser
 import contextlib
 import os
 import sys
@@ -144,8 +145,6 @@ class CleanupTool:
             True if config.ini has the necessary configuration
         """
         try:
-            import configparser
-
             config = configparser.ConfigParser()
             config.read('config.ini', 'utf-8')
 

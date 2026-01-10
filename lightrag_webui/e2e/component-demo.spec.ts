@@ -260,10 +260,12 @@ test.describe('Keyboard Shortcuts', () => {
 test.describe('Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/#/demo')
+    await expect(page.getByTestId('component-demo')).toBeVisible()
   })
 
-  test('status badges have role="status"', async ({ page }) => {
-    const statusBadges = page.locator('[role="status"]')
+  test('status badges have accessible aria-labels', async ({ page }) => {
+    const demo = page.getByTestId('status-badge-demo')
+    const statusBadges = demo.locator('[aria-label*="Status:"]')
     await expect(statusBadges.first()).toBeVisible()
   })
 

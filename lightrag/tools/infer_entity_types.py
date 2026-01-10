@@ -26,6 +26,7 @@ sys.path.insert(0, project_root)
 
 # Load .env file
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(project_root, '.env'))
 
 from lightrag.constants import DEFAULT_ENTITY_TYPES
@@ -83,7 +84,7 @@ async def infer_types_with_llm(
         entity_lines.append(f"- {name}: {desc}")
 
     prompt = INFERENCE_PROMPT.format(
-        entity_types=', '.join(DEFAULT_ENTITY_TYPES + ['other']),
+        entity_types=', '.join([*DEFAULT_ENTITY_TYPES, 'other']),
         entities='\n'.join(entity_lines),
     )
 
@@ -246,7 +247,7 @@ async def run_inference(
             return
 
         # Apply updates
-        print(f'\nApplying updates...')
+        print('\nApplying updates...')
 
         success_count = 0
         for entity_name, new_type in all_inferences.items():

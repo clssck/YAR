@@ -814,7 +814,7 @@ class _KeyedLockContext:
                         lock_acquired = True  # Lock successfully acquired
                     except TimeoutError:
                         # Convert to LockTimeoutError with context
-                        raise LockTimeoutError(key, LOCK_TIMEOUT)
+                        raise LockTimeoutError(key, LOCK_TIMEOUT) from None
                     finally:
                         if lock_acquired:
                             entry['entered'] = True

@@ -178,7 +178,7 @@ async def run_evaluation(
     try:
         await db.initdb()
         print(f'\n{"="*70}')
-        print(f'MMR DIVERSITY EVALUATION')
+        print('MMR DIVERSITY EVALUATION')
         print(f'{"="*70}')
         print(f'Query: "{query}"')
         print(f'Workspace: {workspace}')
@@ -191,20 +191,6 @@ async def run_evaluation(
 
         # Fetch chunks with embeddings
         fetch_k = top_k * 3  # Fetch more for MMR to work with
-        sql = """
-            SELECT id, content, content_vector, file_path,
-                   1 - (content_vector <=> (
-                       SELECT content_vector FROM LIGHTRAG_VDB_CHUNKS
-                       WHERE workspace = $1 LIMIT 1
-                   )) as base_similarity
-            FROM LIGHTRAG_VDB_CHUNKS
-            WHERE workspace = $1
-            ORDER BY RANDOM()
-            LIMIT $2
-        """
-
-        # Alternative: search by content similarity if we have a way to embed
-        # For now, let's use a simpler approach - get chunks and simulate
 
         # Get sample chunks with their vectors
         sample_sql = """
@@ -259,11 +245,11 @@ async def run_evaluation(
         print(f'\n{"="*70}')
         print('DIVERSITY METRICS')
         print(f'{"="*70}')
-        print(f'\nStandard Ranking:')
+        print('\nStandard Ranking:')
         print(f'  Avg pairwise similarity: {standard_diversity["avg_pairwise_similarity"]:.4f}')
         print(f'  Max pairwise similarity: {standard_diversity.get("max_pairwise_similarity", 0):.4f}')
 
-        print(f'\nMMR Ranking:')
+        print('\nMMR Ranking:')
         print(f'  Avg pairwise similarity: {mmr_diversity["avg_pairwise_similarity"]:.4f}')
         print(f'  Max pairwise similarity: {mmr_diversity.get("max_pairwise_similarity", 0):.4f}')
 

@@ -48,7 +48,7 @@ try:
 
     # Only enable Langfuse if both keys are configured
     if langfuse_public_key and langfuse_secret_key:
-        from langfuse.openai import AsyncOpenAI  # type: ignore[import-untyped]
+        from langfuse.openai import AsyncOpenAI
 
         LANGFUSE_ENABLED = True
         logger.info('Langfuse observability enabled for OpenAI client')

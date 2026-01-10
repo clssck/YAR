@@ -110,7 +110,7 @@ def renumber_references_sequential(text: str) -> str:
     placeholder = '\x00REF_'  # Use null byte prefix as unlikely collision
 
     # First pass: replace all refs with placeholders
-    for old_num in ref_mapping.keys():
+    for old_num in ref_mapping:
         result = re.sub(rf'\[{old_num}\]', f'{placeholder}{old_num}\x00', result)
 
     # Second pass: replace placeholders with new sequential numbers

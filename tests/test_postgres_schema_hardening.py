@@ -13,15 +13,14 @@ For integration tests, see test_postgres_retry_integration.py.
 
 import pytest
 
+# Private pattern for testing - imported separately
 from lightrag.validators import (
+    _VALID_WORKSPACE_PATTERN,
     PG_MAX_IDENTIFIER_LENGTH,
     validate_numeric_config,
     validate_sql_identifier,
     validate_workspace_name,
 )
-
-# Private pattern for testing - imported separately
-from lightrag.validators import _VALID_WORKSPACE_PATTERN
 
 
 class TestWorkspaceNameValidation:

@@ -14,6 +14,7 @@ Or run individually (avoids asyncpg connection pool event loop issues):
     pytest "tests/test_unicode_integration.py::TestUnicodeNormalizationIntegration::test_stored_entity_names_have_no_zero_width_chars" -v --run-integration
 """
 
+import contextlib
 import os
 import uuid
 
@@ -31,52 +32,66 @@ from lightrag.utils import UNICODE_SECURITY_STRIP
 @pytest.fixture
 async def setup_rag(tmp_path):
     """Create a LightRAG instance for testing."""
+    import os
+
     from lightrag import LightRAG
     from lightrag.kg.postgres_impl import ClientManager
     from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
+    from lightrag.utils import EmbeddingFunc
 
     # Reset connection pool state before each test
-    ClientManager._client = None
-    ClientManager._pool = None
+    if ClientManager._db_instance is not None:
+        with contextlib.suppress(Exception):
+            if ClientManager._db_instance.pool is not None:
+                await ClientManager._db_instance.pool.close()
+        ClientManager._db_instance = None
+        ClientManager._ref_count = 0
 
-    workspace = f"test_unicode_int_{uuid.uuid4().hex[:8]}"
+    embedding_dim = int(os.getenv('EMBEDDING_DIM', '1536'))
+    embedding_func = EmbeddingFunc(
+        embedding_dim=embedding_dim,
+        max_token_size=8192,
+        func=openai_embed,
+    )
+    embedding_func.send_dimensions = os.getenv('EMBEDDING_SEND_DIM', 'false').lower() == 'true'
+
+    workspace = f'test_unicode_int_{uuid.uuid4().hex[:8]}'
     rag = LightRAG(
         working_dir=str(tmp_path / workspace),
         workspace=workspace,
-        embedding_func=openai_embed,
+        embedding_func=embedding_func,
         llm_model_func=gpt_4o_mini_complete,
-        graph_storage="PGGraphStorage",
-        kv_storage="PGKVStorage",
-        vector_storage="PGVectorStorage",
-        doc_status_storage="PGDocStatusStorage",
+        graph_storage='PGGraphStorage',
+        kv_storage='PGKVStorage',
+        vector_storage='PGVectorStorage',
+        doc_status_storage='PGDocStatusStorage',
         enable_llm_cache_for_entity_extract=False,
     )
     await rag.initialize_storages()
 
-    # Clean workspace before test
-    try:
-        db = rag.entities_vdb._db_required()
-        for table in ['LIGHTRAG_DOC_FULL', 'LIGHTRAG_DOC_CHUNKS', 'LIGHTRAG_VDB_ENTITY',
-                      'LIGHTRAG_VDB_RELATION', 'LIGHTRAG_ENTITY_ALIASES']:
-            try:
-                await db.execute(f"DELETE FROM {table} WHERE workspace = $1", data={'workspace': workspace})
-            except Exception:
-                pass
-    except Exception:
-        pass
+    db = rag.entities_vdb._db_required()
+    for table in [
+        'LIGHTRAG_DOC_FULL',
+        'LIGHTRAG_DOC_CHUNKS',
+        'LIGHTRAG_DOC_STATUS',
+        'LIGHTRAG_VDB_ENTITY',
+        'LIGHTRAG_VDB_RELATION',
+        'LIGHTRAG_VDB_CHUNKS',
+        'LIGHTRAG_ENTITY_ALIASES',
+    ]:
+        with contextlib.suppress(Exception):
+            await db.execute(f'DELETE FROM {table} WHERE workspace = $1', data={'workspace': workspace})
 
     yield rag
 
     # Proper cleanup
     await rag.finalize_storages()
-    # Close the pool after each test to avoid event loop issues
-    if ClientManager._pool is not None:
-        try:
-            await ClientManager._pool.close()
-        except Exception:
-            pass
-        ClientManager._pool = None
-        ClientManager._client = None
+    if ClientManager._db_instance is not None:
+        with contextlib.suppress(Exception):
+            if ClientManager._db_instance.pool is not None:
+                await ClientManager._db_instance.pool.close()
+        ClientManager._db_instance = None
+        ClientManager._ref_count = 0
 
 
 @pytest.mark.integration
@@ -99,36 +114,34 @@ class TestUnicodeNormalizationIntegration:
         """
         rag = setup_rag
 
-        # Insert document with zero-width characters embedded in entity names
-        # These are invisible but would create byte-different entity names
         doc_with_zwc = (
-            "Micro\u200Bsoft announced new Azure\u200D features. "  # ZWSP, ZWJ
-            "Apple\uFEFF Inc released iOS updates. "  # BOM
-            "Google\u034F Cloud expanded its services."  # CGJ
+            f'[{rag.workspace}] '
+            'Micro\u200bsoft announced new Azure\u200d features. '
+            'Apple\ufeff Inc released iOS updates. '
+            'Google\u034f Cloud expanded its services.'
         )
         await rag.ainsert(doc_with_zwc)
 
         # Get all entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            "SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1",
-            params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
 
         # Ensure we actually got some entities (sanity check)
-        assert len(entity_names) > 0, "No entities extracted - test inconclusive"
+        assert len(entity_names) > 0, 'No entities extracted - test inconclusive'
 
         # CRITICAL ASSERTION: No entity name should contain zero-width characters
         for entity_name in entity_names:
             for zwc in UNICODE_SECURITY_STRIP:
                 assert zwc not in entity_name, (
-                    f"NORMALIZATION FAILURE: Entity '{repr(entity_name)}' "
-                    f"contains zero-width character {repr(zwc)} (U+{ord(zwc):04X})"
+                    f"NORMALIZATION FAILURE: Entity '{entity_name!r}' "
+                    f'contains zero-width character {zwc!r} (U+{ord(zwc):04X})'
                 )
 
-        print(f"✅ Verified {len(entity_names)} entities contain no zero-width characters")
+        print(f'✅ Verified {len(entity_names)} entities contain no zero-width characters')
 
     async def test_nfd_accents_normalized_to_nfc_in_db(self, setup_rag):
         """Verify that NFD accented entity names are stored as NFC in DB.
@@ -139,34 +152,32 @@ class TestUnicodeNormalizationIntegration:
         Without normalization, these would be stored as different byte sequences.
         """
         import unicodedata
+
         rag = setup_rag
 
-        # Insert document with NFD-encoded entity name
-        nfd_cafe = "Cafe\u0301"  # e + combining acute = é in NFD
-        doc = f"The {nfd_cafe} company opened new locations in Paris."
+        nfd_cafe = 'Cafe\u0301'
+        doc = f'[{rag.workspace}] The {nfd_cafe} company opened new locations in Paris.'
         await rag.ainsert(doc)
 
         # Get entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            "SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1",
-            params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
 
         # Ensure we got some entities
-        assert len(entity_names) > 0, "No entities extracted - test inconclusive"
+        assert len(entity_names) > 0, 'No entities extracted - test inconclusive'
 
         # Verify all names are NFC normalized (no combining characters left decomposed)
         for entity_name in entity_names:
             nfc_form = unicodedata.normalize('NFC', entity_name)
             assert entity_name == nfc_form, (
-                f"NORMALIZATION FAILURE: Entity '{repr(entity_name)}' is not NFC normalized. "
-                f"Expected: '{repr(nfc_form)}'"
+                f"NORMALIZATION FAILURE: Entity '{entity_name!r}' is not NFC normalized. Expected: '{nfc_form!r}'"
             )
 
-        print(f"✅ Verified {len(entity_names)} entities are NFC normalized")
+        print(f'✅ Verified {len(entity_names)} entities are NFC normalized')
 
     async def test_math_alphanumerics_normalized_in_db(self, setup_rag):
         """CANARY TEST: Verify mathematical alphanumerics are normalized to ASCII in DB.
@@ -179,23 +190,20 @@ class TestUnicodeNormalizationIntegration:
         """
         rag = setup_rag
 
-        # Insert document with mathematical bold entity name
-        # 𝐀𝐩𝐩𝐥𝐞 = Mathematical Bold: A (U+1D400), p (U+1D429), p, l (U+1D425), e (U+1D41E)
-        math_apple = "\U0001D400\U0001D429\U0001D429\U0001D425\U0001D41E"
-        doc = f"The company {math_apple} announced new products today."
+        math_apple = '\U0001d400\U0001d429\U0001d429\U0001d425\U0001d41e'
+        doc = f'[{rag.workspace}] The company {math_apple} announced new products today.'
         await rag.ainsert(doc)
 
         # Get entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            "SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1",
-            params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
 
         # Ensure we got some entities
-        assert len(entity_names) > 0, "No entities extracted - test inconclusive"
+        assert len(entity_names) > 0, 'No entities extracted - test inconclusive'
 
         # CRITICAL ASSERTION: No entity name should contain mathematical alphanumerics
         MATH_ALPHA_RANGE = (0x1D400, 0x1D7FF)
@@ -203,12 +211,12 @@ class TestUnicodeNormalizationIntegration:
             for char in entity_name:
                 cp = ord(char)
                 assert not (MATH_ALPHA_RANGE[0] <= cp <= MATH_ALPHA_RANGE[1]), (
-                    f"NORMALIZATION FAILURE: Entity '{repr(entity_name)}' "
-                    f"contains mathematical alphanumeric U+{cp:04X}. "
-                    f"_normalize_math_alphanumerics() may not be called!"
+                    f"NORMALIZATION FAILURE: Entity '{entity_name!r}' "
+                    f'contains mathematical alphanumeric U+{cp:04X}. '
+                    f'_normalize_math_alphanumerics() may not be called!'
                 )
 
-        print(f"✅ Verified {len(entity_names)} entities contain no math alphanumerics")
+        print(f'✅ Verified {len(entity_names)} entities contain no math alphanumerics')
 
 
 @pytest.mark.integration
@@ -229,9 +237,9 @@ class TestAliasResolutionNormalization:
 
         # Store an alias with clean name
         await store_alias(
-            alias="microsoft",
-            canonical="Microsoft Corporation",
-            method="manual",
+            alias='microsoft',
+            canonical='Microsoft Corporation',
+            method='manual',
             confidence=1.0,
             db=db,
             workspace=rag.workspace,
@@ -239,17 +247,17 @@ class TestAliasResolutionNormalization:
 
         # Lookup with zero-width character variant - should still find it
         # because resolver.py normalizes before lookup
-        cached = await get_cached_alias("micro\u200Bsoft", db, rag.workspace)
+        cached = await get_cached_alias('micro\u200bsoft', db, rag.workspace)
 
         assert cached is not None, (
-            "RESOLVER FAILURE: Alias lookup failed for zero-width variant. "
-            "normalize_unicode_for_entity_matching() may not be called in resolver.py"
+            'RESOLVER FAILURE: Alias lookup failed for zero-width variant. '
+            'normalize_unicode_for_entity_matching() may not be called in resolver.py'
         )
-        assert cached[0] == "Microsoft Corporation", (
+        assert cached[0] == 'Microsoft Corporation', (
             f"RESOLVER FAILURE: Expected 'Microsoft Corporation', got '{cached[0]}'"
         )
 
-        print("✅ Verified alias cache normalizes lookups correctly")
+        print('✅ Verified alias cache normalizes lookups correctly')
 
     async def test_alias_cache_nfd_lookup(self, setup_rag):
         """Verify alias cache lookups work with NFD accent variants."""
@@ -260,24 +268,23 @@ class TestAliasResolutionNormalization:
 
         # Store an alias with NFC name
         await store_alias(
-            alias="café",  # NFC form
-            canonical="Café Restaurant Group",
-            method="manual",
+            alias='café',  # NFC form
+            canonical='Café Restaurant Group',
+            method='manual',
             confidence=1.0,
             db=db,
             workspace=rag.workspace,
         )
 
         # Lookup with NFD variant - should still find it
-        nfd_cafe = "cafe\u0301"  # e + combining acute
+        nfd_cafe = 'cafe\u0301'  # e + combining acute
         cached = await get_cached_alias(nfd_cafe, db, rag.workspace)
 
         assert cached is not None, (
-            "RESOLVER FAILURE: Alias lookup failed for NFD variant. "
-            "NFC normalization may not be applied in resolver.py"
+            'RESOLVER FAILURE: Alias lookup failed for NFD variant. NFC normalization may not be applied in resolver.py'
         )
 
-        print("✅ Verified alias cache normalizes NFD lookups correctly")
+        print('✅ Verified alias cache normalizes NFD lookups correctly')
 
 
 @pytest.mark.integration
@@ -295,31 +302,30 @@ class TestPipelineIntegrationSmoke:
 
         # Use Combining Grapheme Joiner (CGJ) - only stripped by our function
         # This character is specifically in UNICODE_SECURITY_STRIP Phase 2
-        entity_with_cgj = "Test\u034FCompany"  # CGJ between Test and Company
+        entity_with_cgj = 'Test\u034fCompany'  # CGJ between Test and Company
 
-        doc = f"The {entity_with_cgj} released new products today."
+        doc = f'The {entity_with_cgj} released new products today.'
         await rag.ainsert(doc)
 
         # Get entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            "SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1",
-            params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
 
         # If any entity contains CGJ, normalization is NOT being called
         for entity_name in entity_names:
-            assert '\u034F' not in entity_name, (
-                f"PIPELINE FAILURE: Entity '{repr(entity_name)}' contains CGJ (U+034F). "
-                f"This proves normalize_unicode_for_entity_matching() is NOT being called!"
+            assert '\u034f' not in entity_name, (
+                f"PIPELINE FAILURE: Entity '{entity_name!r}' contains CGJ (U+034F). "
+                f'This proves normalize_unicode_for_entity_matching() is NOT being called!'
             )
 
-        print(f"✅ Verified normalization function is called during extraction")
+        print('✅ Verified normalization function is called during extraction')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import asyncio
 
     async def run_quick_test():
@@ -327,38 +333,37 @@ if __name__ == "__main__":
         from lightrag import LightRAG
         from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
 
-        workspace = f"manual_test_{uuid.uuid4().hex[:8]}"
+        workspace = f'manual_test_{uuid.uuid4().hex[:8]}'
         rag = LightRAG(
-            working_dir=f"/tmp/{workspace}",
+            working_dir=f'/tmp/{workspace}',
             workspace=workspace,
             embedding_func=openai_embed,
             llm_model_func=gpt_4o_mini_complete,
-            graph_storage="PGGraphStorage",
-            kv_storage="PGKVStorage",
-            vector_storage="PGVectorStorage",
-            doc_status_storage="PGDocStatusStorage",
+            graph_storage='PGGraphStorage',
+            kv_storage='PGKVStorage',
+            vector_storage='PGVectorStorage',
+            doc_status_storage='PGDocStatusStorage',
             enable_llm_cache_for_entity_extract=False,
         )
         await rag.initialize_storages()
 
         # Test with zero-width characters
-        doc = "Micro\u200Bsoft announced Azure\u200D updates. Apple\uFEFF Inc released iOS."
-        print(f"Inserting document with zero-width chars: {repr(doc[:60])}")
+        doc = 'Micro\u200bsoft announced Azure\u200d updates. Apple\ufeff Inc released iOS.'
+        print(f'Inserting document with zero-width chars: {doc[:60]!r}')
         await rag.ainsert(doc)
 
         # Check entities
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            "SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1",
-            params=[workspace], multirows=True
+            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[workspace], multirows=True
         )
 
-        print(f"\nExtracted entities ({len(entities or [])}):")
-        for e in (entities or []):
+        print(f'\nExtracted entities ({len(entities or [])}):')
+        for e in entities or []:
             name = e['entity_name']
             has_zwc = any(zwc in name for zwc in UNICODE_SECURITY_STRIP)
-            status = "❌ CONTAINS ZWC" if has_zwc else "✅ CLEAN"
-            print(f"  {status}: {repr(name)}")
+            status = '❌ CONTAINS ZWC' if has_zwc else '✅ CLEAN'
+            print(f'  {status}: {name!r}')
 
         await rag.finalize_storages()
 

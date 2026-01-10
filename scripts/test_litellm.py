@@ -14,6 +14,7 @@ Usage:
 import argparse
 import sys
 
+
 def main():
     parser = argparse.ArgumentParser(description='Test LiteLLM proxy')
     parser.add_argument('--host', default='172.28.0.1', help='LiteLLM host')
@@ -21,6 +22,7 @@ def main():
     parser.add_argument('--key', default='sk-litellm-master-key', help='API key')
     args = parser.parse_args()
 
+    import openai
     from openai import OpenAI
 
     base_url = f'http://{args.host}:{args.port}/v1'
@@ -38,8 +40,17 @@ def main():
         dims = len(resp.data[0].embedding)
         print(f'   ✓ Success: {dims} dimensions')
         print(f'   First 5 values: {resp.data[0].embedding[:5]}')
+    except openai.AuthenticationError as e:
+        print(f'   ✗ Authentication failed: {e}')
+        success = False
+    except openai.APIConnectionError as e:
+        print(f'   ✗ Connection failed: {e}')
+        success = False
+    except openai.APIError as e:
+        print(f'   ✗ API error: {e}')
+        success = False
     except Exception as e:
-        print(f'   ✗ Failed: {e}')
+        print(f'   ✗ Unexpected error: {e}')
         success = False
 
     # Test chat
@@ -53,8 +64,17 @@ def main():
         content = resp.choices[0].message.content
         print(f'   ✓ Success: "{content}"')
         print(f'   Tokens: {resp.usage.prompt_tokens} prompt, {resp.usage.completion_tokens} completion')
+    except openai.AuthenticationError as e:
+        print(f'   ✗ Authentication failed: {e}')
+        success = False
+    except openai.APIConnectionError as e:
+        print(f'   ✗ Connection failed: {e}')
+        success = False
+    except openai.APIError as e:
+        print(f'   ✗ API error: {e}')
+        success = False
     except Exception as e:
-        print(f'   ✗ Failed: {e}')
+        print(f'   ✗ Unexpected error: {e}')
         success = False
 
     print('\n' + '=' * 60)

@@ -535,17 +535,15 @@ class LightRAG:
             type[BaseGraphStorage], self._get_storage_class(self.graph_storage)
         )
         # Bind global_config to storage constructors
-        self.key_string_value_json_storage_cls = cast(
-            type[BaseKVStorage],
-            partial(self.key_string_value_json_storage_cls, global_config=global_config),
+        # After partial(), these become Callable factories, not class types
+        self._kv_storage_factory: Callable[..., BaseKVStorage] = partial(
+            self.key_string_value_json_storage_cls, global_config=global_config
         )
-        self.vector_db_storage_cls = cast(
-            type[BaseVectorStorage],
-            partial(self.vector_db_storage_cls, global_config=global_config),
+        self._vector_storage_factory: Callable[..., BaseVectorStorage] = partial(
+            self.vector_db_storage_cls, global_config=global_config
         )
-        self.graph_storage_cls = cast(
-            type[BaseGraphStorage],
-            partial(self.graph_storage_cls, global_config=global_config),
+        self._graph_storage_factory: Callable[..., BaseGraphStorage] = partial(
+            self.graph_storage_cls, global_config=global_config
         )
 
         # Initialize document status storage
@@ -561,9 +559,7 @@ class LightRAG:
         self.relation_chunks = self._create_kv_storage(NameSpace.KV_STORE_RELATION_CHUNKS)
 
         # Initialize graph storage
-        self.chunk_entity_relation_graph = self._create_graph_storage(
-            NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION
-        )
+        self.chunk_entity_relation_graph = self._create_graph_storage(NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION)
 
         # Initialize vector storages
         self.entities_vdb = self._create_vector_storage(
@@ -1007,40 +1003,31 @@ class LightRAG:
         storage_class = lazy_external_import(import_path, storage_name)
         return storage_class
 
-    def _create_kv_storage(self, namespace: NameSpace) -> BaseKVStorage:
-        """Create a KV storage instance with common parameters."""
-        return cast(
-            BaseKVStorage,
-            self.key_string_value_json_storage_cls(
-                namespace=namespace,
-                workspace=self.workspace,
-                embedding_func=self.embedding_func,
-            ),
+    def _create_kv_storage(self, namespace: str) -> BaseKVStorage:
+        """Create a KV storage instance with common parameters.
+
+        Note: self.key_string_value_json_storage_cls is wrapped with partial()
+        in __post_init__ which pre-binds global_config.
+        """
+        return self._kv_storage_factory(
+            namespace=namespace,
+            workspace=self.workspace,
+            embedding_func=self.embedding_func,
         )
 
-    def _create_vector_storage(
-        self, namespace: NameSpace, meta_fields: set[str]
-    ) -> BaseVectorStorage:
-        """Create a vector storage instance with common parameters."""
-        return cast(
-            BaseVectorStorage,
-            self.vector_db_storage_cls(
-                namespace=namespace,
-                workspace=self.workspace,
-                embedding_func=self.embedding_func,
-                meta_fields=meta_fields,
-            ),
+    def _create_vector_storage(self, namespace: str, meta_fields: set[str]) -> BaseVectorStorage:
+        return self._vector_storage_factory(
+            namespace=namespace,
+            workspace=self.workspace,
+            embedding_func=self.embedding_func,
+            meta_fields=meta_fields,
         )
 
-    def _create_graph_storage(self, namespace: NameSpace) -> BaseGraphStorage:
-        """Create a graph storage instance with common parameters."""
-        return cast(
-            BaseGraphStorage,
-            self.graph_storage_cls(
-                namespace=namespace,
-                workspace=self.workspace,
-                embedding_func=self.embedding_func,
-            ),
+    def _create_graph_storage(self, namespace: str) -> BaseGraphStorage:
+        return self._graph_storage_factory(
+            namespace=namespace,
+            workspace=self.workspace,
+            embedding_func=self.embedding_func,
         )
 
     @staticmethod

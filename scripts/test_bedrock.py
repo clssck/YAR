@@ -206,10 +206,10 @@ def test_configured_models(client, region: str) -> None:
 
     if passed == total:
         print(f"\n  {GREEN}✓ All {total} configured models working!{NC}")
-        print(f"\n  LightRAG is ready to use with AWS Bedrock.")
+        print("\n  LightRAG is ready to use with AWS Bedrock.")
     else:
         print(f"\n  {YELLOW}⚠ {passed}/{total} models working{NC}")
-        print(f"\n  Failed models may need to be enabled in AWS Bedrock console:")
+        print("\n  Failed models may need to be enabled in AWS Bedrock console:")
         print(f"    https://console.aws.amazon.com/bedrock/home?region={region}#/modelaccess")
 
 
@@ -243,7 +243,6 @@ def test_all_models(client, models: list[dict]) -> None:
         print(f"\n  {CYAN}Text/Chat Models ({len(text_models)}){NC}")
         for model in text_models:
             model_id = model.get("modelId", "")
-            provider = model.get("providerName", "Unknown")
 
             # Skip on-demand throughput versions (duplicates)
             if ":0" not in model_id and model_id.count(":") > 0:
@@ -300,7 +299,7 @@ def test_all_models(client, models: list[dict]) -> None:
 
     if text_ok > 0:
         print(f"  {CYAN}Text/Chat Models ({text_ok}):{NC}")
-        for model_id, ok, msg in results["text"]:
+        for model_id, ok, _msg in results["text"]:
             if ok:
                 print(f"    ✓ {model_id}")
         print()
@@ -359,7 +358,7 @@ def main():
 
     # Check credentials
     print(f"  Region: {args.region}")
-    print(f"  Checking AWS credentials...")
+    print("  Checking AWS credentials...")
 
     creds_ok, identity = check_credentials(args.region)
     if not creds_ok:
@@ -369,7 +368,7 @@ def main():
         print_info("Make sure AWS_WEB_IDENTITY_TOKEN_FILE/AWS_ROLE_ARN or AWS_ACCESS_KEY_ID is set")
         sys.exit(1)
 
-    print_ok(f"Credentials valid")
+    print_ok("Credentials valid")
     print(f"      Account: {identity['Account']}")
     print(f"      ARN: {identity['Arn']}")
 
@@ -378,7 +377,7 @@ def main():
     bedrock_runtime = boto3.client("bedrock-runtime", region_name=args.region)
 
     # List models
-    print(f"\n  Fetching available models...")
+    print("\n  Fetching available models...")
     models = list_foundation_models(bedrock)
 
     if not models:

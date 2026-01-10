@@ -64,7 +64,7 @@ export default function UploadDocumentsDialog({
   // Calculate overall progress percentage
   const overallProgress = useMemo(() => {
     if (uploadStats.total === 0) return 0
-    return Math.round((uploadStats.completed + uploadStats.failed) / uploadStats.total * 100)
+    return Math.round(((uploadStats.completed + uploadStats.failed) / uploadStats.total) * 100)
   }, [uploadStats])
 
   const handleRejectedFiles = useCallback(
@@ -139,7 +139,7 @@ export default function UploadDocumentsDialog({
         // Upload files in sequence, not parallel
         for (const file of sortedFiles) {
           // Update current file being uploaded
-          setUploadStats(prev => ({
+          setUploadStats((prev) => ({
             ...prev,
             currentFile: file.name,
           }))
@@ -222,7 +222,7 @@ export default function UploadDocumentsDialog({
           }
 
           // Update progress stats after each file
-          setUploadStats(prev => ({
+          setUploadStats((prev) => ({
             ...prev,
             completed: completedCount,
             failed: failedCount,
@@ -323,8 +323,7 @@ export default function UploadDocumentsDialog({
                       total: uploadStats.total,
                       defaultValue: `Uploading ${uploadStats.completed + uploadStats.failed + 1} of ${uploadStats.total}...`,
                     })
-                  : t('documentPanel.uploadDocuments.progress.complete', 'Upload complete')
-                }
+                  : t('documentPanel.uploadDocuments.progress.complete', 'Upload complete')}
               </span>
               <span className="font-medium">{overallProgress}%</span>
             </div>
@@ -435,9 +434,7 @@ export default function UploadDocumentsDialog({
               <UploadIcon className="h-4 w-4 mr-2" />
               {t('documentPanel.uploadDocuments.uploadMore', 'Upload More')}
             </Button>
-            <Button onClick={handleClose}>
-              {t('documentPanel.uploadDocuments.done', 'Done')}
-            </Button>
+            <Button onClick={handleClose}>{t('documentPanel.uploadDocuments.done', 'Done')}</Button>
           </DialogFooter>
         )}
       </DialogContent>

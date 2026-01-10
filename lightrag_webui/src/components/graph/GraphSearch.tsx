@@ -7,9 +7,9 @@ import MiniSearch from 'minisearch'
 import { type FC, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AsyncSearch } from '@/components/ui/AsyncSearch'
+import { formatShortcut, useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { searchResultLimit } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
-import { useKeyboardShortcut, formatShortcut } from '@/hooks/useKeyboardShortcut'
 
 // Message item identifier for search results
 export const messageId = '__message_item'

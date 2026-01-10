@@ -48,11 +48,11 @@ if not pm.is_installed('asyncpg'):
 if not pm.is_installed('pgvector'):
     pm.install('pgvector')
 
-import asyncpg  # type: ignore
-from asyncpg import Connection, Pool  # type: ignore
-from asyncpg.pool import PoolConnectionProxy  # type: ignore
+import asyncpg
+from asyncpg import Connection, Pool
+from asyncpg.pool import PoolConnectionProxy
 from dotenv import load_dotenv
-from pgvector.asyncpg import register_vector  # type: ignore
+from pgvector.asyncpg import register_vector
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each lightrag instance
@@ -104,7 +104,7 @@ VECTOR_DISTANCE_OP: dict[str, str] = {
 if VECTOR_DISTANCE_METRIC not in VECTOR_OPS_CLASS:
     raise ValueError(
         f"Invalid POSTGRES_VECTOR_DISTANCE='{VECTOR_DISTANCE_METRIC}'. "
-        f"Must be one of: {', '.join(VECTOR_OPS_CLASS.keys())}"
+        f'Must be one of: {", ".join(VECTOR_OPS_CLASS.keys())}'
     )
 
 # Patterns for sensitive parameter keys that should be masked in logs
@@ -239,9 +239,7 @@ class PostgreSQLDB:
         self.max = int(config['max_connections'])
         self.min = int(config.get('min_connections', 5))
         if self.min > self.max:
-            raise ValueError(
-                f'min_connections ({self.min}) cannot exceed max_connections ({self.max})'
-            )
+            raise ValueError(f'min_connections ({self.min}) cannot exceed max_connections ({self.max})')
         self.increment = 1
         self.pool: Pool | None = None
 
@@ -477,7 +475,7 @@ class PostgreSQLDB:
             pool = await asyncpg.create_pool(
                 **connection_params,
                 init=_init_connection,  # Register pgvector codec on every connection
-            )  # type: ignore
+            )
             self.pool = pool
 
         try:
@@ -580,7 +578,7 @@ class PostgreSQLDB:
             with attempt:
                 await self._ensure_pool()
                 assert self.pool is not None
-                async with self.pool.acquire() as connection:  # type: ignore[arg-type]
+                async with self.pool.acquire() as connection:
                     if with_age and graph_name:
                         await self.configure_age(connection, graph_name)
                     elif with_age and not graph_name:
@@ -632,7 +630,7 @@ class PostgreSQLDB:
     async def configure_vector_extension(connection: Connection | PoolConnectionProxy) -> None:
         """Create VECTOR extension if it doesn't exist for vector similarity operations."""
         try:
-            await connection.execute('CREATE EXTENSION IF NOT EXISTS vector')  # type: ignore
+            await connection.execute('CREATE EXTENSION IF NOT EXISTS vector')
             logger.info('PostgreSQL, VECTOR extension enabled')
         except asyncpg.exceptions.DuplicateObjectError:
             logger.debug('VECTOR extension already exists')
@@ -647,7 +645,7 @@ class PostgreSQLDB:
     async def configure_age_extension(connection: Connection | PoolConnectionProxy) -> None:
         """Create AGE extension if it doesn't exist for graph operations."""
         try:
-            await connection.execute('CREATE EXTENSION IF NOT EXISTS AGE CASCADE')  # type: ignore
+            await connection.execute('CREATE EXTENSION IF NOT EXISTS AGE CASCADE')
             logger.info('PostgreSQL, AGE extension enabled')
         except asyncpg.exceptions.DuplicateObjectError:
             logger.debug('AGE extension already exists')
@@ -662,7 +660,7 @@ class PostgreSQLDB:
     async def configure_trgm_extension(connection: Connection | PoolConnectionProxy) -> None:
         """Create pg_trgm extension if it doesn't exist for fuzzy text matching (ILIKE optimization)."""
         try:
-            await connection.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')  # type: ignore
+            await connection.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')
             logger.info('PostgreSQL, pg_trgm extension enabled')
         except asyncpg.exceptions.DuplicateObjectError:
             logger.debug('pg_trgm extension already exists')
@@ -692,13 +690,9 @@ class PostgreSQLDB:
         validate_sql_identifier(graph_name, 'graph_name')
 
         try:
-            await connection.execute(  # type: ignore
-                'SET search_path = ag_catalog, "$user", public'
-            )
+            await connection.execute('SET search_path = ag_catalog, "$user", public')
             # AGE's create_graph() expects a text literal; identifier is validated above
-            await connection.execute(  # type: ignore
-                f"SELECT create_graph('{graph_name}')"
-            )
+            await connection.execute(f"SELECT create_graph('{graph_name}')")
         except (
             asyncpg.exceptions.InvalidSchemaNameError,
             asyncpg.exceptions.UniqueViolationError,
@@ -953,14 +947,12 @@ class PostgreSQLDB:
                     if actual_dim != expected_dim:
                         raise ValueError(
                             f"VECTOR DIMENSION MISMATCH: Table '{table_name}' has {actual_dim}D vectors, "
-                            f"but EMBEDDING_DIM={expected_dim}. "
-                            f"Options: (1) Set EMBEDDING_DIM={actual_dim} to match existing data, or "
-                            f"(2) Run a manual migration to alter column dimensions and rebuild indexes. "
-                            f"See docs/vector_migration.md for migration steps."
+                            f'but EMBEDDING_DIM={expected_dim}. '
+                            f'Options: (1) Set EMBEDDING_DIM={actual_dim} to match existing data, or '
+                            f'(2) Run a manual migration to alter column dimensions and rebuild indexes. '
+                            f'See docs/vector_migration.md for migration steps.'
                         )
-                    logger.debug(
-                        f'PostgreSQL, Vector dimension validated: {table_name}.{column_name} = {actual_dim}D'
-                    )
+                    logger.debug(f'PostgreSQL, Vector dimension validated: {table_name}.{column_name} = {actual_dim}D')
 
             except ValueError:
                 # Re-raise dimension mismatch errors
@@ -1539,18 +1531,18 @@ class PostgreSQLDB:
                 col_exists = await self.query(check_sql, [col['name']])
 
                 if not col_exists:
-                    logger.info(f"Adding {col['name']} column to LIGHTRAG_ENTITY_ALIASES table")
+                    logger.info(f'Adding {col["name"]} column to LIGHTRAG_ENTITY_ALIASES table')
                     add_sql = f"""
                     ALTER TABLE LIGHTRAG_ENTITY_ALIASES
                     ADD COLUMN {col['name']} {col['type']}
                     """
                     await self.execute(add_sql)
-                    logger.info(f"Successfully added {col['name']} column to LIGHTRAG_ENTITY_ALIASES table")
+                    logger.info(f'Successfully added {col["name"]} column to LIGHTRAG_ENTITY_ALIASES table')
                 else:
-                    logger.info(f"{col['name']} column already exists in LIGHTRAG_ENTITY_ALIASES table")
+                    logger.info(f'{col["name"]} column already exists in LIGHTRAG_ENTITY_ALIASES table')
 
             except Exception as e:
-                logger.warning(f"Failed to add {col['name']} column to LIGHTRAG_ENTITY_ALIASES: {e}")
+                logger.warning(f'Failed to add {col["name"]} column to LIGHTRAG_ENTITY_ALIASES: {e}')
 
     async def _migrate_field_lengths(self):
         """Migrate database field lengths: entity_name, source_id, target_id, and file_path"""
@@ -2435,9 +2427,7 @@ class PostgreSQLDB:
                     WHERE indexname = $1 AND tablename = $2
                 """
             try:
-                vector_index_exists = await self.query(
-                    check_vector_index_sql, [vector_index_name, k.lower()]
-                )
+                vector_index_exists = await self.query(check_vector_index_sql, [vector_index_name, k.lower()])
                 if not vector_index_exists:
                     # Only set vector dimension when index doesn't exist
                     # DDL statements require identifier interpolation (validated above)
@@ -2922,16 +2912,8 @@ class PGKVStorage(BaseKVStorage):
             if self.db is None:
                 self.db = await ClientManager.get_client()
 
-            # Implement workspace priority: PostgreSQLDB.workspace > self.workspace > "default"
-            if self.db.workspace:
-                # Use PostgreSQLDB's workspace (highest priority)
-                self.workspace = self.db.workspace
-            elif hasattr(self, 'workspace') and self.workspace:
-                # Use storage class's workspace (medium priority)
-                pass
-            else:
-                # Use "default" for compatibility (lowest priority)
-                self.workspace = 'default'
+            if not (hasattr(self, 'workspace') and self.workspace):
+                self.workspace = self.db.workspace if self.db.workspace else 'default'
 
     async def finalize(self):
         if self.db is not None:
@@ -3396,16 +3378,8 @@ class PGVectorStorage(BaseVectorStorage):
             if self.db is None:
                 self.db = await ClientManager.get_client()
 
-            # Implement workspace priority: PostgreSQLDB.workspace > self.workspace > "default"
-            if self.db.workspace:
-                # Use PostgreSQLDB's workspace (highest priority)
-                self.workspace = self.db.workspace
-            elif hasattr(self, 'workspace') and self.workspace:
-                # Use storage class's workspace (medium priority)
-                pass
-            else:
-                # Use "default" for compatibility (lowest priority)
-                self.workspace = 'default'
+            if not (hasattr(self, 'workspace') and self.workspace):
+                self.workspace = self.db.workspace if self.db.workspace else 'default'
 
     async def finalize(self):
         if self.db is not None:
@@ -4190,16 +4164,8 @@ class PGDocStatusStorage(DocStatusStorage):
             if self.db is None:
                 self.db = await ClientManager.get_client()
 
-            # Implement workspace priority: PostgreSQLDB.workspace > self.workspace > "default"
-            if self.db.workspace:
-                # Use PostgreSQLDB's workspace (highest priority)
-                self.workspace = self.db.workspace
-            elif hasattr(self, 'workspace') and self.workspace:
-                # Use storage class's workspace (medium priority)
-                pass
-            else:
-                # Use "default" for compatibility (lowest priority)
-                self.workspace = 'default'
+            if not (hasattr(self, 'workspace') and self.workspace):
+                self.workspace = self.db.workspace if self.db.workspace else 'default'
 
     async def finalize(self):
         if self.db is not None:
@@ -4720,9 +4686,7 @@ class PGGraphStorage(BaseGraphStorage):
             raise RuntimeError('PostgreSQL client is not initialized')
         return self.db
 
-    def _track_json_error(
-        self, context: str, error: json.JSONDecodeError, raw_data: str | None = None
-    ) -> None:
+    def _track_json_error(self, context: str, error: json.JSONDecodeError, raw_data: str | None = None) -> None:
         """Track a JSON parse error for monitoring and debugging.
 
         Args:
@@ -4862,18 +4826,9 @@ class PGGraphStorage(BaseGraphStorage):
             if self.db is None:
                 self.db = await ClientManager.get_client()
 
-            # Implement workspace priority: PostgreSQLDB.workspace > self.workspace > "default"
-            if self.db.workspace:
-                # Use PostgreSQLDB's workspace (highest priority)
-                self.workspace = self.db.workspace
-            elif hasattr(self, 'workspace') and self.workspace:
-                # Use storage class's workspace (medium priority)
-                pass
-            else:
-                # Use "default" for compatibility (lowest priority)
-                self.workspace = 'default'
+            if not (hasattr(self, 'workspace') and self.workspace):
+                self.workspace = self.db.workspace if self.db.workspace else 'default'
 
-            # Dynamically generate graph name based on workspace
             self.graph_name = self._get_workspace_graph_name()
 
             # Log the graph initialization for debugging
@@ -4973,7 +4928,7 @@ class PGGraphStorage(BaseGraphStorage):
             start = time.perf_counter()
             if cache_used:
                 # Cache hit - skip expensive graph list query, just check AGE works
-                await db.execute("SELECT 1 FROM ag_catalog.ag_graph LIMIT 1")
+                await db.execute('SELECT 1 FROM ag_catalog.ag_graph LIMIT 1')
                 graph_names = []  # Not populated when using cache
             else:
                 # Cache miss - query full graph list
@@ -5029,7 +4984,7 @@ class PGGraphStorage(BaseGraphStorage):
             try:
                 start = time.perf_counter()
                 await db.query(
-                    f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote('RETURN 1')}) AS (one agtype)",
+                    f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote("RETURN 1")}) AS (one agtype)',
                     with_age=True,
                     graph_name=self.graph_name,
                 )
@@ -5364,7 +5319,7 @@ class PGGraphStorage(BaseGraphStorage):
                       MATCH (n:base {entity_id: node_id})
                       OPTIONAL MATCH (n)-[]-(connected:base)
                       RETURN n.entity_id AS source_id, connected.entity_id AS connected_id"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (source_id text, connected_id text)"
+        query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (source_id text, connected_id text)'
 
         results = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         edges = []
@@ -5398,7 +5353,7 @@ class PGGraphStorage(BaseGraphStorage):
         cypher = f"""MERGE (n:base {{entity_id: "{label}"}})
                      SET n += {properties}
                      RETURN n"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (n agtype)"
+        query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (n agtype)'
 
         try:
             db = self._db_required()
@@ -5435,7 +5390,7 @@ class PGGraphStorage(BaseGraphStorage):
                      MERGE (source)-[r:DIRECTED]->(target)
                      SET r += {edge_properties}
                      RETURN r"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (r agtype)"
+        query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (r agtype)'
 
         try:
             db = self._db_required()
@@ -5448,8 +5403,7 @@ class PGGraphStorage(BaseGraphStorage):
         except Exception as e:
             # Log context before re-raising - intentionally broad to capture all database failures
             logger.error(
-                f'[{self.workspace}] POSTGRES, upsert_edge error on edge: '
-                f'`{source_node_id}`-`{target_node_id}`: {e}'
+                f'[{self.workspace}] POSTGRES, upsert_edge error on edge: `{source_node_id}`-`{target_node_id}`: {e}'
             )
             raise
 
@@ -5515,7 +5469,7 @@ class PGGraphStorage(BaseGraphStorage):
                 SET n.description = d.description
                 SET n.source_id = d.source_id
                 RETURN count(n)"""
-            query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (cnt agtype)"
+            query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (cnt agtype)'
 
             try:
                 await db._timed_operation(
@@ -5603,7 +5557,7 @@ class PGGraphStorage(BaseGraphStorage):
                 SET r.keywords = d.keywords
                 SET r.source_id = d.source_id
                 RETURN count(r)"""
-            query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (cnt agtype)"
+            query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (cnt agtype)'
 
             try:
                 await db._timed_operation(
@@ -5639,7 +5593,9 @@ class PGGraphStorage(BaseGraphStorage):
         cypher = """UNWIND $node_ids AS node_id
                      MATCH (n:base {entity_id: node_id})
                      DETACH DELETE n"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (n agtype)"
+        query = (
+            f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (n agtype)'
+        )
 
         try:
             await self._query(
@@ -5666,7 +5622,9 @@ class PGGraphStorage(BaseGraphStorage):
         cypher = """UNWIND $node_ids AS node_id
                      MATCH (n:base {entity_id: node_id})
                      DETACH DELETE n"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (n agtype)"
+        query = (
+            f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (n agtype)'
+        )
 
         try:
             await self._query(query, readonly=False, params=cy_params)
@@ -5701,7 +5659,7 @@ class PGGraphStorage(BaseGraphStorage):
         cypher = f"""UNWIND [{literal_pairs}] AS pair
                          MATCH (a:base {{entity_id: pair.src}})-[r:DIRECTED]->(b:base {{entity_id: pair.tgt}})
                          DELETE r"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (r agtype)"
+        query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}) AS (r agtype)'
 
         try:
             await self._query(query, readonly=False)
@@ -6043,13 +6001,13 @@ class PGGraphStorage(BaseGraphStorage):
                          MATCH (n:base {entity_id: node_id})
                          OPTIONAL MATCH (n:base)-[]->(connected:base)
                          RETURN node_id, connected.entity_id AS connected_id"""
-            outgoing_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(outgoing_cypher)}, $1::agtype) AS (node_id text, connected_id text)"
+            outgoing_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(outgoing_cypher)}, $1::agtype) AS (node_id text, connected_id text)'
 
             incoming_cypher = """UNWIND $node_ids AS node_id
                          MATCH (n:base {entity_id: node_id})
                          OPTIONAL MATCH (n:base)<-[]-(connected:base)
                          RETURN node_id, connected.entity_id AS connected_id"""
-            incoming_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(incoming_cypher)}, $1::agtype) AS (node_id text, connected_id text)"
+            incoming_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(incoming_cypher)}, $1::agtype) AS (node_id text, connected_id text)'
 
             outgoing_results, incoming_results = await asyncio.gather(
                 self._query(outgoing_query, params=cy_params), self._query(incoming_query, params=cy_params)
@@ -6104,7 +6062,7 @@ class PGGraphStorage(BaseGraphStorage):
         cypher = """UNWIND $node_ids AS node_id
                     MATCH (n:base {entity_id: node_id})
                     RETURN id(n) as internal_id, n"""
-        query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (internal_id bigint, n agtype)"
+        query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (internal_id bigint, n agtype)'
 
         node_result = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
         if not node_result or not node_result[0].get('n'):
@@ -6285,7 +6243,7 @@ class PGGraphStorage(BaseGraphStorage):
                 MATCH (n:base {entity_id: entity_id})
                 OPTIONAL MATCH (n)-[r]-()
                 RETURN entity_id, count(r) as degree"""
-            degree_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(degree_cypher)}, $1::agtype) AS (entity_id text, degree bigint)"
+            degree_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(degree_cypher)}, $1::agtype) AS (entity_id text, degree bigint)'
             degree_results = await self._query(degree_query, params=degree_params)
             degree_map = {row['entity_id']: int(row['degree']) for row in degree_results}
             # Update node properties with db_degree
@@ -6325,8 +6283,8 @@ class PGGraphStorage(BaseGraphStorage):
         # Handle wildcard query - get all nodes
         if node_label == '*':
             # First check total node count to determine if graph should be truncated
-            count_cypher = "MATCH (n:base) RETURN count(distinct n) AS total_nodes"
-            count_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(count_cypher)}) AS (total_nodes bigint)"
+            count_cypher = 'MATCH (n:base) RETURN count(distinct n) AS total_nodes'
+            count_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(count_cypher)}) AS (total_nodes bigint)'
 
             count_result = await self._query(count_query)
             total_nodes = count_result[0]['total_nodes'] if count_result else 0
@@ -6344,7 +6302,7 @@ class PGGraphStorage(BaseGraphStorage):
             else:
                 degree_filter = ''
 
-            nodes_cypher = "MATCH (n:base) OPTIONAL MATCH (n)-[r]->() RETURN id(n) as node_id, count(r) as degree"
+            nodes_cypher = 'MATCH (n:base) OPTIONAL MATCH (n)-[r]->() RETURN id(n) as node_id, count(r) as degree'
             query_nodes = f"""SELECT * FROM (
                 SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(nodes_cypher)}) AS (node_id BIGINT, degree BIGINT)
             ) AS subq
@@ -6368,7 +6326,7 @@ class PGGraphStorage(BaseGraphStorage):
                         OPTIONAL MATCH (a)-[r]->(b)
                             WHERE id(b) IN node_ids
                         RETURN a, r, b"""
-                query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(subgraph_cypher)}, $1::agtype) AS (a AGTYPE, r AGTYPE, b AGTYPE)"
+                query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(subgraph_cypher)}, $1::agtype) AS (a AGTYPE, r AGTYPE, b AGTYPE)'
                 results = await self._query(query, params=cy_params)
 
                 # Process query results, deduplicate nodes and edges
@@ -6611,8 +6569,8 @@ class PGGraphStorage(BaseGraphStorage):
     async def drop(self) -> dict[str, str]:
         """Drop the storage"""
         try:
-            drop_cypher = "MATCH (n) DETACH DELETE n"
-            drop_query = f"SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(drop_cypher)}) AS (result agtype)"
+            drop_cypher = 'MATCH (n) DETACH DELETE n'
+            drop_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(drop_cypher)}) AS (result agtype)'
 
             await self._query(drop_query, readonly=False)
             return {

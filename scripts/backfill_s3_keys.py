@@ -112,7 +112,7 @@ async def main():
             local_path = INPUT_DIR / '__enqueued__' / file_path
 
         if not local_path.exists():
-            print(f'  ✗ Local file not found, skipping')
+            print('  ✗ Local file not found, skipping')
             continue
 
         # Generate S3 key

@@ -11,8 +11,6 @@ This module tests:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import numpy as np
 import pytest
 

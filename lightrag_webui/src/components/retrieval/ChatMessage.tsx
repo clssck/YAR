@@ -1,4 +1,10 @@
-import { AlertCircleIcon, BrainIcon, ChevronDownIcon, LoaderIcon, RefreshCwIcon } from 'lucide-react'
+import {
+  AlertCircleIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  LoaderIcon,
+  RefreshCwIcon,
+} from 'lucide-react'
 import mermaid from 'mermaid'
 import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -9,7 +15,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeReact from 'rehype-react'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import type { CitationsMetadata, Message, StreamReference } from '@/api/lightrag'
+import type { CitationsMetadata, Message } from '@/api/lightrag'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import { remarkFootnotes } from '@/utils/remarkFootnotes'
@@ -245,11 +251,12 @@ export const ChatMessage = ({
         // Check if this is a reference line like "[3] filename.pdf"
         if (references && references.length > 0) {
           // Extract text content from children
-          const textContent = typeof children === 'string'
-            ? children
-            : Array.isArray(children)
-              ? children.map((c) => (typeof c === 'string' ? c : '')).join('')
-              : ''
+          const textContent =
+            typeof children === 'string'
+              ? children
+              : Array.isArray(children)
+                ? children.map((c) => (typeof c === 'string' ? c : '')).join('')
+                : ''
 
           // Match reference pattern: [n] followed by filename
           const refMatch = textContent.match(/^\[(\d+)\]\s*(.+)$/)
@@ -303,9 +310,10 @@ export const ChatMessage = ({
   )
 
   // Determine if we're in a streaming state (content is being received)
-  const isStreaming = message.role === 'assistant' && !message.isError && (
-    isThinking || (!finalDisplayContent && !thinkingTime)
-  )
+  const isStreaming =
+    message.role === 'assistant' &&
+    !message.isError &&
+    (isThinking || (!finalDisplayContent && !thinkingTime))
 
   // Categorize error type from error message content
   const errorType = useMemo(() => {
@@ -313,9 +321,22 @@ export const ChatMessage = ({
     if (message.errorType) return message.errorType
     const content = (message.content || '').toLowerCase()
     if (content.includes('timeout') || content.includes('timed out')) return 'timeout'
-    if (content.includes('401') || content.includes('403') || content.includes('unauthorized') || content.includes('forbidden')) return 'auth'
-    if (content.includes('500') || content.includes('502') || content.includes('503') || content.includes('server')) return 'server'
-    if (content.includes('network') || content.includes('fetch') || content.includes('connection')) return 'network'
+    if (
+      content.includes('401') ||
+      content.includes('403') ||
+      content.includes('unauthorized') ||
+      content.includes('forbidden')
+    )
+      return 'auth'
+    if (
+      content.includes('500') ||
+      content.includes('502') ||
+      content.includes('503') ||
+      content.includes('server')
+    )
+      return 'server'
+    if (content.includes('network') || content.includes('fetch') || content.includes('connection'))
+      return 'network'
     return 'unknown'
   }, [message.isError, message.errorType, message.content])
 
@@ -531,7 +552,8 @@ export const ChatMessage = ({
           </span>
           {message.content && message.content.length > 0 && (
             <span className="opacity-70">
-              ({message.content.length.toLocaleString()} {t('retrievePanel.chatMessage.chars', 'chars')})
+              ({message.content.length.toLocaleString()}{' '}
+              {t('retrievePanel.chatMessage.chars', 'chars')})
             </span>
           )}
         </div>

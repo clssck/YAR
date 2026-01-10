@@ -5,7 +5,8 @@
 import { forwardRef } from 'react'
 import { cn } from '@/lib/utils'
 
-export interface SliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> {
+export interface SliderProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> {
   /** Current value */
   value?: number
   /** Called when value changes */
@@ -50,9 +51,7 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
         {(labels?.min || labels?.max || showValue) && (
           <div className="flex justify-between items-center mb-1 text-[10px] text-muted-foreground">
             <span>{labels?.min || ''}</span>
-            {showValue && (
-              <span className="font-medium text-foreground">{formatValue(value)}</span>
-            )}
+            {showValue && <span className="font-medium text-foreground">{formatValue(value)}</span>}
             <span>{labels?.max || ''}</span>
           </div>
         )}

@@ -17,7 +17,13 @@ import {
   useShortcutStore,
 } from '@/stores/shortcuts'
 
-const CATEGORY_ORDER: ShortcutCategory[] = ['global', 'navigation', 'documents', 'graph', 'retrieval']
+const CATEGORY_ORDER: ShortcutCategory[] = [
+  'global',
+  'navigation',
+  'documents',
+  'graph',
+  'retrieval',
+]
 
 const CATEGORY_LABELS: Record<ShortcutCategory, string> = {
   global: 'shortcutHelp.category.global',
@@ -39,16 +45,20 @@ function ShortcutRow({ shortcut }: { shortcut: RegisteredShortcut }) {
   )
 }
 
-function ShortcutSection({ category, shortcuts }: { category: ShortcutCategory; shortcuts: RegisteredShortcut[] }) {
+function ShortcutSection({
+  category,
+  shortcuts,
+}: {
+  category: ShortcutCategory
+  shortcuts: RegisteredShortcut[]
+}) {
   const { t } = useTranslation()
 
   if (shortcuts.length === 0) return null
 
   return (
     <div className="mb-4">
-      <h3 className="mb-2 text-sm font-semibold text-foreground">
-        {t(CATEGORY_LABELS[category])}
-      </h3>
+      <h3 className="mb-2 text-sm font-semibold text-foreground">{t(CATEGORY_LABELS[category])}</h3>
       <div className="space-y-0.5">
         {shortcuts.map((shortcut) => (
           <ShortcutRow key={shortcut.id} shortcut={shortcut} />
@@ -95,12 +105,7 @@ export function KeyboardShortcutHelp() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0"
-          title={t('shortcutHelp.title')}
-        >
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title={t('shortcutHelp.title')}>
           <KeyboardIcon className="h-4 w-4" />
           <span className="sr-only">{t('shortcutHelp.title')}</span>
         </Button>
@@ -127,9 +132,7 @@ export function KeyboardShortcutHelp() {
           )}
         </div>
         <div className="mt-4 border-t pt-4">
-          <p className="text-xs text-muted-foreground text-center">
-            {t('shortcutHelp.hint')}
-          </p>
+          <p className="text-xs text-muted-foreground text-center">{t('shortcutHelp.hint')}</p>
         </div>
       </DialogContent>
     </Dialog>

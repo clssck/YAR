@@ -23,3 +23,4 @@ exclude = [
 unresolved-import = "ignore"        # Optional deps not installed
 conflicting-declarations = "ignore" # try/except ImportError pattern
 redundant-cast = "ignore"           # Intentional casts for clarity
+invalid-return-type = "warn"        # @sync_wrapper() decorated methods have empty bodies (impl in decorator)

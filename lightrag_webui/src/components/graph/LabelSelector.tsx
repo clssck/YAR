@@ -112,7 +112,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
   const recentLabels = useMemo(() => {
     const recent = SearchHistoryManager.getRecentSearches(RECENT_LABELS_LIMIT)
     return recent.map((item) => item.label).filter((l) => l !== '*')
-  }, [open]) // Recalculate when dropdown opens
+  }, [])
 
   const handleSelect = useCallback(
     (label: string) => {
@@ -211,11 +211,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
           <CommandList>
             {/* Always show wildcard at top */}
             <CommandGroup>
-              <CommandItem
-                value=""
-                onSelect={() => handleSelect('*')}
-                className="cursor-pointer"
-              >
+              <CommandItem value="" onSelect={() => handleSelect('*')} className="cursor-pointer">
                 <span className="font-mono">*</span>
                 <span className="ml-2 text-xs text-muted-foreground">
                   {t('graphPanel.graphLabels.allLabels')}
@@ -227,32 +223,29 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
             </CommandGroup>
 
             {/* Search results */}
-            {showSearchResults && (
-              <>
-                {displayedLabels.search.length > 0 ? (
-                  <CommandGroup heading={t('graphPanel.graphLabels.searchResults')}>
-                    {displayedLabels.search.map((label) => (
-                      <CommandItem
-                        key={label}
-                        value=""
-                        onSelect={() => handleSelect(label)}
-                        className="cursor-pointer truncate"
-                      >
-                        {label}
-                        <Check
-                          className={cn(
-                            'ml-auto h-4 w-4 shrink-0',
-                            value === label ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                ) : (
-                  !isSearching && <CommandEmpty>{t('graphPanel.graphLabels.noResults')}</CommandEmpty>
-                )}
-              </>
-            )}
+            {showSearchResults &&
+              (displayedLabels.search.length > 0 ? (
+                <CommandGroup heading={t('graphPanel.graphLabels.searchResults')}>
+                  {displayedLabels.search.map((label) => (
+                    <CommandItem
+                      key={label}
+                      value=""
+                      onSelect={() => handleSelect(label)}
+                      className="cursor-pointer truncate"
+                    >
+                      {label}
+                      <Check
+                        className={cn(
+                          'ml-auto h-4 w-4 shrink-0',
+                          value === label ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ) : (
+                !isSearching && <CommandEmpty>{t('graphPanel.graphLabels.noResults')}</CommandEmpty>
+              ))}
 
             {/* Recent + Popular when not searching */}
             {showRecentAndPopular && (

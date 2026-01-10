@@ -32,6 +32,22 @@ from typing import (
 import numpy as np
 from dotenv import load_dotenv
 
+__all__ = [
+    'CacheData',
+    'EmbeddingFunc',
+    'TiktokenTokenizer',
+    'Tokenizer',
+    'compute_mdhash_id',
+    'export_data',
+    'generate_track_id',
+    'get_env_value',
+    'lazy_external_import',
+    'logger',
+    'set_verbose_debug',
+    'setup_logger',
+    'sync_wrapper',
+]
+
 from lightrag.constants import (
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILENAME,
@@ -96,7 +112,7 @@ def _patch_ascii_colors_console_handler() -> None:
 
     original_handle_error = ConsoleHandler.handle_error
 
-    def _safe_handle_error(self, message: str) -> None:  # type: ignore[override]
+    def _safe_handle_error(self, message: str) -> None:
         exc_type, _, _ = sys.exc_info()
         if exc_type in (ValueError, OSError) and 'close' in message.lower():
             return
@@ -1525,8 +1541,9 @@ def sync_wrapper(async_method_name: str | None = None):
                 '''Sync version of :meth:`acustom_async`.'''
     """
 
-    def decorator(func: Callable) -> Callable:
-        target_name = async_method_name or f'a{func.__name__}'
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        func_name = getattr(func, '__name__', 'unknown')
+        target_name = async_method_name or f'a{func_name}'
 
         @wraps(func)
         def wrapper(self, *args, **kwargs):
@@ -2055,36 +2072,38 @@ def get_content_summary(content: str, max_length: int = 250) -> str:
 # Characters to strip for security (invisible/control characters)
 # These can be used in adversarial attacks to create visually identical
 # but byte-different entity names, causing duplicate entities in the graph.
-UNICODE_SECURITY_STRIP = frozenset({
-    # === Zero-Width Characters ===
-    '\u200B',  # Zero Width Space (ZWSP)
-    '\u200C',  # Zero Width Non-Joiner (ZWNJ)
-    '\u200D',  # Zero Width Joiner (ZWJ)
-    '\u2060',  # Word Joiner
-    '\uFEFF',  # Zero Width No-Break Space / BOM
-    '\u00AD',  # Soft Hyphen
-    # === Bidirectional Formatting Controls ===
-    '\u202A',  # Left-to-Right Embedding
-    '\u202B',  # Right-to-Left Embedding
-    '\u202C',  # Pop Directional Formatting
-    '\u202D',  # Left-to-Right Override (LRO)
-    '\u202E',  # Right-to-Left Override (RLO)
-    # === Directional Isolates ===
-    '\u2066',  # Left-to-Right Isolate
-    '\u2067',  # Right-to-Left Isolate
-    '\u2068',  # First Strong Isolate
-    '\u2069',  # Pop Directional Isolate
-    # === Phase 2: Additional Attack Vectors ===
-    '\u034F',  # Combining Grapheme Joiner (CGJ) - alters grapheme boundaries
-    '\u202F',  # Narrow No-Break Space (NNBSP) - invisible space variant
-    '\u2061',  # Function Application - invisible math operator
-    '\u2062',  # Invisible Times - invisible math operator
-    '\u2063',  # Invisible Separator - invisible math operator
-    '\u2064',  # Invisible Plus - invisible math operator
-    '\uFFF9',  # Interlinear Annotation Anchor
-    '\uFFFA',  # Interlinear Annotation Separator
-    '\uFFFB',  # Interlinear Annotation Terminator
-})
+UNICODE_SECURITY_STRIP = frozenset(
+    {
+        # === Zero-Width Characters ===
+        '\u200b',  # Zero Width Space (ZWSP)
+        '\u200c',  # Zero Width Non-Joiner (ZWNJ)
+        '\u200d',  # Zero Width Joiner (ZWJ)
+        '\u2060',  # Word Joiner
+        '\ufeff',  # Zero Width No-Break Space / BOM
+        '\u00ad',  # Soft Hyphen
+        # === Bidirectional Formatting Controls ===
+        '\u202a',  # Left-to-Right Embedding
+        '\u202b',  # Right-to-Left Embedding
+        '\u202c',  # Pop Directional Formatting
+        '\u202d',  # Left-to-Right Override (LRO)
+        '\u202e',  # Right-to-Left Override (RLO)
+        # === Directional Isolates ===
+        '\u2066',  # Left-to-Right Isolate
+        '\u2067',  # Right-to-Left Isolate
+        '\u2068',  # First Strong Isolate
+        '\u2069',  # Pop Directional Isolate
+        # === Phase 2: Additional Attack Vectors ===
+        '\u034f',  # Combining Grapheme Joiner (CGJ) - alters grapheme boundaries
+        '\u202f',  # Narrow No-Break Space (NNBSP) - invisible space variant
+        '\u2061',  # Function Application - invisible math operator
+        '\u2062',  # Invisible Times - invisible math operator
+        '\u2063',  # Invisible Separator - invisible math operator
+        '\u2064',  # Invisible Plus - invisible math operator
+        '\ufff9',  # Interlinear Annotation Anchor
+        '\ufffa',  # Interlinear Annotation Separator
+        '\ufffb',  # Interlinear Annotation Terminator
+    }
+)
 
 
 # Mathematical alphanumeric symbols that should be normalized to ASCII
@@ -2156,11 +2175,12 @@ def normalize_unicode_for_entity_matching(text: str) -> str:
     # - Variation Selectors Supplement (U+E0100-U+E01EF): extended variants
     # - Tag Characters (U+E0001-U+E007F): deprecated language tags, can be exploited
     text = ''.join(
-        c for c in text
+        c
+        for c in text
         if not (
-            0xFE00 <= ord(c) <= 0xFE0F or      # Variation Selectors
-            0xE0100 <= ord(c) <= 0xE01EF or    # Variation Selectors Supplement
-            0xE0001 <= ord(c) <= 0xE007F       # Tag Characters
+            0xFE00 <= ord(c) <= 0xFE0F  # Variation Selectors
+            or 0xE0100 <= ord(c) <= 0xE01EF  # Variation Selectors Supplement
+            or 0xE0001 <= ord(c) <= 0xE007F  # Tag Characters
         )
     )
 

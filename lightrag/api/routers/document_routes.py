@@ -45,7 +45,7 @@ def _is_kreuzberg_available() -> bool:
         bool: True if kreuzberg is available, False otherwise
     """
     try:
-        import kreuzberg  # noqa: F401  # type: ignore[import-not-found]
+        import kreuzberg  # noqa: F401
 
         return True
     except ImportError:
@@ -839,7 +839,7 @@ def _convert_with_kreuzberg(file_path: Path) -> str:
     Returns:
         str: Extracted text content
     """
-    from kreuzberg import extract_file_sync  # type: ignore[import-not-found]
+    from kreuzberg import extract_file_sync
 
     result = extract_file_sync(str(file_path))
     return result.content

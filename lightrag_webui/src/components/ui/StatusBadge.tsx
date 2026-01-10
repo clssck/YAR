@@ -1,12 +1,12 @@
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
+  AlertCircle,
   CheckCircle,
   Clock,
-  AlertCircle,
-  Loader2,
   Info,
-  XCircle,
+  Loader2,
   type LucideIcon,
+  XCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -45,7 +45,7 @@ const statusIcons: Record<string, LucideIcon> = {
 }
 
 export interface StatusBadgeProps
-  extends React.HTMLAttributes<HTMLSpanElement>,
+  extends React.HTMLAttributes<HTMLOutputElement>,
     VariantProps<typeof statusBadgeVariants> {
   /** Text label displayed in the badge */
   label: string
@@ -75,20 +75,16 @@ export default function StatusBadge({
   const isAnimated = animate && status === 'processing'
 
   return (
-    <span
+    <output
       className={cn(statusBadgeVariants({ status, size }), className)}
-      role="status"
       aria-label={`Status: ${label}`}
       {...props}
     >
       {showIcon && Icon && (
-        <Icon
-          className={cn('h-3 w-3 shrink-0', isAnimated && 'animate-spin')}
-          aria-hidden="true"
-        />
+        <Icon className={cn('h-3 w-3 shrink-0', isAnimated && 'animate-spin')} aria-hidden="true" />
       )}
       <span>{label}</span>
-    </span>
+    </output>
   )
 }
 

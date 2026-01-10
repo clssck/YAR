@@ -13,8 +13,8 @@ import { useLayoutRandom } from '@react-sigma/layout-random'
 import { GripIcon, Loader2, PlayIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 import { animateNodes } from 'sigma/utils'
+import { toast } from 'sonner'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/Command'
@@ -236,11 +236,7 @@ const WorkerLayoutControl = ({
         variant={controlButtonVariant}
         className={cn(isRunning && 'ring-2 ring-primary ring-offset-1 ring-offset-background')}
       >
-        {isRunning ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <PlayIcon />
-        )}
+        {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayIcon />}
       </Button>
       {/* Running indicator badge */}
       {isRunning && (
@@ -408,15 +404,10 @@ const LayoutsControl = () => {
                         runLayout(name as LayoutName)
                       }}
                       key={name}
-                      className={cn(
-                        'cursor-pointer text-xs',
-                        name === layout && 'bg-accent'
-                      )}
+                      className={cn('cursor-pointer text-xs', name === layout && 'bg-accent')}
                     >
                       {t(`graphPanel.sideBar.layoutsControl.layouts.${name}`)}
-                      {name === layout && (
-                        <span className="ml-auto text-muted-foreground">✓</span>
-                      )}
+                      {name === layout && <span className="ml-auto text-muted-foreground">✓</span>}
                     </CommandItem>
                   ))}
                 </CommandGroup>

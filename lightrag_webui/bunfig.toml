@@ -1,2 +1,4 @@
 [test]
 preload = ["./src/__tests__/setup.ts"]
+# Exclude e2e folder - Playwright tests should be run with `npx playwright test`
+root = "./src/__tests__"

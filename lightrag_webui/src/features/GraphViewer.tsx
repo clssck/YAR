@@ -3,10 +3,10 @@ import { SigmaContainer, useRegisterEvents, useSigma } from '@react-sigma/core'
 import { createEdgeCurveProgram, EdgeCurvedArrowProgram } from '@sigma/edge-curve'
 import { createNodeBorderProgram, NodeBorderProgram } from '@sigma/node-border'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Sigma } from 'sigma'
 import { EdgeArrowProgram, NodeCircleProgram, NodePointProgram } from 'sigma/rendering'
 import type { Settings as SigmaSettings } from 'sigma/settings'
-
 import FocusOnNode from '@/components/graph/FocusOnNode'
 import FullScreenControl from '@/components/graph/FullScreenControl'
 import GraphControl from '@/components/graph/GraphControl'
@@ -23,12 +23,11 @@ import ZoomControl from '@/components/graph/ZoomControl'
 import LoadingState, { Skeleton } from '@/components/ui/LoadingState'
 import Separator from '@/components/ui/Separator'
 import { useResponsive } from '@/hooks/useBreakpoint'
-import { cn } from '@/lib/utils'
 
 import { labelColorDarkTheme, labelColorLightTheme } from '@/lib/constants'
+import { cn } from '@/lib/utils'
 import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
-import { useTranslation } from 'react-i18next'
 
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
@@ -89,7 +88,6 @@ const FocusSync = () => {
 
   return <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
 }
-
 
 const GraphEvents = () => {
   const registerEvents = useRegisterEvents()

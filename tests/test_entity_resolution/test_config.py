@@ -230,7 +230,7 @@ class TestConfigValidation:
 
     def test_soft_match_threshold_above_min_confidence_rejected(self):
         """soft_match_threshold > min_confidence raises ValueError."""
-        with pytest.raises(ValueError, match='soft_match_threshold.*must be <= min_confidence'):
+        with pytest.raises(ValueError, match=r'soft_match_threshold.*must be <= min_confidence'):
             EntityResolutionConfig(min_confidence=0.80, soft_match_threshold=0.90)
 
     def test_soft_match_threshold_equal_to_min_confidence_allowed(self):

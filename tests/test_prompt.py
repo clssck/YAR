@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from lightrag.prompt import PROMPTS
 
 
@@ -341,15 +339,11 @@ class TestPromptFormatting:
 
     def test_no_unmatched_braces_in_prompts(self):
         """Test prompts don't have unmatched braces (common formatting issue)."""
-        # Pattern to find single braces (not part of {{}} or {placeholder})
-        single_brace_pattern = re.compile(r'(?<!\{)\{(?!\{)(?![a-zA-Z_][a-zA-Z0-9_]*\})(?!\})')
-
-        for key, value in PROMPTS.items():
-            if isinstance(value, str):
+        for _key, value in PROMPTS.items():
+            if isinstance(value, str) and not ('{{' in value and '}}' in value):
                 # Skip if it's JSON example content which uses literal braces
-                if '{{' in value and '}}' in value:
-                    continue
                 # This is a simplified check - real formatting issues would raise on .format()
+                pass
 
     def test_prompts_are_non_empty_strings(self):
         """Test string prompts are non-empty."""

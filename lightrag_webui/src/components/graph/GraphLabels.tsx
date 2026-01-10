@@ -75,11 +75,7 @@ const GraphLabels = () => {
       >
         <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
       </Button>
-      <LabelSelector
-        value={label}
-        onChange={handleLabelChange}
-        disabled={isRefreshing}
-      />
+      <LabelSelector value={label} onChange={handleLabelChange} disabled={isRefreshing} />
     </div>
   )
 }

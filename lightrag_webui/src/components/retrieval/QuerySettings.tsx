@@ -1,4 +1,4 @@
-import { RotateCcw, Zap, Scale, Search } from 'lucide-react'
+import { RotateCcw, Scale, Search, Zap } from 'lucide-react'
 import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { QueryMode, QueryRequest } from '@/api/lightrag'
@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import Checkbox from '@/components/ui/Checkbox'
 import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import Input from '@/components/ui/Input'
-import Slider from '@/components/ui/Slider'
 import {
   Select,
   SelectContent,
@@ -38,7 +37,7 @@ const PRESETS = {
     max_entity_tokens: 6000,
     max_relation_tokens: 8000,
     max_total_tokens: 30000,
-    enable_rerank: true,
+    enable_rerank: false,
   },
   thorough: {
     mode: 'hybrid' as QueryMode,
@@ -47,7 +46,7 @@ const PRESETS = {
     max_entity_tokens: 10000,
     max_relation_tokens: 12000,
     max_total_tokens: 50000,
-    enable_rerank: true,
+    enable_rerank: false,
   },
 }
 
@@ -55,6 +54,13 @@ export default function QuerySettings() {
   const { t } = useTranslation()
   const querySettings = useSettingsStore((state) => state.querySettings)
   const userPromptHistory = useSettingsStore((state) => state.userPromptHistory)
+  const storageConfig = useSettingsStore((state) => state.storageConfig)
+
+  // Check if reranker is configured (rerank_binding is not null/undefined/'null')
+  const isRerankerAvailable =
+    storageConfig?.rerank_binding != null &&
+    storageConfig.rerank_binding !== 'null' &&
+    storageConfig.rerank_binding !== ''
 
   const handleChange = useCallback(
     (key: keyof QueryRequest, value: QueryRequest[keyof QueryRequest]) => {
@@ -151,7 +157,10 @@ export default function QuerySettings() {
                 variant="outline"
                 className="flex-1 h-7 text-xs gap-1"
                 onClick={() => applyPreset('fast')}
-                tooltip={t('retrievePanel.querySettings.presets.fastTooltip', 'Quick responses with fewer results')}
+                tooltip={t(
+                  'retrievePanel.querySettings.presets.fastTooltip',
+                  'Quick responses with fewer results'
+                )}
               >
                 <Zap className="h-3 w-3" />
                 {t('retrievePanel.querySettings.presets.fast', 'Fast')}
@@ -161,7 +170,10 @@ export default function QuerySettings() {
                 variant="outline"
                 className="flex-1 h-7 text-xs gap-1"
                 onClick={() => applyPreset('balanced')}
-                tooltip={t('retrievePanel.querySettings.presets.balancedTooltip', 'Balanced speed and quality')}
+                tooltip={t(
+                  'retrievePanel.querySettings.presets.balancedTooltip',
+                  'Balanced speed and quality'
+                )}
               >
                 <Scale className="h-3 w-3" />
                 {t('retrievePanel.querySettings.presets.balanced', 'Balanced')}
@@ -171,7 +183,10 @@ export default function QuerySettings() {
                 variant="outline"
                 className="flex-1 h-7 text-xs gap-1"
                 onClick={() => applyPreset('thorough')}
-                tooltip={t('retrievePanel.querySettings.presets.thoroughTooltip', 'Comprehensive search with more context')}
+                tooltip={t(
+                  'retrievePanel.querySettings.presets.thoroughTooltip',
+                  'Comprehensive search with more context'
+                )}
               >
                 <Search className="h-3 w-3" />
                 {t('retrievePanel.querySettings.presets.thorough', 'Thorough')}
@@ -289,7 +304,10 @@ export default function QuerySettings() {
                     value={querySettings.chunk_top_k ?? ''}
                     onChange={(e) => {
                       const value = e.target.value
-                      handleChange('chunk_top_k', value === '' ? '' : Number.parseInt(value, 10) || 0)
+                      handleChange(
+                        'chunk_top_k',
+                        value === '' ? '' : Number.parseInt(value, 10) || 0
+                      )
                     }}
                     onBlur={(e) => {
                       const value = e.target.value
@@ -301,7 +319,10 @@ export default function QuerySettings() {
                     placeholder={t('retrievePanel.querySettings.chunkTopKPlaceholder')}
                     className="h-8 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                   />
-                  <ResetButton onClick={() => handleReset('chunk_top_k')} title="Reset to default" />
+                  <ResetButton
+                    onClick={() => handleReset('chunk_top_k')}
+                    title="Reset to default"
+                  />
                 </div>
               </div>
             </CollapsibleSection>
@@ -468,12 +489,23 @@ export default function QuerySettings() {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <label htmlFor="show_references_section" className="flex-1 ml-1 cursor-help text-xs">
-                          {t('retrievePanel.querySettings.showReferencesSection', 'Show References')}
+                        <label
+                          htmlFor="show_references_section"
+                          className="flex-1 ml-1 cursor-help text-xs"
+                        >
+                          {t(
+                            'retrievePanel.querySettings.showReferencesSection',
+                            'Show References'
+                          )}
                         </label>
                       </TooltipTrigger>
                       <TooltipContent side="left">
-                        <p>{t('retrievePanel.querySettings.showReferencesSectionTooltip', 'Show or hide the References section at the bottom of responses')}</p>
+                        <p>
+                          {t(
+                            'retrievePanel.querySettings.showReferencesSectionTooltip',
+                            'Show or hide the References section at the bottom of responses'
+                          )}
+                        </p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -489,7 +521,10 @@ export default function QuerySettings() {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <label htmlFor="only_need_context" className="flex-1 ml-1 cursor-help text-xs">
+                        <label
+                          htmlFor="only_need_context"
+                          className="flex-1 ml-1 cursor-help text-xs"
+                        >
                           {t('retrievePanel.querySettings.onlyNeedContext')}
                         </label>
                       </TooltipTrigger>
@@ -515,7 +550,10 @@ export default function QuerySettings() {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <label htmlFor="only_need_prompt" className="flex-1 ml-1 cursor-help text-xs">
+                        <label
+                          htmlFor="only_need_prompt"
+                          className="flex-1 ml-1 cursor-help text-xs"
+                        >
                           {t('retrievePanel.querySettings.onlyNeedPrompt')}
                         </label>
                       </TooltipTrigger>
@@ -549,20 +587,36 @@ export default function QuerySettings() {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <label htmlFor="enable_rerank" className="flex-1 ml-1 cursor-help text-xs">
+                        <label
+                          htmlFor="enable_rerank"
+                          className={`flex-1 ml-1 cursor-help text-xs ${!isRerankerAvailable ? 'opacity-50' : ''}`}
+                        >
                           {t('retrievePanel.querySettings.enableRerank')}
+                          {!isRerankerAvailable && (
+                            <span className="ml-1 text-muted-foreground">
+                              ({t('retrievePanel.querySettings.notConfigured', 'not configured')})
+                            </span>
+                          )}
                         </label>
                       </TooltipTrigger>
                       <TooltipContent side="left">
-                        <p>{t('retrievePanel.querySettings.enableRerankTooltip')}</p>
+                        <p>
+                          {isRerankerAvailable
+                            ? t('retrievePanel.querySettings.enableRerankTooltip')
+                            : t(
+                                'retrievePanel.querySettings.rerankNotConfiguredTooltip',
+                                'No reranker model configured. Set RERANK_BINDING in server config to enable.'
+                              )}
+                        </p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                   <Checkbox
-                    className="mr-6 cursor-pointer"
+                    className={`mr-6 ${isRerankerAvailable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                     id="enable_rerank"
                     checked={querySettings.enable_rerank}
                     onCheckedChange={(checked) => handleChange('enable_rerank', checked)}
+                    disabled={!isRerankerAvailable}
                   />
                 </div>
 

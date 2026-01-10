@@ -6,8 +6,8 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Text from '@/components/ui/Text'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
-import useLightragGraph from '@/hooks/useLightragGraph'
 import { useResponsive } from '@/hooks/useBreakpoint'
+import useLightragGraph from '@/hooks/useLightragGraph'
 import { cn } from '@/lib/utils'
 import { type RawEdgeType, type RawNodeType, useGraphStore } from '@/stores/graph'
 import EditablePropertyRow from './EditablePropertyRow'
@@ -103,6 +103,7 @@ const PropertiesView = () => {
     <div className={cn(containerClasses, 'relative')}>
       {/* Close button */}
       <button
+        type="button"
         onClick={handleClose}
         className="absolute top-2 right-2 z-10 p-1 rounded-full hover:bg-primary/10 transition-colors"
         aria-label="Close properties panel"
@@ -375,7 +376,10 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
             <Text
               className="hover:bg-primary/20 rounded p-1"
               text={String(node.degree)}
-              tooltip={t('graphPanel.propertiesView.node.degreeTooltip', 'Visible connections in this graph')}
+              tooltip={t(
+                'graphPanel.propertiesView.node.degreeTooltip',
+                'Visible connections in this graph'
+              )}
               side="left"
             />
             {asNumber(node.properties?.db_degree) > node.degree && (
@@ -428,25 +432,25 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
           {t('graphPanel.propertiesView.node.properties')}
         </h4>
         <div className="bg-amber-50/50 dark:bg-amber-950/30 rounded-md p-2 border border-amber-100 dark:border-amber-900/50 max-h-48 overflow-auto">
-        {Object.keys(node.properties)
-          .sort()
-          .map((name) => {
-            if (name === 'created_at' || name === 'truncate' || name === 'db_degree') return null // Hide internal properties
-            return (
-              <PropertyRow
-                key={name}
-                name={name}
-                value={node.properties[name]}
-                nodeId={String(node.id)}
-                entityId={asString(node.properties.entity_id)}
-                entityType="node"
-                isEditable={
-                  name === 'description' || name === 'entity_id' || name === 'entity_type'
-                }
-                truncate={asString(node.properties.truncate)}
-              />
-            )
-          })}
+          {Object.keys(node.properties)
+            .sort()
+            .map((name) => {
+              if (name === 'created_at' || name === 'truncate' || name === 'db_degree') return null // Hide internal properties
+              return (
+                <PropertyRow
+                  key={name}
+                  name={name}
+                  value={node.properties[name]}
+                  nodeId={String(node.id)}
+                  entityId={asString(node.properties.entity_id)}
+                  entityType="node"
+                  isEditable={
+                    name === 'description' || name === 'entity_id' || name === 'entity_type'
+                  }
+                  truncate={asString(node.properties.truncate)}
+                />
+              )
+            })}
         </div>
       </div>
 

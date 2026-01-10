@@ -5,7 +5,7 @@ configurations, particularly ensuring that optional auth doesn't
 accidentally become required.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI

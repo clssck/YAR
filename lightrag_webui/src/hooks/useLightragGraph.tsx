@@ -1,8 +1,14 @@
+import type Graph from 'graphology'
+import { UndirectedGraph } from 'graphology'
+import { useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import seedrandom from 'seedrandom'
+import { toast } from 'sonner'
 import {
-    type LightragEdgeType,
-    type LightragGraphType,
-    type LightragNodeType,
-    queryGraphs,
+  type LightragEdgeType,
+  type LightragGraphType,
+  type LightragNodeType,
+  queryGraphs,
 } from '@/api/lightrag'
 import * as Constants from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
@@ -10,12 +16,6 @@ import { type RawEdgeType, RawGraph, type RawNodeType, useGraphStore } from '@/s
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
 import { DEFAULT_NODE_COLOR, resolveNodeColor } from '@/utils/graphColor'
-import type Graph from 'graphology'
-import { UndirectedGraph } from 'graphology'
-import { useCallback, useEffect, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import seedrandom from 'seedrandom'
-import { toast } from 'sonner'
 
 // Internal mutable types for graph processing
 // These extend API types with visualization properties added during data transformation

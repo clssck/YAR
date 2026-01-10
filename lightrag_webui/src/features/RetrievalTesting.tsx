@@ -8,16 +8,11 @@ import { ChatMessage, type MessageWithError } from '@/components/retrieval/ChatM
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/Popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import Textarea from '@/components/ui/Textarea'
-import { cn } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
-import { errorMessage, throttle } from '@/lib/utils'
+import { cn, errorMessage, throttle } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { copyToClipboard } from '@/utils/clipboard'
 
@@ -119,7 +114,7 @@ const deduplicateReferencesSection = (text: string): string => {
   // Match References section (### References or ## References)
   const refsPattern = /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
 
-  return text.replace(refsPattern, (match, header, refsBlock) => {
+  return text.replace(refsPattern, (_match, header, refsBlock) => {
     const refLinePattern = /[-*]\s*\[(\d+)\]\s*([^\n]+)/
     const seenRefs = new Set<string>()
     const uniqueLines: string[] = []
@@ -167,9 +162,10 @@ const renumberReferencesSequential = (text: string): string => {
   // Find all unique reference numbers in the text
   const refPattern = /\[(\d+)\]/g
   const allRefs: string[] = []
-  let match: RegExpExecArray | null
-  while ((match = refPattern.exec(text)) !== null) {
+  let match: RegExpExecArray | null = refPattern.exec(text)
+  while (match !== null) {
     allRefs.push(match[1])
+    match = refPattern.exec(text)
   }
 
   if (allRefs.length === 0) return text
@@ -210,12 +206,24 @@ const renumberReferencesSequential = (text: string): string => {
 
 // Mode configuration with descriptions for the selector
 const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
-  { value: 'hybrid', labelKey: 'retrievePanel.mode.hybrid', descKey: 'retrievePanel.mode.hybridDesc' },
+  {
+    value: 'hybrid',
+    labelKey: 'retrievePanel.mode.hybrid',
+    descKey: 'retrievePanel.mode.hybridDesc',
+  },
   { value: 'mix', labelKey: 'retrievePanel.mode.mix', descKey: 'retrievePanel.mode.mixDesc' },
   { value: 'local', labelKey: 'retrievePanel.mode.local', descKey: 'retrievePanel.mode.localDesc' },
-  { value: 'global', labelKey: 'retrievePanel.mode.global', descKey: 'retrievePanel.mode.globalDesc' },
+  {
+    value: 'global',
+    labelKey: 'retrievePanel.mode.global',
+    descKey: 'retrievePanel.mode.globalDesc',
+  },
   { value: 'naive', labelKey: 'retrievePanel.mode.naive', descKey: 'retrievePanel.mode.naiveDesc' },
-  { value: 'bypass', labelKey: 'retrievePanel.mode.bypass', descKey: 'retrievePanel.mode.bypassDesc' },
+  {
+    value: 'bypass',
+    labelKey: 'retrievePanel.mode.bypass',
+    descKey: 'retrievePanel.mode.bypassDesc',
+  },
 ]
 
 export default function RetrievalTesting() {
@@ -488,10 +496,9 @@ export default function RetrievalTesting() {
         ...state.querySettings,
         query: actualQuery,
         response_type: 'Multiple Paragraphs',
-        conversation_history:
-          prevMessages
-            .filter((m) => m.isError !== true)
-            .map((m) => ({ role: m.role, content: m.content })),
+        conversation_history: prevMessages
+          .filter((m) => m.isError !== true)
+          .map((m) => ({ role: m.role, content: m.content })),
         ...(effectiveMode ? { mode: effectiveMode } : {}),
       }
 
@@ -616,7 +623,8 @@ export default function RetrievalTesting() {
               deduplicateReferencesSection(finalCotResult.displayContent)
             )
             // Strip References section if user has disabled it
-            const showRefs = useSettingsStore.getState().querySettings.show_references_section ?? true
+            const showRefs =
+              useSettingsStore.getState().querySettings.show_references_section ?? true
             if (!showRefs) {
               processedContent = stripReferencesSection(processedContent)
             }
@@ -895,7 +903,9 @@ export default function RetrievalTesting() {
       link.click()
       URL.revokeObjectURL(url)
 
-      toast.success(t('retrievePanel.retrieval.exported', 'Chat exported as {{format}}', { format }))
+      toast.success(
+        t('retrievePanel.retrieval.exported', 'Chat exported as {{format}}', { format })
+      )
     },
     [messages, t]
   )
@@ -1110,7 +1120,9 @@ export default function RetrievalTesting() {
                   className="gap-1"
                 >
                   <DownloadIcon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{t('retrievePanel.retrieval.export', 'Export')}</span>
+                  <span className="hidden sm:inline">
+                    {t('retrievePanel.retrieval.export', 'Export')}
+                  </span>
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-40 p-1" align="start" side="top">
@@ -1167,9 +1179,7 @@ export default function RetrievalTesting() {
                     }}
                     className={cn(
                       'w-full text-left px-3 py-2 rounded-md text-sm transition-colors',
-                      modeOverride === null
-                        ? 'bg-primary/10 text-primary'
-                        : 'hover:bg-muted'
+                      modeOverride === null ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
                     )}
                   >
                     <div className="font-medium">{t('retrievePanel.mode.default', 'Default')}</div>
@@ -1197,9 +1207,7 @@ export default function RetrievalTesting() {
                       )}
                     >
                       <div className="font-medium">{t(mode.labelKey, mode.value)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {t(mode.descKey, '')}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{t(mode.descKey, '')}</div>
                     </button>
                   ))}
                 </div>

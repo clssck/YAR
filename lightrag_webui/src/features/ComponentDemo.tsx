@@ -3,16 +3,20 @@
  * Visual showcase of all foundation UI components for testing and documentation
  */
 import { useState } from 'react'
-import CollapsibleSection from '@/components/ui/CollapsibleSection'
-import StatusBadge, { DocumentStatusBadge } from '@/components/ui/StatusBadge'
-import LoadingState, { Skeleton, SkeletonText, PulsingDot } from '@/components/ui/LoadingState'
-import LastUpdated from '@/components/ui/LastUpdated'
-import EmptyState, { EmptyDocuments, EmptyGraph, EmptySearchResults } from '@/components/ui/EmptyState'
-import { useKeyboardShortcuts, formatShortcut } from '@/hooks/useKeyboardShortcut'
-import { useResponsive } from '@/hooks/useBreakpoint'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
 import { toast } from 'sonner'
+import Button from '@/components/ui/Button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import CollapsibleSection from '@/components/ui/CollapsibleSection'
+import EmptyState, {
+  EmptyDocuments,
+  EmptyGraph,
+  EmptySearchResults,
+} from '@/components/ui/EmptyState'
+import LastUpdated from '@/components/ui/LastUpdated'
+import LoadingState, { PulsingDot, Skeleton, SkeletonText } from '@/components/ui/LoadingState'
+import StatusBadge, { DocumentStatusBadge } from '@/components/ui/StatusBadge'
+import { useResponsive } from '@/hooks/useBreakpoint'
+import { formatShortcut, useKeyboardShortcuts } from '@/hooks/useKeyboardShortcut'
 
 export default function ComponentDemo() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(true)
@@ -102,7 +106,9 @@ export default function ComponentDemo() {
           </CollapsibleSection>
 
           <CollapsibleSection title="With Badge Count" badge={5}>
-            <p className="text-sm text-muted-foreground">This section has a badge showing a count.</p>
+            <p className="text-sm text-muted-foreground">
+              This section has a badge showing a count.
+            </p>
           </CollapsibleSection>
 
           <CollapsibleSection title="With String Badge" badge="new">
@@ -266,10 +272,7 @@ export default function ComponentDemo() {
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">Preset: EmptySearchResults</p>
             <div className="border rounded-lg">
-              <EmptySearchResults
-                query="test query"
-                onClear={() => toast('Search cleared!')}
-              />
+              <EmptySearchResults query="test query" onClear={() => toast('Search cleared!')} />
             </div>
           </div>
         </CardContent>
@@ -282,17 +285,25 @@ export default function ComponentDemo() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Press <code className="bg-muted px-1.5 py-0.5 rounded">{formatShortcut('t', { meta: true })}</code> to trigger a toast notification.
+            Press{' '}
+            <code className="bg-muted px-1.5 py-0.5 rounded">
+              {formatShortcut('t', { meta: true })}
+            </code>{' '}
+            to trigger a toast notification.
           </p>
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">formatShortcut examples:</p>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">{formatShortcut('k', { meta: true })}</code>
+                <code className="bg-muted px-1.5 py-0.5 rounded">
+                  {formatShortcut('k', { meta: true })}
+                </code>
                 <span className="ml-2 text-muted-foreground">Search</span>
               </div>
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">{formatShortcut('s', { meta: true, shift: true })}</code>
+                <code className="bg-muted px-1.5 py-0.5 rounded">
+                  {formatShortcut('s', { meta: true, shift: true })}
+                </code>
                 <span className="ml-2 text-muted-foreground">Save All</span>
               </div>
               <div>
@@ -300,7 +311,9 @@ export default function ComponentDemo() {
                 <span className="ml-2 text-muted-foreground">Close</span>
               </div>
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">{formatShortcut('Enter', { ctrl: true })}</code>
+                <code className="bg-muted px-1.5 py-0.5 rounded">
+                  {formatShortcut('Enter', { ctrl: true })}
+                </code>
                 <span className="ml-2 text-muted-foreground">Submit</span>
               </div>
             </div>

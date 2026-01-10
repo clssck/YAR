@@ -112,3 +112,67 @@ class LockTimeoutError(TimeoutError):
         self.timeout = timeout
 
 
+class LightRAGError(Exception):
+    """Base exception for all LightRAG errors."""
+
+
+class StorageError(LightRAGError):
+    """Raised when a storage operation fails."""
+
+    def __init__(self, message: str, storage_type: str | None = None, operation: str | None = None):
+        self.storage_type = storage_type
+        self.operation = operation
+        detail = f'[{storage_type}]' if storage_type else ''
+        detail += f' {operation}:' if operation else ''
+        super().__init__(f'{detail} {message}'.strip())
+
+
+class ExtractionError(LightRAGError):
+    """Raised when entity/relationship extraction fails."""
+
+    def __init__(self, message: str, chunk_key: str | None = None):
+        self.chunk_key = chunk_key
+        prefix = f'[chunk={chunk_key}]' if chunk_key else ''
+        super().__init__(f'{prefix} {message}'.strip())
+
+
+class QueryError(LightRAGError):
+    """Raised when a query operation fails."""
+
+    def __init__(self, message: str, query_mode: str | None = None):
+        self.query_mode = query_mode
+        prefix = f'[mode={query_mode}]' if query_mode else ''
+        super().__init__(f'{prefix} {message}'.strip())
+
+
+class ConfigurationError(LightRAGError):
+    """Raised when configuration is invalid or missing."""
+
+    def __init__(self, message: str, config_key: str | None = None):
+        self.config_key = config_key
+        prefix = f'[{config_key}]' if config_key else ''
+        super().__init__(f'{prefix} {message}'.strip())
+
+
+class EmbeddingError(LightRAGError):
+    """Raised when embedding computation fails."""
+
+    def __init__(self, message: str, model: str | None = None):
+        self.model = model
+        prefix = f'[model={model}]' if model else ''
+        super().__init__(f'{prefix} {message}'.strip())
+
+
+class LLMError(LightRAGError):
+    """Raised when LLM call fails."""
+
+    def __init__(self, message: str, model: str | None = None, operation: str | None = None):
+        self.model = model
+        self.operation = operation
+        parts = []
+        if model:
+            parts.append(f'model={model}')
+        if operation:
+            parts.append(f'op={operation}')
+        prefix = f'[{", ".join(parts)}]' if parts else ''
+        super().__init__(f'{prefix} {message}'.strip())

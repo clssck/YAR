@@ -160,7 +160,7 @@ const useSettingsStoreBase = create<SettingsState>()(
         only_need_prompt: false,
         stream: true,
         user_prompt: '',
-        enable_rerank: true,
+        enable_rerank: false,
         citation_mode: 'none',
         citation_threshold: 0.7,
         show_references_section: true,
@@ -303,7 +303,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 25,
+      version: 26,
       migrate: (persistedState: unknown, version: number) => {
         // Cast to the expected state type for migration operations
         const state = persistedState as Partial<SettingsState> & Record<string, unknown>
@@ -430,6 +430,11 @@ const useSettingsStoreBase = create<SettingsState>()(
           if (state.querySettings) {
             // Remove deprecated history_turns property from old versions
             delete (state.querySettings as Record<string, unknown>).history_turns
+          }
+        }
+        if (version < 26) {
+          if (state.querySettings) {
+            state.querySettings.enable_rerank = false
           }
         }
         return state

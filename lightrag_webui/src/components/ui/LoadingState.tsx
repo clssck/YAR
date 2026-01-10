@@ -7,8 +7,7 @@ const loadingContainerVariants = cva('flex items-center', {
   variants: {
     variant: {
       inline: 'gap-2',
-      overlay:
-        'fixed inset-0 z-50 bg-background/80 backdrop-blur-sm justify-center flex-col gap-3',
+      overlay: 'fixed inset-0 z-50 bg-background/80 backdrop-blur-sm justify-center flex-col gap-3',
       centered: 'justify-center flex-col gap-3 py-8',
       minimal: 'gap-1.5',
     },
@@ -37,7 +36,7 @@ const textSizeMap = {
 }
 
 export interface LoadingStateProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends React.OutputHTMLAttributes<HTMLOutputElement>,
     VariantProps<typeof loadingContainerVariants> {
   /** Message to display while loading */
   message?: string
@@ -67,9 +66,8 @@ export default function LoadingState({
   const hasProgress = progress !== undefined && progress >= 0
 
   return (
-    <div
+    <output
       className={cn(loadingContainerVariants({ variant, size }), className)}
-      role="status"
       aria-label={ariaLabel ?? message ?? 'Loading'}
       aria-busy="true"
       {...props}
@@ -88,7 +86,9 @@ export default function LoadingState({
       {hasProgress && (
         <div className="w-full max-w-xs">
           <Progress value={progress} className="h-1.5" />
-          <span className={cn('text-muted-foreground mt-1 block text-center', textSizeMap[sizeKey])}>
+          <span
+            className={cn('text-muted-foreground mt-1 block text-center', textSizeMap[sizeKey])}
+          >
             {Math.round(progress)}%
           </span>
         </div>
@@ -98,7 +98,7 @@ export default function LoadingState({
       <span className="sr-only" aria-live="polite">
         {hasProgress ? `Loading: ${Math.round(progress)}% complete` : 'Loading...'}
       </span>
-    </div>
+    </output>
   )
 }
 
@@ -119,18 +119,12 @@ export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivEl
 /**
  * Skeleton loader for text content
  */
-export function SkeletonText({
-  lines = 3,
-  className,
-}: {
-  lines?: number
-  className?: string
-}) {
+export function SkeletonText({ lines = 3, className }: { lines?: number; className?: string }) {
   return (
     <div className={cn('space-y-2', className)} aria-hidden="true">
-      {Array.from({ length: lines }).map((_, i) => (
+      {Array.from({ length: lines }).map((_, i, arr) => (
         <Skeleton
-          key={i}
+          key={`line-${i}-${arr.length}`}
           className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
         />
       ))}
@@ -144,10 +138,7 @@ export function SkeletonText({
 export function PulsingDot({ className }: { className?: string }) {
   return (
     <span
-      className={cn(
-        'inline-block h-2 w-2 rounded-full bg-primary animate-pulse',
-        className
-      )}
+      className={cn('inline-block h-2 w-2 rounded-full bg-primary animate-pulse', className)}
       aria-hidden="true"
     />
   )

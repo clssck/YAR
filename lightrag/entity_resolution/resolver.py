@@ -19,7 +19,6 @@ from lightrag.utils import logger, normalize_unicode_for_entity_matching
 
 from .config import DEFAULT_CONFIG, EntityResolutionConfig
 
-
 # Types that should never be merged together
 # These represent fundamentally different categories of entities
 INCOMPATIBLE_TYPE_PAIRS: set[frozenset[str]] = {

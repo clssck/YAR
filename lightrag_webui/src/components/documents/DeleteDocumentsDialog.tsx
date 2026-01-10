@@ -130,12 +130,18 @@ export default function DeleteDocumentsDialog({
                 })}
               </div>
               <div className="text-sm text-muted-foreground mt-1">
-                {t('documentPanel.deleteDocuments.pleaseWait', 'Please wait, this may take a moment')}
+                {t(
+                  'documentPanel.deleteDocuments.pleaseWait',
+                  'Please wait, this may take a moment'
+                )}
               </div>
             </div>
             {/* Progress bar animation */}
             <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-destructive rounded-full animate-pulse" style={{ width: '60%' }} />
+              <div
+                className="h-full bg-destructive rounded-full animate-pulse"
+                style={{ width: '60%' }}
+              />
             </div>
           </div>
         ) : (

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
  * Tailwind CSS default breakpoints (in pixels)
@@ -113,7 +113,9 @@ export function useIsBelowBreakpoint(breakpoint: Breakpoint): boolean {
  * })
  * ```
  */
-export function useResponsiveValue<T>(values: Partial<Record<BreakpointOrBelow, T>>): T | undefined {
+export function useResponsiveValue<T>(
+  values: Partial<Record<BreakpointOrBelow, T>>
+): T | undefined {
   const breakpoint = useBreakpoint()
 
   // Find the value for current breakpoint or the largest smaller breakpoint

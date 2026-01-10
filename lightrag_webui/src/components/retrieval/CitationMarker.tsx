@@ -59,7 +59,9 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
   // Find sources matching our reference IDs (deduplicated by reference_id)
   const matchingSources = sources
     .filter((s) => referenceIds.includes(s.reference_id))
-    .filter((source, index, arr) => arr.findIndex((s) => s.reference_id === source.reference_id) === index)
+    .filter(
+      (source, index, arr) => arr.findIndex((s) => s.reference_id === source.reference_id) === index
+    )
 
   // Confidence styling
   const confidenceInfo = getConfidenceLevel(confidence)
@@ -95,7 +97,8 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
               <div className="flex items-start gap-2">
                 <FileTextIcon className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
                 <h4 className="font-semibold text-sm leading-tight">
-                  {source.document_title || t('retrievePanel.citation.untitled', 'Untitled Document')}
+                  {source.document_title ||
+                    t('retrievePanel.citation.untitled', 'Untitled Document')}
                 </h4>
               </div>
 
