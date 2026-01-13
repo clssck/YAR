@@ -5,7 +5,7 @@ import type { PropertyValue } from '@/api/lightrag'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Text from '@/components/ui/Text'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useResponsive } from '@/hooks/useBreakpoint'
 import useLightragGraph from '@/hooks/useLightragGraph'
 import { cn } from '@/lib/utils'
@@ -383,24 +383,26 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
               side="left"
             />
             {asNumber(node.properties?.db_degree) > node.degree && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant="outline"
-                    className="text-xs px-1.5 py-0 text-amber-600 border-amber-400 cursor-help animate-pulse"
-                  >
-                    +{asNumber(node.properties.db_degree) - node.degree}{' '}
-                    {t('graphPanel.propertiesView.node.hidden', 'hidden')}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent side="left" className="max-w-64">
-                  {t(
-                    'graphPanel.propertiesView.node.hiddenConnectionsTooltip',
-                    'This node has {{count}} additional connections in the database that are not currently visible. Click "Load connections" below to expand.',
-                    { count: asNumber(node.properties.db_degree) - node.degree }
-                  )}
-                </TooltipContent>
-              </Tooltip>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className="text-xs px-1.5 py-0 text-amber-600 border-amber-400 cursor-help animate-pulse"
+                    >
+                      +{asNumber(node.properties.db_degree) - node.degree}{' '}
+                      {t('graphPanel.propertiesView.node.hidden', 'hidden')}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-64">
+                    {t(
+                      'graphPanel.propertiesView.node.hiddenConnectionsTooltip',
+                      'This node has {{count}} additional connections in the database that are not currently visible. Click "Load connections" below to expand.',
+                      { count: asNumber(node.properties.db_degree) - node.degree }
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </span>
         </div>

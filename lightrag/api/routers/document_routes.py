@@ -669,43 +669,38 @@ class DocumentManager:
         input_dir: str,
         workspace: str = '',  # New parameter for workspace isolation
         supported_extensions: tuple = (
-            '.txt',
-            '.md',
+            # Office documents
             '.pdf',
             '.docx',
-            '.pptx',
+            '.doc',
             '.xlsx',
-            '.rtf',  # Rich Text Format
-            '.odt',  # OpenDocument Text
-            '.tex',  # LaTeX
-            '.epub',  # Electronic Publication
-            '.html',  # HyperText Markup Language
-            '.htm',  # HyperText Markup Language
-            '.csv',  # Comma-Separated Values
-            '.json',  # JavaScript Object Notation
-            '.xml',  # eXtensible Markup Language
-            '.yaml',  # YAML Ain't Markup Language
-            '.yml',  # YAML
-            '.log',  # Log files
-            '.conf',  # Configuration files
-            '.ini',  # Initialization files
-            '.properties',  # Java properties files
-            '.sql',  # SQL scripts
-            '.bat',  # Batch files
-            '.sh',  # Shell scripts
-            '.c',  # C source code
-            '.cpp',  # C++ source code
-            '.py',  # Python source code
-            '.java',  # Java source code
-            '.js',  # JavaScript source code
-            '.ts',  # TypeScript source code
-            '.swift',  # Swift source code
-            '.go',  # Go source code
-            '.rb',  # Ruby source code
-            '.php',  # PHP source code
-            '.css',  # Cascading Style Sheets
-            '.scss',  # Sassy CSS
-            '.less',  # LESS CSS
+            '.xls',
+            '.pptx',
+            '.ppt',
+            '.odt',
+            '.ods',
+            '.odp',
+            '.rtf',
+            # Ebooks
+            '.epub',
+            '.mobi',
+            # Markup
+            '.html',
+            '.htm',
+            '.md',
+            '.rst',
+            '.tex',
+            '.asciidoc',
+            # Data
+            '.json',
+            '.xml',
+            '.yaml',
+            '.yml',
+            '.csv',
+            '.tsv',
+            # Email
+            '.eml',
+            '.msg',
         ),
     ):
         # Store the base input directory and workspace
@@ -823,26 +818,104 @@ def get_unique_filename_in_enqueued(target_dir: Path, original_name: str) -> str
     return f'{base_name}_{timestamp}{extension}'
 
 
-# Document processing helper function (synchronous)
-# Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop
+# Formats supported by Kreuzberg for one-pass extraction+chunking
+# Code files (.py, .js, etc.) are NOT in this list - they use simple UTF-8 read
+KREUZBERG_SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        # Documents
+        '.pdf',
+        '.docx',
+        '.doc',
+        '.odt',
+        '.rtf',
+        '.txt',
+        '.md',
+        '.markdown',
+        # Presentations
+        '.pptx',
+        '.ppt',
+        '.odp',
+        # Spreadsheets
+        '.xlsx',
+        '.xls',
+        '.ods',
+        '.csv',
+        # E-books
+        '.epub',
+        '.mobi',
+        # Web/Data
+        '.html',
+        '.htm',
+        '.xml',
+        '.json',
+        # Email
+        '.eml',
+    }
+)
+
+# Code/config files - simple UTF-8 read, no Kreuzberg processing
+CODE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        '.py',
+        '.java',
+        '.js',
+        '.ts',
+        '.tsx',
+        '.jsx',
+        '.c',
+        '.cpp',
+        '.h',
+        '.hpp',
+        '.cs',
+        '.go',
+        '.rb',
+        '.php',
+        '.swift',
+        '.kt',
+        '.rs',
+        '.sh',
+        '.bash',
+        '.bat',
+        '.ps1',
+        '.css',
+        '.scss',
+        '.less',
+        '.sass',
+        '.sql',
+        '.yaml',
+        '.yml',
+        '.toml',
+        '.ini',
+        '.conf',
+        '.properties',
+        '.log',
+        '.tex',
+    }
+)
 
 
-def _convert_with_kreuzberg(file_path: Path) -> str:
-    """Convert document using kreuzberg (synchronous).
+def _extract_and_chunk_with_kreuzberg(
+    file_path: Path,
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    chunking_preset: str | None = 'semantic',
+) -> tuple[str, list[dict[str, Any]]]:
+    """One-pass document extraction and chunking using Kreuzberg (synchronous).
 
-    Kreuzberg is a high-performance document intelligence framework
-    supporting 56+ formats with Rust core.
-
-    Args:
-        file_path: Path to the document file
-
-    Returns:
-        str: Extracted text content
+    Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
+    This preserves document structure for better semantic chunk boundaries.
     """
-    from kreuzberg import extract_file_sync
+    from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
 
-    result = extract_file_sync(str(file_path))
-    return result.content
+    result = extract_and_chunk_sync(
+        file_path,
+        chunk_token_size=chunk_token_size,
+        chunk_overlap_token_size=chunk_overlap_token_size,
+        chunking_preset=chunking_preset,
+    )
+
+    chunks = chunks_to_lightrag_format(result)
+    return result.content, chunks
 
 
 async def pipeline_enqueue_file(
@@ -850,24 +923,39 @@ async def pipeline_enqueue_file(
     file_path: Path,
     track_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
 ) -> tuple[bool, str]:
-    """Add a file to the queue for processing
+    """Add a file to the queue for processing with one-pass extraction+chunking.
+
+    For PDF/DOCX files, this performs extraction and chunking in a single pass
+    using Kreuzberg, preserving document structure for better chunk boundaries.
 
     Args:
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID, if not provided will be generated
         metadata: Optional metadata dict (e.g., chunking_preset)
+        chunk_token_size: Max tokens per chunk (uses rag.chunk_token_size if None)
+        chunk_overlap_token_size: Overlap tokens (uses rag.chunk_overlap_token_size if None)
+        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
+
     Returns:
         tuple: (success: bool, track_id: str)
     """
-
-    # Generate track_id if not provided
     if track_id is None:
         track_id = generate_track_id('unknown')
 
+    effective_chunk_size = chunk_token_size or rag.chunk_token_size
+    effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
+    effective_preset = chunking_preset or metadata.get('chunking_preset') if metadata else None
+    if effective_preset is None:
+        effective_preset = 'semantic'
+
     try:
         content = ''
+        pre_chunks: list[dict[str, Any]] | None = None
         ext = file_path.suffix.lower()
         file_size = 0
 
@@ -920,120 +1008,91 @@ async def pipeline_enqueue_file(
 
         # Process based on file type
         try:
-            match ext:
-                case (
-                    '.txt'
-                    | '.md'
-                    | '.html'
-                    | '.htm'
-                    | '.tex'
-                    | '.json'
-                    | '.xml'
-                    | '.yaml'
-                    | '.yml'
-                    | '.rtf'
-                    | '.odt'
-                    | '.epub'
-                    | '.csv'
-                    | '.log'
-                    | '.conf'
-                    | '.ini'
-                    | '.properties'
-                    | '.sql'
-                    | '.bat'
-                    | '.sh'
-                    | '.c'
-                    | '.cpp'
-                    | '.py'
-                    | '.java'
-                    | '.js'
-                    | '.ts'
-                    | '.swift'
-                    | '.go'
-                    | '.rb'
-                    | '.php'
-                    | '.css'
-                    | '.scss'
-                    | '.less'
-                ):
-                    try:
-                        # Try to decode as UTF-8
-                        content = file.decode('utf-8')
+            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
+                try:
+                    content, pre_chunks = await asyncio.to_thread(
+                        _extract_and_chunk_with_kreuzberg,
+                        file_path,
+                        effective_chunk_size,
+                        effective_overlap,
+                        effective_preset,
+                    )
+                    logger.info(
+                        f'[File Extraction] One-pass extraction: {file_path.name} -> '
+                        f'{len(pre_chunks)} chunks (preset={effective_preset})'
+                    )
+                except Exception as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
+                            'original_error': f'Failed to extract text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
+                    return False, track_id
 
-                        # Validate content
-                        if not content or len(content.strip()) == 0:
-                            error_files = [
-                                {
-                                    'file_path': str(file_path.name),
-                                    'error_description': '[File Extraction]Empty file content',
-                                    'original_error': 'File contains no content or only whitespace',
-                                    'file_size': file_size,
-                                }
-                            ]
-                            await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                            logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
-                            return False, track_id
+            elif ext in CODE_EXTENSIONS:
+                try:
+                    content = file.decode('utf-8')
 
-                        # Check if content looks like binary data string representation
-                        if content.startswith("b'") or content.startswith('b"'):
-                            error_files = [
-                                {
-                                    'file_path': str(file_path.name),
-                                    'error_description': '[File Extraction]Binary data in text file',
-                                    'original_error': 'File appears to contain binary data representation instead of text',
-                                    'file_size': file_size,
-                                }
-                            ]
-                            await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                            logger.error(
-                                f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
-                            )
-                            return False, track_id
-
-                    except UnicodeDecodeError as e:
+                    if not content or len(content.strip()) == 0:
                         error_files = [
                             {
                                 'file_path': str(file_path.name),
-                                'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
-                                'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
+                                'error_description': '[File Extraction]Empty file content',
+                                'original_error': 'File contains no content or only whitespace',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
+                        return False, track_id
+
+                    if content.startswith("b'") or content.startswith('b"'):
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Binary data in text file',
+                                'original_error': 'File appears to contain binary data representation instead of text',
                                 'file_size': file_size,
                             }
                         ]
                         await rag.apipeline_enqueue_error_documents(error_files, track_id)
                         logger.error(
-                            f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
+                            f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
                         )
                         return False, track_id
 
-                case '.pdf' | '.docx' | '.pptx' | '.xlsx':
-                    # Use Kreuzberg for all document formats (56+ supported)
-                    try:
-                        content = await asyncio.to_thread(_convert_with_kreuzberg, file_path)
-                    except Exception as e:
-                        error_files = [
-                            {
-                                'file_path': str(file_path.name),
-                                'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
-                                'original_error': f'Failed to extract text: {e!s}',
-                                'file_size': file_size,
-                            }
-                        ]
-                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                        logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
-                        return False, track_id
-
-                case _:
+                except UnicodeDecodeError as e:
                     error_files = [
                         {
                             'file_path': str(file_path.name),
-                            'error_description': f'[File Extraction]Unsupported file type: {ext}',
-                            'original_error': f'File extension {ext} is not supported',
+                            'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
+                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
                             'file_size': file_size,
                         }
                     ]
                     await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
+                    logger.error(
+                        f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
+                    )
                     return False, track_id
+
+            else:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': f'[File Extraction]Unsupported file type: {ext}',
+                        'original_error': f'File extension {ext} is not supported',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
+                return False, track_id
 
         except Exception as e:
             error_files = [
@@ -1065,8 +1124,16 @@ async def pipeline_enqueue_file(
                 return False, track_id
 
             try:
+                enqueue_metadata = metadata.copy() if metadata else {}
+                enqueue_metadata['chunking_preset'] = effective_preset
+                enqueue_metadata['chunk_token_size'] = effective_chunk_size
+                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
+
+                if pre_chunks:
+                    enqueue_metadata['pre_chunks'] = pre_chunks
+
                 await rag.apipeline_enqueue_documents(
-                    content, file_paths=file_path.name, track_id=track_id, metadata=metadata
+                    content, file_paths=file_path.name, track_id=track_id, metadata=enqueue_metadata
                 )
 
                 logger.info(f'Successfully extracted and enqueued file: {file_path.name}')
@@ -1147,17 +1214,31 @@ async def pipeline_index_file(
     file_path: Path,
     track_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
 ):
-    """Index a file with track_id
+    """Index a file with track_id and optional chunking settings.
 
     Args:
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
         metadata: Optional metadata dict (e.g., chunking_preset)
+        chunk_token_size: Max tokens per chunk (uses rag default if None)
+        chunk_overlap_token_size: Overlap tokens (uses rag default if None)
+        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
     """
     try:
-        success, _returned_track_id = await pipeline_enqueue_file(rag, file_path, track_id, metadata)
+        success, _returned_track_id = await pipeline_enqueue_file(
+            rag,
+            file_path,
+            track_id,
+            metadata,
+            chunk_token_size,
+            chunk_overlap_token_size,
+            chunking_preset,
+        )
         if success:
             await rag.apipeline_process_enqueue_documents()
 

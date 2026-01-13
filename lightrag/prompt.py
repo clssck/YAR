@@ -249,11 +249,12 @@ Consider the conversation history if provided to maintain conversational flow an
   - Do not generate anything after the reference section.
 
 2. Content & Grounding:
-  - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
-  - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
+  - Base your answer on the provided **Context**. You may use your knowledge to interpret and connect ideas, but core facts must come from the context.
+  - If partial information exists in the **Context**, provide what you can and note any gaps. Only state "insufficient information" if the context contains nothing relevant.
+  - IMPORTANT: If the context contains ANY relevant information, you MUST attempt to answer. Do not refuse when relevant context exists.
 
 3. Formatting & Language:
-  - The response MUST be in the same language as the user query.
+  - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
 
@@ -305,11 +306,12 @@ Consider the conversation history if provided to maintain conversational flow an
   - Do not generate anything after the reference section.
 
 2. Content & Grounding:
-  - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
-  - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
+  - Base your answer on the provided **Context**. You may use your knowledge to interpret and connect ideas, but core facts must come from the context.
+  - If partial information exists in the **Context**, provide what you can and note any gaps. Only state "insufficient information" if the context contains nothing relevant.
+  - IMPORTANT: If the context contains ANY relevant information, you MUST attempt to answer. Do not refuse when relevant context exists.
 
 3. Formatting & Language:
-  - The response MUST be in the same language as the user query.
+  - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
 
@@ -497,7 +499,9 @@ Example (not connected):
 
 # HyDE (Hypothetical Document Embedding) prompt
 # Generates a hypothetical answer to improve retrieval through semantic similarity
-PROMPTS['hyde_prompt'] = """You are a knowledgeable assistant. Given the following question, write a brief, factual passage that would directly answer it. Write as if you are certain of the facts, even if you need to imagine plausible details. Focus on being informative and comprehensive.
+PROMPTS[
+    'hyde_prompt'
+] = """You are a knowledgeable assistant. Given the following question, write a brief, factual passage that would directly answer it. Write as if you are certain of the facts, even if you need to imagine plausible details. Focus on being informative and comprehensive.
 
 Question: {query}
 
@@ -505,7 +509,9 @@ Write a concise 2-3 sentence hypothetical answer that contains the key informati
 
 # Entity Review prompt for LLM-based entity resolution
 # Used to determine if entity pairs refer to the same real-world entity
-PROMPTS['entity_review_system_prompt'] = """You are an Entity Resolution Specialist. Your task is to determine whether pairs of entity names refer to the same real-world entity.
+PROMPTS[
+    'entity_review_system_prompt'
+] = """You are an Entity Resolution Specialist. Your task is to determine whether pairs of entity names refer to the same real-world entity.
 
 ---Guidelines---
 

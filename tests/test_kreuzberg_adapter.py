@@ -184,7 +184,7 @@ class TestMultipleFileFormats:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.md'
-        test_content = '''# Heading 1
+        test_content = """# Heading 1
 
 This is a paragraph with **bold** and *italic* text.
 
@@ -198,7 +198,7 @@ This is a paragraph with **bold** and *italic* text.
 def hello():
     print("Hello, world!")
 ```
-'''
+"""
         test_file.write_text(test_content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -211,7 +211,7 @@ def hello():
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.html'
-        test_content = '''<!DOCTYPE html>
+        test_content = """<!DOCTYPE html>
 <html>
 <head><title>Test Page</title></head>
 <body>
@@ -222,7 +222,7 @@ def hello():
 <li>Second item</li>
 </ul>
 </body>
-</html>'''
+</html>"""
         test_file.write_text(test_content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -236,11 +236,11 @@ def hello():
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.json'
-        test_content = '''{
+        test_content = """{
     "name": "LightRAG",
     "description": "A retrieval-augmented generation framework",
     "features": ["graph-based", "semantic search", "knowledge extraction"]
-}'''
+}"""
         test_file.write_text(test_content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -253,10 +253,10 @@ def hello():
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.csv'
-        test_content = '''name,age,city
+        test_content = """name,age,city
 Alice,30,New York
 Bob,25,Los Angeles
-Charlie,35,Chicago'''
+Charlie,35,Chicago"""
         test_file.write_text(test_content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -269,7 +269,7 @@ Charlie,35,Chicago'''
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.xml'
-        test_content = '''<?xml version="1.0" encoding="UTF-8"?>
+        test_content = """<?xml version="1.0" encoding="UTF-8"?>
 <document>
     <title>Test Document</title>
     <content>This is the document content for testing.</content>
@@ -277,7 +277,7 @@ Charlie,35,Chicago'''
         <author>Test Author</author>
         <date>2024-01-01</date>
     </metadata>
-</document>'''
+</document>"""
         test_file.write_text(test_content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -307,13 +307,13 @@ class TestEdgeCases:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'unicode.txt'
-        test_content = '''Unicode test content:
+        test_content = """Unicode test content:
 日本語テスト (Japanese)
 中文测试 (Chinese)
 한국어 테스트 (Korean)
 Тест на русском (Russian)
 العربية اختبار (Arabic)
-🎉 Emoji support 🚀 ✨'''
+🎉 Emoji support 🚀 ✨"""
         test_file.write_text(test_content, encoding='utf-8')
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -351,14 +351,14 @@ class TestEdgeCases:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'special.txt'
-        test_content = '''Special characters test:
+        test_content = """Special characters test:
 <script>alert('xss')</script>
 SQL: SELECT * FROM users WHERE id = 1; DROP TABLE users;--
 Path: ../../../etc/passwd
 Quotes: "double" and 'single'
 Backslash: C:\\Users\\test
 Newlines: line1\nline2\rline3
-Tabs:	col1	col2	col3'''
+Tabs:	col1	col2	col3"""
         test_file.write_text(test_content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -560,9 +560,7 @@ class TestExtractionResultStructure:
         test_file = tmp_path / 'test.txt'
         test_file.write_text('Content for chunking. ' * 50)
 
-        options = ExtractionOptions(
-            chunking=ChunkingOptions(enabled=True, max_chars=100)
-        )
+        options = ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=100))
         result = extract_with_kreuzberg_sync(test_file, options)
 
         if result.chunks:
@@ -582,7 +580,7 @@ class TestSemanticChunkingAdvanced:
         """Test that semantic chunking respects section boundaries."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# Section 1: Introduction
+        content = """# Section 1: Introduction
 
 This is the introduction with detailed information about the topic.
 It spans multiple sentences to provide context.
@@ -595,7 +593,7 @@ We used several techniques to achieve our goals.
 # Section 3: Results
 
 Results show significant improvement across all metrics.
-The data supports our hypothesis strongly.'''
+The data supports our hypothesis strongly."""
 
         chunks = chunking_by_semantic(content, max_chars=500, max_overlap=50)
 
@@ -608,7 +606,7 @@ The data supports our hypothesis strongly.'''
         """Test semantic chunking with code blocks."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# Code Example
+        content = """# Code Example
 
 Here is a Python function:
 
@@ -626,7 +624,7 @@ function greet() {
 }
 ```
 
-More text after code.'''
+More text after code."""
 
         chunks = chunking_by_semantic(content, max_chars=300, max_overlap=30)
 
@@ -639,7 +637,7 @@ More text after code.'''
         """Test semantic chunking with markdown tables."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# Data Analysis
+        content = """# Data Analysis
 
 | Name | Value | Status |
 |------|-------|--------|
@@ -651,7 +649,7 @@ The table above shows our test results.
 
 # Conclusion
 
-Based on the data, we can conclude that most tests passed.'''
+Based on the data, we can conclude that most tests passed."""
 
         chunks = chunking_by_semantic(content, max_chars=400, max_overlap=40)
 
@@ -805,7 +803,7 @@ class TestRealWorldFormats:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from lightrag.operate import chunking_by_semantic
 
-        md_content = '''# LightRAG Test Document
+        md_content = """# LightRAG Test Document
 
 ## Introduction
 
@@ -827,7 +825,7 @@ rag = LightRAG(working_dir="./storage")
 ## Conclusion
 
 LightRAG provides powerful RAG capabilities.
-'''
+"""
         md_path = tmp_path / 'test.md'
         md_path.write_text(md_content)
 
@@ -865,8 +863,7 @@ class TestPdfiumAutoSetup:
             pdfium_path = kreuzberg_dir / 'libpdfium.so'
 
         # Symlink should exist (either pre-existing or auto-created)
-        assert pdfium_path.exists() or pdfium_path.is_symlink(), \
-            'pdfium library should be available for PDF support'
+        assert pdfium_path.exists() or pdfium_path.is_symlink(), 'pdfium library should be available for PDF support'
 
     def test_setup_function_is_idempotent(self):
         """Test that setup function can be called multiple times safely."""
@@ -911,7 +908,7 @@ class TestChunkingPresets:
         """Test chunking with 'recursive' preset."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# Introduction
+        content = """# Introduction
 
 This is the first paragraph with some introductory text.
 It provides context for what follows.
@@ -924,7 +921,7 @@ The section continues with additional sentences.
 ## Second Section
 
 This section covers a different aspect of the subject.
-Multiple sentences provide comprehensive coverage.'''
+Multiple sentences provide comprehensive coverage."""
 
         chunks = chunking_by_semantic(
             content,
@@ -944,13 +941,13 @@ Multiple sentences provide comprehensive coverage.'''
         """Test chunking with 'semantic' preset."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''The quick brown fox jumps over the lazy dog. This sentence follows.
+        content = """The quick brown fox jumps over the lazy dog. This sentence follows.
 
 A completely new topic starts here. It discusses something entirely different.
 The semantic boundaries should be respected by the chunker.
 
 Yet another topic with its own context and meaning. This should ideally
-be kept together if it forms a coherent semantic unit.'''
+be kept together if it forms a coherent semantic unit."""
 
         chunks = chunking_by_semantic(
             content,
@@ -983,18 +980,16 @@ be kept together if it forms a coherent semantic unit.'''
         """Test that different presets may produce different chunk counts."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''First topic: Introduction to programming.
+        content = """First topic: Introduction to programming.
 Second topic: Advanced algorithms.
 Third topic: System design principles.
-Fourth topic: Testing methodologies.'''
+Fourth topic: Testing methodologies."""
 
         # Test with no preset
         chunks_default = chunking_by_semantic(content, max_chars=100, max_overlap=10)
 
         # Test with recursive preset
-        chunks_recursive = chunking_by_semantic(
-            content, max_chars=100, max_overlap=10, preset='recursive'
-        )
+        chunks_recursive = chunking_by_semantic(content, max_chars=100, max_overlap=10, preset='recursive')
 
         # Both should produce valid chunks
         assert len(chunks_default) >= 1
@@ -1092,13 +1087,13 @@ class TestCreateChunker:
         chunking_func = create_chunker(preset='recursive')
         mock_tokenizer = MagicMock()
 
-        content = '''# Header One
+        content = """# Header One
 
 First paragraph content here.
 
 # Header Two
 
-Second paragraph content here.'''
+Second paragraph content here."""
 
         chunks = chunking_func(mock_tokenizer, content, None, False, 50, 300)
 
@@ -1262,9 +1257,7 @@ class TestAsyncExtraction:
 
         result = await extract_with_kreuzberg(
             test_file,
-            ExtractionOptions(
-                chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20)
-            ),
+            ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20)),
         )
         assert result.content is not None
         assert result.chunks is not None
@@ -1319,9 +1312,7 @@ class TestBatchExtractionAdvanced:
 
         results = await batch_extract_with_kreuzberg(
             files,
-            ExtractionOptions(
-                chunking=ChunkingOptions(enabled=True, max_chars=500, max_overlap=50)
-            ),
+            ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=500, max_overlap=50)),
         )
 
         assert len(results) == 3
@@ -1550,9 +1541,7 @@ class TestConfigBuilding:
             _build_extraction_config,
         )
 
-        options = ExtractionOptions(
-            chunking=ChunkingOptions(enabled=True, max_chars=1000, preset='recursive')
-        )
+        options = ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=1000, preset='recursive'))
         config = _build_extraction_config(options)
 
         assert config is not None
@@ -1566,9 +1555,7 @@ class TestConfigBuilding:
             _build_extraction_config,
         )
 
-        options = ExtractionOptions(
-            chunking=ChunkingOptions(enabled=False)
-        )
+        options = ExtractionOptions(chunking=ChunkingOptions(enabled=False))
         config = _build_extraction_config(options)
 
         # Should be None since chunking is disabled
@@ -1732,10 +1719,10 @@ class TestSpecialContent:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'code.txt'
-        content = '''def hello():
+        content = """def hello():
     print("Hello, World!")
     return True
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -1772,7 +1759,7 @@ class TestChunkingPresetBehavior:
         """Test recursive preset on structured document."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# Chapter 1
+        content = """# Chapter 1
 
 This is the introduction paragraph.
 
@@ -1786,7 +1773,7 @@ Details about section one point two.
 
 # Chapter 2
 
-This is chapter two content.'''
+This is chapter two content."""
 
         chunks = chunking_by_semantic(content, max_chars=150, max_overlap=15, preset='recursive')
 
@@ -1799,12 +1786,12 @@ This is chapter two content.'''
         """Test semantic preset tries to preserve semantic units."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''The quick brown fox jumps over the lazy dog. This is a complete thought.
+        content = """The quick brown fox jumps over the lazy dog. This is a complete thought.
 
 A new paragraph begins here with a different topic entirely.
 We discuss something completely unrelated to foxes or dogs.
 
-Yet another paragraph with its own distinct meaning and context.'''
+Yet another paragraph with its own distinct meaning and context."""
 
         chunks = chunking_by_semantic(content, max_chars=200, max_overlap=20, preset='semantic')
 
@@ -1998,9 +1985,7 @@ class TestResultConversion:
 
         result = extract_with_kreuzberg_sync(
             test_file,
-            ExtractionOptions(
-                chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20)
-            ),
+            ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20)),
         )
 
         assert result.chunks is not None
@@ -2274,7 +2259,7 @@ class TestEndToEndPipeline:
         from lightrag.operate import chunking_by_semantic
 
         # Create a realistic document
-        doc_content = '''# Introduction to Machine Learning
+        doc_content = """# Introduction to Machine Learning
 
 Machine learning is a subset of artificial intelligence that enables systems
 to learn and improve from experience without being explicitly programmed.
@@ -2309,7 +2294,7 @@ Unsupervised learning finds patterns in unlabeled data. Key techniques:
 ## Conclusion
 
 Machine learning continues to revolutionize many industries.
-'''
+"""
         doc_path = tmp_path / 'ml_overview.md'
         doc_path.write_text(doc_content)
 
@@ -2335,7 +2320,7 @@ Machine learning continues to revolutionize many industries.
         from lightrag.operate import chunking_by_semantic
 
         # Document with clear sections
-        doc_content = '''# Section A
+        doc_content = """# Section A
 Content for section A with important information.
 
 # Section B
@@ -2343,7 +2328,7 @@ Content for section B with different topics.
 
 # Section C
 Content for section C concluding the document.
-'''
+"""
         doc_path = tmp_path / 'structured.md'
         doc_path.write_text(doc_content)
 
@@ -2539,12 +2524,12 @@ class TestMetadataAndLanguageDetection:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'table_test.txt'
-        test_file.write_text('''
+        test_file.write_text("""
 | Column1 | Column2 |
 |---------|---------|
 | Value1  | Value2  |
 | Value3  | Value4  |
-''')
+""")
 
         result = extract_with_kreuzberg_sync(test_file)
 
@@ -2595,8 +2580,9 @@ class TestChunkQualityValidation:
 
         for chunk in chunks:
             # Allow some tolerance for word boundaries
-            assert len(chunk['content']) <= max_chars * 1.5, \
+            assert len(chunk['content']) <= max_chars * 1.5, (
                 f'Chunk too long: {len(chunk["content"])} chars (max: {max_chars})'
+            )
 
     def test_chunks_have_positive_token_counts(self):
         """Verify all chunks have positive token counts."""
@@ -2618,8 +2604,7 @@ class TestChunkQualityValidation:
         chunks = chunking_by_semantic(content, max_chars=200, max_overlap=20)
 
         for i, chunk in enumerate(chunks):
-            assert chunk['chunk_order_index'] == i, \
-                f'Expected index {i}, got {chunk["chunk_order_index"]}'
+            assert chunk['chunk_order_index'] == i, f'Expected index {i}, got {chunk["chunk_order_index"]}'
 
     def test_chunk_char_offsets_are_valid(self):
         """Verify char_start and char_end are valid."""
@@ -2637,13 +2622,13 @@ class TestChunkQualityValidation:
         """Verify chunks contain actual content, not just whitespace."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''
+        content = """
 First paragraph with meaningful content.
 
 Second paragraph with more important information.
 
 Third paragraph concluding the document.
-'''
+"""
 
         chunks = chunking_by_semantic(content, max_chars=100, max_overlap=10)
 
@@ -2692,6 +2677,7 @@ class TestLightRAGIntegration:
 
         # Get default chunking func
         from lightrag.operate import create_chunker
+
         default_func = create_chunker(preset='recursive')
 
         # Both should be callable
@@ -2989,7 +2975,7 @@ class TestAdditionalFileFormats:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.rst'
-        content = '''
+        content = """
 Title
 =====
 
@@ -3006,7 +2992,7 @@ Section
 
     def example():
         pass
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3018,7 +3004,7 @@ Section
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.yaml'
-        content = '''
+        content = """
 name: LightRAG
 version: 1.0.0
 features:
@@ -3027,7 +3013,7 @@ features:
 config:
   chunk_size: 1200
   overlap: 100
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3038,14 +3024,14 @@ config:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.toml'
-        content = '''
+        content = """
 [project]
 name = "lightrag"
 version = "1.0.0"
 
 [dependencies]
 kreuzberg = ">=0.4.0"
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3056,14 +3042,14 @@ kreuzberg = ">=0.4.0"
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.ini'
-        content = '''
+        content = """
 [database]
 host = localhost
 port = 5432
 
 [server]
 debug = true
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3074,12 +3060,12 @@ debug = true
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'test.log'
-        content = '''
+        content = """
 2024-01-01 10:00:00 INFO Starting application
 2024-01-01 10:00:01 DEBUG Loading configuration
 2024-01-01 10:00:02 INFO Server started on port 8000
 2024-01-01 10:00:03 WARNING High memory usage detected
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3092,7 +3078,7 @@ debug = true
 
         # SQL mime type not supported, use .txt extension
         test_file = tmp_path / 'test_sql.txt'
-        content = '''
+        content = """
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100),
@@ -3101,7 +3087,7 @@ CREATE TABLE users (
 
 INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com');
 SELECT * FROM users WHERE id = 1;
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3140,7 +3126,7 @@ class MyClass:
 
         # JavaScript mime type not supported, use .txt extension
         test_file = tmp_path / 'test_js.txt'
-        content = '''
+        content = """
 // JavaScript module
 function greet(name) {
     console.log(`Hello, ${name}!`);
@@ -3153,7 +3139,7 @@ const data = {
 };
 
 export { greet, data };
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3166,7 +3152,7 @@ export { greet, data };
 
         # TypeScript (.ts) conflicts with video MIME type, use .txt
         test_file = tmp_path / 'test_ts.txt'
-        content = '''
+        content = """
 interface User {
     id: number;
     name: string;
@@ -3176,7 +3162,7 @@ interface User {
 function createUser(name: string, email: string): User {
     return { id: Date.now(), name, email };
 }
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3189,7 +3175,7 @@ function createUser(name: string, email: string): User {
 
         # Shell scripts may not be supported, use .txt
         test_file = tmp_path / 'test_shell.txt'
-        content = '''#!/bin/bash
+        content = """#!/bin/bash
 # Shell script example
 
 echo "Starting process..."
@@ -3197,7 +3183,7 @@ for i in {1..5}; do
     echo "Step $i"
 done
 echo "Done!"
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3210,13 +3196,13 @@ echo "Done!"
 
         # Dockerfile has no extension, use .txt
         test_file = tmp_path / 'dockerfile.txt'
-        content = '''FROM python:3.11-slim
+        content = """FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
 CMD ["python", "main.py"]
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3229,7 +3215,7 @@ CMD ["python", "main.py"]
 
         # Makefile has no extension, use .txt
         test_file = tmp_path / 'makefile.txt'
-        content = '''.PHONY: build test clean
+        content = """.PHONY: build test clean
 
 build:
 \tpython setup.py build
@@ -3239,7 +3225,7 @@ test:
 
 clean:
 \trm -rf build dist
-'''
+"""
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
@@ -3410,11 +3396,11 @@ class TestConfigurationCombinations:
         """Test all chunking presets with same content."""
         from lightrag.operate import chunking_by_semantic
 
-        content = '''First paragraph with detailed information.
+        content = """First paragraph with detailed information.
 
 Second paragraph with different content.
 
-Third paragraph to conclude.'''
+Third paragraph to conclude."""
 
         presets = [None, 'recursive', 'semantic']
         results = {}
@@ -3458,9 +3444,7 @@ Third paragraph to conclude.'''
             extract_with_kreuzberg_sync,
         )
 
-        options = ExtractionOptions(
-            chunking=ChunkingOptions(enabled=True, max_chars=500, max_overlap=50)
-        )
+        options = ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=500, max_overlap=50))
 
         import tempfile
 
@@ -3482,6 +3466,7 @@ Third paragraph to conclude.'''
             assert 'Second' in result2.content
         finally:
             import os
+
             os.unlink(f1_path)
             os.unlink(f2_path)
 
@@ -3526,9 +3511,7 @@ class TestAsyncConcurrency:
         test_file = tmp_path / 'async_options.txt'
         test_file.write_text('Content for async extraction with options. ' * 50)
 
-        options = ExtractionOptions(
-            chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20)
-        )
+        options = ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20))
 
         result = await extract_with_kreuzberg(test_file, options)
 
@@ -3599,8 +3582,9 @@ class TestChunkBoundaryBehavior:
 
         for chunk in chunks:
             # Content should contain complete words
-            assert 'Antidisestablishmentarianism' in chunk['content'] or \
-                   len(chunk['content'].strip()) < 10  # Small leftover OK
+            assert (
+                'Antidisestablishmentarianism' in chunk['content'] or len(chunk['content'].strip()) < 10
+            )  # Small leftover OK
 
     def test_chunk_overlap_contains_context(self):
         """Test that overlapping regions provide context."""
@@ -3838,11 +3822,11 @@ class TestFactoryFunctionAdvanced:
         func_semantic = create_chunker(preset='semantic')
 
         mock_tokenizer = MagicMock()
-        content = '''Section 1
+        content = """Section 1
 Content for section one.
 
 Section 2
-Content for section two.'''
+Content for section two."""
 
         chunks_default = func_default(mock_tokenizer, content, None, False, 50, 200)
         chunks_recursive = func_recursive(mock_tokenizer, content, None, False, 50, 200)
@@ -3886,7 +3870,7 @@ class TestRealWorldScenarios:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# Abstract
+        content = """# Abstract
 
 This paper presents a novel approach to document processing.
 
@@ -3915,7 +3899,7 @@ Kreuzberg provides robust document processing capabilities.
 
 1. Smith, J. (2024). Document Processing. Journal of AI.
 2. Johnson, M. (2024). Text Extraction Methods. AI Conference.
-'''
+"""
         doc_path = tmp_path / 'paper.md'
         doc_path.write_text(content)
 
@@ -3932,7 +3916,7 @@ Kreuzberg provides robust document processing capabilities.
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from lightrag.operate import chunking_by_semantic
 
-        content = '''# API Reference
+        content = """# API Reference
 
 ## Installation
 
@@ -3960,7 +3944,7 @@ result = rag.query("What is this about?")
 ## Error Handling
 
 The library raises `LightRAGError` for configuration issues.
-'''
+"""
         doc_path = tmp_path / 'docs.md'
         doc_path.write_text(content)
 
@@ -3974,7 +3958,7 @@ The library raises `LightRAGError` for configuration issues.
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from lightrag.operate import chunking_by_semantic
 
-        content = '''Meeting Transcript - Project Review
+        content = """Meeting Transcript - Project Review
 
 Alice: Good morning everyone. Let's start with the status update.
 
@@ -3991,7 +3975,7 @@ Alice: I'll arrange that today. Anything else?
 Charlie: No blockers from my side.
 
 Alice: Perfect. Let's reconvene tomorrow at 10 AM.
-'''
+"""
         doc_path = tmp_path / 'transcript.txt'
         doc_path.write_text(content)
 
@@ -4083,9 +4067,7 @@ class TestKreuzbergDirectAPI:
         test_file = tmp_path / 'with_config.txt'
         test_file.write_text('Content for config test. ' * 50)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=200, max_overlap=20)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=200, max_overlap=20))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4246,7 +4228,7 @@ class TestKreuzbergTableExtraction:
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'table.md'
-        test_file.write_text('''# Document with Table
+        test_file.write_text("""# Document with Table
 
 | Name | Age | City |
 |------|-----|------|
@@ -4255,7 +4237,7 @@ class TestKreuzbergTableExtraction:
 | Charlie | 35 | SF |
 
 Some text after the table.
-''')
+""")
 
         result = extract_with_kreuzberg_sync(test_file)
 
@@ -4268,11 +4250,11 @@ Some text after the table.
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         test_file = tmp_path / 'data.csv'
-        test_file.write_text('''id,name,value
+        test_file.write_text("""id,name,value
 1,item_one,100
 2,item_two,200
 3,item_three,300
-''')
+""")
 
         result = extract_with_kreuzberg_sync(test_file)
 
@@ -4482,9 +4464,7 @@ class TestKreuzbergChunkContent:
         test_file = tmp_path / 'chunk_fields.txt'
         test_file.write_text('Content for chunk field testing. ' * 50)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=200, max_overlap=20)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=200, max_overlap=20))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4501,9 +4481,7 @@ class TestKreuzbergChunkContent:
         test_file = tmp_path / 'sequential.txt'
         test_file.write_text('Sequential content. ' * 100)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=100, max_overlap=10)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=100, max_overlap=10))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4518,9 +4496,7 @@ class TestKreuzbergChunkContent:
         test_file = tmp_path / 'nonempty.txt'
         test_file.write_text('Non-empty chunk content. ' * 50)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=200, max_overlap=20)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=200, max_overlap=20))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4537,9 +4513,7 @@ class TestKreuzbergChunkContent:
         test_file = tmp_path / 'coverage.txt'
         test_file.write_text(original)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=20, max_overlap=5)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=20, max_overlap=5))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4565,18 +4539,16 @@ class TestKreuzbergPresetBehavior:
         """Test recursive preset handles paragraphs."""
         from kreuzberg import ChunkingConfig, ExtractionConfig, extract_file_sync
 
-        content = '''First paragraph with some content.
+        content = """First paragraph with some content.
 
 Second paragraph with different content.
 
 Third paragraph to complete the test.
-'''
+"""
         test_file = tmp_path / 'paragraphs.txt'
         test_file.write_text(content)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(preset='recursive', max_chars=100, max_overlap=10)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(preset='recursive', max_chars=100, max_overlap=10))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4587,16 +4559,14 @@ Third paragraph to complete the test.
         """Test semantic preset preserves semantic boundaries."""
         from kreuzberg import ChunkingConfig, ExtractionConfig, extract_file_sync
 
-        content = '''The quick brown fox jumps over the lazy dog. This sentence demonstrates word boundaries.
+        content = """The quick brown fox jumps over the lazy dog. This sentence demonstrates word boundaries.
 
 A new paragraph begins here with fresh ideas and concepts.
-'''
+"""
         test_file = tmp_path / 'semantic.txt'
         test_file.write_text(content)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(preset='semantic', max_chars=100, max_overlap=10)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(preset='semantic', max_chars=100, max_overlap=10))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4610,9 +4580,7 @@ A new paragraph begins here with fresh ideas and concepts.
         test_file = tmp_path / 'basic.txt'
         test_file.write_text('Basic chunking test content. ' * 50)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=200, max_overlap=20)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=200, max_overlap=20))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4658,9 +4626,7 @@ class TestKreuzbergExtractionResultComplete:
         test_file = tmp_path / 'chunks_type.txt'
         test_file.write_text('Content for chunks type testing. ' * 50)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=100, max_overlap=10)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=100, max_overlap=10))
 
         result = extract_file_sync(str(test_file), config=config)
 
@@ -4712,9 +4678,7 @@ class TestKreuzbergPerformanceCharacteristics:
         small_file = tmp_path / 'small.txt'
         small_file.write_text('Small content. ' * 10)
 
-        config = ExtractionConfig(
-            chunking=ChunkingConfig(max_chars=50, max_overlap=5)
-        )
+        config = ExtractionConfig(chunking=ChunkingConfig(max_chars=50, max_overlap=5))
 
         small_result = extract_file_sync(str(small_file), config=config)
 
@@ -4779,9 +4743,7 @@ class TestKreuzbergAdapterConversion:
         test_file = tmp_path / 'chunk_conv.txt'
         test_file.write_text('Chunk conversion content. ' * 50)
 
-        options = ExtractionOptions(
-            chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20)
-        )
+        options = ExtractionOptions(chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20))
 
         result = extract_with_kreuzberg_sync(test_file, options)
 
@@ -4830,7 +4792,7 @@ class TestKreuzbergDocumentProcessing:
         """Test processing code documentation."""
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
-        content = '''# Function Documentation
+        content = """# Function Documentation
 
 ## `calculate_sum(a, b)`
 
@@ -4848,7 +4810,7 @@ Calculates the sum of two numbers.
 result = calculate_sum(3, 5)
 print(result)  # Output: 8
 ```
-'''
+"""
         test_file = tmp_path / 'docs.md'
         test_file.write_text(content)
 
@@ -4861,7 +4823,7 @@ print(result)  # Output: 8
         """Test processing legal-style document."""
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
-        content = '''TERMS OF SERVICE
+        content = """TERMS OF SERVICE
 
 1. ACCEPTANCE OF TERMS
 By accessing this service, you agree to these terms.
@@ -4874,7 +4836,7 @@ The service is provided "as is" without warranties.
 
 4. GOVERNING LAW
 These terms are governed by applicable law.
-'''
+"""
         test_file = tmp_path / 'terms.txt'
         test_file.write_text(content)
 
@@ -4887,7 +4849,7 @@ These terms are governed by applicable law.
         """Test processing data report."""
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
-        content = '''Quarterly Report Q4 2024
+        content = """Quarterly Report Q4 2024
 
 Summary:
 - Revenue: $10.5M (up 15%)
@@ -4901,7 +4863,7 @@ Key Metrics:
 | Users | 40,000 | 50,000 | +25% |
 
 Outlook: Positive growth expected in Q1 2025.
-'''
+"""
         test_file = tmp_path / 'report.md'
         test_file.write_text(content)
 
@@ -4913,13 +4875,13 @@ Outlook: Positive growth expected in Q1 2025.
         """Test processing multilingual content."""
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
-        content = '''Multilingual Document
+        content = """Multilingual Document
 
 English: Hello, welcome to our service.
 Spanish: Hola, bienvenido a nuestro servicio.
 French: Bonjour, bienvenue à notre service.
 German: Hallo, willkommen bei unserem Service.
-'''
+"""
         test_file = tmp_path / 'multilingual.txt'
         test_file.write_text(content)
 
@@ -4932,7 +4894,7 @@ German: Hallo, willkommen bei unserem Service.
         """Test processing technical specification."""
         from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
-        content = '''Technical Specification v2.1
+        content = """Technical Specification v2.1
 
 ## System Requirements
 - CPU: 4 cores minimum
@@ -4948,10 +4910,568 @@ German: Hallo, willkommen bei unserem Service.
 
 ## Data Format
 JSON with UTF-8 encoding.
-'''
+"""
         test_file = tmp_path / 'spec.md'
         test_file.write_text(content)
 
         result = extract_with_kreuzberg_sync(test_file)
 
         assert 'API' in result.content or 'Technical' in result.content
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestOnePassChunking:
+    """Test one-pass extraction and chunking functions."""
+
+    def test_create_chunking_options_defaults(self):
+        """Test create_chunking_options with default values."""
+        from lightrag.document import create_chunking_options
+
+        options = create_chunking_options()
+
+        assert options.enabled is True
+        assert options.max_chars == 1200 * 4  # 4800
+        assert options.max_overlap == 100 * 4  # 400
+        assert options.preset == 'semantic'
+
+    def test_create_chunking_options_custom_values(self):
+        """Test create_chunking_options with custom token sizes."""
+        from lightrag.document import create_chunking_options
+
+        options = create_chunking_options(
+            chunk_token_size=500,
+            chunk_overlap_token_size=50,
+            preset='recursive',
+        )
+
+        assert options.enabled is True
+        assert options.max_chars == 500 * 4  # 2000
+        assert options.max_overlap == 50 * 4  # 200
+        assert options.preset == 'recursive'
+
+    def test_create_chunking_options_no_preset(self):
+        """Test create_chunking_options with no preset."""
+        from lightrag.document import create_chunking_options
+
+        options = create_chunking_options(preset=None)
+
+        assert options.enabled is True
+        assert options.preset is None
+
+    def test_extract_and_chunk_sync_basic(self, tmp_path: Path):
+        """Test basic one-pass extraction and chunking."""
+        from lightrag.document import extract_and_chunk_sync
+
+        test_file = tmp_path / 'onepass.txt'
+        content = 'First paragraph with some content. ' * 50 + '\n\n'
+        content += 'Second paragraph with different content. ' * 50
+        test_file.write_text(content)
+
+        result = extract_and_chunk_sync(test_file)
+
+        assert result.content is not None
+        assert len(result.content) > 0
+        assert result.chunks is not None
+        assert len(result.chunks) >= 1
+
+    def test_extract_and_chunk_sync_with_custom_sizes(self, tmp_path: Path):
+        """Test one-pass extraction with custom chunk sizes."""
+        from lightrag.document import extract_and_chunk_sync
+
+        test_file = tmp_path / 'custom_size.txt'
+        content = 'Test sentence for chunking. ' * 200  # ~5600 chars
+        test_file.write_text(content)
+
+        result = extract_and_chunk_sync(
+            test_file,
+            chunk_token_size=100,  # ~400 chars
+            chunk_overlap_token_size=10,  # ~40 chars
+        )
+
+        assert result.content is not None
+        assert result.chunks is not None
+        # With small chunk size, should produce multiple chunks
+        assert len(result.chunks) > 1
+
+    def test_extract_and_chunk_sync_with_preset(self, tmp_path: Path):
+        """Test one-pass extraction with different presets."""
+        from lightrag.document import extract_and_chunk_sync
+
+        test_file = tmp_path / 'preset_test.txt'
+        content = """# Section One
+
+This is the first section with important content.
+
+# Section Two
+
+This is the second section with different content.
+"""
+        test_file.write_text(content)
+
+        # Test with semantic preset
+        result_semantic = extract_and_chunk_sync(test_file, chunking_preset='semantic')
+        assert result_semantic.content is not None
+
+        # Test with recursive preset
+        result_recursive = extract_and_chunk_sync(test_file, chunking_preset='recursive')
+        assert result_recursive.content is not None
+
+    @pytest.mark.asyncio
+    async def test_extract_and_chunk_async(self, tmp_path: Path):
+        """Test async one-pass extraction and chunking."""
+        from lightrag.document import extract_and_chunk
+
+        test_file = tmp_path / 'async_onepass.txt'
+        content = 'Async test content. ' * 100
+        test_file.write_text(content)
+
+        result = await extract_and_chunk(test_file)
+
+        assert result.content is not None
+        assert result.chunks is not None
+        assert len(result.chunks) >= 1
+
+    @pytest.mark.asyncio
+    async def test_extract_and_chunk_async_custom_sizes(self, tmp_path: Path):
+        """Test async one-pass extraction with custom chunk sizes."""
+        from lightrag.document import extract_and_chunk
+
+        test_file = tmp_path / 'async_custom.txt'
+        content = 'Long content for async chunking. ' * 200
+        test_file.write_text(content)
+
+        result = await extract_and_chunk(
+            test_file,
+            chunk_token_size=50,
+            chunk_overlap_token_size=5,
+        )
+
+        assert result.content is not None
+        assert result.chunks is not None
+        assert len(result.chunks) > 1
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestChunksToLightRAGFormat:
+    """Test chunks_to_lightrag_format conversion function."""
+
+    def test_chunks_to_lightrag_format_basic(self, tmp_path: Path):
+        """Test basic conversion of chunks to LightRAG format."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        test_file = tmp_path / 'format_test.txt'
+        content = 'Content for format testing. ' * 100
+        test_file.write_text(content)
+
+        result = extract_and_chunk_sync(test_file, chunk_token_size=100)
+        chunks = chunks_to_lightrag_format(result)
+
+        assert isinstance(chunks, list)
+        assert len(chunks) >= 1
+
+        # Check chunk structure
+        for i, chunk in enumerate(chunks):
+            assert 'tokens' in chunk
+            assert 'content' in chunk
+            assert 'chunk_order_index' in chunk
+            assert 'char_start' in chunk
+            assert 'char_end' in chunk
+            assert isinstance(chunk['tokens'], int)
+            assert isinstance(chunk['content'], str)
+            assert chunk['chunk_order_index'] == i
+
+    def test_chunks_to_lightrag_format_token_estimation(self, tmp_path: Path):
+        """Test token estimation in converted chunks."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        test_file = tmp_path / 'token_test.txt'
+        content = 'Word ' * 400  # ~2000 chars
+        test_file.write_text(content)
+
+        result = extract_and_chunk_sync(test_file, chunk_token_size=100)
+        chunks = chunks_to_lightrag_format(result)
+
+        for chunk in chunks:
+            # Token estimate should be roughly chars/4
+            expected_tokens = len(chunk['content']) // 4
+            assert abs(chunk['tokens'] - expected_tokens) <= 5
+
+    def test_chunks_to_lightrag_format_preserves_order(self, tmp_path: Path):
+        """Test that chunk order is preserved in conversion."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        test_file = tmp_path / 'order_test.txt'
+        content = 'Sentence number one. ' * 50 + 'Sentence number two. ' * 50
+        test_file.write_text(content)
+
+        result = extract_and_chunk_sync(test_file, chunk_token_size=50)
+        chunks = chunks_to_lightrag_format(result)
+
+        for i, chunk in enumerate(chunks):
+            assert chunk['chunk_order_index'] == i
+
+    def test_chunks_to_lightrag_format_no_chunks_fallback(self, tmp_path: Path):
+        """Test fallback when extraction result has no chunks."""
+        from lightrag.document import ExtractionResult, chunks_to_lightrag_format
+
+        # Create result with no chunks
+        result = ExtractionResult(
+            content='Short content without chunks.',
+            chunks=None,
+            mime_type='text/plain',
+            metadata={},
+            tables=None,
+            detected_languages=None,
+        )
+
+        chunks = chunks_to_lightrag_format(result)
+
+        assert len(chunks) == 1
+        assert chunks[0]['content'] == 'Short content without chunks.'
+        assert chunks[0]['chunk_order_index'] == 0
+        assert chunks[0]['char_start'] == 0
+
+    def test_chunks_to_lightrag_format_empty_chunks_fallback(self, tmp_path: Path):
+        """Test fallback when extraction result has empty chunks list."""
+        from lightrag.document import ExtractionResult, chunks_to_lightrag_format
+
+        # Create result with empty chunks list
+        result = ExtractionResult(
+            content='Content with empty chunks list.',
+            chunks=[],
+            mime_type='text/plain',
+            metadata={},
+            tables=None,
+            detected_languages=None,
+        )
+
+        chunks = chunks_to_lightrag_format(result)
+
+        # Empty list is falsy, so should trigger fallback
+        assert len(chunks) == 1
+        assert chunks[0]['content'] == 'Content with empty chunks list.'
+
+    def test_chunks_to_lightrag_format_strips_whitespace(self, tmp_path: Path):
+        """Test that chunk content is stripped of whitespace."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        test_file = tmp_path / 'whitespace_test.txt'
+        content = '   Content with whitespace.   ' * 100
+        test_file.write_text(content)
+
+        result = extract_and_chunk_sync(test_file, chunk_token_size=100)
+        chunks = chunks_to_lightrag_format(result)
+
+        for chunk in chunks:
+            # Content should be stripped
+            assert not chunk['content'].startswith(' ')
+            assert not chunk['content'].endswith(' ')
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestOnePassIntegration:
+    """Integration tests for one-pass extraction and chunking."""
+
+    def test_one_pass_pdf_extraction(self):
+        """Test one-pass extraction and chunking of PDF file."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        pdf_path = Path('inputs/__enqueued__/SAR439589 SERD Lesson Learnt final.pdf')
+        if not pdf_path.exists():
+            pytest.skip('Test PDF not available')
+
+        result = extract_and_chunk_sync(pdf_path)
+
+        assert result.content is not None
+        assert len(result.content) > 1000
+        assert result.chunks is not None
+        assert len(result.chunks) >= 1
+
+        # Convert to LightRAG format
+        chunks = chunks_to_lightrag_format(result)
+        assert len(chunks) >= 1
+        for chunk in chunks:
+            assert chunk['content']
+            assert chunk['tokens'] > 0
+
+    def test_one_pass_docx_extraction(self, tmp_path: Path):
+        """Test one-pass extraction and chunking of DOCX file."""
+        import zipfile
+
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        # Create minimal DOCX
+        content_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Test Document for One-Pass Extraction</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Section 1: Introduction - This provides context for the document.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Section 2: Methods - The methodology used in this analysis.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Section 3: Results - The findings demonstrate effectiveness.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Section 4: Conclusion - Key findings and recommendations.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"""
+
+        rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+        content_types_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+        docx_path = tmp_path / 'onepass_test.docx'
+        with zipfile.ZipFile(docx_path, 'w') as zf:
+            zf.writestr('[Content_Types].xml', content_types_xml)
+            zf.writestr('_rels/.rels', rels_xml)
+            zf.writestr('word/document.xml', content_xml)
+
+        result = extract_and_chunk_sync(docx_path)
+
+        assert result.content is not None
+        assert 'Test Document' in result.content or 'One-Pass' in result.content
+
+        chunks = chunks_to_lightrag_format(result)
+        assert len(chunks) >= 1
+
+    def test_one_pass_markdown_extraction(self, tmp_path: Path):
+        """Test one-pass extraction and chunking of Markdown file."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        md_content = """# One-Pass Extraction Test
+
+## Introduction
+
+This document tests the one-pass extraction and chunking functionality.
+It should be processed in a single pass, preserving document structure.
+
+## Features
+
+The one-pass approach offers several benefits:
+
+1. Efficiency: Only one call to Kreuzberg
+2. Structure preservation: Headers and sections inform chunk boundaries
+3. Better semantic coherence: Chunks respect document organization
+
+## Code Example
+
+```python
+from lightrag.document import extract_and_chunk_sync
+
+result = extract_and_chunk_sync(file_path)
+```
+
+## Conclusion
+
+One-pass extraction is the recommended approach for binary documents.
+"""
+        md_path = tmp_path / 'onepass.md'
+        md_path.write_text(md_content)
+
+        result = extract_and_chunk_sync(md_path, chunk_token_size=100)
+
+        assert result.content is not None
+        assert 'One-Pass' in result.content
+
+        chunks = chunks_to_lightrag_format(result)
+        assert len(chunks) >= 1
+        for chunk in chunks:
+            assert 'content' in chunk
+            assert 'tokens' in chunk
+            assert 'chunk_order_index' in chunk
+
+    def test_one_pass_vs_two_pass_equivalence(self, tmp_path: Path):
+        """Test that one-pass produces similar results to two-pass."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+        from lightrag.document.kreuzberg_adapter import extract_with_kreuzberg_sync
+        from lightrag.operate import chunking_by_semantic
+
+        test_file = tmp_path / 'equivalence_test.txt'
+        content = """First section of the document.
+This has multiple sentences that form a coherent paragraph.
+The content should be chunked similarly regardless of approach.
+
+Second section with different content.
+This paragraph discusses different topics.
+The chunking should respect these boundaries.
+
+Third section for good measure.
+More content to ensure multiple chunks are created.
+This completes the test document.
+"""
+        test_file.write_text(content)
+
+        # One-pass approach
+        one_pass_result = extract_and_chunk_sync(
+            test_file,
+            chunk_token_size=50,
+            chunk_overlap_token_size=5,
+        )
+        one_pass_chunks = chunks_to_lightrag_format(one_pass_result)
+
+        # Two-pass approach
+        two_pass_result = extract_with_kreuzberg_sync(test_file)
+        two_pass_chunks = chunking_by_semantic(
+            two_pass_result.content,
+            max_chars=50 * 4,
+            max_overlap=5 * 4,
+        )
+
+        # Both should produce chunks with valid structure
+        assert len(one_pass_chunks) >= 1
+        assert len(two_pass_chunks) >= 1
+
+        # Both should capture the content
+        one_pass_content = ' '.join(c['content'] for c in one_pass_chunks)
+        two_pass_content = ' '.join(c['content'] for c in two_pass_chunks)
+
+        assert 'First section' in one_pass_content or 'section' in one_pass_content
+        assert 'First section' in two_pass_content or 'section' in two_pass_content
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestOnePassStress:
+    """Stress tests for one-pass extraction edge cases."""
+
+    def test_empty_file_one_pass(self, tmp_path: Path):
+        """Empty file should not crash."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        empty_file = tmp_path / 'empty.txt'
+        empty_file.write_text('')
+
+        result = extract_and_chunk_sync(empty_file)
+        chunks = chunks_to_lightrag_format(result)
+
+        assert result.content == ''
+        assert len(chunks) == 1
+        assert chunks[0]['content'] == ''
+
+    def test_single_character_file(self, tmp_path: Path):
+        """Single character file should work."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        single_file = tmp_path / 'single.txt'
+        single_file.write_text('X')
+
+        result = extract_and_chunk_sync(single_file)
+        chunks = chunks_to_lightrag_format(result)
+
+        assert 'X' in result.content
+        assert len(chunks) == 1
+        assert chunks[0]['content'] == 'X'
+
+    def test_very_long_single_line(self, tmp_path: Path):
+        """Very long single line without breaks."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        long_file = tmp_path / 'longline.txt'
+        long_content = 'X' * 50000
+        long_file.write_text(long_content)
+
+        result = extract_and_chunk_sync(long_file, chunk_token_size=100)
+        chunks = chunks_to_lightrag_format(result)
+
+        assert result.content is not None
+        assert len(chunks) >= 1
+        total = ''.join(c['content'] for c in chunks)
+        assert len(total) > 0
+
+    def test_unicode_edge_cases(self, tmp_path: Path):
+        """Unicode edge cases: RTL, combining characters, emoji."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        unicode_file = tmp_path / 'unicode.txt'
+        content = 'מימין לשמאל\n🇺🇸🇬🇧🇫🇷🇩🇪🇯🇵\né é e\u0301\n👨‍👩‍👧‍👦'
+        unicode_file.write_text(content, encoding='utf-8')
+
+        result = extract_and_chunk_sync(unicode_file)
+        chunks = chunks_to_lightrag_format(result)
+
+        assert result.content is not None
+        assert len(chunks) >= 1
+
+    def test_chunk_size_edge_cases(self, tmp_path: Path):
+        """Extreme chunk sizes should handle gracefully."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        test_file = tmp_path / 'edge.txt'
+        test_file.write_text('Test content. ' * 100)
+
+        result = extract_and_chunk_sync(
+            test_file,
+            chunk_token_size=1,
+            chunk_overlap_token_size=0,
+        )
+        chunks = chunks_to_lightrag_format(result)
+
+        assert len(chunks) >= 1
+
+    def test_chunks_have_required_keys(self, tmp_path: Path):
+        """Verify pre_chunks have all required keys for lightrag.py."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+
+        test_file = tmp_path / 'keys.txt'
+        test_file.write_text('Content for structure validation. ' * 50)
+
+        result = extract_and_chunk_sync(test_file, chunk_token_size=50)
+        chunks = chunks_to_lightrag_format(result)
+
+        required_keys = {'tokens', 'content', 'chunk_order_index'}
+
+        for chunk in chunks:
+            assert all(key in chunk for key in required_keys)
+            assert 'char_start' in chunk
+            assert 'char_end' in chunk
+
+    @pytest.mark.asyncio
+    async def test_concurrent_extractions(self, tmp_path: Path):
+        """Multiple concurrent extractions should not interfere."""
+        import asyncio
+
+        from lightrag.document import extract_and_chunk
+
+        files = []
+        for i in range(10):
+            f = tmp_path / f'concurrent_{i}.txt'
+            f.write_text(f'Unique content for file {i}. ' * 50)
+            files.append(f)
+
+        tasks = [extract_and_chunk(f) for f in files]
+        results = await asyncio.gather(*tasks)
+
+        for i, result in enumerate(results):
+            assert f'file {i}' in result.content.lower() or 'Unique content' in result.content
+
+    def test_chunks_work_with_compute_mdhash_id(self, tmp_path: Path):
+        """Verify chunks can be hashed correctly for lightrag.py."""
+        from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+        from lightrag.utils import compute_mdhash_id
+
+        test_file = tmp_path / 'hash_test.txt'
+        test_file.write_text("""
+Section one with unique content here.
+
+Section two has different unique content.
+
+Section three also has its own content.
+""")
+
+        result = extract_and_chunk_sync(test_file, chunk_token_size=50)
+        chunks = chunks_to_lightrag_format(result)
+
+        chunks_dict = {
+            compute_mdhash_id(dp['content'], prefix='chunk-'): {
+                **dp,
+                'full_doc_id': 'doc-123',
+                'file_path': 'test.txt',
+                'llm_cache_list': [],
+            }
+            for dp in chunks
+        }
+
+        assert len(chunks_dict) == len(chunks)

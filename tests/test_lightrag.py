@@ -67,7 +67,7 @@ def mock_llm_func():
 
     async def llm_func(prompt: str, **kwargs) -> str:
         """Mock LLM function."""
-        return f"Mock response to: {prompt[:50]}"
+        return f'Mock response to: {prompt[:50]}'
 
     return llm_func
 
@@ -330,7 +330,7 @@ class TestLightRAGDeprecatedParameters:
         """Test deprecation warning for log_level parameter."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            rag = LightRAG(
+            LightRAG(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,
@@ -360,7 +360,7 @@ class TestLightRAGDeprecatedParameters:
         """Test deprecation warning for log_file_path parameter."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            rag = LightRAG(
+            LightRAG(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,

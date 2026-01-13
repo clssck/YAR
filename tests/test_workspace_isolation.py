@@ -19,6 +19,7 @@ Total: 11 test scenarios
 """
 
 import asyncio
+import contextlib
 import os
 import shutil
 import time
@@ -727,9 +728,9 @@ async def test_empty_workspace_standardization():
 @pytest.mark.offline
 @pytest.mark.asyncio
 @pytest.mark.skip(
-    reason="Workspace isolation bug: full_docs.get_by_id() returns documents across workspaces. "
-    "See test output - SQL includes workspace filter but documents are found cross-workspace. "
-    "Needs investigation in PGKVStorage.get_by_id() or document insertion logic."
+    reason='Workspace isolation bug: full_docs.get_by_id() returns documents across workspaces. '
+    'See test output - SQL includes workspace filter but documents are found cross-workspace. '
+    'Needs investigation in PGKVStorage.get_by_id() or document insertion logic.'
 )
 async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
     """
@@ -788,15 +789,15 @@ async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
             ]
             for workspace in test_workspaces:
                 for table in tables_to_clean:
-                    try:
-                        await conn.execute(f"DELETE FROM {table} WHERE workspace = $1", workspace)
-                    except Exception:
-                        pass  # Table may not exist yet
+                    with contextlib.suppress(Exception):  # Table may not exist yet
+                        await conn.execute(f'DELETE FROM {table} WHERE workspace = $1', workspace)
 
             # Also clean up specific test documents by their computed IDs (in case stored with different workspace)
             from lightrag.utils import compute_mdhash_id, sanitize_text_for_encoding
 
-            text_a = 'This document is about Artificial Intelligence and Machine Learning. AI is transforming the world.'
+            text_a = (
+                'This document is about Artificial Intelligence and Machine Learning. AI is transforming the world.'
+            )
             text_b = 'This document is about Deep Learning and Neural Networks. Deep learning uses multiple layers.'
             doc_ids = [
                 compute_mdhash_id(sanitize_text_for_encoding(text_a), prefix='doc-'),
@@ -804,8 +805,8 @@ async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
             ]
             for doc_id in doc_ids:
                 try:
-                    await conn.execute("DELETE FROM LIGHTRAG_DOC_FULL WHERE id = $1", doc_id)
-                    await conn.execute("DELETE FROM LIGHTRAG_DOC_STATUS WHERE id = $1", doc_id)
+                    await conn.execute('DELETE FROM LIGHTRAG_DOC_FULL WHERE id = $1', doc_id)
+                    await conn.execute('DELETE FROM LIGHTRAG_DOC_STATUS WHERE id = $1', doc_id)
                 except Exception:
                     pass
             print('   Cleaned up existing database data for test workspaces')

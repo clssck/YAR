@@ -1567,6 +1567,9 @@ class LightRAG:
                     chunk_results: list[Any] = []
                     chunks: dict[str, Any] = {}
                     doc_chunking_preset: str | None = None
+                    effective_chunk_size = self.chunk_token_size
+                    effective_overlap = self.chunk_overlap_token_size
+                    pre_chunks: list[dict[str, Any]] | None = None
 
                     async with semaphore:
                         nonlocal processed_count
@@ -1612,32 +1615,31 @@ class LightRAG:
                             if self.tokenizer is None:
                                 raise ValueError('Tokenizer is not initialized')
 
-                            # Check for per-document chunking preset in metadata
                             doc_metadata = getattr(status_doc, 'metadata', {}) or {}
                             doc_chunking_preset = doc_metadata.get('chunking_preset')
+                            pre_chunks = doc_metadata.get('pre_chunks')
 
-                            # Use per-document preset if specified, otherwise use instance default
-                            if doc_chunking_preset is not None:
-                                # Create a temporary chunking function with the document's preset
-                                chunking_func = create_chunker(preset=doc_chunking_preset)
+                            if pre_chunks:
+                                logger.info(f'Using {len(pre_chunks)} pre-computed chunks from one-pass extraction')
+                                chunking_result = pre_chunks
                             else:
-                                chunking_func = self.chunking_func
+                                if doc_chunking_preset is not None:
+                                    chunking_func = create_chunker(preset=doc_chunking_preset)
+                                else:
+                                    chunking_func = self.chunking_func
 
-                            # Call chunking function, supporting both sync and async implementations
-                            chunking_result = chunking_func(
-                                self.tokenizer,
-                                content,
-                                split_by_character,
-                                split_by_character_only,
-                                self.chunk_overlap_token_size,
-                                self.chunk_token_size,
-                            )
+                                chunking_result = chunking_func(
+                                    self.tokenizer,
+                                    content,
+                                    split_by_character,
+                                    split_by_character_only,
+                                    self.chunk_overlap_token_size,
+                                    self.chunk_token_size,
+                                )
 
-                            # If result is awaitable, await to get actual result
-                            if inspect.isawaitable(chunking_result):
-                                chunking_result = await chunking_result
+                                if inspect.isawaitable(chunking_result):
+                                    chunking_result = await chunking_result
 
-                            # Validate return type
                             if not isinstance(chunking_result, (list, tuple)):
                                 raise TypeError(
                                     f'chunking_func must return a list or tuple of dicts, got {type(chunking_result)}'
@@ -1669,24 +1671,30 @@ class LightRAG:
 
                             # Process document in two stages
                             # Stage 1: Process text chunks and docs (parallel execution)
+                            effective_chunk_size = doc_metadata.get('chunk_token_size') or self.chunk_token_size
+                            effective_overlap = (
+                                doc_metadata.get('chunk_overlap_token_size') or self.chunk_overlap_token_size
+                            )
+
                             doc_status_task = asyncio.create_task(
                                 self.doc_status.upsert(
                                     {
                                         doc_id: {
                                             'status': DocStatus.PROCESSING,
                                             'chunks_count': len(chunks),
-                                            'chunks_list': list(chunks.keys()),  # Save chunks list
+                                            'chunks_list': list(chunks.keys()),
                                             'content_summary': status_doc.content_summary,
                                             'content_length': status_doc.content_length,
                                             'created_at': status_doc.created_at,
                                             'updated_at': datetime.now(timezone.utc).isoformat(),
                                             'file_path': file_path,
-                                            'track_id': status_doc.track_id,  # Preserve existing track_id
+                                            'track_id': status_doc.track_id,
                                             'metadata': {
                                                 'processing_start_time': processing_start_time,
                                                 'chunking_preset': doc_chunking_preset or 'semantic',
-                                                'chunk_token_size': self.chunk_token_size,
-                                                'chunk_overlap_token_size': self.chunk_overlap_token_size,
+                                                'chunk_token_size': effective_chunk_size,
+                                                'chunk_overlap_token_size': effective_overlap,
+                                                'one_pass_chunking': bool(pre_chunks),
                                             },
                                         }
                                     }
@@ -1761,13 +1769,17 @@ class LightRAG:
                                         'created_at': status_doc.created_at,
                                         'updated_at': datetime.now(timezone.utc).isoformat(),
                                         'file_path': file_path,
-                                        'track_id': status_doc.track_id,  # Preserve existing track_id
+                                        'track_id': status_doc.track_id,
                                         'metadata': {
                                             'processing_start_time': processing_start_time,
                                             'processing_end_time': processing_end_time,
                                             'chunking_preset': doc_chunking_preset or 'semantic',
-                                            'chunk_token_size': self.chunk_token_size,
-                                            'chunk_overlap_token_size': self.chunk_overlap_token_size,
+                                            'chunk_token_size': effective_chunk_size
+                                            if 'effective_chunk_size' in dir()
+                                            else self.chunk_token_size,
+                                            'chunk_overlap_token_size': effective_overlap
+                                            if 'effective_overlap' in dir()
+                                            else self.chunk_overlap_token_size,
                                         },
                                     }
                                 }
@@ -1815,13 +1827,14 @@ class LightRAG:
                                             'created_at': status_doc.created_at,
                                             'updated_at': datetime.now(timezone.utc).isoformat(),
                                             'file_path': file_path,
-                                            'track_id': status_doc.track_id,  # Preserve existing track_id
+                                            'track_id': status_doc.track_id,
                                             'metadata': {
                                                 'processing_start_time': processing_start_time,
                                                 'processing_end_time': processing_end_time,
                                                 'chunking_preset': doc_chunking_preset or 'semantic',
-                                                'chunk_token_size': self.chunk_token_size,
-                                                'chunk_overlap_token_size': self.chunk_overlap_token_size,
+                                                'chunk_token_size': effective_chunk_size,
+                                                'chunk_overlap_token_size': effective_overlap,
+                                                'one_pass_chunking': bool(pre_chunks),
                                             },
                                         }
                                     }
@@ -1869,7 +1882,6 @@ class LightRAG:
                                 # Record processing end time for failed case
                                 processing_end_time = int(time.time())
 
-                                # Update document status to failed
                                 await self.doc_status.upsert(
                                     {
                                         doc_id: {
@@ -1878,15 +1890,15 @@ class LightRAG:
                                             'content_summary': status_doc.content_summary,
                                             'content_length': status_doc.content_length,
                                             'created_at': status_doc.created_at,
-                                            'updated_at': datetime.now().isoformat(),
+                                            'updated_at': datetime.now(timezone.utc).isoformat(),
                                             'file_path': file_path,
-                                            'track_id': status_doc.track_id,  # Preserve existing track_id
+                                            'track_id': status_doc.track_id,
                                             'metadata': {
                                                 'processing_start_time': processing_start_time,
                                                 'processing_end_time': processing_end_time,
                                                 'chunking_preset': doc_chunking_preset or 'semantic',
-                                                'chunk_token_size': self.chunk_token_size,
-                                                'chunk_overlap_token_size': self.chunk_overlap_token_size,
+                                                'chunk_token_size': effective_chunk_size,
+                                                'chunk_overlap_token_size': effective_overlap,
                                             },
                                         }
                                     }

@@ -15,7 +15,54 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import tiktoken
+
 from lightrag.utils import logger
+
+# Cache the tokenizer for performance
+_TOKENIZER_CACHE: dict[str, tiktoken.Encoding] = {}
+
+
+def _get_tokenizer(model: str = 'gpt-4o') -> tiktoken.Encoding:
+    """Get cached tiktoken tokenizer."""
+    if model not in _TOKENIZER_CACHE:
+        try:
+            _TOKENIZER_CACHE[model] = tiktoken.encoding_for_model(model)
+        except KeyError:
+            # Fallback to cl100k_base for unknown models
+            _TOKENIZER_CACHE[model] = tiktoken.get_encoding('cl100k_base')
+    return _TOKENIZER_CACHE[model]
+
+
+def tokens_to_chars(token_count: int, model: str = 'gpt-4o') -> int:
+    """Convert token count to approximate character count using actual tokenizer.
+
+    Uses a sample of common text to estimate the average chars/token ratio,
+    then applies it to the token count. This is more accurate than the
+    naive 4 chars/token approximation.
+
+    Args:
+        token_count: Number of tokens
+        model: Model name for tokenizer selection
+
+    Returns:
+        Estimated character count
+    """
+    tokenizer = _get_tokenizer(model)
+
+    # Mixed content sample (technical terms, abbreviations, numbers) for realistic ratio
+    sample = (
+        'CMC Cross-Sharing Session 2023: Key findings from Q3 regulatory submissions. '
+        'FDA approved 3 NDAs for SAR-123456. EMA issued GMP warnings for Site-A. '
+        'Process B vs Process C comparability data shows 95.2% similarity. '
+        'def extract_entities(doc: Document) -> list[Entity]: return parser.parse(doc)'
+    )
+
+    sample_tokens = len(tokenizer.encode(sample))
+    chars_per_token = len(sample) / sample_tokens if sample_tokens > 0 else 4.0
+
+    return int(token_count * chars_per_token)
+
 
 if TYPE_CHECKING:
     pass
@@ -107,32 +154,17 @@ if KREUZBERG_AVAILABLE:
 
 @dataclass
 class ChunkingOptions:
-    """Options for Kreuzberg's chunking functionality.
-
-    Attributes:
-        enabled: Whether to use Kreuzberg's built-in chunking
-        max_chars: Maximum characters per chunk (default 1200 * 4 ~= token equivalent)
-        max_overlap: Character overlap between chunks (default 100 * 4)
-        preset: Chunking preset - None (default), "recursive", or "semantic"
-            - recursive: Split by paragraphs, sentences, then words
-            - semantic: Preserve semantic boundaries
-    """
+    """Kreuzberg chunking config."""
 
     enabled: bool = False
-    max_chars: int = 4800  # ~1200 tokens
-    max_overlap: int = 400  # ~100 tokens
-    preset: str | None = None  # 'recursive', 'semantic', or None for default
+    max_chars: int = 4170  # ~1000 tokens via tokens_to_chars
+    max_overlap: int = 417  # ~100 tokens
+    preset: str | None = 'semantic'  # 'recursive', 'semantic', or None
 
 
 @dataclass
 class OcrOptions:
-    """Options for Kreuzberg's OCR functionality.
-
-    Attributes:
-        backend: OCR backend to use - "tesseract", "easyocr", "surya", "paddleocr"
-        language: Language code for OCR (e.g., "en", "de", "zh")
-        enable_table_detection: Enable table detection for Tesseract
-    """
+    """Kreuzberg OCR config."""
 
     backend: str = 'tesseract'
     language: str = 'en'
@@ -140,18 +172,64 @@ class OcrOptions:
 
 
 @dataclass
-class ExtractionOptions:
-    """Combined extraction options for Kreuzberg.
+class PdfOptions:
+    """Kreuzberg PDF-specific config."""
 
-    Attributes:
-        chunking: Chunking options (optional)
-        ocr: OCR options (optional)
-        mime_type: Override MIME type detection
-    """
+    extract_images: bool = False
+    extract_metadata: bool = True
+    enable_hierarchy: bool = False  # Document structure analysis
+
+
+@dataclass
+class LanguageDetectionOptions:
+    """Kreuzberg language detection config."""
+
+    enabled: bool = True
+    min_confidence: float = 0.5
+    detect_multiple: bool = False
+
+
+@dataclass
+class TokenReductionOptions:
+    """Kreuzberg token reduction config for LLM optimization."""
+
+    mode: str | None = None  # 'off', 'light', 'moderate', 'aggressive', 'maximum'
+    preserve_important_words: bool = True
+
+
+@dataclass
+class PageOptions:
+    """Kreuzberg page tracking config."""
+
+    extract_pages: bool = True
+    insert_page_markers: bool = True  # Adds [Page N] markers for source citation
+    marker_format: str | None = None  # Custom format, e.g., "--- Page {page} ---"
+
+
+@dataclass
+class HierarchyOptions:
+    """Kreuzberg document structure detection via font clustering."""
+
+    enabled: bool = False
+    k_clusters: int = 6  # Number of heading levels to detect
+    include_bbox: bool = False  # Include bounding box coordinates
+    ocr_coverage_threshold: float | None = None
+
+
+@dataclass
+class ExtractionOptions:
+    """Combined extraction options for Kreuzberg."""
 
     chunking: ChunkingOptions | None = None
     ocr: OcrOptions | None = None
+    pdf: PdfOptions | None = None
+    language_detection: LanguageDetectionOptions | None = None
+    token_reduction: TokenReductionOptions | None = None
+    pages: PageOptions | None = None
+    hierarchy: HierarchyOptions | None = None
     mime_type: str | None = None
+    use_cache: bool = True
+    enable_quality_processing: bool = True
 
 
 @dataclass
@@ -195,49 +273,92 @@ class ExtractionResult:
 
 
 def _build_extraction_config(options: ExtractionOptions | None = None) -> Any:
-    """Build Kreuzberg ExtractionConfig from our options.
-
-    Args:
-        options: Our extraction options dataclass
-
-    Returns:
-        Kreuzberg ExtractionConfig instance
-    """
-    from kreuzberg import ChunkingConfig, ExtractionConfig
+    """Build Kreuzberg ExtractionConfig from our options."""
+    from kreuzberg import (
+        ChunkingConfig,
+        ExtractionConfig,
+        LanguageDetectionConfig,
+        OcrConfig,
+        PdfConfig,
+        TokenReductionConfig,
+    )
 
     config_kwargs: dict[str, Any] = {}
 
-    if options:
-        # Configure chunking
-        if options.chunking and options.chunking.enabled:
-            chunking_kwargs: dict[str, Any] = {
-                'max_chars': options.chunking.max_chars,
-                'max_overlap': options.chunking.max_overlap,
-            }
-            # Add preset if specified (recursive, semantic, etc.)
-            if options.chunking.preset:
-                chunking_kwargs['preset'] = options.chunking.preset
-            config_kwargs['chunking'] = ChunkingConfig(**chunking_kwargs)
+    if not options:
+        return None
 
-        # Configure OCR
-        if options.ocr:
-            from kreuzberg import OcrConfig
+    if options.use_cache is not None:
+        config_kwargs['use_cache'] = options.use_cache
 
-            ocr_kwargs: dict[str, Any] = {
-                'backend': options.ocr.backend,
-            }
-            if options.ocr.language:
-                ocr_kwargs['language'] = options.ocr.language
+    if options.enable_quality_processing is not None:
+        config_kwargs['enable_quality_processing'] = options.enable_quality_processing
 
-            # Tesseract-specific options
-            if options.ocr.backend == 'tesseract' and options.ocr.enable_table_detection:
-                from kreuzberg import TesseractConfig
+    if options.chunking and options.chunking.enabled:
+        chunking_kwargs: dict[str, Any] = {
+            'max_chars': options.chunking.max_chars,
+            'max_overlap': options.chunking.max_overlap,
+        }
+        if options.chunking.preset:
+            chunking_kwargs['preset'] = options.chunking.preset
+        config_kwargs['chunking'] = ChunkingConfig(**chunking_kwargs)
 
-                ocr_kwargs['tesseract_config'] = TesseractConfig(
-                    enable_table_detection=True,
-                )
+    if options.ocr:
+        ocr_kwargs: dict[str, Any] = {'backend': options.ocr.backend}
+        if options.ocr.language:
+            ocr_kwargs['language'] = options.ocr.language
+        if options.ocr.backend == 'tesseract' and options.ocr.enable_table_detection:
+            from kreuzberg import TesseractConfig
 
-            config_kwargs['ocr'] = OcrConfig(**ocr_kwargs)
+            ocr_kwargs['tesseract_config'] = TesseractConfig(enable_table_detection=True)
+        config_kwargs['ocr'] = OcrConfig(**ocr_kwargs)
+
+    if options.pdf:
+        pdf_kwargs: dict[str, Any] = {
+            'extract_images': options.pdf.extract_images,
+            'extract_metadata': options.pdf.extract_metadata,
+        }
+        if options.pdf.enable_hierarchy:
+            from kreuzberg import HierarchyConfig
+
+            pdf_kwargs['hierarchy'] = HierarchyConfig(enabled=True)
+        config_kwargs['pdf_options'] = PdfConfig(**pdf_kwargs)
+
+    if options.language_detection:
+        config_kwargs['language_detection'] = LanguageDetectionConfig(
+            enabled=options.language_detection.enabled,
+            min_confidence=options.language_detection.min_confidence,
+            detect_multiple=options.language_detection.detect_multiple,
+        )
+
+    if options.token_reduction and options.token_reduction.mode:
+        config_kwargs['token_reduction'] = TokenReductionConfig(
+            mode=options.token_reduction.mode,
+            preserve_important_words=options.token_reduction.preserve_important_words,
+        )
+
+    if options.pages:
+        from kreuzberg import PageConfig
+
+        page_kwargs: dict[str, Any] = {
+            'extract_pages': options.pages.extract_pages,
+            'insert_page_markers': options.pages.insert_page_markers,
+        }
+        if options.pages.marker_format:
+            page_kwargs['marker_format'] = options.pages.marker_format
+        config_kwargs['pages'] = PageConfig(**page_kwargs)
+
+    if options.hierarchy and options.hierarchy.enabled:
+        from kreuzberg import HierarchyConfig
+
+        hierarchy_config = HierarchyConfig(
+            enabled=True,
+            k_clusters=options.hierarchy.k_clusters,
+            include_bbox=options.hierarchy.include_bbox,
+            ocr_coverage_threshold=options.hierarchy.ocr_coverage_threshold,
+        )
+        if 'pdf_options' not in config_kwargs:
+            config_kwargs['pdf_options'] = PdfConfig(hierarchy=hierarchy_config)
 
     return ExtractionConfig(**config_kwargs) if config_kwargs else None
 
@@ -267,13 +388,15 @@ def _convert_result(kreuzberg_result: Any) -> ExtractionResult:
                 end_char = getattr(chunk, 'end_char', None)
                 metadata = getattr(chunk, 'metadata', None)
 
-            chunks.append(TextChunk(
-                content=chunk_content,
-                index=i,
-                start_char=start_char,
-                end_char=end_char,
-                metadata=metadata if isinstance(metadata, dict) else None,
-            ))
+            chunks.append(
+                TextChunk(
+                    content=chunk_content,
+                    index=i,
+                    start_char=start_char,
+                    end_char=end_char,
+                    metadata=metadata if isinstance(metadata, dict) else None,
+                )
+            )
 
     return ExtractionResult(
         content=kreuzberg_result.content,
@@ -306,9 +429,7 @@ def extract_with_kreuzberg_sync(
         Exception: If extraction fails
     """
     if not is_kreuzberg_available():
-        raise ImportError(
-            'kreuzberg is not installed. Install it with: pip install kreuzberg'
-        )
+        raise ImportError('kreuzberg is not installed. Install it with: pip install kreuzberg')
 
     from kreuzberg import extract_file_sync
 
@@ -347,9 +468,7 @@ async def extract_with_kreuzberg(
         Exception: If extraction fails
     """
     if not is_kreuzberg_available():
-        raise ImportError(
-            'kreuzberg is not installed. Install it with: pip install kreuzberg'
-        )
+        raise ImportError('kreuzberg is not installed. Install it with: pip install kreuzberg')
 
     from kreuzberg import extract_file
 
@@ -387,9 +506,7 @@ async def batch_extract_with_kreuzberg(
         Exception: If batch extraction fails
     """
     if not is_kreuzberg_available():
-        raise ImportError(
-            'kreuzberg is not installed. Install it with: pip install kreuzberg'
-        )
+        raise ImportError('kreuzberg is not installed. Install it with: pip install kreuzberg')
 
     from kreuzberg import batch_extract_files
 
@@ -401,6 +518,161 @@ async def batch_extract_with_kreuzberg(
     except Exception as e:
         logger.error(f'Kreuzberg batch extraction failed: {e}')
         raise
+
+
+def create_chunking_options(
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    preset: str | None = 'semantic',
+) -> ChunkingOptions:
+    """Create ChunkingOptions from LightRAG's token-based settings.
+
+    This is a convenience function that converts LightRAG's token-based
+    chunking parameters to Kreuzberg's character-based parameters.
+
+    Args:
+        chunk_token_size: Maximum tokens per chunk (default: 1200)
+        chunk_overlap_token_size: Overlapping tokens between chunks (default: 100)
+        preset: Chunking preset - 'semantic', 'recursive', or None
+
+    Returns:
+        ChunkingOptions configured for one-pass extraction+chunking
+    """
+    max_chars = tokens_to_chars(chunk_token_size)
+    max_overlap = tokens_to_chars(chunk_overlap_token_size)
+
+    return ChunkingOptions(
+        enabled=True,
+        max_chars=max_chars,
+        max_overlap=max_overlap,
+        preset=preset,
+    )
+
+
+def extract_and_chunk_sync(
+    file_path: str | Path,
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    chunking_preset: str | None = 'semantic',
+    ocr_options: OcrOptions | None = None,
+) -> ExtractionResult:
+    """One-pass extraction and chunking from a document file (synchronous).
+
+    This function performs document extraction and semantic chunking in a single
+    pass, preserving document structure for better chunk boundaries. This is more
+    efficient and produces better results than extracting text first and then
+    re-chunking it.
+
+    Args:
+        file_path: Path to the document file
+        chunk_token_size: Maximum tokens per chunk (default: 1200)
+        chunk_overlap_token_size: Overlapping tokens between chunks (default: 100)
+        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
+        ocr_options: Optional OCR configuration for scanned documents/images
+
+    Returns:
+        ExtractionResult with content and chunks
+
+    Raises:
+        ImportError: If kreuzberg is not installed
+        Exception: If extraction fails
+    """
+    chunking_options = create_chunking_options(
+        chunk_token_size=chunk_token_size,
+        chunk_overlap_token_size=chunk_overlap_token_size,
+        preset=chunking_preset,
+    )
+
+    options = ExtractionOptions(
+        chunking=chunking_options,
+        ocr=ocr_options,
+    )
+
+    return extract_with_kreuzberg_sync(file_path, options)
+
+
+async def extract_and_chunk(
+    file_path: str | Path,
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    chunking_preset: str | None = 'semantic',
+    ocr_options: OcrOptions | None = None,
+) -> ExtractionResult:
+    """One-pass extraction and chunking from a document file (async).
+
+    This function performs document extraction and semantic chunking in a single
+    pass, preserving document structure for better chunk boundaries. This is more
+    efficient and produces better results than extracting text first and then
+    re-chunking it.
+
+    Args:
+        file_path: Path to the document file
+        chunk_token_size: Maximum tokens per chunk (default: 1200)
+        chunk_overlap_token_size: Overlapping tokens between chunks (default: 100)
+        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
+        ocr_options: Optional OCR configuration for scanned documents/images
+
+    Returns:
+        ExtractionResult with content and chunks
+
+    Raises:
+        ImportError: If kreuzberg is not installed
+        Exception: If extraction fails
+    """
+    chunking_options = create_chunking_options(
+        chunk_token_size=chunk_token_size,
+        chunk_overlap_token_size=chunk_overlap_token_size,
+        preset=chunking_preset,
+    )
+
+    options = ExtractionOptions(
+        chunking=chunking_options,
+        ocr=ocr_options,
+    )
+
+    return await extract_with_kreuzberg(file_path, options)
+
+
+def chunks_to_lightrag_format(result: ExtractionResult) -> list[dict[str, Any]]:
+    """Convert ExtractionResult chunks to LightRAG's expected chunk format.
+
+    This converts Kreuzberg's TextChunk objects to the dictionary format
+    expected by LightRAG's document processing pipeline.
+
+    Args:
+        result: ExtractionResult from extraction (must have chunks)
+
+    Returns:
+        List of chunk dictionaries compatible with LightRAG's chunking_func output
+    """
+    if not result.chunks:
+        # Fallback: return whole content as single chunk
+        return [
+            {
+                'tokens': len(result.content) // 4,
+                'content': result.content.strip(),
+                'chunk_order_index': 0,
+                'char_start': 0,
+                'char_end': len(result.content),
+            }
+        ]
+
+    chunks = []
+    for chunk in result.chunks:
+        # Estimate token count (~4 chars per token)
+        tokens = len(chunk.content) // 4
+
+        chunks.append(
+            {
+                'tokens': tokens,
+                'content': chunk.content.strip(),
+                'chunk_order_index': chunk.index,
+                'char_start': chunk.start_char if chunk.start_char is not None else 0,
+                'char_end': chunk.end_char if chunk.end_char is not None else len(chunk.content),
+            }
+        )
+
+    return chunks
 
 
 def get_supported_formats() -> list[str]:

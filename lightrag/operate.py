@@ -243,11 +243,11 @@ def create_chunker(
         Note: tokenizer, split_by_character, and split_by_character_only are ignored
         since Kreuzberg handles tokenization and boundary detection internally.
         """
-        # Mark unused parameters (Kreuzberg handles these internally)
+        from lightrag.document.kreuzberg_adapter import tokens_to_chars
+
         _ = tokenizer, split_by_character, split_by_character_only
-        # Convert token sizes to character sizes (~4 chars per token)
-        max_chars = chunk_token_size * 4
-        max_overlap = chunk_overlap_token_size * 4
+        max_chars = tokens_to_chars(chunk_token_size)
+        max_overlap = tokens_to_chars(chunk_overlap_token_size)
 
         return chunking_by_semantic(
             content=content,
