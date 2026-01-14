@@ -941,12 +941,14 @@ def create_app(args):
     swagger_static_dir = Path(__file__).parent / 'static' / 'swagger-ui'
     logger.info(f'Swagger static dir: {swagger_static_dir.resolve()}, exists: {swagger_static_dir.exists()}')
     if swagger_static_dir.exists():
+        # Mount at root /static path first, then swagger-ui subpath
+        static_parent = Path(__file__).parent / 'static'
         app.mount(
-            '/static/swagger-ui',
-            StaticFiles(directory=str(swagger_static_dir.resolve())),
-            name='swagger-ui-static',
+            '/static',
+            StaticFiles(directory=str(static_parent.resolve())),
+            name='static-files',
         )
-        logger.info('Swagger UI static files mounted at /static/swagger-ui')
+        logger.info(f'Static files mounted at /static -> {static_parent.resolve()}')
 
     # Conditionally mount WebUI only if assets exist
     if webui_assets_exist:
