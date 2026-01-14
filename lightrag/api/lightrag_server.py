@@ -939,12 +939,14 @@ def create_app(args):
 
     # Mount Swagger UI static files for offline support
     swagger_static_dir = Path(__file__).parent / 'static' / 'swagger-ui'
+    logger.info(f'Swagger static dir: {swagger_static_dir.resolve()}, exists: {swagger_static_dir.exists()}')
     if swagger_static_dir.exists():
         app.mount(
             '/static/swagger-ui',
             StaticFiles(directory=str(swagger_static_dir.resolve())),
             name='swagger-ui-static',
         )
+        logger.info('Swagger UI static files mounted at /static/swagger-ui')
 
     # Conditionally mount WebUI only if assets exist
     if webui_assets_exist:
