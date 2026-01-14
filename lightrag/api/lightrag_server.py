@@ -942,7 +942,7 @@ def create_app(args):
     if swagger_static_dir.exists():
         app.mount(
             '/static/swagger-ui',
-            StaticFiles(directory=swagger_static_dir),
+            StaticFiles(directory=str(swagger_static_dir.resolve())),
             name='swagger-ui-static',
         )
 
