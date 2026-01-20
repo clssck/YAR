@@ -937,18 +937,27 @@ def create_app(args):
 
             return response
 
-    # Mount Swagger UI static files for offline support
+    # Serve Swagger UI static files with explicit routes (more reliable than StaticFiles mount)
     swagger_static_dir = Path(__file__).parent / 'static' / 'swagger-ui'
     logger.info(f'Swagger static dir: {swagger_static_dir.resolve()}, exists: {swagger_static_dir.exists()}')
     if swagger_static_dir.exists():
-        # Mount at root /static path first, then swagger-ui subpath
-        static_parent = Path(__file__).parent / 'static'
-        app.mount(
-            '/static',
-            StaticFiles(directory=str(static_parent.resolve())),
-            name='static-files',
-        )
-        logger.info(f'Static files mounted at /static -> {static_parent.resolve()}')
+        from fastapi.responses import FileResponse
+
+        @app.get('/static/swagger-ui/{file_path:path}')
+        async def serve_swagger_static(file_path: str):
+            """Serve swagger-ui static files"""
+            file = swagger_static_dir / file_path
+            if file.exists() and file.is_file():
+                suffix = file.suffix.lower()
+                content_types = {
+                    '.js': 'application/javascript',
+                    '.css': 'text/css',
+                    '.png': 'image/png',
+                }
+                return FileResponse(file, media_type=content_types.get(suffix, 'application/octet-stream'))
+            raise HTTPException(status_code=404, detail='Swagger UI asset not found')
+
+        logger.info('Swagger UI routes registered at /static/swagger-ui/')
 
     # Conditionally mount WebUI only if assets exist
     if webui_assets_exist:

@@ -1,6 +1,7 @@
 import re
 from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from lightrag import LightRAG
@@ -26,6 +27,21 @@ def get_order_clause(ddl: str) -> str:
     elif 'id' in ddl_lower:
         return 'ORDER BY id ASC'
     return ''
+
+
+def convert_numpy_to_serializable(obj: Any) -> Any:
+    """Convert numpy arrays and other non-serializable types to JSON-serializable form.
+
+    This is needed because asyncpg's pgvector codec deserializes VECTOR columns
+    to numpy.ndarray objects, which Pydantic/FastAPI cannot serialize to JSON.
+    """
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {k: convert_numpy_to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [convert_numpy_to_serializable(item) for item in obj]
+    return obj
 
 
 def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
@@ -98,8 +114,11 @@ def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
         sql = f'SELECT * FROM {table_name} WHERE workspace = $1 {order_clause} LIMIT $2 OFFSET $3'
         rows = await db.query(sql, [target_workspace, page_size, offset], multirows=True)
 
+        # Convert numpy arrays to lists for JSON serialization (pgvector returns numpy.ndarray)
+        serializable_rows = [convert_numpy_to_serializable(row) for row in (rows or [])]
+
         return {
-            'data': rows or [],
+            'data': serializable_rows,
             'total': total,
             'page': page,
             'page_size': page_size,
