@@ -6,6 +6,7 @@ import {
   FileIcon,
   FolderIcon,
   HomeIcon,
+  InfoIcon,
   RefreshCwIcon,
   Trash2Icon,
   UploadIcon,
@@ -16,6 +17,7 @@ import { toast } from 'sonner'
 import type { S3ObjectInfo } from '@/api/lightrag'
 import { s3Delete, s3Download, s3List, s3Upload } from '@/api/lightrag'
 import FileViewer from '@/components/storage/FileViewer'
+import FolderDetails from '@/components/storage/FolderDetails'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,6 +94,9 @@ export default function S3Browser() {
 
   // File viewer state
   const [viewTarget, setViewTarget] = useState<S3ObjectInfo | null>(null)
+
+  // Folder details state
+  const [viewFolder, setViewFolder] = useState<string | null>(null)
 
   // Fetch objects at current prefix
   const {
@@ -176,6 +181,12 @@ export default function S3Browser() {
   // Handle view click
   const handleView = useCallback((obj: S3ObjectInfo) => {
     setViewTarget(obj)
+  }, [])
+
+  // Handle folder info click
+  const handleFolderInfo = useCallback((folder: string, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent navigation
+    setViewFolder(folder)
   }, [])
 
   // Handle delete click
@@ -305,7 +316,17 @@ export default function S3Browser() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">-</TableCell>
                     <TableCell className="text-muted-foreground">-</TableCell>
-                    <TableCell></TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => handleFolderInfo(folder, e)}
+                        title={t('storagePanel.actions.info')}
+                      >
+                        <InfoIcon className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
 
@@ -406,6 +427,14 @@ export default function S3Browser() {
         fileKey={viewTarget?.key ?? null}
         fileName={viewTarget ? getDisplayName(viewTarget.key, prefix) : ''}
         fileSize={viewTarget?.size ?? 0}
+      />
+
+      {/* Folder details */}
+      <FolderDetails
+        open={!!viewFolder}
+        onOpenChange={(open) => !open && setViewFolder(null)}
+        folderPath={viewFolder}
+        folderName={viewFolder ? getDisplayName(viewFolder, prefix) : ''}
       />
     </div>
   )

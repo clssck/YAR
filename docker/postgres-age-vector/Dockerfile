@@ -1,5 +1,5 @@
 # Start from pgvector image (has vector extension pre-built correctly)
-FROM pgvector/pgvector:pg17
+FROM pgvector/pgvector:0.8.1-pg17-trixie
 
 # Install build dependencies for AGE
 RUN apt-get update && apt-get install -y \

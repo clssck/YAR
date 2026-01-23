@@ -267,17 +267,24 @@ def create_app(args):
     # Initialize document manager with workspace support for data isolation
     doc_manager = DocumentManager(args.input_dir, workspace=args.workspace)
 
-    # Initialize S3 client if configured (for upload routes)
-    s3_client: S3Client | None = None
+    # Initialize S3 client (mandatory for document storage)
     s3_endpoint_url = os.getenv('S3_ENDPOINT_URL', '')
-    if s3_endpoint_url:
-        try:
-            s3_config = S3Config(endpoint_url=s3_endpoint_url)
-            s3_client = S3Client(s3_config)
-            logger.info(f'S3 client configured for endpoint: {s3_endpoint_url}')
-        except ValueError as e:
-            logger.warning(f'S3 client not initialized: {e}')
-            s3_client = None
+    if not s3_endpoint_url:
+        raise RuntimeError(
+            'S3 storage is required. Set S3_ENDPOINT_URL, S3_ACCESS_KEY_ID, '
+            'S3_SECRET_ACCESS_KEY, and S3_BUCKET_NAME environment variables. '
+            'Use RustFS for local development: docker run -p 9000:9000 rustfs/rustfs'
+        )
+
+    try:
+        s3_config = S3Config(endpoint_url=s3_endpoint_url)
+        s3_client = S3Client(s3_config)
+        logger.info(f'S3 client configured for endpoint: {s3_endpoint_url}')
+    except ValueError as e:
+        raise RuntimeError(
+            f'S3 configuration error: {e}. Ensure S3_ACCESS_KEY_ID and '
+            'S3_SECRET_ACCESS_KEY are set correctly.'
+        ) from e
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -660,6 +667,7 @@ def create_app(args):
                 'entity_types': args.entity_types,
             },
             entity_resolution_config=create_entity_resolution_config(args),
+            auto_connect_orphans=args.auto_connect_orphans,
         )
     except Exception as e:
         logger.error(f'Failed to initialize LightRAG: {e}')
@@ -671,6 +679,7 @@ def create_app(args):
             rag,
             doc_manager,
             api_key,
+            s3_client,  # Enable S3 integration for document uploads
         )
     )
     app.include_router(create_query_routes(rag, api_key, args.top_k, s3_client))
@@ -688,14 +697,11 @@ def create_app(args):
     if all_postgres_storages:
         app.include_router(create_table_routes(rag, api_key), prefix='/tables')
 
-    # Register upload routes and S3 browser if S3 is configured
-    if s3_client is not None:
-        app.include_router(create_upload_routes(rag, s3_client, api_key))
-        logger.info('S3 upload routes registered at /upload')
-        app.include_router(create_s3_routes(s3_client, api_key), prefix='/s3')
-        logger.info('S3 browser routes registered at /s3')
-    else:
-        logger.info('S3 not configured - upload and browser routes disabled')
+    # Register upload routes and S3 browser (S3 is mandatory)
+    app.include_router(create_upload_routes(rag, s3_client, api_key))
+    logger.info('S3 upload routes registered at /upload')
+    app.include_router(create_s3_routes(s3_client, api_key), prefix='/s3')
+    logger.info('S3 browser routes registered at /s3')
 
     # Register BM25 search routes if PostgreSQL storage is configured
     # Full-text search requires PostgreSQLDB for ts_rank queries

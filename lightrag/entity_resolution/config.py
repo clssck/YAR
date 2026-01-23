@@ -38,7 +38,8 @@ class EntityResolutionConfig:
 
     # Minimum confidence for LLM to auto-apply an alias
     # Below this: alias is suggested but not auto-applied
-    min_confidence: float = 0.85
+    # Lowered from 0.85 to catch more abbreviation pairs (FDA ↔ Food and Drug Administration)
+    min_confidence: float = 0.80
 
     # Lower threshold for "soft" matches - logged for review but not auto-applied
     # Matches between soft_match_threshold and min_confidence are logged as
@@ -50,6 +51,8 @@ class EntityResolutionConfig:
     # When True: Matching entities are merged automatically
     # When False: Aliases are stored but require manual verification
     auto_apply: bool = True
+
+    # Note: All merges are always audited in the alias table for debugging/tracking
 
     def __post_init__(self) -> None:
         """Validate configuration values."""

@@ -1257,6 +1257,15 @@ export type S3DeleteResponse = {
   status: string
 }
 
+export type S3FolderStatsResponse = {
+  prefix: string
+  total_size: number
+  object_count: number
+  folder_count: number
+  last_modified: string | null
+  preview: S3ObjectInfo[]
+}
+
 /**
  * List objects and folders under a prefix in the S3 bucket.
  * @param prefix - S3 prefix to list (e.g., "staging/default/")
@@ -1307,5 +1316,21 @@ export const s3Upload = async (prefix: string, file: File): Promise<S3UploadResp
  */
 export const s3Delete = async (key: string): Promise<S3DeleteResponse> => {
   const response = await axiosInstance.delete(`/s3/object/${encodeURIComponent(key)}`)
+  return response.data
+}
+
+/**
+ * Get statistics for an S3 folder (prefix).
+ * @param prefix - Folder prefix path (e.g., "default/doc_123/")
+ * @param previewLimit - Maximum number of objects in preview (default: 10)
+ * @returns Folder statistics including total size, object count, and preview
+ */
+export const s3FolderStats = async (
+  prefix: string,
+  previewLimit = 10
+): Promise<S3FolderStatsResponse> => {
+  const response = await axiosInstance.get(`/s3/folder-stats/${encodeURIComponent(prefix)}`, {
+    params: { preview_limit: previewLimit },
+  })
   return response.data
 }

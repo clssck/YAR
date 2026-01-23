@@ -130,7 +130,6 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
       try {
         if (typeof sigma.setGraph === 'function') {
           sigma.setGraph(sigmaGraph as unknown as AbstractGraph<NodeType, EdgeType>)
-          console.log('Binding graph to sigma instance')
         } else {
           // Type assertion for backward compatibility with older sigma versions
           ;(sigma as unknown as { graph: typeof sigmaGraph }).graph = sigmaGraph
@@ -141,7 +140,6 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
       }
 
       assignLayout()
-      console.log('Initial layout applied to graph')
     }
   }, [sigma, sigmaGraph, assignLayout])
 
@@ -152,7 +150,6 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
     if (sigma) {
       const currentInstance = useGraphStore.getState().sigmaInstance
       if (!currentInstance) {
-        console.log('Setting sigma instance from GraphControl')
         // Cast to generic Sigma type for store compatibility
         // The specific NodeType/EdgeType typing is preserved in the component context
         useGraphStore.getState().setSigmaInstance(sigma as unknown as Sigma)
@@ -221,11 +218,7 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
     registerEvents(events as Parameters<typeof registerEvents>[0])
 
     return () => {
-      try {
-        console.log('Cleaning up graph event listeners')
-      } catch (error) {
-        console.warn('Error cleaning up graph event listeners:', error)
-      }
+      // Cleanup function for graph event listeners
     }
   }, [registerEvents, enableEdgeEvents, sigma])
 

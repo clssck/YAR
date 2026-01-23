@@ -91,7 +91,6 @@ const WorkerLayoutControl = ({
   const handleClick = useCallback(() => {
     if (isRunning) {
       // Stop the animation
-      console.log('Stopping layout animation')
       if (animationTimerRef.current) {
         window.clearInterval(animationTimerRef.current)
         animationTimerRef.current = null
@@ -101,10 +100,8 @@ const WorkerLayoutControl = ({
       try {
         if (typeof layout.kill === 'function') {
           layout.kill()
-          console.log('Layout algorithm killed')
         } else if (typeof layout.stop === 'function') {
           layout.stop()
-          console.log('Layout algorithm stopped')
         }
       } catch (error) {
         console.error('Error stopping layout algorithm:', error)
@@ -123,8 +120,6 @@ const WorkerLayoutControl = ({
       setIterationCount(0)
     } else {
       // Start the animation
-      console.log('Starting layout animation')
-
       // Reset iteration count
       setIterationCount(0)
 
@@ -141,7 +136,6 @@ const WorkerLayoutControl = ({
       // Set a timeout to automatically stop the animation after 3 seconds
       setTimeout(() => {
         if (animationTimerRef.current) {
-          console.log('Auto-stopping layout animation after 3 seconds')
           window.clearInterval(animationTimerRef.current)
           animationTimerRef.current = null
           setIsRunning(false)
@@ -177,15 +171,12 @@ const WorkerLayoutControl = ({
    */
   useEffect(() => {
     if (!sigma) {
-      console.log('No sigma instance available')
       return
     }
 
     // Auto-run if specified
     let timeout: number | null = null
     if (autoRunFor !== undefined && autoRunFor > -1 && sigma.getGraph().order > 0) {
-      console.log('Auto-starting layout animation')
-
       // Initial position update
       updatePositions()
 
@@ -199,7 +190,6 @@ const WorkerLayoutControl = ({
       // Set a timeout to stop it if autoRunFor > 0
       if (autoRunFor > 0) {
         timeout = window.setTimeout(() => {
-          console.log('Auto-stopping layout animation after timeout')
           if (animationTimerRef.current) {
             window.clearInterval(animationTimerRef.current)
             animationTimerRef.current = null
@@ -330,7 +320,6 @@ const LayoutsControl = () => {
 
   const runLayout = useCallback(
     (newLayout: LayoutName) => {
-      console.debug('Running layout:', newLayout)
       const { positions } = layouts[newLayout].layout
 
       try {
@@ -341,7 +330,6 @@ const LayoutsControl = () => {
         }
 
         const pos = positions()
-        console.log('Positions calculated, animating nodes')
         animateNodes(graph, pos, { duration: 400 })
         setLayout(newLayout)
       } catch (error) {

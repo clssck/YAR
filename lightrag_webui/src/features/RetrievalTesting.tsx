@@ -844,17 +844,10 @@ export default function RetrievalTesting() {
 
   const clearMessages = useCallback(() => {
     if (messages.length === 0) return
-    // Show confirmation toast before clearing
-    toast(t('retrievePanel.retrieval.clearConfirm', 'Clear chat history?'), {
-      action: {
-        label: t('retrievePanel.retrieval.clearConfirmYes', 'Clear'),
-        onClick: () => {
-          setMessages([])
-          useSettingsStore.getState().setRetrievalHistory([])
-          toast.success(t('retrievePanel.retrieval.cleared', 'Chat history cleared'))
-        },
-      },
-    })
+    // Clear immediately - no confirmation needed for recoverable action
+    setMessages([])
+    useSettingsStore.getState().setRetrievalHistory([])
+    toast.success(t('retrievePanel.retrieval.cleared', 'Chat history cleared'))
   }, [messages.length, t])
 
   // Export chat history

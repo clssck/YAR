@@ -646,12 +646,7 @@ const CodeHighlight = memo(
                 rawContent.startsWith('erDiagram'))
 
             if (!looksPotentiallyComplete) {
-              console.log(
-                'Mermaid content might be incomplete, skipping render attempt:',
-                rawContent
-              )
-              // Optionally keep loading indicator or show a message
-              // container.innerHTML = '<p class="text-sm text-muted-foreground">Waiting for complete diagram...</p>';
+              // Mermaid content might be incomplete, skipping render attempt
               return
             }
 
@@ -689,7 +684,7 @@ const CodeHighlight = memo(
                     }
                   }
                 } else if (mermaidRef.current !== container) {
-                  console.log('Mermaid container changed before rendering completed.')
+                  // Container changed before rendering completed - skip applying result
                 }
               })
               .catch((error) => {

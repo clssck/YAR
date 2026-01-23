@@ -36,7 +36,7 @@ dependencies = [
     "tenacity",
     "tiktoken",
     "xlsxwriter>=3.1.0",
-    "kreuzberg>=4.0.0rc10",
+    "kreuzberg>=4.0.8",
     "pypdfium2>=5.0.0",  # PDF rendering library for Kreuzberg (pdfium bindings)
 ]
 

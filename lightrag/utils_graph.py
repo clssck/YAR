@@ -1068,7 +1068,7 @@ async def _merge_entities_impl(
     """
     # Default merge strategy for entities
     default_entity_merge_strategy = {
-        'description': 'concatenate',
+        'description': 'join_unique',  # Use join_unique to avoid duplicate descriptions
         'entity_type': 'keep_first',
         'source_id': 'join_unique',
         'file_path': 'join_unique',
@@ -1397,6 +1397,7 @@ async def amerge_entities(
     Merges multiple source entities into a target entity, handling all relationships,
     and updating both the knowledge graph and vector database.
     Also merges chunk tracking information from entity_chunks_storage and relation_chunks_storage.
+    All merges are audited in the alias table for debugging/tracking.
 
     Args:
         chunk_entity_relation_graph: Graph storage instance
@@ -1423,7 +1424,7 @@ async def amerge_entities(
     namespace = f'{workspace}:GraphDB' if workspace else 'GraphDB'
     async with get_storage_keyed_lock(lock_keys, namespace=namespace, enable_logging=False):
         try:
-            return await _merge_entities_impl(
+            result = await _merge_entities_impl(
                 chunk_entity_relation_graph,
                 entities_vdb,
                 relationships_vdb,
@@ -1434,9 +1435,63 @@ async def amerge_entities(
                 entity_chunks_storage=entity_chunks_storage,
                 relation_chunks_storage=relation_chunks_storage,
             )
+
+            # Always store audit trail entries for debugging/tracking
+            await _store_merge_audit_entries(
+                entities_vdb, source_entities, target_entity, workspace
+            )
+
+            return result
         except Exception as e:
             logger.error(f'Error merging entities: {e}')
             raise
+
+
+async def _store_merge_audit_entries(
+    entities_vdb,
+    source_entities: list[str],
+    target_entity: str,
+    workspace: str,
+) -> None:
+    """Store audit entries for entity merges in the alias table.
+
+    Args:
+        entities_vdb: Vector database storage (used to get DB connection)
+        source_entities: List of source entity names that were merged
+        target_entity: Name of the target entity they were merged into
+        workspace: Workspace for isolation
+    """
+    from lightrag.entity_resolution import store_alias
+
+    # Try to get database connection
+    db = None
+    try:
+        _db_required = getattr(entities_vdb, '_db_required', None)
+        if _db_required is not None:
+            db = _db_required()
+    except (RuntimeError, AttributeError):
+        return  # Not PostgreSQL or not initialized - skip audit
+
+    if db is None:
+        return
+
+    for source in source_entities:
+        # Skip if source is the same as target (self-merge)
+        if source.lower().strip() == target_entity.lower().strip():
+            continue
+        try:
+            await store_alias(
+                alias=source,
+                canonical=target_entity,
+                method='merge',  # Distinguishes from 'llm' or 'manual'
+                confidence=1.0,  # Manual/API merges have full confidence
+                db=db,
+                workspace=workspace,
+                llm_reasoning='Merged via API or manual operation',
+            )
+            logger.debug(f'[{workspace}] Audit: stored merge {source} → {target_entity}')
+        except Exception as e:
+            logger.debug(f'[{workspace}] Failed to store merge audit for {source}: {e}')
 
 
 def _merge_attributes(

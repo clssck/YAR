@@ -152,6 +152,188 @@ if KREUZBERG_AVAILABLE:
     _setup_pdfium_for_kreuzberg()
 
 
+def _extract_ppsx_from_zip(file_path: str | Path) -> str:
+    """Extract text from PPSX using direct ZIP extraction.
+
+    PPSX files are structurally identical to PPTX (OpenXML package),
+    but python-pptx rejects them due to content-type validation.
+    This function extracts text directly from the slide XML files.
+
+    Args:
+        file_path: Path to the PPSX file
+
+    Returns:
+        Extracted text content
+    """
+    import re
+    import zipfile
+
+    all_text = []
+
+    with zipfile.ZipFile(str(file_path), 'r') as zf:
+        # Find all slide XML files
+        slide_files = sorted(
+            [n for n in zf.namelist() if re.match(r'ppt/slides/slide\d+\.xml', n)],
+            key=lambda x: int(re.search(r'slide(\d+)', x).group(1)),  # type: ignore[union-attr]
+        )
+
+        for slide_num, slide_file in enumerate(slide_files, 1):
+            slide_texts = [f'[Slide {slide_num}]']
+
+            content = zf.read(slide_file).decode('utf-8')
+            # Extract all <a:t> elements (text runs in DrawingML)
+            texts = re.findall(r'<a:t[^>]*>([^<]*)</a:t>', content)
+            for text in texts:
+                text = text.strip()
+                if text:
+                    slide_texts.append(text)
+
+            if len(slide_texts) > 1:
+                all_text.extend(slide_texts)
+                all_text.append('')
+
+    return '\n'.join(all_text)
+
+
+def _extract_ppsx_bytes_from_zip(data: bytes) -> str:
+    """Extract text from PPSX bytes using direct ZIP extraction.
+
+    Args:
+        data: PPSX file content as bytes
+
+    Returns:
+        Extracted text content
+    """
+    import io
+    import re
+    import zipfile
+
+    all_text = []
+
+    with zipfile.ZipFile(io.BytesIO(data), 'r') as zf:
+        slide_files = sorted(
+            [n for n in zf.namelist() if re.match(r'ppt/slides/slide\d+\.xml', n)],
+            key=lambda x: int(re.search(r'slide(\d+)', x).group(1)),  # type: ignore[union-attr]
+        )
+
+        for slide_num, slide_file in enumerate(slide_files, 1):
+            slide_texts = [f'[Slide {slide_num}]']
+
+            content = zf.read(slide_file).decode('utf-8')
+            texts = re.findall(r'<a:t[^>]*>([^<]*)</a:t>', content)
+            for text in texts:
+                text = text.strip()
+                if text:
+                    slide_texts.append(text)
+
+            if len(slide_texts) > 1:
+                all_text.extend(slide_texts)
+                all_text.append('')
+
+    return '\n'.join(all_text)
+
+
+def _extract_pptx_with_python_pptx(file_path: str | Path) -> str:
+    """Fallback PPTX extraction using python-pptx.
+
+    Used when Kreuzberg's native PPTX parser fails (e.g., on shapes without txBody).
+    python-pptx handles missing text gracefully with hasattr checks.
+
+    Args:
+        file_path: Path to the PPTX file
+
+    Returns:
+        Extracted text content
+    """
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    def extract_text_from_shape(shape: Any) -> list[str]:
+        """Recursively extract text from a shape, handling groups."""
+        texts = []
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            for child_shape in shape.shapes:
+                texts.extend(extract_text_from_shape(child_shape))
+        elif hasattr(shape, 'text') and shape.text:
+            texts.append(shape.text.strip())
+        # Also check for tables - must verify shape actually has a table
+        if shape.has_table:
+            try:
+                for row in shape.table.rows:
+                    row_texts = []
+                    for cell in row.cells:
+                        if cell.text:
+                            row_texts.append(cell.text.strip())
+                    if row_texts:
+                        texts.append(' | '.join(row_texts))
+            except Exception:
+                pass  # Shape reports has_table but table access fails
+        return texts
+
+    prs = Presentation(str(file_path))
+    all_text = []
+
+    for slide_num, slide in enumerate(prs.slides, 1):
+        slide_texts = [f'[Slide {slide_num}]']
+        for shape in slide.shapes:
+            slide_texts.extend(extract_text_from_shape(shape))
+        if len(slide_texts) > 1:  # More than just the slide marker
+            all_text.extend(slide_texts)
+            all_text.append('')  # Blank line between slides
+
+    return '\n'.join(all_text)
+
+
+def _extract_pptx_bytes_with_python_pptx(data: bytes) -> str:
+    """Fallback PPTX extraction from bytes using python-pptx.
+
+    Args:
+        data: PPTX file content as bytes
+
+    Returns:
+        Extracted text content
+    """
+    import io
+
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    def extract_text_from_shape(shape: Any) -> list[str]:
+        """Recursively extract text from a shape, handling groups."""
+        texts = []
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            for child_shape in shape.shapes:
+                texts.extend(extract_text_from_shape(child_shape))
+        elif hasattr(shape, 'text') and shape.text:
+            texts.append(shape.text.strip())
+        # Also check for tables - must verify shape actually has a table
+        if shape.has_table:
+            try:
+                for row in shape.table.rows:
+                    row_texts = []
+                    for cell in row.cells:
+                        if cell.text:
+                            row_texts.append(cell.text.strip())
+                    if row_texts:
+                        texts.append(' | '.join(row_texts))
+            except Exception:
+                pass  # Shape reports has_table but table access fails
+        return texts
+
+    prs = Presentation(io.BytesIO(data))
+    all_text = []
+
+    for slide_num, slide in enumerate(prs.slides, 1):
+        slide_texts = [f'[Slide {slide_num}]']
+        for shape in slide.shapes:
+            slide_texts.extend(extract_text_from_shape(shape))
+        if len(slide_texts) > 1:  # More than just the slide marker
+            all_text.extend(slide_texts)
+            all_text.append('')  # Blank line between slides
+
+    return '\n'.join(all_text)
+
+
 @dataclass
 class ChunkingOptions:
     """Kreuzberg chunking config."""
@@ -230,6 +412,7 @@ class ExtractionOptions:
     mime_type: str | None = None
     use_cache: bool = True
     enable_quality_processing: bool = True
+    force_ocr: bool = False  # Force OCR even for text-based documents (fallback for PPTX parsing failures)
 
 
 @dataclass
@@ -293,6 +476,9 @@ def _build_extraction_config(options: ExtractionOptions | None = None) -> Any:
 
     if options.enable_quality_processing is not None:
         config_kwargs['enable_quality_processing'] = options.enable_quality_processing
+
+    if options.force_ocr:
+        config_kwargs['force_ocr'] = True
 
     if options.chunking and options.chunking.enabled:
         chunking_kwargs: dict[str, Any] = {
@@ -435,14 +621,43 @@ def extract_with_kreuzberg_sync(
 
     config = _build_extraction_config(options)
 
+    file_str = str(file_path).lower()
+    is_pptx_like = file_str.endswith(('.pptx', '.ppt', '.ppsx'))
+
+    # PPSX uses PPTX MIME override - kreuzberg handles it if we lie about the MIME type
+    effective_mime = options.mime_type if options else None
+    if file_str.endswith('.ppsx') and not effective_mime:
+        effective_mime = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        logger.debug('PPSX detected, using PPTX MIME type override for kreuzberg')
+
     try:
         result = extract_file_sync(
             file_path,
-            mime_type=options.mime_type if options else None,
+            mime_type=effective_mime,
             config=config,
         )
         return _convert_result(result)
     except Exception as e:
+        # Kreuzberg PPTX parser fails on shapes without txBody (pictures, SmartArt, etc.)
+        error_msg = str(e)
+        if 'No txBody found' in error_msg and is_pptx_like:
+            # For PPSX, use ZIP extraction (python-pptx also rejects PPSX)
+            if file_str.endswith('.ppsx'):
+                logger.warning(
+                    f'Kreuzberg PPSX extraction failed ({error_msg}), using ZIP extraction fallback'
+                )
+                content = _extract_ppsx_from_zip(file_path)
+                return ExtractionResult(
+                    content=content,
+                    mime_type='application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+                )
+            # For PPTX, use python-pptx
+            logger.warning(
+                f'Kreuzberg PPTX extraction failed ({error_msg}), using python-pptx fallback'
+            )
+            content = _extract_pptx_with_python_pptx(file_path)
+            return ExtractionResult(content=content, mime_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
+
         logger.error(f'Kreuzberg extraction failed for {file_path}: {e}')
         raise
 
@@ -474,15 +689,160 @@ async def extract_with_kreuzberg(
 
     config = _build_extraction_config(options)
 
+    file_str = str(file_path).lower()
+    is_pptx_like = file_str.endswith(('.pptx', '.ppt', '.ppsx'))
+
+    # PPSX uses PPTX MIME override - kreuzberg handles it if we lie about the MIME type
+    effective_mime = options.mime_type if options else None
+    if file_str.endswith('.ppsx') and not effective_mime:
+        effective_mime = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        logger.debug('PPSX detected, using PPTX MIME type override for kreuzberg')
+
     try:
         result = await extract_file(
             file_path,
-            mime_type=options.mime_type if options else None,
+            mime_type=effective_mime,
             config=config,
         )
         return _convert_result(result)
     except Exception as e:
+        # Kreuzberg PPTX parser fails on shapes without txBody (pictures, SmartArt, etc.)
+        error_msg = str(e)
+        if 'No txBody found' in error_msg and is_pptx_like:
+            # For PPSX, use ZIP extraction (python-pptx also rejects PPSX)
+            if file_str.endswith('.ppsx'):
+                logger.warning(
+                    f'Kreuzberg PPSX extraction failed ({error_msg}), using ZIP extraction fallback'
+                )
+                content = _extract_ppsx_from_zip(file_path)
+                return ExtractionResult(
+                    content=content,
+                    mime_type='application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+                )
+            # For PPTX, use python-pptx
+            logger.warning(
+                f'Kreuzberg PPTX extraction failed ({error_msg}), using python-pptx fallback'
+            )
+            content = _extract_pptx_with_python_pptx(file_path)
+            return ExtractionResult(content=content, mime_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
+
         logger.error(f'Kreuzberg extraction failed for {file_path}: {e}')
+        raise
+
+
+def extract_bytes_with_kreuzberg_sync(
+    data: bytes,
+    mime_type: str,
+    options: ExtractionOptions | None = None,
+) -> ExtractionResult:
+    """Extract text from bytes using Kreuzberg (synchronous).
+
+    This function processes document data directly from memory without
+    requiring a file on disk. Useful for S3/cloud storage workflows.
+
+    Args:
+        data: Document content as bytes
+        mime_type: MIME type of the data (e.g., 'application/pdf')
+        options: Extraction options (chunking, OCR, etc.)
+
+    Returns:
+        ExtractionResult with content and optional chunks
+
+    Raises:
+        ImportError: If kreuzberg is not installed
+        Exception: If extraction fails
+    """
+    if not is_kreuzberg_available():
+        raise ImportError('kreuzberg is not installed. Install it with: pip install kreuzberg')
+
+    from kreuzberg import extract_bytes_sync
+
+    config = _build_extraction_config(options)
+    is_pptx_like = 'presentationml' in mime_type
+
+    # PPSX (slideshow) not supported by kreuzberg or python-pptx, use ZIP extraction
+    if 'slideshow' in mime_type:
+        logger.info('PPSX MIME type detected, using ZIP extraction')
+        content = _extract_ppsx_bytes_from_zip(data)
+        return ExtractionResult(content=content, mime_type=mime_type)
+
+    try:
+        result = extract_bytes_sync(
+            data,
+            mime_type,
+            config=config,
+        )
+        return _convert_result(result)
+    except Exception as e:
+        # Kreuzberg PPTX parser fails on shapes without txBody (pictures, SmartArt, etc.)
+        # Fallback: use python-pptx which handles missing text gracefully
+        error_msg = str(e)
+        if 'No txBody found' in error_msg and is_pptx_like:
+            logger.warning(
+                f'Kreuzberg PPTX extraction failed ({error_msg}), using python-pptx fallback'
+            )
+            content = _extract_pptx_bytes_with_python_pptx(data)
+            return ExtractionResult(content=content, mime_type=mime_type)
+
+        logger.error(f'Kreuzberg bytes extraction failed for {mime_type}: {e}')
+        raise
+
+
+async def extract_bytes_with_kreuzberg(
+    data: bytes,
+    mime_type: str,
+    options: ExtractionOptions | None = None,
+) -> ExtractionResult:
+    """Extract text from bytes using Kreuzberg (async).
+
+    Async version that processes document data directly from memory
+    without requiring a file on disk. Useful for S3/cloud storage workflows.
+
+    Args:
+        data: Document content as bytes
+        mime_type: MIME type of the data (e.g., 'application/pdf')
+        options: Extraction options (chunking, OCR, etc.)
+
+    Returns:
+        ExtractionResult with content and optional chunks
+
+    Raises:
+        ImportError: If kreuzberg is not installed
+        Exception: If extraction fails
+    """
+    if not is_kreuzberg_available():
+        raise ImportError('kreuzberg is not installed. Install it with: pip install kreuzberg')
+
+    from kreuzberg import extract_bytes
+
+    config = _build_extraction_config(options)
+    is_pptx_like = 'presentationml' in mime_type
+
+    # PPSX (slideshow) not supported by kreuzberg or python-pptx, use ZIP extraction
+    if 'slideshow' in mime_type:
+        logger.info('PPSX MIME type detected, using ZIP extraction')
+        content = _extract_ppsx_bytes_from_zip(data)
+        return ExtractionResult(content=content, mime_type=mime_type)
+
+    try:
+        result = await extract_bytes(
+            data,
+            mime_type,
+            config=config,
+        )
+        return _convert_result(result)
+    except Exception as e:
+        # Kreuzberg PPTX parser fails on shapes without txBody (pictures, SmartArt, etc.)
+        # Fallback: use python-pptx which handles missing text gracefully
+        error_msg = str(e)
+        if 'No txBody found' in error_msg and is_pptx_like:
+            logger.warning(
+                f'Kreuzberg PPTX extraction failed ({error_msg}), using python-pptx fallback'
+            )
+            content = _extract_pptx_bytes_with_python_pptx(data)
+            return ExtractionResult(content=content, mime_type=mime_type)
+
+        logger.error(f'Kreuzberg bytes extraction failed for {mime_type}: {e}')
         raise
 
 
@@ -695,6 +1055,7 @@ def get_supported_formats() -> list[str]:
         '.markdown',
         # Presentations
         '.pptx',
+        '.ppsx',  # PowerPoint Show (same structure as PPTX)
         '.ppt',
         '.odp',
         # Spreadsheets

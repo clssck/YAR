@@ -74,6 +74,7 @@ from lightrag.utils import (
     truncate_list_by_token_size,
     update_chunk_cache_list,
     use_llm_func_with_cache,
+    validate_and_fix_citations,
 )
 
 # use the .env that is inside the current folder
@@ -1803,8 +1804,9 @@ async def _merge_nodes_then_upsert(
     )
     sorted_descriptions = [dp['description'] for dp in sorted_nodes]
 
-    # Combine already_description with sorted new sorted descriptions
-    description_list = already_description + sorted_descriptions
+    # Combine already_description with sorted new descriptions, deduplicating across both
+    combined_descriptions = already_description + sorted_descriptions
+    description_list = list(dict.fromkeys(combined_descriptions))  # Preserve order, remove duplicates
     if not description_list:
         logger.error(f'Entity {entity_name} has no description')
         raise ValueError(f'Entity {entity_name} has no description')
@@ -2081,8 +2083,9 @@ async def _merge_edges_then_upsert(
     )
     sorted_descriptions = [dp['description'] for dp in sorted_edges]
 
-    # Combine already_description with sorted new descriptions
-    description_list = already_description + sorted_descriptions
+    # Combine already_description with sorted new descriptions, deduplicating across both
+    combined_descriptions = already_description + sorted_descriptions
+    description_list = list(dict.fromkeys(combined_descriptions))  # Preserve order, remove duplicates
     if not description_list:
         logger.error(f'Relation {src_id}~{tgt_id} has no description')
         raise ValueError(f'Relation {src_id}~{tgt_id} has no description')
@@ -3311,6 +3314,13 @@ async def kg_query(
                 .replace('</system>', '')
                 .strip()
             )
+
+        # Validate and optionally fix citations
+        available_refs = context_result.raw_data.get('data', {}).get('references', [])
+        if available_refs:
+            response, was_fixed = validate_and_fix_citations(response, available_refs)
+            if was_fixed:
+                logger.info(f'[kg_query] Auto-corrected citations for: {query[:50]}...')
 
         return QueryResult(content=response, raw_data=context_result.raw_data)
     else:
@@ -5091,6 +5101,13 @@ async def naive_query(
                 .replace('</system>', '')
                 .strip()
             )
+
+        # Validate and optionally fix citations
+        available_refs = raw_data.get('data', {}).get('references', [])
+        if available_refs:
+            response, was_fixed = validate_and_fix_citations(response, available_refs)
+            if was_fixed:
+                logger.info(f'[naive_query] Auto-corrected citations for: {query[:50]}...')
 
         return QueryResult(content=response, raw_data=raw_data)
     else:

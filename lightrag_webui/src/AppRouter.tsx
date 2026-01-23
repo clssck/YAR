@@ -67,7 +67,6 @@ const AppContent = () => {
       // Don't redirect for public routes (login, demo)
       const publicRoutes = ['/login', '/demo']
       if (!publicRoutes.some((route) => currentPath.startsWith(route))) {
-        console.log('Not authenticated, redirecting to login')
         navigate('/login')
       }
     }

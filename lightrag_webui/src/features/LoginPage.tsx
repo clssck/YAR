@@ -21,10 +21,6 @@ const LoginPage = () => {
   const [checkingAuth, setCheckingAuth] = useState(true)
   const authCheckRef = useRef(false) // Prevent duplicate calls in Vite dev mode
 
-  useEffect(() => {
-    console.log('LoginPage mounted')
-  }, [])
-
   // Check if authentication is configured, skip login if not
   useEffect(() => {
     const checkAuthConfig = async () => {
@@ -106,10 +102,7 @@ const LoginPage = () => {
       const isSameUser = previousUsername === username
 
       // If it's not the same user, clear chat history
-      if (isSameUser) {
-        console.log('Same user logging in, preserving chat history')
-      } else {
-        console.log('Different user logging in, clearing chat history')
+      if (!isSameUser) {
         // Directly clear chat history instead of setting a flag
         useSettingsStore.getState().setRetrievalHistory([])
       }

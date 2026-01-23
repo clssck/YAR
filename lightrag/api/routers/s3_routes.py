@@ -89,6 +89,17 @@ class S3DeleteResponse(BaseModel):
     status: str = Field(description='Deletion status')
 
 
+class S3FolderStatsResponse(BaseModel):
+    """Response model for folder statistics."""
+
+    prefix: str = Field(description='Folder prefix path')
+    total_size: int = Field(description='Total size of all objects in bytes')
+    object_count: int = Field(description='Total number of objects')
+    folder_count: int = Field(description='Number of immediate subfolders')
+    last_modified: str | None = Field(description='Most recent modification timestamp')
+    preview: list[S3ObjectInfo] = Field(description='Preview of first few objects')
+
+
 def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRouter:
     """
     Create S3 browser routes with the given S3 client.
@@ -236,6 +247,82 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
             key=key,
             size=len(content),
             url=url,
+        )
+
+    @router.get(
+        '/folder-stats/{prefix:path}',
+        response_model=S3FolderStatsResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    @handle_api_error('getting folder statistics')
+    async def get_folder_stats(
+        prefix: str,
+        preview_limit: int = Query(default=10, description='Max objects in preview', ge=1, le=50),
+    ) -> S3FolderStatsResponse:
+        """
+        Get statistics for a folder (prefix).
+
+        Recursively calculates total size, object count, and returns a preview
+        of the first few objects.
+
+        Args:
+            prefix: Folder prefix path (e.g., "default/doc_123/")
+            preview_limit: Maximum number of objects to include in preview
+
+        Returns:
+            S3FolderStatsResponse with folder statistics
+        """
+        # Ensure prefix ends with / for folder semantics
+        if prefix and not prefix.endswith('/'):
+            prefix = f'{prefix}/'
+
+        # Get immediate children (folders and objects at this level)
+        immediate = await s3_client.list_objects(prefix=prefix, delimiter='/')
+        folder_count = len(immediate['folders'])
+
+        # Get all objects recursively (no delimiter = flat list)
+        all_objects: list[dict] = []
+        total_size = 0
+        last_modified: str | None = None
+
+        # Use pagination to get all objects under this prefix
+        async with s3_client._get_client() as client:
+            paginator = client.get_paginator('list_objects_v2')
+            async for page in paginator.paginate(
+                Bucket=s3_client.config.bucket_name,
+                Prefix=prefix,
+            ):
+                for obj in page.get('Contents', []):
+                    obj_info = {
+                        'key': obj['Key'],
+                        'size': obj['Size'],
+                        'last_modified': obj['LastModified'].isoformat(),
+                    }
+                    all_objects.append(obj_info)
+                    total_size += obj['Size']
+
+                    # Track most recent modification
+                    if last_modified is None or obj_info['last_modified'] > last_modified:
+                        last_modified = obj_info['last_modified']
+
+        # Build preview (first N objects)
+        preview = [
+            S3ObjectInfo(
+                key=obj['key'],
+                size=obj['size'],
+                last_modified=obj['last_modified'],
+                content_type=None,
+            )
+            for obj in all_objects[:preview_limit]
+        ]
+
+        return S3FolderStatsResponse(
+            prefix=prefix,
+            total_size=total_size,
+            object_count=len(all_objects),
+            folder_count=folder_count,
+            last_modified=last_modified,
+            preview=preview,
         )
 
     @router.delete(

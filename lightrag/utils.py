@@ -39,13 +39,18 @@ __all__ = [
     'Tokenizer',
     'compute_mdhash_id',
     'export_data',
+    'find_best_reference',
     'generate_track_id',
     'get_env_value',
+    'has_citation',
+    'insert_citation',
+    'is_factual_sentence',
     'lazy_external_import',
     'logger',
     'set_verbose_debug',
     'setup_logger',
     'sync_wrapper',
+    'validate_and_fix_citations',
 ]
 
 from lightrag.constants import (
@@ -3461,3 +3466,218 @@ def generate_reference_list_from_chunks(
         )
 
     return reference_list, updated_chunks
+
+
+# ---------------------------------------------------------------------------
+# Citation Validation and Auto-Correction
+# ---------------------------------------------------------------------------
+
+# Compiled regex for citation detection (e.g., [1], [2], [15])
+_CITATION_PATTERN = re.compile(r'\[\d+\]')
+
+# Sentence-ending punctuation for splitting
+_SENTENCE_END_PATTERN = re.compile(r'(?<=[.!?])\s+')
+
+
+def has_citation(text: str) -> bool:
+    """Check if text contains at least one citation marker [n]."""
+    return bool(_CITATION_PATTERN.search(text))
+
+
+def is_factual_sentence(sentence: str) -> bool:
+    """
+    Determine if a sentence likely contains factual claims that should be cited.
+
+    Returns False for:
+    - Questions
+    - Meta-statements (e.g., "Based on the context...")
+    - Very short sentences (< 20 chars)
+    - Headers/formatting
+    """
+    sentence = sentence.strip()
+
+    # Too short to be a factual claim
+    if len(sentence) < 20:
+        return False
+
+    # Questions don't need citations
+    if sentence.endswith('?'):
+        return False
+
+    # Headers and list markers
+    if sentence.startswith(('#', '-', '*', '•', '>')):
+        return False
+
+    # Meta-statements that don't make factual claims
+    meta_phrases = (
+        'based on',
+        'according to the context',
+        'the context shows',
+        'the information provided',
+        'i can',
+        'i cannot',
+        "i don't",
+        'let me',
+        'here is',
+        'here are',
+        'in summary',
+        'to summarize',
+        'in conclusion',
+    )
+    lower_sentence = sentence.lower()
+    if any(lower_sentence.startswith(phrase) for phrase in meta_phrases):
+        return False
+
+    return True
+
+
+def find_best_reference(sentence: str, references: list[dict]) -> dict | None:
+    """
+    Find the most relevant reference for a sentence using keyword overlap.
+
+    Args:
+        sentence: The uncited sentence
+        references: List of reference dicts with 'reference_id', 'document_title', etc.
+
+    Returns:
+        Best matching reference dict, or None if no good match
+    """
+    if not references:
+        return None
+
+    # Extract words from sentence (lowercase, alphanumeric only)
+    sentence_words = set(
+        re.findall(r'\b[a-z][a-z0-9]+\b', sentence.lower())
+    )
+
+    # Common words to ignore
+    stopwords = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+        'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+        'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+        'can', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
+        'where', 'why', 'how', 'what', 'which', 'who', 'whom',
+        'this', 'that', 'these', 'those', 'it', 'its', 'of', 'to',
+        'for', 'with', 'on', 'at', 'by', 'from', 'in', 'as',
+    }
+    sentence_words -= stopwords
+
+    if not sentence_words:
+        # No meaningful words, use first reference
+        return references[0] if references else None
+
+    best_ref = None
+    best_score = 0
+
+    for ref in references:
+        # Build reference text from title and excerpt
+        ref_text = ' '.join([
+            ref.get('document_title', ''),
+            ref.get('excerpt', ''),
+            ref.get('file_path', ''),
+        ]).lower()
+
+        ref_words = set(re.findall(r'\b[a-z][a-z0-9]+\b', ref_text))
+        ref_words -= stopwords
+
+        # Calculate overlap score
+        overlap = len(sentence_words & ref_words)
+        if overlap > best_score:
+            best_score = overlap
+            best_ref = ref
+
+    return best_ref
+
+
+def insert_citation(sentence: str, ref_id: str) -> str:
+    """
+    Insert a citation [ref_id] before the final punctuation of a sentence.
+
+    Examples:
+        "LightRAG is a framework." + "1" -> "LightRAG is a framework [1]."
+        "It supports graphs"       + "2" -> "It supports graphs [2]"
+    """
+    sentence = sentence.rstrip()
+    citation = f' [{ref_id}]'
+
+    # Find final punctuation
+    if sentence and sentence[-1] in '.!?':
+        return sentence[:-1] + citation + sentence[-1]
+    else:
+        return sentence + citation
+
+
+def validate_and_fix_citations(
+    response_text: str,
+    available_references: list[dict],
+    min_coverage: float = 0.5,
+    enable_auto_fix: bool = True,
+) -> tuple[str, bool]:
+    """
+    Validate that citations exist in response and optionally fix missing ones.
+
+    Args:
+        response_text: The LLM response text (may include ### References section)
+        available_references: List of reference dicts with 'reference_id', etc.
+        min_coverage: Minimum fraction of factual sentences that should be cited
+        enable_auto_fix: Whether to attempt auto-correction of missing citations
+
+    Returns:
+        Tuple of (possibly_fixed_text, was_modified)
+    """
+    if not response_text or not available_references:
+        return response_text, False
+
+    # Split off the References section to avoid modifying it
+    parts = response_text.split('### References')
+    main_text = parts[0]
+    references_section = '### References' + parts[1] if len(parts) > 1 else ''
+
+    # Split into sentences
+    sentences = _SENTENCE_END_PATTERN.split(main_text)
+
+    # Count factual sentences and cited sentences
+    factual_sentences = []
+    for sentence in sentences:
+        if is_factual_sentence(sentence):
+            factual_sentences.append(sentence)
+
+    if not factual_sentences:
+        return response_text, False
+
+    cited_count = sum(1 for s in factual_sentences if has_citation(s))
+    coverage = cited_count / len(factual_sentences)
+
+    # If coverage is adequate, no fixes needed
+    if coverage >= min_coverage:
+        return response_text, False
+
+    # Log the issue
+    logger.warning(
+        f'[citation_validation] Low citation coverage: {coverage:.1%} '
+        f'({cited_count}/{len(factual_sentences)} sentences cited)'
+    )
+
+    if not enable_auto_fix:
+        return response_text, False
+
+    # Attempt to fix uncited factual sentences
+    modified_text = main_text
+    was_modified = False
+
+    for sentence in factual_sentences:
+        if not has_citation(sentence) and sentence in modified_text:
+            best_ref = find_best_reference(sentence, available_references)
+            if best_ref:
+                ref_id = best_ref.get('reference_id', '1')
+                fixed_sentence = insert_citation(sentence, ref_id)
+                modified_text = modified_text.replace(sentence, fixed_sentence, 1)
+                was_modified = True
+                logger.info(
+                    f'[citation_validation] Auto-added citation [{ref_id}] to: '
+                    f'"{sentence[:50]}..."'
+                )
+
+    if was_modified:
+        return modified_text + references_section, True
+    return response_text, False

@@ -32,9 +32,9 @@ class TestEntityResolutionConfigDefaults:
         assert config.candidates_per_entity == 10
 
     def test_default_min_confidence(self):
-        """Default min confidence should be 0.85."""
+        """Default min confidence should be 0.80 (lowered to catch more abbreviations)."""
         config = EntityResolutionConfig()
-        assert config.min_confidence == 0.85
+        assert config.min_confidence == 0.80
 
     def test_default_soft_match_threshold(self):
         """Default soft match threshold should be 0.70."""

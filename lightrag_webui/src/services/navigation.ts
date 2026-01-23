@@ -20,8 +20,6 @@ class NavigationService {
    * @param preserveHistory If true, chat history will be preserved. Default is false.
    */
   resetAllApplicationState(preserveHistory = false) {
-    console.log('Resetting all application state...')
-
     // Reset graph state
     const graphStore = useGraphStore.getState()
     const sigma = graphStore.sigmaInstance

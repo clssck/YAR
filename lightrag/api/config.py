@@ -271,6 +271,12 @@ def parse_args() -> argparse.Namespace:
     # PDF decryption password
     args.pdf_decrypt_password = get_env_value('PDF_DECRYPT_PASSWORD', None)
 
+    # OCR configuration for scanned documents and images
+    # Enables text extraction from images in PPTX, scanned PDFs, etc.
+    args.enable_ocr = get_env_value('ENABLE_OCR', True, bool)
+    args.ocr_backend = get_env_value('OCR_BACKEND', 'tesseract')  # tesseract, easyocr, paddleocr
+    args.ocr_language = get_env_value('OCR_LANGUAGE', 'eng')  # Tesseract language code
+
     # Add environment variables that were previously read directly
     args.cors_origins = get_env_value('CORS_ORIGINS', '*')
     args.summary_language = get_env_value('SUMMARY_LANGUAGE', DEFAULT_SUMMARY_LANGUAGE)
@@ -293,8 +299,9 @@ def parse_args() -> argparse.Namespace:
     # Min rerank score configuration
     args.min_rerank_score = get_env_value('MIN_RERANK_SCORE', DEFAULT_MIN_RERANK_SCORE, float)
 
-    # Orphan connection configuration
-    args.auto_connect_orphans = get_env_value('AUTO_CONNECT_ORPHANS', False, bool)
+    # Orphan connection - disabled for now (can hang on LLM calls)
+    # TODO: Re-enable once LLM timeout issues are resolved
+    args.auto_connect_orphans = False
 
     # Query configuration
     args.top_k = get_env_value('TOP_K', DEFAULT_TOP_K, int)

@@ -20,6 +20,39 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
         *   `entity_description`: Provide a concise yet comprehensive description of the entity's attributes and activities, based *solely* on the information present in the input text.
     *   **Output Format - Entities:** Output a total of 4 fields for each entity, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `entity`.
         *   Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
+    *   **What NOT to Extract as Entities:**
+        *   Do NOT extract numeric values, percentages, or metrics (e.g., "3.4% decline", "$10 billion", "40% reduction").
+        *   Do NOT extract generic event descriptors (e.g., "market selloff", "price increase", "stock decline").
+        *   Do NOT extract time periods or dates as entities (e.g., "Q3 2024", "this year", "midday trading").
+        *   Do NOT extract adjectives or qualities (e.g., "significant", "lower-than-expected").
+        *   Do NOT extract GENERIC terms in these categories (with or without organization prefix):
+            - Documents/Reports: "annual report", "quarterly earnings", "press release", "safety report", "earnings report", "shareholder letter", "10-K filing", "Form 8-K", "proxy statement", "SEC filings"
+            - Programs/Initiatives: "research initiatives", "digital transformation initiative", "cloud migration strategy", "testing program"
+            - Requirements/Guidelines: "clinical trial requirements", "compliance requirements", "guidelines", "regulations"
+            - Generic events: "investor event", "shareholder meeting", "press conference", "product launch", "developer conference", "IPO roadshow", "earnings call", "investor day" (NAMED events like "CES 2024", "WWDC 2024", "AWS re:Invent" ARE valid)
+            - Finance terms: "funding round", "Series A/B/C", "SPAC merger", "IPO", "M&A transaction" (extract the COMPANIES involved, not the transaction type)
+            - Subdivisions: "services division", "enforcement division", "autonomous vehicle division", "research department"
+            - Websites/Portals: "website", "investor portal", "corporate website", "official blog"
+            - Tech buzzwords: "DevOps pipeline", "CI/CD pipeline", "microservices architecture", "data lake", "API", "deployment cycles", "container orchestration" (NAMED products like "Kubernetes", "AWS Lambda" ARE valid)
+            - Hardware categories: "GPUs", "CPUs", "servers", "chips" (extract specific models like "H100", "M1 chip" instead)
+            - Processes: "peer review process", "review process", "approval process", "build process"
+            - Data references: "test data", "laboratory data", "study results", "research findings", "financial results", "analytics data"
+            - Strategy/Roadmap: "strategic roadmap", "platform roadmap", "product roadmap", "strategic plan"
+            - Generic field/domain terms (NEVER extract these): "AI", "artificial intelligence", "machine learning", "ML", "deep learning", "DL", "AGI", "artificial general intelligence", "NLP", "natural language processing", "computer vision", "data science", "cloud computing", "LLM", "large language models", "neural networks", "big data", "analytics" (these are fields/categories, not specific entities - extract specific implementations like "GPT-4", "Azure", "TensorFlow" instead)
+            - Abstract concepts: "privacy", "security", "innovation", "technology", "research", "development", "strategy", "growth" (these are too generic - extract specific things instead)
+        *   Entities must be UNIQUE, SPECIFICALLY NAMED things - not generic category words.
+            GOOD entities: "iPhone 15", "GPT-4", "KEYNOTE-024 Trial", "CES 2024"
+            BAD entities: "annual report", "research partnerships", "investor event", "clinical trial requirements"
+        *   Do NOT extract possessive constructions (e.g., "Apple's CFO"). Extract the actual person's name.
+        *   Do NOT extract generic roles (e.g., "the CEO", "the Commissioner"). Extract the person's name instead.
+    *   **Person Names:**
+        *   Extract person names in their canonical form WITHOUT honorific titles (Dr., Prof., Mr., Mrs., Ms., Sr., Jr., etc.). Include the title in the description if relevant.
+        *   Example: "Dr. Jane Smith presented..." → extract as "Jane Smith" with description mentioning she is a doctor.
+        *   This ensures the same person is not duplicated with/without titles.
+    *   **Abbreviations and Aliases:**
+        *   When an entity appears as both an abbreviation and full name (e.g., "FDA" and "Food and Drug Administration"), extract ONLY the most commonly used form, typically the abbreviation for well-known entities.
+        *   Include the alternative form in the description (e.g., "FDA (Food and Drug Administration) is the regulatory agency...")
+        *   Do NOT extract slang, memes, or informal abbreviations as entities (e.g., "LFG", "WAGMI", "HODL").
 
 2.  **Relationship Extraction & Output:**
     *   **Identification:** Identify direct, clearly stated relationships between previously extracted entities. Focus on concrete, actionable relationships.
@@ -44,10 +77,16 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
     *   **N-ary Relationship Decomposition:** If a statement involves more than two entities, decompose into binary relationships.
         *   **Example:** "Pfizer and BioNTech developed the COVID-19 vaccine" → extract "Pfizer developed COVID-19 Vaccine" AND "BioNTech developed COVID-19 Vaccine" AND "Pfizer partnered with BioNTech"
     *   **Relationship Details:** For each binary relationship, extract:
-        *   `source_entity`: The name of the source entity (use consistent naming with entities above).
-        *   `target_entity`: The name of the target entity (use consistent naming with entities above).
+        *   `source_entity`: The ACTOR/SUBJECT performing the action (use consistent naming with entities above).
+        *   `target_entity`: The OBJECT/RECIPIENT of the action (use consistent naming with entities above).
         *   `relationship_keywords`: One or more **action-oriented keywords** (e.g., "manufactures", "treats", "leads", "approved"). Separate multiple keywords with comma `,`. **DO NOT use `{tuple_delimiter}` within this field.**
         *   `relationship_description`: A concise explanation of the relationship.
+    *   **Relationship Direction (CRITICAL):**
+        *   source_entity PERFORMS the action ON target_entity
+        *   "Sam Altman leads OpenAI" → source=Sam Altman, target=OpenAI, keyword=leads
+        *   "OpenAI developed GPT-4" → source=OpenAI, target=GPT-4, keyword=developed
+        *   "Microsoft invested in OpenAI" → source=Microsoft, target=OpenAI, keyword=invested in
+        *   WRONG: source=OpenAI, target=Sam Altman, keyword=leads (direction reversed!)
     *   **Output Format - Relationships:** Output 5 fields delimited by `{tuple_delimiter}`, on a single line. First field must be `relation`.
         *   Format: `relation{tuple_delimiter}source_entity{tuple_delimiter}target_entity{tuple_delimiter}relationship_keywords{tuple_delimiter}relationship_description`
 
@@ -119,7 +158,7 @@ Based on the last extraction task, identify and extract any **missed or incorrec
 
 PROMPTS['entity_extraction_examples'] = [
     """<Entity_types>
-["Person","Creature","Organization","Location","Event","Concept","Method","Content","Data","Artifact","NaturalObject"]
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
 
 <Input Text>
 ```
@@ -142,37 +181,32 @@ relation{tuple_delimiter}Roger Perlmutter{tuple_delimiter}Merck{tuple_delimiter}
 
 """,
     """<Entity_types>
-["Person","Creature","Organization","Location","Event","Concept","Method","Content","Data","Artifact","NaturalObject"]
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
 
 <Input Text>
 ```
-Stock markets faced a sharp downturn today as tech giants saw significant declines, with the global tech index dropping by 3.4% in midday trading. Analysts attribute the selloff to investor concerns over rising interest rates and regulatory uncertainty.
-
-Among the hardest hit, nexon technologies saw its stock plummet by 7.8% after reporting lower-than-expected quarterly earnings. In contrast, Omega Energy posted a modest 2.1% gain, driven by rising oil prices.
-
-Meanwhile, commodity markets reflected a mixed sentiment. Gold futures rose by 1.5%, reaching $2,080 per ounce, as investors sought safe-haven assets. Crude oil prices continued their rally, climbing to $87.60 per barrel, supported by supply constraints and strong demand.
-
-Financial experts are closely watching the Federal Reserve's next move, as speculation grows over potential rate hikes. The upcoming policy announcement is expected to influence investor confidence and overall market stability.
+OpenAI announced a strategic partnership with Microsoft to develop next-generation AI systems. Under the agreement, Microsoft will invest $10 billion over multiple years to accelerate research in large language models. Sam Altman, CEO of OpenAI, stated that the collaboration will focus on building safe and beneficial artificial general intelligence. The partnership builds on their previous work developing GPT-4, which powers ChatGPT and Microsoft's Copilot assistant.
 ```
 
 <Output>
-entity{tuple_delimiter}Global Tech Index{tuple_delimiter}category{tuple_delimiter}The Global Tech Index tracks the performance of major technology stocks and experienced a 3.4% decline today.
-entity{tuple_delimiter}Nexon Technologies{tuple_delimiter}organization{tuple_delimiter}Nexon Technologies is a tech company that saw its stock decline by 7.8% after disappointing earnings.
-entity{tuple_delimiter}Omega Energy{tuple_delimiter}organization{tuple_delimiter}Omega Energy is an energy company that gained 2.1% in stock value due to rising oil prices.
-entity{tuple_delimiter}Gold Futures{tuple_delimiter}product{tuple_delimiter}Gold futures rose by 1.5%, indicating increased investor interest in safe-haven assets.
-entity{tuple_delimiter}Crude Oil{tuple_delimiter}product{tuple_delimiter}Crude oil prices rose to $87.60 per barrel due to supply constraints and strong demand.
-entity{tuple_delimiter}Market Selloff{tuple_delimiter}category{tuple_delimiter}Market selloff refers to the significant decline in stock values due to investor concerns over interest rates and regulations.
-entity{tuple_delimiter}Federal Reserve Policy Announcement{tuple_delimiter}category{tuple_delimiter}The Federal Reserve's upcoming policy announcement is expected to impact investor confidence and market stability.
-entity{tuple_delimiter}3.4% Decline{tuple_delimiter}category{tuple_delimiter}The Global Tech Index experienced a 3.4% decline in midday trading.
-relation{tuple_delimiter}Global Tech Index{tuple_delimiter}Market Selloff{tuple_delimiter}market performance, investor sentiment{tuple_delimiter}The decline in the Global Tech Index is part of the broader market selloff driven by investor concerns.
-relation{tuple_delimiter}Nexon Technologies{tuple_delimiter}Global Tech Index{tuple_delimiter}company impact, index movement{tuple_delimiter}Nexon Technologies' stock decline contributed to the overall drop in the Global Tech Index.
-relation{tuple_delimiter}Gold Futures{tuple_delimiter}Market Selloff{tuple_delimiter}market reaction, safe-haven investment{tuple_delimiter}Gold prices rose as investors sought safe-haven assets during the market selloff.
-relation{tuple_delimiter}Federal Reserve Policy Announcement{tuple_delimiter}Market Selloff{tuple_delimiter}interest rate impact, financial regulation{tuple_delimiter}Speculation over Federal Reserve policy changes contributed to market volatility and investor selloff.
+entity{tuple_delimiter}OpenAI{tuple_delimiter}organization{tuple_delimiter}OpenAI is an AI research company that announced a strategic partnership with Microsoft to develop next-generation AI systems.
+entity{tuple_delimiter}Microsoft{tuple_delimiter}organization{tuple_delimiter}Microsoft is a technology company investing $10 billion in OpenAI to accelerate AI research.
+entity{tuple_delimiter}Sam Altman{tuple_delimiter}person{tuple_delimiter}Sam Altman is the CEO of OpenAI who announced the collaboration will focus on safe AGI development.
+entity{tuple_delimiter}GPT-4{tuple_delimiter}artifact{tuple_delimiter}GPT-4 is a large language model developed by OpenAI that powers ChatGPT and Microsoft Copilot.
+entity{tuple_delimiter}ChatGPT{tuple_delimiter}artifact{tuple_delimiter}ChatGPT is an AI assistant product powered by GPT-4.
+entity{tuple_delimiter}Microsoft Copilot{tuple_delimiter}artifact{tuple_delimiter}Microsoft Copilot is an AI assistant powered by GPT-4.
+entity{tuple_delimiter}Artificial General Intelligence{tuple_delimiter}concept{tuple_delimiter}Artificial general intelligence (AGI) is the research goal that OpenAI and Microsoft aim to develop safely.
+relation{tuple_delimiter}OpenAI{tuple_delimiter}Microsoft{tuple_delimiter}partnered with{tuple_delimiter}OpenAI and Microsoft formed a strategic partnership to develop next-generation AI systems.
+relation{tuple_delimiter}Microsoft{tuple_delimiter}OpenAI{tuple_delimiter}invested in{tuple_delimiter}Microsoft is investing $10 billion in OpenAI over multiple years.
+relation{tuple_delimiter}Sam Altman{tuple_delimiter}OpenAI{tuple_delimiter}leads{tuple_delimiter}Sam Altman is the CEO of OpenAI.
+relation{tuple_delimiter}OpenAI{tuple_delimiter}GPT-4{tuple_delimiter}developed{tuple_delimiter}OpenAI developed the GPT-4 large language model.
+relation{tuple_delimiter}GPT-4{tuple_delimiter}ChatGPT{tuple_delimiter}powers{tuple_delimiter}GPT-4 is the underlying model that powers ChatGPT.
+relation{tuple_delimiter}GPT-4{tuple_delimiter}Microsoft Copilot{tuple_delimiter}powers{tuple_delimiter}GPT-4 powers Microsoft's Copilot assistant.
 {completion_delimiter}
 
 """,
     """<Entity_types>
-["Person","Creature","Organization","Location","Event","Concept","Method","Content","Data","Artifact","NaturalObject"]
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
 
 <Input Text>
 ```
@@ -195,24 +229,29 @@ PROMPTS['summarize_entity_descriptions'] = """---Role---
 You are a Knowledge Graph Specialist, proficient in data curation and synthesis.
 
 ---Task---
-Your task is to synthesize a list of descriptions of a given entity or relation into a single, comprehensive, and cohesive summary.
+Synthesize multiple descriptions of a given entity or relation into a single, concise, and informative summary.
 
 ---Instructions---
-1. Input Format: The description list is provided in JSON format. Each JSON object (representing a single description) appears on a new line within the `Description List` section.
-2. Output Format: The merged description will be returned as plain text, presented in multiple paragraphs, without any additional formatting or extraneous comments before or after the summary.
-3. Comprehensiveness: The summary must integrate all key information from *every* provided description. Do not omit any important facts or details.
-4. Context: Ensure the summary is written from an objective, third-person perspective; explicitly mention the name of the entity or relation for full clarity and context.
+1. Input Format: The description list is provided in JSON format. Each JSON object appears on a new line.
+2. Output Format: Return plain text only. No markdown, headers, or formatting. No introductory or concluding remarks.
+3. Conciseness Priority:
+  - Eliminate ALL redundancy. If the same fact appears multiple times, include it only ONCE.
+  - Prioritize unique, specific facts over generic statements.
+  - Use compact phrasing. Avoid filler words and verbose constructions.
+  - Target: capture maximum information in minimum words.
+4. Content Priority (in order):
+  - Core identity: What is this entity? (type, category, primary function)
+  - Key relationships: Who/what is it connected to and how?
+  - Distinguishing facts: What makes this entity unique or notable?
+  - Secondary details: Only if space permits within token limit.
 5. Context & Objectivity:
-  - Write the summary from an objective, third-person perspective.
-  - Explicitly mention the full name of the entity or relation at the beginning of the summary to ensure immediate clarity and context.
+  - Write from objective, third-person perspective.
+  - Start with the entity/relation name for immediate clarity.
 6. Conflict Handling:
-  - In cases of conflicting or inconsistent descriptions, first determine if these conflicts arise from multiple, distinct entities or relationships that share the same name.
-  - If distinct entities/relations are identified, summarize each one *separately* within the overall output.
-  - If conflicts within a single entity/relation (e.g., historical discrepancies) exist, attempt to reconcile them or present both viewpoints with noted uncertainty.
-7. Length Constraint:The summary's total length must not exceed {summary_length} tokens, while still maintaining depth and completeness.
-8. Language: The entire output must be written in {language}. Proper nouns (e.g., personal names, place names, organization names) may in their original language if proper translation is not available.
-  - The entire output must be written in {language}.
-  - Proper nouns (e.g., personal names, place names, organization names) should be retained in their original language if a proper, widely accepted translation is not available or would cause ambiguity.
+  - If descriptions refer to genuinely different entities with the same name, summarize each separately.
+  - For temporal conflicts (historical changes), prefer the most recent information unless historical context is critical.
+7. Length Constraint: Maximum {summary_length} tokens. Prioritize brevity while preserving key facts.
+8. Language: Output in {language}. Keep proper nouns in original language if no standard translation exists.
 
 ---Input---
 {description_type} Name: {description_name}
@@ -226,39 +265,73 @@ Description List:
 ---Output---
 """
 
-PROMPTS['fail_response'] = "Sorry, I'm not able to provide an answer to that question.[no-context]"
+PROMPTS['fail_response'] = """I couldn't find relevant information in the knowledge base to answer your question.
+
+**Suggestions:**
+- Try rephrasing your question with different terms
+- Ask about specific entities, people, organizations, or concepts
+- Verify that documents containing the relevant information have been indexed
+
+[no-context]"""
 
 PROMPTS['rag_response'] = """---Role---
 
-You are an expert AI assistant specializing in synthesizing information from a provided knowledge base. Your primary function is to answer user queries accurately by ONLY using the information within the provided **Context**.
+You are an expert AI assistant synthesizing information from a knowledge base. Answer user queries accurately using ONLY information from the provided **Context**.
 
 ---Goal---
 
-Generate a comprehensive, well-structured answer to the user query.
-The answer must integrate relevant facts from the Knowledge Graph and Document Chunks found in the **Context**.
-Consider the conversation history if provided to maintain conversational flow and avoid repeating information.
+Generate a direct, well-structured answer integrating facts from Knowledge Graph and Document Chunks in the **Context**.
 
 ---Instructions---
 
-1. Step-by-Step Instruction:
-  - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
-  - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
-  - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - Generate a references section at the end of the response. Each reference document must directly support the facts presented in the response.
-  - Do not generate anything after the reference section.
+1. Answer Strategy:
+  - START with the direct answer. Do not begin with "Based on the context..." or similar preamble.
+  - Use Knowledge Graph entities/relationships as your primary source for facts about entities, their attributes, and connections.
+  - Use Document Chunks for detailed evidence, quotes, and supporting context.
+  - Synthesize both sources into a coherent response.
 
-2. Content & Grounding:
-  - Base your answer on the provided **Context**. You may use your knowledge to interpret and connect ideas, but core facts must come from the context.
-  - If partial information exists in the **Context**, provide what you can and note any gaps. Only state "insufficient information" if the context contains nothing relevant.
-  - IMPORTANT: If the context contains ANY relevant information, you MUST attempt to answer. Do not refuse when relevant context exists.
+2. Content Priority:
+  - FIRST: Answer the core question directly using available facts.
+  - SECOND: Provide supporting details and context.
+  - THIRD: Note any relevant gaps only if they significantly impact the answer.
+  - IMPORTANT: If the context contains ANY relevant information, you MUST answer. Do not refuse when relevant context exists.
 
-3. Formatting & Language:
+3. Grounding:
+  - Core facts MUST come from the context. Use your knowledge only to connect ideas fluently.
+  - If you find partial information, answer with what's available. Only say "insufficient information" if context contains NOTHING relevant.
+
+4. Formatting & Language:
   - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
 
-4. References Section Format:
+5. Inline Citations - CRITICAL REQUIREMENT:
+  - **EVERY factual claim MUST have a citation [n]**. This is non-negotiable.
+  - Place [n] immediately after the claim, before punctuation.
+  - Even single-sentence answers need citations.
+
+  EXAMPLES OF CORRECT CITATION USAGE:
+
+  Example 1 (Short Answer - IMPORTANT):
+  Query: "What storage does LightRAG use?"
+  Response: "LightRAG uses PostgreSQL for graph storage [1]."
+
+  Example 2 (Multi-Fact Answer):
+  Query: "What are LightRAG's key features?"
+  Response: "LightRAG provides dual-level retrieval combining local and global search [1].
+  It uses graph-based knowledge representation for enhanced accuracy [2]."
+
+  Example 3 (Single Source, Multiple Facts):
+  Response: "The system architecture has three layers [1]. It uses vector similarity
+  for retrieval and manages entity relationships through knowledge graphs [1]."
+
+  COMMON MISTAKES TO AVOID:
+  - ❌ "LightRAG is a RAG framework." (Missing citation)
+  - ✅ "LightRAG is a RAG framework [1]."
+  - ❌ "It uses PostgreSQL and supports graph queries." (No citations)
+  - ✅ "It uses PostgreSQL [1] and supports graph queries [2]."
+
+6. References Section Format:
   - The References section should be under heading: `### References`
   - Reference list entries should adhere to the format: `- [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
   - The Document Title in the citation must retain its original language.
@@ -268,7 +341,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - Provide maximum of 5 most relevant, unique citations.
   - Do not generate footnotes section or any comment, summary, or explanation after the references.
 
-5. Reference Section Example:
+7. Reference Section Example:
 ```
 ### References
 
@@ -277,7 +350,7 @@ Consider the conversation history if provided to maintain conversational flow an
 - [3] Document Title Three
 ```
 
-6. Additional Instructions: {user_prompt}
+8. Additional Instructions: {user_prompt}
 
 
 ---Context---
@@ -287,35 +360,60 @@ Consider the conversation history if provided to maintain conversational flow an
 
 PROMPTS['naive_rag_response'] = """---Role---
 
-You are an expert AI assistant specializing in synthesizing information from a provided knowledge base. Your primary function is to answer user queries accurately by ONLY using the information within the provided **Context**.
+You are an expert AI assistant synthesizing information from a knowledge base. Answer user queries accurately using ONLY information from the provided **Context**.
 
 ---Goal---
 
-Generate a comprehensive, well-structured answer to the user query.
-The answer must integrate relevant facts from the Document Chunks found in the **Context**.
-Consider the conversation history if provided to maintain conversational flow and avoid repeating information.
+Generate a direct, well-structured answer integrating facts from Document Chunks in the **Context**.
 
 ---Instructions---
 
-1. Step-by-Step Instruction:
-  - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
-  - Scrutinize `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
-  - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - Generate a **References** section at the end of the response. Each reference document must directly support the facts presented in the response.
-  - Do not generate anything after the reference section.
+1. Answer Strategy:
+  - START with the direct answer. Do not begin with "Based on the context..." or similar preamble.
+  - Extract relevant facts from Document Chunks and synthesize into a coherent response.
 
-2. Content & Grounding:
-  - Base your answer on the provided **Context**. You may use your knowledge to interpret and connect ideas, but core facts must come from the context.
-  - If partial information exists in the **Context**, provide what you can and note any gaps. Only state "insufficient information" if the context contains nothing relevant.
-  - IMPORTANT: If the context contains ANY relevant information, you MUST attempt to answer. Do not refuse when relevant context exists.
+2. Content Priority:
+  - FIRST: Answer the core question directly using available facts.
+  - SECOND: Provide supporting details and context.
+  - THIRD: Note any relevant gaps only if they significantly impact the answer.
+  - IMPORTANT: If the context contains ANY relevant information, you MUST answer. Do not refuse when relevant context exists.
 
-3. Formatting & Language:
+3. Grounding:
+  - Core facts MUST come from the context. Use your knowledge only to connect ideas fluently.
+  - If you find partial information, answer with what's available. Only say "insufficient information" if context contains NOTHING relevant.
+
+4. Formatting & Language:
   - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
 
-4. References Section Format:
+5. Inline Citations - CRITICAL REQUIREMENT:
+  - **EVERY factual claim MUST have a citation [n]**. This is non-negotiable.
+  - Place [n] immediately after the claim, before punctuation.
+  - Even single-sentence answers need citations.
+
+  EXAMPLES OF CORRECT CITATION USAGE:
+
+  Example 1 (Short Answer - IMPORTANT):
+  Query: "What storage does LightRAG use?"
+  Response: "LightRAG uses PostgreSQL for graph storage [1]."
+
+  Example 2 (Multi-Fact Answer):
+  Query: "What are LightRAG's key features?"
+  Response: "LightRAG provides dual-level retrieval combining local and global search [1].
+  It uses graph-based knowledge representation for enhanced accuracy [2]."
+
+  Example 3 (Single Source, Multiple Facts):
+  Response: "The system architecture has three layers [1]. It uses vector similarity
+  for retrieval and manages entity relationships through knowledge graphs [1]."
+
+  COMMON MISTAKES TO AVOID:
+  - ❌ "LightRAG is a RAG framework." (Missing citation)
+  - ✅ "LightRAG is a RAG framework [1]."
+  - ❌ "It uses PostgreSQL and supports graph queries." (No citations)
+  - ✅ "It uses PostgreSQL [1] and supports graph queries [2]."
+
+6. References Section Format:
   - The References section should be under heading: `### References`
   - Reference list entries should adhere to the format: `- [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
   - The Document Title in the citation must retain its original language.
@@ -325,7 +423,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - Provide maximum of 5 most relevant, unique citations.
   - Do not generate footnotes section or any comment, summary, or explanation after the references.
 
-5. Reference Section Example:
+7. Reference Section Example:
 ```
 ### References
 
@@ -334,7 +432,7 @@ Consider the conversation history if provided to maintain conversational flow an
 - [3] Document Title Three
 ```
 
-6. Additional Instructions: {user_prompt}
+8. Additional Instructions: {user_prompt}
 
 
 ---Context---
@@ -385,21 +483,22 @@ Reference Document List (Each entry starts with a [reference_id] that correspond
 """
 
 PROMPTS['keywords_extraction'] = """---Role---
-You are an expert keyword extractor specializing in scientific and technical information retrieval. Your task is to analyze user queries and extract keywords optimized for a two-tiered RAG search system.
+You are an expert keyword extractor. Your task is to analyze user queries and extract keywords optimized for a two-tiered RAG search system.
 
 ---Goal---
 Extract two distinct types of keywords from the user query:
 
 1. **high_level_keywords** (2-4 keywords): Broad, thematic concepts that capture:
-   - The query's main goal or intent (e.g., "mechanism of action", "comparison", "efficacy")
-   - The subject area or domain (e.g., "cancer treatment", "drug development", "clinical trials")
-   - The type of information sought (e.g., "side effects", "approval process", "research findings")
+   - The query's main goal or intent (e.g., "comparison", "relationship", "overview", "how does", "what is")
+   - The subject area or domain (e.g., "AI technology", "business strategy", "healthcare", "finance")
+   - The type of information sought (e.g., "partnership details", "product features", "history", "impact")
 
 2. **low_level_keywords** (1-4 keywords): Specific entities that appear EXPLICITLY in the query:
-   - Drug/product names: "Keytruda", "Ozempic", "CRISPR-Cas9"
-   - Organization names: "FDA", "WHO", "Pfizer"
-   - Technical terms: "mRNA", "PD-1", "monoclonal antibody"
-   - Diseases/conditions: "lung cancer", "diabetes", "hemophilia"
+   - Company/Organization names: "OpenAI", "Microsoft", "FDA", "Tesla"
+   - Person names: "Elon Musk", "Sam Altman", "Tim Cook"
+   - Product/Technology names: "GPT-4", "iPhone", "Azure", "Keytruda"
+   - Technical terms: "machine learning", "mRNA", "blockchain"
+   - Location names: "Silicon Valley", "China", "California"
 
 ---Instructions---
 1. **Output Format**: Output ONLY a valid JSON object. No explanatory text, no markdown code fences.
@@ -463,6 +562,39 @@ Output:
 }
 
 """,
+    """Example 5 (Tech/Business query):
+
+Query: "What is the relationship between OpenAI and Microsoft?"
+
+Output:
+{
+  "high_level_keywords": ["business relationship", "partnership", "AI technology"],
+  "low_level_keywords": ["OpenAI", "Microsoft"]
+}
+
+""",
+    """Example 6 (Person query):
+
+Query: "Who is Elon Musk and what companies does he lead?"
+
+Output:
+{
+  "high_level_keywords": ["biography", "leadership", "companies"],
+  "low_level_keywords": ["Elon Musk"]
+}
+
+""",
+    """Example 7 (Product query):
+
+Query: "What are the features of GPT-4?"
+
+Output:
+{
+  "high_level_keywords": ["product features", "capabilities", "AI model"],
+  "low_level_keywords": ["GPT-4"]
+}
+
+""",
 ]
 
 PROMPTS['orphan_connection_validation'] = """---Task---
@@ -522,6 +654,9 @@ PROMPTS[
 - Typos/misspellings: "Dupixant" = "Dupixent"
 - Name variations: "Jerome Powell" = "Fed Chair Powell"
 - Shortened forms: "United States" = "United States of America"
+- Company suffixes: "Apple" = "Apple Inc." = "Apple Inc" = "Apple Corporation"
+- University variations: "Stanford" = "Stanford University" = "Stanford U"
+- Government agencies: "SEC" = "Securities and Exchange Commission"
 
 **DO NOT merge entities that are:**
 - Similar but distinct: "Method 1" ≠ "Method 2"

@@ -2,12 +2,15 @@
 This module contains all document-related routes for the LightRAG API.
 """
 
+from __future__ import annotations
+
 import asyncio
+import mimetypes
 import traceback
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import aiofiles
 from fastapi import (
@@ -22,6 +25,7 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lightrag import LightRAG
+from lightrag.api.config import global_args
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.base import DeletionResult, DocStatus
 from lightrag.constants import NS_PIPELINE_STATUS
@@ -32,6 +36,9 @@ from lightrag.utils import (
     logger,
     sanitize_text_for_encoding,
 )
+
+if TYPE_CHECKING:
+    from lightrag.storage.s3_client import S3Client
 
 
 @lru_cache(maxsize=1)
@@ -676,6 +683,7 @@ class DocumentManager:
             '.xlsx',
             '.xls',
             '.pptx',
+            '.ppsx',  # PowerPoint Show (same structure as PPTX)
             '.ppt',
             '.odt',
             '.ods',
@@ -833,6 +841,7 @@ KREUZBERG_SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
         '.markdown',
         # Presentations
         '.pptx',
+        '.ppsx',  # PowerPoint Show
         '.ppt',
         '.odp',
         # Spreadsheets
@@ -899,23 +908,94 @@ def _extract_and_chunk_with_kreuzberg(
     chunk_token_size: int = 1200,
     chunk_overlap_token_size: int = 100,
     chunking_preset: str | None = 'semantic',
+    enable_ocr: bool = True,
+    ocr_backend: str = 'tesseract',
+    ocr_language: str = 'eng',
 ) -> tuple[str, list[dict[str, Any]]]:
     """One-pass document extraction and chunking using Kreuzberg (synchronous).
 
     Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
     This preserves document structure for better semantic chunk boundaries.
+
+    Args:
+        enable_ocr: Enable OCR for images/scanned content (default: True)
+        ocr_backend: OCR backend - 'tesseract', 'easyocr', or 'paddleocr'
+        ocr_language: Language code for OCR (e.g., 'eng' for English)
     """
-    from lightrag.document import chunks_to_lightrag_format, extract_and_chunk_sync
+    from lightrag.document import OcrOptions, chunks_to_lightrag_format, extract_and_chunk_sync
+
+    # Build OCR options if enabled
+    ocr_options = None
+    if enable_ocr:
+        ocr_options = OcrOptions(backend=ocr_backend, language=ocr_language)
 
     result = extract_and_chunk_sync(
         file_path,
         chunk_token_size=chunk_token_size,
         chunk_overlap_token_size=chunk_overlap_token_size,
         chunking_preset=chunking_preset,
+        ocr_options=ocr_options,
     )
 
     chunks = chunks_to_lightrag_format(result)
     return result.content, chunks
+
+
+def _extract_and_chunk_bytes_with_kreuzberg(
+    data: bytes,
+    mime_type: str,
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    chunking_preset: str | None = 'semantic',
+    enable_ocr: bool = True,
+    ocr_backend: str = 'tesseract',
+    ocr_language: str = 'eng',
+) -> tuple[str, list[dict[str, Any]], list[Any] | None]:
+    """One-pass document extraction and chunking from bytes using Kreuzberg (synchronous).
+
+    This extracts text directly from bytes without writing to disk. Used for
+    S3-based workflows where we want to avoid local file storage.
+
+    Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
+
+    Args:
+        enable_ocr: Enable OCR for images/scanned content (default: True)
+        ocr_backend: OCR backend - 'tesseract', 'easyocr', or 'paddleocr'
+        ocr_language: Language code for OCR (e.g., 'eng' for English)
+
+    Returns:
+        Tuple of (content, chunks, tables) where tables can be used for Markdown output.
+    """
+    from lightrag.document import (
+        ChunkingOptions,
+        ExtractionOptions,
+        OcrOptions,
+        chunks_to_lightrag_format,
+        extract_bytes_with_kreuzberg_sync,
+        tokens_to_chars,
+    )
+
+    max_chars = tokens_to_chars(chunk_token_size)
+    max_overlap = tokens_to_chars(chunk_overlap_token_size)
+
+    chunking_options = ChunkingOptions(
+        enabled=True,
+        max_chars=max_chars,
+        max_overlap=max_overlap,
+        preset=chunking_preset,
+    )
+
+    # Build OCR options if enabled
+    ocr_options = None
+    if enable_ocr:
+        ocr_options = OcrOptions(backend=ocr_backend, language=ocr_language)
+
+    options = ExtractionOptions(chunking=chunking_options, ocr=ocr_options)
+
+    # Fallback for PPTX txBody errors is handled in kreuzberg_adapter
+    result = extract_bytes_with_kreuzberg_sync(data, mime_type, options)
+    chunks = chunks_to_lightrag_format(result)
+    return result.content, chunks, result.tables
 
 
 async def pipeline_enqueue_file(
@@ -1016,10 +1096,13 @@ async def pipeline_enqueue_file(
                         effective_chunk_size,
                         effective_overlap,
                         effective_preset,
+                        getattr(global_args, 'enable_ocr', True),
+                        getattr(global_args, 'ocr_backend', 'tesseract'),
+                        getattr(global_args, 'ocr_language', 'eng'),
                     )
                     logger.info(
                         f'[File Extraction] One-pass extraction: {file_path.name} -> '
-                        f'{len(pre_chunks)} chunks (preset={effective_preset})'
+                        f'{len(pre_chunks)} chunks (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
                     )
                 except Exception as e:
                     error_files = [
@@ -1209,6 +1292,579 @@ async def pipeline_enqueue_file(
                 logger.error(f'Error deleting file {file_path}: {e!s}')
 
 
+async def pipeline_enqueue_file_with_s3(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
+    s3_client: S3Client | None = None,
+    s3_doc_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Enqueue file for processing and upload extracted text to S3.
+
+    This extends pipeline_enqueue_file to upload the extracted/OCR'd text
+    to S3 before enqueueing. The processed text is stored at:
+    {workspace}/{doc_id}/processed.md
+
+    Args:
+        rag: LightRAG instance
+        file_path: Path to the saved file
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict
+        chunk_token_size: Max tokens per chunk
+        chunk_overlap_token_size: Overlap tokens
+        chunking_preset: Chunking preset
+        s3_client: S3Client instance for uploading processed text
+        s3_doc_id: Document ID for S3 path (used for S3 folder naming)
+
+    Returns:
+        Tuple of (processed_s3_key, content_doc_id):
+        - processed_s3_key: S3 key of uploaded processed text, or None if failed
+        - content_doc_id: Actual document ID (hash of extracted content), for DB updates
+    """
+    if track_id is None:
+        track_id = generate_track_id('unknown')
+
+    effective_chunk_size = chunk_token_size or rag.chunk_token_size
+    effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
+    effective_preset = chunking_preset or (metadata.get('chunking_preset') if metadata else None)
+    if effective_preset is None:
+        effective_preset = 'semantic'
+
+    processed_s3_key: str | None = None
+    content_doc_id: str | None = None  # Actual doc ID based on extracted content
+
+    try:
+        content = ''
+        pre_chunks: list[dict[str, Any]] | None = None
+        ext = file_path.suffix.lower()
+        file_size = 0
+
+        # Get file size for error reporting
+        try:
+            file_size = file_path.stat().st_size
+        except OSError:
+            file_size = 0
+
+        file = None
+        try:
+            async with aiofiles.open(file_path, 'rb') as f:
+                file = await f.read()
+        except PermissionError as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]Permission denied - cannot read file',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Permission denied reading file: {file_path.name}')
+            return (None, None)
+        except FileNotFoundError as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File not found',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]File not found: {file_path.name}')
+            return (None, None)
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File reading error',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Error reading file {file_path.name}: {e!s}')
+            return (None, None)
+
+        # Process based on file type
+        try:
+            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
+                try:
+                    content, pre_chunks = await asyncio.to_thread(
+                        _extract_and_chunk_with_kreuzberg,
+                        file_path,
+                        effective_chunk_size,
+                        effective_overlap,
+                        effective_preset,
+                        getattr(global_args, 'enable_ocr', True),
+                        getattr(global_args, 'ocr_backend', 'tesseract'),
+                        getattr(global_args, 'ocr_language', 'eng'),
+                    )
+                    logger.info(
+                        f'[File Extraction] One-pass extraction: {file_path.name} -> '
+                        f'{len(pre_chunks)} chunks (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
+                    )
+                except Exception as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
+                            'original_error': f'Failed to extract text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
+                    return (None, None)
+
+            elif ext in CODE_EXTENSIONS:
+                try:
+                    content = file.decode('utf-8')
+
+                    if not content or len(content.strip()) == 0:
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Empty file content',
+                                'original_error': 'File contains no content or only whitespace',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
+                        return (None, None)
+
+                    if content.startswith("b'") or content.startswith('b"'):
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Binary data in text file',
+                                'original_error': 'File appears to contain binary data representation instead of text',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(
+                            f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
+                        )
+                        return (None, None)
+
+                except UnicodeDecodeError as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
+                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(
+                        f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
+                    )
+                    return (None, None)
+
+            else:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': f'[File Extraction]Unsupported file type: {ext}',
+                        'original_error': f'File extension {ext} is not supported',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
+                return (None, None)
+
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File format processing error',
+                    'original_error': f'Unexpected error during file extracting: {e!s}',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Unexpected error during {file_path.name} extracting: {e!s}')
+            return (None, None)
+
+        # Upload processed text to S3 if extraction succeeded
+        if content and s3_client and s3_doc_id:
+            try:
+                processed_s3_key = await _upload_processed_text_to_s3(
+                    s3_client=s3_client,
+                    workspace=rag.workspace,
+                    doc_id=s3_doc_id,
+                    extracted_text=content,
+                )
+            except Exception as e:
+                logger.error(f'Failed to upload processed text to S3: {e}')
+                # Continue processing even if S3 upload fails
+
+        # Insert into the RAG queue
+        if content:
+            # Check if content contains only whitespace characters
+            if not content.strip():
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': '[File Extraction]File contains only whitespace',
+                        'original_error': 'File content contains only whitespace characters',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.warning(f'[File Extraction]File contains only whitespace characters: {file_path.name}')
+                return (None, None)
+
+            try:
+                enqueue_metadata = metadata.copy() if metadata else {}
+                enqueue_metadata['chunking_preset'] = effective_preset
+                enqueue_metadata['chunk_token_size'] = effective_chunk_size
+                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
+
+                if pre_chunks:
+                    enqueue_metadata['pre_chunks'] = pre_chunks
+
+                await rag.apipeline_enqueue_documents(
+                    content, file_paths=file_path.name, track_id=track_id, metadata=enqueue_metadata
+                )
+
+                logger.info(f'Successfully extracted and enqueued file: {file_path.name}')
+
+                # Move file to __enqueued__ directory after enqueuing
+                try:
+                    enqueued_dir = file_path.parent / '__enqueued__'
+                    enqueued_dir.mkdir(exist_ok=True)
+
+                    # Generate unique filename to avoid conflicts
+                    unique_filename = get_unique_filename_in_enqueued(enqueued_dir, file_path.name)
+                    target_path = enqueued_dir / unique_filename
+
+                    # Move the file
+                    file_path.rename(target_path)
+                    logger.debug(f'Moved file to enqueued directory: {file_path.name} -> {unique_filename}')
+
+                except Exception as move_error:
+                    logger.error(f'Failed to move file {file_path.name} to __enqueued__ directory: {move_error}')
+                    # Don't affect the main function's success status
+
+                # Compute the actual document ID from SANITIZED extracted content (matches how LightRAG stores it)
+                # LightRAG applies sanitize_text_for_encoding() before hashing - we must do the same!
+                sanitized_content = sanitize_text_for_encoding(content)
+                content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
+                return (processed_s3_key, content_doc_id)
+
+            except Exception as e:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': 'Document enqueue error',
+                        'original_error': f'Failed to enqueue document: {e!s}',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'Error enqueueing document {file_path.name}: {e!s}')
+                return (None, None)
+        else:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': 'No content extracted',
+                    'original_error': 'No content could be extracted from file',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'No content extracted from file: {file_path.name}')
+            return (None, None)
+
+    except Exception as e:
+        # Catch-all for any unexpected errors
+        try:
+            file_size = file_path.stat().st_size if file_path.exists() else 0
+        except OSError:
+            file_size = 0
+
+        error_files = [
+            {
+                'file_path': str(file_path.name),
+                'error_description': 'Unexpected processing error',
+                'original_error': f'Unexpected error: {e!s}',
+                'file_size': file_size,
+            }
+        ]
+        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+        logger.error(f'Enqueuing file {file_path.name} error: {e!s}')
+        logger.error(traceback.format_exc())
+        return (None, None)
+    finally:
+        if file_path.name.startswith(temp_prefix):
+            try:
+                file_path.unlink()
+            except Exception as e:
+                logger.error(f'Error deleting file {file_path}: {e!s}')
+
+
+async def pipeline_process_bytes_with_s3(
+    rag: LightRAG,
+    file_content: bytes,
+    filename: str,
+    mime_type: str,
+    s3_client: S3Client,
+    s3_doc_id: str,
+    s3_original_key: str,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
+) -> str | None:
+    """Process document bytes directly without local file storage.
+
+    This is the fully S3-integrated flow:
+    1. Original is already uploaded to S3 by caller
+    2. Extract text from bytes in memory
+    3. Upload processed text to S3
+    4. Enqueue to RAG pipeline
+
+    Args:
+        rag: LightRAG instance
+        file_content: Document content as bytes
+        filename: Original filename (for logging/metadata)
+        mime_type: MIME type of the content
+        s3_client: S3Client instance
+        s3_doc_id: Document ID for S3 paths
+        s3_original_key: S3 key of the already-uploaded original
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict
+        chunk_token_size: Max tokens per chunk
+        chunk_overlap_token_size: Overlap tokens
+        chunking_preset: Chunking preset
+
+    Returns:
+        S3 key of the uploaded processed text, or None if processing failed
+    """
+    if track_id is None:
+        track_id = generate_track_id('unknown')
+
+    effective_chunk_size = chunk_token_size or rag.chunk_token_size
+    effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
+    effective_preset = chunking_preset or (metadata.get('chunking_preset') if metadata else None)
+    if effective_preset is None:
+        effective_preset = 'semantic'
+
+    file_size = len(file_content)
+    processed_s3_key: str | None = None
+
+    try:
+        content = ''
+        pre_chunks: list[dict[str, Any]] | None = None
+        ext = Path(filename).suffix.lower()
+
+        tables: list[Any] | None = None
+
+        # Process based on file type
+        try:
+            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
+                try:
+                    content, pre_chunks, tables = await asyncio.to_thread(
+                        _extract_and_chunk_bytes_with_kreuzberg,
+                        file_content,
+                        mime_type,
+                        effective_chunk_size,
+                        effective_overlap,
+                        effective_preset,
+                        getattr(global_args, 'enable_ocr', True),
+                        getattr(global_args, 'ocr_backend', 'tesseract'),
+                        getattr(global_args, 'ocr_language', 'eng'),
+                    )
+                    logger.info(
+                        f'[Bytes Extraction] One-pass extraction: {filename} -> '
+                        f'{len(pre_chunks)} chunks, {len(tables) if tables else 0} tables (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
+                    )
+                except Exception as e:
+                    error_files = [
+                        {
+                            'file_path': filename,
+                            'error_description': f'[Bytes Extraction]{ext.upper()[1:]} processing error',
+                            'original_error': f'Failed to extract text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[Bytes Extraction]Error processing {filename}: {e!s}')
+                    return None
+
+            elif ext in CODE_EXTENSIONS:
+                try:
+                    content = file_content.decode('utf-8')
+
+                    if not content or len(content.strip()) == 0:
+                        error_files = [
+                            {
+                                'file_path': filename,
+                                'error_description': '[Bytes Extraction]Empty file content',
+                                'original_error': 'File contains no content or only whitespace',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(f'[Bytes Extraction]Empty content in file: {filename}')
+                        return None
+
+                except UnicodeDecodeError as e:
+                    error_files = [
+                        {
+                            'file_path': filename,
+                            'error_description': '[Bytes Extraction]UTF-8 encoding error',
+                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[Bytes Extraction]File {filename} is not valid UTF-8 encoded text.')
+                    return None
+
+            else:
+                error_files = [
+                    {
+                        'file_path': filename,
+                        'error_description': f'[Bytes Extraction]Unsupported file type: {ext}',
+                        'original_error': f'File extension {ext} is not supported',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'[Bytes Extraction]Unsupported file type: {filename} (extension {ext})')
+                return None
+
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': filename,
+                    'error_description': '[Bytes Extraction]File format processing error',
+                    'original_error': f'Unexpected error during extraction: {e!s}',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[Bytes Extraction]Unexpected error during {filename} extraction: {e!s}')
+            return None
+
+        # Upload processed text to S3
+        if content:
+            if not content.strip():
+                error_files = [
+                    {
+                        'file_path': filename,
+                        'error_description': '[Bytes Extraction]File contains only whitespace',
+                        'original_error': 'File content contains only whitespace characters',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.warning(f'[Bytes Extraction]File contains only whitespace: {filename}')
+                return None
+
+            try:
+                processed_s3_key = await _upload_processed_text_to_s3(
+                    s3_client=s3_client,
+                    workspace=rag.workspace,
+                    doc_id=s3_doc_id,
+                    extracted_text=content,
+                    tables=tables,
+                )
+            except Exception as e:
+                logger.error(f'Failed to upload processed Markdown to S3: {e}')
+                # Continue processing even if S3 upload fails
+
+            # Insert into the RAG queue
+            try:
+                enqueue_metadata = metadata.copy() if metadata else {}
+                enqueue_metadata['chunking_preset'] = effective_preset
+                enqueue_metadata['chunk_token_size'] = effective_chunk_size
+                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
+                # Pass original file's S3 key through metadata so chunks get it for citations
+                enqueue_metadata['s3_key'] = s3_original_key
+
+                if pre_chunks:
+                    enqueue_metadata['pre_chunks'] = pre_chunks
+
+                await rag.apipeline_enqueue_documents(
+                    content, file_paths=filename, track_id=track_id, metadata=enqueue_metadata
+                )
+
+                logger.info(f'Successfully extracted and enqueued from bytes: {filename}')
+
+                # Process the enqueued document
+                try:
+                    await rag.apipeline_process_enqueue_documents()
+                except Exception:
+                    raise
+
+                # Update database with S3 keys after processing completes
+                # Compute content_doc_id from SANITIZED extracted content (matches how LightRAG stores it)
+                # LightRAG applies sanitize_text_for_encoding() before hashing - we must do the same!
+                sanitized_content = sanitize_text_for_encoding(content)
+                content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
+                await _update_db_with_s3_keys(
+                    s3_client=s3_client,
+                    rag=rag,
+                    doc_id=content_doc_id,
+                    original_s3_key=s3_original_key,
+                    processed_s3_key=processed_s3_key,
+                )
+
+                return processed_s3_key
+
+            except Exception as e:
+                error_files = [
+                    {
+                        'file_path': filename,
+                        'error_description': 'Document enqueue error',
+                        'original_error': f'Failed to enqueue document: {e!s}',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'Error enqueueing document {filename}: {e!s}')
+                return None
+        else:
+            error_files = [
+                {
+                    'file_path': filename,
+                    'error_description': 'No content extracted',
+                    'original_error': 'No content could be extracted from bytes',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'No content extracted from bytes: {filename}')
+            return None
+
+    except Exception as e:
+        error_files = [
+            {
+                'file_path': filename,
+                'error_description': 'Unexpected processing error',
+                'original_error': f'Unexpected error: {e!s}',
+                'file_size': file_size,
+            }
+        ]
+        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+        logger.error(f'Processing bytes {filename} error: {e!s}')
+        logger.error(traceback.format_exc())
+        return None
+
+
 async def pipeline_index_file(
     rag: LightRAG,
     file_path: Path,
@@ -1300,6 +1956,204 @@ async def pipeline_index_texts(
             normalized_sources.append('unknown_source')
     await rag.apipeline_enqueue_documents(input=texts, file_paths=normalized_sources, track_id=track_id)
     await rag.apipeline_process_enqueue_documents()
+
+
+# =============================================================================
+# S3 Integration Helpers
+# =============================================================================
+
+
+async def _upload_to_s3(
+    s3_client: S3Client,
+    workspace: str,
+    doc_id: str,
+    content: bytes,
+    filename: str,
+    content_type: str,
+) -> str:
+    """Upload file to S3 archive. S3 is mandatory - raises on failure.
+
+    Args:
+        s3_client: S3Client instance (required, S3 is mandatory)
+        workspace: Current workspace name
+        doc_id: Document ID (computed from content hash)
+        content: File content as bytes
+        filename: Filename for S3 storage (e.g., 'original.pdf')
+        content_type: MIME type of the file
+
+    Returns:
+        S3 key where the file was uploaded
+
+    Raises:
+        Exception: If upload fails (S3 is mandatory, failures are not swallowed)
+    """
+    s3_key = f'{workspace}/{doc_id}/{filename}'
+    await s3_client.upload_object(
+        key=s3_key,
+        data=content,
+        content_type=content_type,
+    )
+    logger.info(f'Uploaded to S3: {s3_key}')
+    return s3_key
+
+
+async def _upload_processed_text_to_s3(
+    s3_client: S3Client,
+    workspace: str,
+    doc_id: str,
+    extracted_text: str,
+    tables: list[Any] | None = None,
+) -> str:
+    """Upload extracted/OCR'd text to S3 as Markdown.
+
+    If tables are provided, they are appended to the content in Markdown format.
+    This preserves document structure for better citations.
+
+    Args:
+        s3_client: S3Client instance (required, S3 is mandatory)
+        workspace: Current workspace name
+        doc_id: Document ID (same as original file)
+        extracted_text: The extracted text content from kreuzberg
+        tables: Optional list of extracted tables with .markdown property
+
+    Returns:
+        S3 key where the processed Markdown was uploaded
+
+    Raises:
+        Exception: If upload fails
+    """
+    # Build Markdown content
+    markdown_parts = [extracted_text]
+
+    # Append tables in Markdown format if available
+    if tables:
+        table_markdowns = []
+        for table in tables:
+            # Tables from kreuzberg have a .markdown property
+            table_md = getattr(table, 'markdown', None)
+            if table_md:
+                table_markdowns.append(table_md)
+
+        if table_markdowns:
+            markdown_parts.append('\n\n---\n\n## Extracted Tables\n')
+            for idx, md in enumerate(table_markdowns, start=1):
+                markdown_parts.append(f'\n### Table {idx}\n\n{md}\n')
+
+    markdown_content = ''.join(markdown_parts)
+
+    s3_key = f'{workspace}/{doc_id}/processed.md'
+    await s3_client.upload_object(
+        key=s3_key,
+        data=markdown_content.encode('utf-8'),
+        content_type='text/markdown; charset=utf-8',
+    )
+    logger.info(f'Uploaded processed Markdown to S3: {s3_key}')
+    return s3_key
+
+
+async def _update_db_with_s3_keys(
+    s3_client: S3Client,
+    rag: LightRAG,
+    doc_id: str,
+    original_s3_key: str,
+    processed_s3_key: str | None = None,
+):
+    """Update database with S3 keys for original and processed files.
+
+    Called after document processing completes. Updates:
+    - doc_status with original file S3 key
+    - text_chunks with processed text S3 key
+
+    Args:
+        s3_client: S3Client instance (required, S3 is mandatory)
+        rag: LightRAG instance for database updates
+        doc_id: Document ID for database updates
+        original_s3_key: S3 key for the original uploaded file
+        processed_s3_key: S3 key for the processed text (optional)
+    """
+    logger.debug(f'_update_db_with_s3_keys: doc_id={doc_id}, s3_key={original_s3_key}')
+    try:
+        # Update doc_status with original file S3 key
+        if hasattr(rag.doc_status, 'update_s3_key'):
+            await rag.doc_status.update_s3_key(doc_id, original_s3_key)
+            logger.info(f'Updated doc_status with original s3_key: {original_s3_key}')
+
+        # Update text_chunks with processed text S3 key
+        if processed_s3_key and hasattr(rag.text_chunks, 'update_s3_key_by_doc_id'):
+            archive_url = s3_client.get_s3_url(processed_s3_key)
+            updated_count = await rag.text_chunks.update_s3_key_by_doc_id(
+                full_doc_id=doc_id,
+                s3_key=processed_s3_key,
+                archive_url=archive_url,
+            )
+            logger.info(f'Updated {updated_count} chunks with processed s3_key: {processed_s3_key}')
+
+    except Exception as e:
+        logger.error(f'Failed to update DB with S3 keys for doc {doc_id}: {e}')
+        # Don't raise - processing already succeeded, this is cleanup
+
+
+async def pipeline_index_file_with_s3(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    s3_client: S3Client | None = None,
+):
+    """Index file with S3 archival for original and processed content.
+
+    Flow:
+    1. Original file was already uploaded to S3 at /upload time
+    2. Extract text from file (via pipeline_enqueue_file_with_s3)
+    3. Upload processed text to S3
+    4. Process document through normal RAG pipeline
+    5. Update database with S3 keys
+
+    S3 metadata is passed via underscore-prefixed keys in metadata dict.
+
+    Args:
+        rag: LightRAG instance
+        file_path: Path to the file to index
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict (may contain _s3_* keys)
+        s3_client: S3Client instance (required for S3 operations)
+    """
+    # Extract S3 metadata (stored with _ prefix to mark as internal)
+    s3_original_key = None
+    s3_doc_id = None
+    if metadata:
+        s3_original_key = metadata.pop('_s3_original_key', None)
+        s3_doc_id = metadata.pop('_s3_doc_id', None)
+
+    # Process document and capture extracted content for S3 upload
+    # Returns (processed_s3_key, content_doc_id) - content_doc_id is the actual ID stored in DB
+    processed_s3_key, content_doc_id = await pipeline_enqueue_file_with_s3(
+        rag=rag,
+        file_path=file_path,
+        track_id=track_id,
+        metadata=metadata,
+        s3_client=s3_client,
+        s3_doc_id=s3_doc_id,
+    )
+
+    # Process the enqueued documents
+    try:
+        await rag.apipeline_process_enqueue_documents()
+    except Exception as e:
+        logger.error(f'Error processing enqueued documents: {e!s}')
+        logger.error(traceback.format_exc())
+
+    # Update database with S3 keys after processing completes
+    # Use content_doc_id (from extracted content) NOT s3_doc_id (from raw file bytes)
+    # because the database stores documents by the content-based ID
+    if s3_client and content_doc_id and s3_original_key:
+        await _update_db_with_s3_keys(
+            s3_client=s3_client,
+            rag=rag,
+            doc_id=content_doc_id,
+            original_s3_key=s3_original_key,
+            processed_s3_key=processed_s3_key,
+        )
 
 
 async def run_scanning_process(rag: LightRAG, doc_manager: DocumentManager, track_id: str | None = None):
@@ -1559,7 +2413,17 @@ async def background_delete_documents(
                 logger.error(f'Error processing pending documents after deletion: {e}')
 
 
-def create_document_routes(rag: LightRAG, doc_manager: DocumentManager, api_key: str | None = None):
+def create_document_routes(
+    rag: LightRAG,
+    doc_manager: DocumentManager,
+    api_key: str | None = None,
+    s3_client: S3Client | None = None,
+):
+    """Create document routes with optional S3 integration.
+
+    When s3_client is provided, uploaded documents will be stored in S3
+    in addition to local filesystem, and archived after processing.
+    """
     # Create combined auth dependency for document routes
     combined_auth = get_combined_auth_dependency(api_key)
 
@@ -1617,6 +2481,10 @@ def create_document_routes(rag: LightRAG, doc_manager: DocumentManager, api_key:
             HTTPException: If the file type is not supported (400) or other errors occur (500).
         """
         try:
+            # S3 is mandatory - ensure client is available
+            if s3_client is None:
+                raise HTTPException(status_code=500, detail='S3 storage is not configured')
+
             # Sanitize filename to prevent Path Traversal attacks
             safe_filename = sanitize_filename(file.filename or '', doc_manager.input_dir)
 
@@ -1639,29 +2507,52 @@ def create_document_routes(rag: LightRAG, doc_manager: DocumentManager, api_key:
                     track_id=existing_track_id,
                 )
 
-            file_path = doc_manager.input_dir / safe_filename
-            # Check if file already exists in file system
-            if file_path.exists():
-                return InsertResponse(
-                    status='duplicated',
-                    message=f"File '{safe_filename}' already exists in the input directory.",
-                    track_id='',
-                )
+            # Read entire file content (S3-only flow, no local filesystem)
+            file_content = await file.read()
 
-            async with aiofiles.open(file_path, 'wb') as buffer:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    await buffer.write(chunk)
+            # Generate stable doc_id from content hash (S3 is mandatory)
+            s3_doc_id = compute_mdhash_id(file_content, prefix='doc_')
+
+            # Determine original file extension and content type
+            original_ext = Path(safe_filename).suffix
+            original_s3_filename = f'original{original_ext}'
+            content_type = file.content_type
+            # Guess MIME type from filename if missing or generic (curl sends application/octet-stream)
+            if not content_type or content_type == 'application/octet-stream':
+                guessed_type, _ = mimetypes.guess_type(safe_filename)
+                content_type = guessed_type or content_type or 'application/octet-stream'
+
+            # Upload original to S3 immediately (S3 is mandatory)
+            s3_original_key = await _upload_to_s3(
+                s3_client=s3_client,
+                workspace=rag.workspace,
+                doc_id=s3_doc_id,
+                content=file_content,
+                filename=original_s3_filename,
+                content_type=content_type,
+            )
 
             track_id = generate_track_id('upload')
 
-            # Build metadata with chunking preset if specified
-            metadata = {'chunking_preset': chunking_preset} if chunking_preset else None
+            # Build metadata with chunking preset
+            metadata: dict[str, Any] = {}
+            if chunking_preset:
+                metadata['chunking_preset'] = chunking_preset
 
-            # Add to background tasks and get track_id
-            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id, metadata)
+            # Process bytes directly without saving to local filesystem
+            # This extracts text, uploads processed text to S3, and enqueues
+            background_tasks.add_task(
+                pipeline_process_bytes_with_s3,
+                rag,
+                file_content,
+                safe_filename,
+                content_type,
+                s3_client,
+                s3_doc_id,
+                s3_original_key,
+                track_id,
+                metadata,
+            )
 
             return InsertResponse(
                 status='success',

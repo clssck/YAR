@@ -45,6 +45,7 @@ class SourceReference:
     page_range: str | None = None
     excerpt: str | None = None
     chunk_ids: list[str] = field(default_factory=list)
+    s3_key: str | None = None
 
 
 @dataclass
@@ -418,6 +419,7 @@ class CitationExtractor:
                     page_range=ref.get('page_range'),
                     excerpt=excerpt,
                     chunk_ids=[c.get('id', '') for c in chunks if c.get('id')],
+                    s3_key=ref.get('s3_key'),
                 )
             )
 

@@ -166,19 +166,24 @@ class TestExtractionSettings:
         assert all(isinstance(et, str) for et in DEFAULT_ENTITY_TYPES)
 
     def test_default_entity_types_expected_values(self):
-        """Test DEFAULT_ENTITY_TYPES contains expected entity types."""
+        """Test DEFAULT_ENTITY_TYPES contains expected entity types.
+
+        Entity types optimized for general/mixed corpus:
+        - Removed: Creature, NaturalObject, Content (rarely used)
+        - Added: Technology, Product, Document (common in business/tech docs)
+        """
         expected_types = {
             'Person',
-            'Creature',
             'Organization',
             'Location',
             'Event',
             'Concept',
             'Method',
-            'Content',
+            'Technology',
+            'Product',
+            'Document',
             'Data',
             'Artifact',
-            'NaturalObject',
         }
         assert set(DEFAULT_ENTITY_TYPES) == expected_types
 

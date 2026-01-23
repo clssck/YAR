@@ -1,9 +1,8 @@
 """
 Async S3 client wrapper for S3-compatible object storage (RustFS, AWS S3, Cloudflare R2).
 
-This module provides staging and archive functionality for documents:
-- Upload to staging: s3://bucket/staging/{workspace}/{doc_id}
-- Move to archive: s3://bucket/archive/{workspace}/{doc_id}
+This module provides document storage functionality:
+- Documents stored at: s3://bucket/{workspace}/{doc_id}/
 - Generate presigned URLs for citations
 """
 
@@ -204,9 +203,9 @@ class S3Client:
         return f'staging/{workspace}/{doc_id}/{safe_filename}'
 
     def _make_archive_key(self, workspace: str, doc_id: str, filename: str) -> str:
-        """Generate S3 key for archive area."""
+        """Generate S3 key for document storage."""
         safe_filename = filename.replace('/', '_').replace('\\', '_')
-        return f'archive/{workspace}/{doc_id}/{safe_filename}'
+        return f'{workspace}/{doc_id}/{safe_filename}'
 
     def _staging_to_archive_key(self, staging_key: str) -> str:
         """Convert staging key to archive key."""

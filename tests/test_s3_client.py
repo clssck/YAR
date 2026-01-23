@@ -251,12 +251,12 @@ class TestKeyGeneration:
 
     @pytest.mark.offline
     def test_make_archive_key(self, s3_config):
-        """Test archive key format."""
+        """Test archive key format (documents stored at workspace root, no archive prefix)."""
         from lightrag.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         key = client._make_archive_key('workspace1', 'doc456', 'data.json')
-        assert key == 'archive/workspace1/doc456/data.json'
+        assert key == 'workspace1/doc456/data.json'
 
     @pytest.mark.offline
     def test_staging_to_archive_key(self, s3_config):

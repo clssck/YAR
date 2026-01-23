@@ -497,7 +497,8 @@
       "download": "下載",
       "delete": "刪除",
       "retry": "重試",
-      "view": "檢視"
+      "view": "檢視",
+      "info": "詳情"
     },
     "viewer": {
       "pdfPreview": "瀏覽器中無法預覽PDF",
@@ -507,6 +508,15 @@
     "confirmDelete": {
       "title": "確認刪除",
       "description": "確定要刪除 \"{{name}}\" 嗎？此操作無法復原。"
+    },
+    "folderDetails": {
+      "totalSize": "總大小",
+      "objects": "物件數",
+      "subfolders": "子資料夾",
+      "lastModified": "最後修改",
+      "preview": "內容預覽",
+      "empty": "此資料夾為空",
+      "andMore": "還有 {{count}} 個..."
     }
   },
   "pagination": {

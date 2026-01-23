@@ -205,18 +205,21 @@ class LightRAG:
     # Orphan connection
     # ---
 
-    auto_connect_orphans: bool = field(default=get_env_value('AUTO_CONNECT_ORPHANS', False, bool))
+    auto_connect_orphans: bool = field(default=True)
     """Automatically run orphan connection after each document insert.
     Orphans are entities with no relationships. This finds meaningful
-    connections using vector similarity + LLM validation."""
+    connections using vector similarity + LLM validation.
+    Always enabled by default for better graph density."""
 
-    orphan_connection_threshold: float = field(default=get_env_value('ORPHAN_CONNECTION_THRESHOLD', 0.3, float))
+    orphan_connection_threshold: float = field(default=get_env_value('ORPHAN_CONNECTION_THRESHOLD', 0.25, float))
     """Vector similarity threshold for orphan connection candidates.
-    Lower = more candidates (more LLM calls). Range: 0.0-1.0."""
+    Lower = more candidates (more LLM calls). Range: 0.0-1.0.
+    Lowered from 0.3 to 0.25 for better orphan discovery."""
 
-    orphan_confidence_threshold: float = field(default=get_env_value('ORPHAN_CONFIDENCE_THRESHOLD', 0.7, float))
+    orphan_confidence_threshold: float = field(default=get_env_value('ORPHAN_CONFIDENCE_THRESHOLD', 0.75, float))
     """LLM confidence threshold for creating orphan connections.
-    Higher = stricter validation. Range: 0.0-1.0."""
+    Higher = stricter validation. Range: 0.0-1.0.
+    Raised from 0.7 to 0.75 for quality connections."""
 
     orphan_cross_connect: bool = field(default=get_env_value('ORPHAN_CROSS_CONNECT', True, bool))
     """Allow orphans to connect to other orphans, forming new clusters.
@@ -1219,6 +1222,7 @@ class LightRAG:
             doc_id: {
                 'content': contents[doc_id]['content'],
                 'file_path': contents[doc_id]['file_path'],
+                'meta': metadata,  # Store document metadata (chunking_preset, etc.)
             }
             for doc_id in new_docs
         }
@@ -1648,11 +1652,14 @@ class LightRAG:
                             # Build chunks dictionary
                             # Cast after isinstance validation to help type checker
                             validated_chunks = cast(list[dict[str, Any]], chunking_result)
+                            # Extract s3_key from metadata (set during S3 upload flow)
+                            doc_s3_key = doc_metadata.get('s3_key')
                             chunks: dict[str, Any] = {
                                 compute_mdhash_id(dp['content'], prefix='chunk-'): {
                                     **dp,
                                     'full_doc_id': doc_id,
                                     'file_path': file_path,  # Add file path to each chunk
+                                    's3_key': doc_s3_key,  # Add S3 key for citation links
                                     'llm_cache_list': [],  # Initialize empty LLM cache list for each chunk
                                 }
                                 for dp in validated_chunks
@@ -2010,12 +2017,10 @@ class LightRAG:
             self.chunks_vdb,
             self.chunk_entity_relation_graph,
         ]
-        tasks = [
-            cast(StorageNameSpace, storage_inst).index_done_callback()
-            for storage_inst in all_storages
-            if storage_inst is not None
-        ]
-        await asyncio.gather(*tasks)
+
+        for storage_inst in all_storages:
+            if storage_inst is not None:
+                await cast(StorageNameSpace, storage_inst).index_done_callback()
 
         log_message = 'In memory DB persist to disk'
         logger.info(log_message)
@@ -2035,7 +2040,11 @@ class LightRAG:
                         pipeline_status['latest_message'] = orphan_log
                         pipeline_status['history_messages'].append(orphan_log)
 
-                result = await self.aconnect_orphan_entities()
+                # Add timeout to prevent blocking document processing indefinitely
+                result = await asyncio.wait_for(
+                    self.aconnect_orphan_entities(),
+                    timeout=60.0  # 60 second timeout for orphan connection
+                )
 
                 orphan_done_log = f'Orphan connection complete: {result["connections_made"]} connections made'
                 logger.info(orphan_done_log)
@@ -2044,6 +2053,8 @@ class LightRAG:
                         pipeline_status['latest_message'] = orphan_done_log
                         pipeline_status['history_messages'].append(orphan_done_log)
 
+            except asyncio.TimeoutError:
+                logger.warning('Auto orphan connection timed out after 60s')
             except Exception as e:
                 logger.warning(f'Auto orphan connection failed: {e}')
 

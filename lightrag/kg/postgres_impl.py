@@ -3153,6 +3153,7 @@ class PGKVStorage(BaseKVStorage):
                     v.get('file_path', ''),  # Map file_path to doc_name
                     self.workspace,
                     v.get('s3_key'),  # S3 key for document source
+                    json.dumps(v.get('meta')) if v.get('meta') else None,  # JSONB metadata
                 )
                 for k, v in data.items()
             ]
@@ -3979,7 +3980,9 @@ class PGVectorStorage(BaseVectorStorage):
             logger.error(f'[{self.workspace}] Unknown namespace for ID lookup: {self.namespace}')
             return None
 
-        query = f'SELECT *, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM {table_name} WHERE workspace=$1 AND id=$2'
+        # Use explicit columns to avoid returning content_vector (pgvector type not JSON-serializable)
+        columns = _get_vdb_columns_for_table(table_name)
+        query = f'SELECT {columns}, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM {table_name} WHERE workspace=$1 AND id=$2'
         params = {'workspace': self.workspace, 'id': id}
 
         try:
@@ -4009,8 +4012,9 @@ class PGVectorStorage(BaseVectorStorage):
             logger.error(f'[{self.workspace}] Unknown namespace for IDs lookup: {self.namespace}')
             return []
 
-        # Use parameterized array for security and performance
-        query = f'SELECT *, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM {table_name} WHERE workspace=$1 AND id = ANY($2)'
+        # Use explicit columns to avoid returning content_vector (pgvector type not JSON-serializable)
+        columns = _get_vdb_columns_for_table(table_name)
+        query = f'SELECT {columns}, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM {table_name} WHERE workspace=$1 AND id = ANY($2)'
         params = [self.workspace, list(ids)]
 
         try:
@@ -6606,6 +6610,19 @@ def namespace_to_table_name(namespace: str) -> str:
     return ''
 
 
+# Columns for each VDB table (excluding content_vector which is not JSON-serializable)
+_VDB_TABLE_COLUMNS = {
+    'LIGHTRAG_VDB_CHUNKS': 'id, workspace, full_doc_id, chunk_order_index, tokens, content, file_path, create_time, update_time',
+    'LIGHTRAG_VDB_ENTITY': 'id, workspace, entity_name, entity_type, content, create_time, update_time, chunk_ids, file_path',
+    'LIGHTRAG_VDB_RELATION': 'id, workspace, source_id, target_id, content, create_time, update_time, chunk_ids, file_path',
+}
+
+
+def _get_vdb_columns_for_table(table_name: str) -> str:
+    """Get the column list for a VDB table, excluding non-serializable content_vector."""
+    return _VDB_TABLE_COLUMNS.get(table_name, '*')
+
+
 TABLES = {
     'LIGHTRAG_DOC_FULL': {
         'ddl': """CREATE TABLE LIGHTRAG_DOC_FULL (
@@ -6862,12 +6879,13 @@ SQL_TEMPLATES = {
                                  FROM LIGHTRAG_RELATION_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'filter_keys': 'SELECT id FROM {table_name} WHERE workspace=$1 AND id IN ({ids})',
-    'upsert_doc_full': """INSERT INTO LIGHTRAG_DOC_FULL (id, content, doc_name, workspace, s3_key)
-                        VALUES ($1, $2, $3, $4, $5)
+    'upsert_doc_full': """INSERT INTO LIGHTRAG_DOC_FULL (id, content, doc_name, workspace, s3_key, meta)
+                        VALUES ($1, $2, $3, $4, $5, $6)
                         ON CONFLICT (workspace,id) DO UPDATE
                            SET content = $2,
                                doc_name = $3,
                                s3_key = COALESCE($5, LIGHTRAG_DOC_FULL.s3_key),
+                               meta = COALESCE($6, LIGHTRAG_DOC_FULL.meta),
                                update_time = CURRENT_TIMESTAMP
                        """,
     'upsert_llm_response_cache': """INSERT INTO LIGHTRAG_LLM_CACHE(workspace,id,original_prompt,return_value,chunk_id,cache_type,queryparam)

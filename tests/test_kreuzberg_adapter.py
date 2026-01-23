@@ -502,9 +502,10 @@ class TestExtractionOptions:
         options = ChunkingOptions()
 
         assert options.enabled is False
-        assert options.max_chars == 4800
-        assert options.max_overlap == 400
-        assert options.preset is None  # Default is None, can be 'recursive' or 'semantic'
+        # Defaults are hardcoded in dataclass (~1000 tokens, ~100 tokens overlap)
+        assert options.max_chars == 4170
+        assert options.max_overlap == 417
+        assert options.preset == 'semantic'  # Default preset
 
     def test_extraction_options_dataclass(self):
         """Test ExtractionOptions dataclass defaults."""
@@ -1524,14 +1525,17 @@ class TestConfigBuilding:
         assert config is None
 
     def test_build_extraction_config_empty_options(self):
-        """Test config building with empty options."""
+        """Test config building with empty options uses defaults."""
         from lightrag.document.kreuzberg_adapter import (
             ExtractionOptions,
             _build_extraction_config,
         )
 
         config = _build_extraction_config(ExtractionOptions())
-        assert config is None
+        # Config is returned with default cache/quality settings
+        assert config is not None
+        assert config.use_cache is True
+        assert config.enable_quality_processing is True
 
     def test_build_extraction_config_with_chunking(self):
         """Test config building with chunking enabled."""
@@ -1548,7 +1552,7 @@ class TestConfigBuilding:
         assert config.chunking is not None
 
     def test_build_extraction_config_chunking_disabled(self):
-        """Test that disabled chunking doesn't create config."""
+        """Test that disabled chunking doesn't add chunking to config."""
         from lightrag.document.kreuzberg_adapter import (
             ChunkingOptions,
             ExtractionOptions,
@@ -1558,8 +1562,9 @@ class TestConfigBuilding:
         options = ExtractionOptions(chunking=ChunkingOptions(enabled=False))
         config = _build_extraction_config(options)
 
-        # Should be None since chunking is disabled
-        assert config is None
+        # Config is returned (with cache/quality defaults) but no chunking
+        assert config is not None
+        assert config.chunking is None
 
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
@@ -2036,9 +2041,10 @@ class TestDataclassDefaults:
         opts = ChunkingOptions()
 
         assert opts.enabled is False
-        assert opts.max_chars == 4800
-        assert opts.max_overlap == 400
-        assert opts.preset is None
+        # Defaults are hardcoded in dataclass (~1000 tokens, ~100 tokens overlap)
+        assert opts.max_chars == 4170
+        assert opts.max_overlap == 417
+        assert opts.preset == 'semantic'
 
     def test_ocr_options_all_defaults(self):
         """Test OcrOptions has correct defaults."""
@@ -4926,17 +4932,19 @@ class TestOnePassChunking:
     def test_create_chunking_options_defaults(self):
         """Test create_chunking_options with default values."""
         from lightrag.document import create_chunking_options
+        from lightrag.document.kreuzberg_adapter import tokens_to_chars
 
         options = create_chunking_options()
 
         assert options.enabled is True
-        assert options.max_chars == 1200 * 4  # 4800
-        assert options.max_overlap == 100 * 4  # 400
+        assert options.max_chars == tokens_to_chars(1200)  # ~5005 chars
+        assert options.max_overlap == tokens_to_chars(100)  # ~417 chars
         assert options.preset == 'semantic'
 
     def test_create_chunking_options_custom_values(self):
         """Test create_chunking_options with custom token sizes."""
         from lightrag.document import create_chunking_options
+        from lightrag.document.kreuzberg_adapter import tokens_to_chars
 
         options = create_chunking_options(
             chunk_token_size=500,
@@ -4945,8 +4953,8 @@ class TestOnePassChunking:
         )
 
         assert options.enabled is True
-        assert options.max_chars == 500 * 4  # 2000
-        assert options.max_overlap == 50 * 4  # 200
+        assert options.max_chars == tokens_to_chars(500)  # ~2085 chars
+        assert options.max_overlap == tokens_to_chars(50)  # ~208 chars
         assert options.preset == 'recursive'
 
     def test_create_chunking_options_no_preset(self):

@@ -13,6 +13,18 @@ from lightrag.api.utils_api import (
 from lightrag.kg.postgres_impl import TABLES
 
 
+def sanitize_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert non-JSON-serializable values (numpy arrays, etc.) to serializable format."""
+    sanitized = {}
+    for key, value in row.items():
+        if isinstance(value, np.ndarray):
+            # Convert vector to truncated string representation
+            sanitized[key] = f'[vector: {len(value)} dims]'
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
 def get_order_clause(ddl: str) -> str:
     """Determine the best ORDER BY clause based on available columns in DDL."""
     ddl_lower = ddl.lower()
@@ -27,21 +39,6 @@ def get_order_clause(ddl: str) -> str:
     elif 'id' in ddl_lower:
         return 'ORDER BY id ASC'
     return ''
-
-
-def convert_numpy_to_serializable(obj: Any) -> Any:
-    """Convert numpy arrays and other non-serializable types to JSON-serializable form.
-
-    This is needed because asyncpg's pgvector codec deserializes VECTOR columns
-    to numpy.ndarray objects, which Pydantic/FastAPI cannot serialize to JSON.
-    """
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, dict):
-        return {k: convert_numpy_to_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [convert_numpy_to_serializable(item) for item in obj]
-    return obj
 
 
 def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
@@ -114,11 +111,11 @@ def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
         sql = f'SELECT * FROM {table_name} WHERE workspace = $1 {order_clause} LIMIT $2 OFFSET $3'
         rows = await db.query(sql, [target_workspace, page_size, offset], multirows=True)
 
-        # Convert numpy arrays to lists for JSON serialization (pgvector returns numpy.ndarray)
-        serializable_rows = [convert_numpy_to_serializable(row) for row in (rows or [])]
+        # Sanitize rows to handle numpy arrays (show summary instead of huge float lists)
+        sanitized_rows = [sanitize_row(row) for row in (rows or [])]
 
         return {
-            'data': serializable_rows,
+            'data': sanitized_rows,
             'total': total,
             'page': page,
             'page_size': page_size,

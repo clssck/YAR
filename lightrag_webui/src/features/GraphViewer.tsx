@@ -173,18 +173,15 @@ const GraphViewer = () => {
     const isThemeChange = prevTheme.current && prevTheme.current !== theme
     if (isThemeChange) {
       setIsThemeSwitching(true)
-      console.log('Theme switching detected:', prevTheme.current, '->', theme)
 
       // Reset theme switching state after a short delay
       const timer = setTimeout(() => {
         setIsThemeSwitching(false)
-        console.log('Theme switching completed')
       }, 150)
 
       return () => clearTimeout(timer)
     }
     prevTheme.current = theme
-    console.log('Initialized sigma settings for theme:', theme)
   }, [theme])
 
   // Clean up sigma instance when component unmounts
@@ -195,10 +192,9 @@ const GraphViewer = () => {
       const sigma = useGraphStore.getState().sigmaInstance
       if (sigma) {
         try {
-          // Destroy sigma，and clear WebGL context
+          // Destroy sigma and clear WebGL context
           sigma.kill()
           useGraphStore.getState().setSigmaInstance(null)
-          console.log('Cleared sigma instance on Graphviewer unmount')
         } catch (error) {
           console.error('Error cleaning up sigma instance:', error)
         }
