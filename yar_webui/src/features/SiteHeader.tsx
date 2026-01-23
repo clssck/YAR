@@ -1,4 +1,5 @@
-import { BrainIcon, LogOutIcon } from 'lucide-react'
+import { LogOutIcon } from 'lucide-react'
+import { PirateFlag } from '@/components/icons/PirateFlag'
 import { useTranslation } from 'react-i18next'
 import type { LightragConfiguration } from '@/api/yar'
 import AppSettings from '@/components/AppSettings'
@@ -92,7 +93,7 @@ export default function SiteHeader() {
     <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex h-10 w-full border-b px-4 backdrop-blur">
       <div className="min-w-[200px] w-auto flex items-center">
         <a href={webuiPrefix} className="flex items-center gap-2">
-          <BrainIcon className="size-4 text-plum" aria-hidden="true" />
+          <PirateFlag className="size-4 text-plum" aria-hidden="true" />
         </a>
         {webuiTitle && (
           <div className="flex items-center">

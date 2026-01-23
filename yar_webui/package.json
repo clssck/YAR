@@ -119,6 +119,7 @@
     "happy-dom": "^20.3.7",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
+    "react-grab": "^0.0.98",
     "tailwindcss": "^4.1.18",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.9.3",
