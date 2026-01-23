@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: Parsed arguments
     """
 
-    parser = argparse.ArgumentParser(description='LightRAG API Server')
+    parser = argparse.ArgumentParser(description='YAR (Yet Another RAG) API Server')
 
     # Server configuration
     parser.add_argument(

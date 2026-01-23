@@ -1,5 +1,5 @@
 """
-LightRAG FastAPI Server
+YAR (Yet Another RAG) FastAPI Server
 """
 
 import argparse
@@ -327,7 +327,7 @@ def create_app(args):
                 logger.debug('Gunicorn Mode: postpone shared storage finalization to master process')
 
     # Initialize FastAPI
-    base_description = 'Providing API for LightRAG core and Web UI'
+    base_description = 'Providing API for YAR core and Web UI'
     swagger_description = (
         base_description + (' (API-Key Enabled)' if api_key else '') + '\n\n[View ReDoc documentation](/redoc)'
     )
@@ -337,7 +337,7 @@ def create_app(args):
     root_path = os.environ.get('ROOT_PATH', '')
 
     app_kwargs = {
-        'title': 'LightRAG Server API',
+        'title': 'YAR Server API',
         'description': swagger_description,
         'version': __api_version__,
         'openapi_url': '/openapi.json',  # Explicitly set OpenAPI schema URL
@@ -670,7 +670,7 @@ def create_app(args):
             auto_connect_orphans=args.auto_connect_orphans,
         )
     except Exception as e:
-        logger.error(f'Failed to initialize LightRAG: {e}')
+        logger.error(f'Failed to initialize YAR: {e}')
         raise
 
     # Add routes
@@ -1064,7 +1064,7 @@ def configure_logging():
     log_dir = os.getenv('LOG_DIR', os.getcwd())
     log_file_path = os.path.abspath(os.path.join(log_dir, DEFAULT_LOG_FILENAME))
 
-    print(f'\nLightRAG log file: {log_file_path}\n')
+    print(f'\nYAR log file: {log_file_path}\n')
     os.makedirs(os.path.dirname(log_dir), exist_ok=True)
 
     # Get log file max size and backup count from environment variables
