@@ -1,5 +1,5 @@
 """
-Tests for lightrag/api/routers/table_routes.py - Table inspection endpoints.
+Tests for yar/api/routers/table_routes.py - Table inspection endpoints.
 
 This module tests:
 - get_order_clause helper function
@@ -9,7 +9,7 @@ This module tests:
 
 from __future__ import annotations
 
-from lightrag.api.routers.table_routes import get_order_clause
+from yar.api.routers.table_routes import get_order_clause
 
 
 class TestGetOrderClause:

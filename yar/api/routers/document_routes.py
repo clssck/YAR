@@ -1,0 +1,3469 @@
+"""
+This module contains all document-related routes for the LightRAG API.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import mimetypes
+import traceback
+from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Literal
+
+import aiofiles
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from yar import LightRAG
+from yar.api.config import global_args
+from yar.api.utils_api import get_combined_auth_dependency
+from yar.base import DeletionResult, DocStatus
+from yar.constants import NS_PIPELINE_STATUS
+from yar.utils import (
+    compute_mdhash_id,
+    generate_track_id,
+    get_pinyin_sort_key,
+    logger,
+    sanitize_text_for_encoding,
+)
+
+if TYPE_CHECKING:
+    from yar.storage.s3_client import S3Client
+
+
+@lru_cache(maxsize=1)
+def _is_kreuzberg_available() -> bool:
+    """Check if kreuzberg is available (cached check).
+
+    Kreuzberg is a high-performance document processing engine with Rust core,
+    supporting 56+ document formats with built-in OCR and RAG chunking.
+
+    Returns:
+        bool: True if kreuzberg is available, False otherwise
+    """
+    try:
+        import kreuzberg  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+# Function to format datetime to ISO format string with timezone information
+def format_datetime(dt: Any) -> str | None:
+    """Format datetime to ISO format string with timezone information
+
+    Args:
+        dt: Datetime object, string, or None
+
+    Returns:
+        ISO format string with timezone information, or None if input is None
+    """
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        return dt
+
+    # Check if datetime object has timezone information
+    if isinstance(dt, datetime) and dt.tzinfo is None:
+        # If datetime object has no timezone info (naive datetime), add UTC timezone
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    # Return ISO format string with timezone information
+    return dt.isoformat()
+
+
+router = APIRouter(
+    prefix='/documents',
+    tags=['documents'],
+)
+
+# Temporary file prefix
+temp_prefix = '__tmp__'
+
+
+def sanitize_filename(filename: str, input_dir: Path) -> str:
+    """
+    Sanitize uploaded filename to prevent Path Traversal attacks.
+
+    Args:
+        filename: The original filename from the upload
+        input_dir: The target input directory
+
+    Returns:
+        str: Sanitized filename that is safe to use
+
+    Raises:
+        HTTPException: If the filename is unsafe or invalid
+    """
+    # Basic validation
+    if not filename or not filename.strip():
+        raise HTTPException(status_code=400, detail='Filename cannot be empty')
+
+    # Remove path separators and traversal sequences
+    clean_name = filename.replace('/', '').replace('\\', '')
+    clean_name = clean_name.replace('..', '')
+
+    # Remove control characters and null bytes
+    clean_name = ''.join(c for c in clean_name if ord(c) >= 32 and c != '\x7f')
+
+    # Remove leading/trailing whitespace and dots
+    clean_name = clean_name.strip().strip('.')
+
+    # Check if anything is left after sanitization
+    if not clean_name:
+        raise HTTPException(status_code=400, detail='Invalid filename after sanitization')
+
+    # Verify the final path stays within the input directory
+    try:
+        final_path = (input_dir / clean_name).resolve()
+        if not final_path.is_relative_to(input_dir.resolve()):
+            raise HTTPException(status_code=400, detail='Unsafe filename detected')
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail='Invalid filename') from None
+
+    return clean_name
+
+
+class ScanResponse(BaseModel):
+    """Response model for document scanning operation
+
+    Attributes:
+        status: Status of the scanning operation
+        message: Optional message with additional details
+        track_id: Tracking ID for monitoring scanning progress
+    """
+
+    status: Literal['scanning_started'] = Field(description='Status of the scanning operation')
+    message: str | None = Field(default=None, description='Additional details about the scanning operation')
+    track_id: str = Field(description='Tracking ID for monitoring scanning progress')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status': 'scanning_started',
+                'message': 'Scanning process has been initiated in the background',
+                'track_id': 'scan_20250729_170612_abc123',
+            }
+        }
+    )
+
+
+class ReprocessResponse(BaseModel):
+    """Response model for reprocessing failed documents operation
+
+    Attributes:
+        status: Status of the reprocessing operation
+        message: Message describing the operation result
+        track_id: Always empty string. Reprocessed documents retain their original track_id.
+    """
+
+    status: Literal['reprocessing_started'] = Field(description='Status of the reprocessing operation')
+    message: str = Field(description='Human-readable message describing the operation')
+    track_id: str = Field(
+        default='',
+        description='Always empty string. Reprocessed documents retain their original track_id from initial upload.',
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status': 'reprocessing_started',
+                'message': 'Reprocessing of failed documents has been initiated in background',
+                'track_id': '',
+            }
+        }
+    )
+
+
+class CancelPipelineResponse(BaseModel):
+    """Response model for pipeline cancellation operation
+
+    Attributes:
+        status: Status of the cancellation request
+        message: Message describing the operation result
+    """
+
+    status: Literal['cancellation_requested', 'not_busy'] = Field(description='Status of the cancellation request')
+    message: str = Field(description='Human-readable message describing the operation')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status': 'cancellation_requested',
+                'message': 'Pipeline cancellation has been requested. Documents will be marked as FAILED.',
+            }
+        }
+    )
+
+
+class InsertTextRequest(BaseModel):
+    """Request model for inserting a single text document
+
+    Attributes:
+        text: The text content to be inserted into the RAG system
+        file_source: Source of the text (optional)
+    """
+
+    text: str = Field(
+        min_length=1,
+        description='The text to insert',
+    )
+    file_source: str | None = Field(default=None, min_length=0, description='File Source')
+
+    @field_validator('text', mode='after')
+    @classmethod
+    def strip_text_after(cls, text: str) -> str:
+        return text.strip()
+
+    @field_validator('file_source', mode='after')
+    @classmethod
+    def strip_source_after(cls, file_source: str | None) -> str | None:
+        if file_source is None:
+            return None
+        return file_source.strip()
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'text': 'This is a sample text to be inserted into the RAG system.',
+                'file_source': 'Source of the text (optional)',
+            }
+        }
+    )
+
+
+class InsertTextsRequest(BaseModel):
+    """Request model for inserting multiple text documents
+
+    Attributes:
+        texts: List of text contents to be inserted into the RAG system
+        file_sources: Sources of the texts (optional)
+    """
+
+    texts: list[str] = Field(
+        min_length=1,
+        description='The texts to insert',
+    )
+    file_sources: list[str] | None = Field(default=None, min_length=0, description='Sources of the texts')
+
+    @field_validator('texts', mode='after')
+    @classmethod
+    def strip_texts_after(cls, texts: list[str]) -> list[str]:
+        return [text.strip() for text in texts]
+
+    @field_validator('file_sources', mode='after')
+    @classmethod
+    def strip_sources_after(cls, file_sources: list[str] | None) -> list[str] | None:
+        if file_sources is None:
+            return None
+        return [file_source.strip() for file_source in file_sources]
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'texts': [
+                    'This is the first text to be inserted.',
+                    'This is the second text to be inserted.',
+                ],
+                'file_sources': [
+                    'First file source (optional)',
+                ],
+            }
+        }
+    )
+
+
+class InsertResponse(BaseModel):
+    """Response model for document insertion operations
+
+    Attributes:
+        status: Status of the operation (success, duplicated, partial_success, failure)
+        message: Detailed message describing the operation result
+        track_id: Tracking ID for monitoring processing status
+    """
+
+    status: Literal['success', 'duplicated', 'partial_success', 'failure'] = Field(
+        description='Status of the operation'
+    )
+    message: str = Field(description='Message describing the operation result')
+    track_id: str = Field(description='Tracking ID for monitoring processing status')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status': 'success',
+                'message': "File 'document.pdf' uploaded successfully. Processing will continue in background.",
+                'track_id': 'upload_20250729_170612_abc123',
+            }
+        }
+    )
+
+
+class ClearDocumentsResponse(BaseModel):
+    """Response model for document clearing operation
+
+    Attributes:
+        status: Status of the clear operation
+        message: Detailed message describing the operation result
+    """
+
+    status: Literal['success', 'partial_success', 'busy', 'fail'] = Field(description='Status of the clear operation')
+    message: str = Field(description='Message describing the operation result')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status': 'success',
+                'message': 'All documents cleared successfully. Deleted 15 files.',
+            }
+        }
+    )
+
+
+class ClearCacheRequest(BaseModel):
+    """Request model for clearing cache
+
+    This model is kept for API compatibility but no longer accepts any parameters.
+    All cache will be cleared regardless of the request content.
+    """
+
+    model_config = ConfigDict(json_schema_extra={'example': {}})
+
+
+class ClearCacheResponse(BaseModel):
+    """Response model for cache clearing operation
+
+    Attributes:
+        status: Status of the clear operation
+        message: Detailed message describing the operation result
+    """
+
+    status: Literal['success', 'fail'] = Field(description='Status of the clear operation')
+    message: str = Field(description='Message describing the operation result')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status': 'success',
+                'message': "Successfully cleared cache for modes: ['default', 'naive']",
+            }
+        }
+    )
+
+
+class DeleteDocRequest(BaseModel):
+    doc_ids: list[str] = Field(..., description='The IDs of the documents to delete.')
+    delete_file: bool = Field(
+        default=False,
+        description='Whether to delete the corresponding file in the upload directory.',
+    )
+    delete_llm_cache: bool = Field(
+        default=False,
+        description='Whether to delete cached LLM extraction results for the documents.',
+    )
+
+    @field_validator('doc_ids', mode='after')
+    @classmethod
+    def validate_doc_ids(cls, doc_ids: list[str]) -> list[str]:
+        if not doc_ids:
+            raise ValueError('Document IDs list cannot be empty')
+
+        validated_ids = []
+        for doc_id in doc_ids:
+            if not doc_id or not doc_id.strip():
+                raise ValueError('Document ID cannot be empty')
+            validated_ids.append(doc_id.strip())
+
+        # Check for duplicates
+        if len(validated_ids) != len(set(validated_ids)):
+            raise ValueError('Document IDs must be unique')
+
+        return validated_ids
+
+
+class DeleteEntityRequest(BaseModel):
+    entity_name: str = Field(..., description='The name of the entity to delete.')
+
+    @field_validator('entity_name', mode='after')
+    @classmethod
+    def validate_entity_name(cls, entity_name: str) -> str:
+        if not entity_name or not entity_name.strip():
+            raise ValueError('Entity name cannot be empty')
+        return entity_name.strip()
+
+
+class DeleteRelationRequest(BaseModel):
+    source_entity: str = Field(..., description='The name of the source entity.')
+    target_entity: str = Field(..., description='The name of the target entity.')
+
+    @field_validator('source_entity', 'target_entity', mode='after')
+    @classmethod
+    def validate_entity_names(cls, entity_name: str) -> str:
+        if not entity_name or not entity_name.strip():
+            raise ValueError('Entity name cannot be empty')
+        return entity_name.strip()
+
+
+class DocStatusResponse(BaseModel):
+    id: str = Field(description='Document identifier')
+    content_summary: str = Field(description='Summary of document content')
+    content_length: int = Field(description='Length of document content in characters')
+    status: DocStatus = Field(description='Current processing status')
+    created_at: str | None = Field(default=None, description='Creation timestamp (ISO format string)')
+    updated_at: str | None = Field(default=None, description='Last update timestamp (ISO format string)')
+    track_id: str | None = Field(default=None, description='Tracking ID for monitoring progress')
+    chunks_count: int | None = Field(default=None, description='Number of chunks the document was split into')
+    error_msg: str | None = Field(default=None, description='Error message if processing failed')
+    metadata: dict[str, Any] | None = Field(default=None, description='Additional metadata about the document')
+    file_path: str | None = Field(default=None, description='Path to the document file')
+    s3_key: str | None = Field(default=None, description='S3 storage key for archived documents')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'id': 'doc_123456',
+                'content_summary': 'Research paper on machine learning',
+                'content_length': 15240,
+                'status': 'processed',
+                'created_at': '2025-03-31T12:34:56',
+                'updated_at': '2025-03-31T12:35:30',
+                'track_id': 'upload_20250729_170612_abc123',
+                'chunks_count': 12,
+                'error_msg': None,
+                'metadata': {'author': 'John Doe', 'year': 2025},
+                'file_path': 's3://yar/archive/default/doc_123456/research_paper.pdf',
+                's3_key': 'archive/default/doc_123456/research_paper.pdf',
+            }
+        }
+    )
+
+
+class TrackStatusResponse(BaseModel):
+    """Response model for tracking document processing status by track_id
+
+    Attributes:
+        track_id: The tracking ID
+        documents: List of documents associated with this track_id
+        total_count: Total number of documents for this track_id
+        status_summary: Count of documents by status
+    """
+
+    track_id: str = Field(description='The tracking ID')
+    documents: list[DocStatusResponse] = Field(description='List of documents associated with this track_id')
+    total_count: int = Field(description='Total number of documents for this track_id')
+    status_summary: dict[str, int] = Field(description='Count of documents by status')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'track_id': 'upload_20250729_170612_abc123',
+                'documents': [
+                    {
+                        'id': 'doc_123456',
+                        'content_summary': 'Research paper on machine learning',
+                        'content_length': 15240,
+                        'status': 'PROCESSED',
+                        'created_at': '2025-03-31T12:34:56',
+                        'updated_at': '2025-03-31T12:35:30',
+                        'track_id': 'upload_20250729_170612_abc123',
+                        'chunks_count': 12,
+                        'error_msg': None,
+                        'metadata': {'author': 'John Doe', 'year': 2025},
+                        'file_path': 'research_paper.pdf',
+                    }
+                ],
+                'total_count': 1,
+                'status_summary': {'PROCESSED': 1},
+            }
+        }
+    )
+
+
+class DocumentsRequest(BaseModel):
+    """Request model for paginated document queries
+
+    Attributes:
+        status_filter: Filter by document status, None for all statuses
+        page: Page number (1-based)
+        page_size: Number of documents per page (10-200)
+        sort_field: Field to sort by ('created_at', 'updated_at', 'id', 'file_path')
+        sort_direction: Sort direction ('asc' or 'desc')
+    """
+
+    status_filter: DocStatus | None = Field(
+        default=None, description='Filter by document status, None for all statuses'
+    )
+    page: int = Field(default=1, ge=1, description='Page number (1-based)')
+    page_size: int = Field(default=50, ge=10, le=200, description='Number of documents per page (10-200)')
+    sort_field: Literal['created_at', 'updated_at', 'id', 'file_path'] = Field(
+        default='updated_at', description='Field to sort by'
+    )
+    sort_direction: Literal['asc', 'desc'] = Field(default='desc', description='Sort direction')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status_filter': 'PROCESSED',
+                'page': 1,
+                'page_size': 50,
+                'sort_field': 'updated_at',
+                'sort_direction': 'desc',
+            }
+        }
+    )
+
+
+class PaginationInfo(BaseModel):
+    """Pagination information
+
+    Attributes:
+        page: Current page number
+        page_size: Number of items per page
+        total_count: Total number of items
+        total_pages: Total number of pages
+        has_next: Whether there is a next page
+        has_prev: Whether there is a previous page
+    """
+
+    page: int = Field(description='Current page number')
+    page_size: int = Field(description='Number of items per page')
+    total_count: int = Field(description='Total number of items')
+    total_pages: int = Field(description='Total number of pages')
+    has_next: bool = Field(description='Whether there is a next page')
+    has_prev: bool = Field(description='Whether there is a previous page')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'page': 1,
+                'page_size': 50,
+                'total_count': 150,
+                'total_pages': 3,
+                'has_next': True,
+                'has_prev': False,
+            }
+        }
+    )
+
+
+class PaginatedDocsResponse(BaseModel):
+    """Response model for paginated document queries
+
+    Attributes:
+        documents: List of documents for the current page
+        pagination: Pagination information
+        status_counts: Count of documents by status for all documents
+    """
+
+    documents: list[DocStatusResponse] = Field(description='List of documents for the current page')
+    pagination: PaginationInfo = Field(description='Pagination information')
+    status_counts: dict[str, int] = Field(description='Count of documents by status for all documents')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'documents': [
+                    {
+                        'id': 'doc_123456',
+                        'content_summary': 'Research paper on machine learning',
+                        'content_length': 15240,
+                        'status': 'PROCESSED',
+                        'created_at': '2025-03-31T12:34:56',
+                        'updated_at': '2025-03-31T12:35:30',
+                        'track_id': 'upload_20250729_170612_abc123',
+                        'chunks_count': 12,
+                        'error_msg': None,
+                        'metadata': {'author': 'John Doe', 'year': 2025},
+                        'file_path': 'research_paper.pdf',
+                    }
+                ],
+                'pagination': {
+                    'page': 1,
+                    'page_size': 50,
+                    'total_count': 150,
+                    'total_pages': 3,
+                    'has_next': True,
+                    'has_prev': False,
+                },
+                'status_counts': {
+                    'PENDING': 10,
+                    'PROCESSING': 5,
+                    'PREPROCESSED': 5,
+                    'PROCESSED': 130,
+                    'FAILED': 5,
+                },
+            }
+        }
+    )
+
+
+class StatusCountsResponse(BaseModel):
+    """Response model for document status counts
+
+    Attributes:
+        status_counts: Count of documents by status
+    """
+
+    status_counts: dict[str, int] = Field(description='Count of documents by status')
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'status_counts': {
+                    'PENDING': 10,
+                    'PROCESSING': 5,
+                    'PREPROCESSED': 5,
+                    'PROCESSED': 130,
+                    'FAILED': 5,
+                }
+            }
+        }
+    )
+
+
+class PipelineStatusResponse(BaseModel):
+    """Response model for pipeline status
+
+    Attributes:
+        autoscanned: Whether auto-scan has started
+        busy: Whether the pipeline is currently busy
+        job_name: Current job name (e.g., indexing files/indexing texts)
+        job_start: Job start time as ISO format string with timezone (optional)
+        docs: Total number of documents to be indexed
+        batchs: Number of batches for processing documents
+        cur_batch: Current processing batch
+        request_pending: Flag for pending request for processing
+        latest_message: Latest message from pipeline processing
+        history_messages: List of history messages
+        update_status: Status of update flags for all namespaces
+    """
+
+    autoscanned: bool = False
+    busy: bool = False
+    job_name: str = 'Default Job'
+    job_start: str | None = None
+    docs: int = 0
+    batchs: int = 0
+    cur_batch: int = 0
+    request_pending: bool = False
+    latest_message: str = ''
+    history_messages: list[str] | None = None
+    update_status: dict | None = None
+
+    @field_validator('job_start', mode='before')
+    @classmethod
+    def parse_job_start(cls, value):
+        """Process datetime and return as ISO format string with timezone"""
+        return format_datetime(value)
+
+    model_config = ConfigDict(extra='allow')
+
+
+class DocumentManager:
+    def __init__(
+        self,
+        input_dir: str,
+        workspace: str = '',  # New parameter for workspace isolation
+        supported_extensions: tuple = (
+            # Office documents
+            '.pdf',
+            '.docx',
+            '.doc',
+            '.xlsx',
+            '.xls',
+            '.pptx',
+            '.ppsx',  # PowerPoint Show (same structure as PPTX)
+            '.ppt',
+            '.odt',
+            '.ods',
+            '.odp',
+            '.rtf',
+            # Ebooks
+            '.epub',
+            '.mobi',
+            # Markup
+            '.html',
+            '.htm',
+            '.md',
+            '.rst',
+            '.tex',
+            '.asciidoc',
+            # Data
+            '.json',
+            '.xml',
+            '.yaml',
+            '.yml',
+            '.csv',
+            '.tsv',
+            # Email
+            '.eml',
+            '.msg',
+        ),
+    ):
+        # Store the base input directory and workspace
+        self.base_input_dir = Path(input_dir)
+        self.workspace = workspace
+        self.supported_extensions = supported_extensions
+        self.indexed_files = set()
+
+        # Create workspace-specific input directory
+        # If workspace is provided, create a subdirectory for data isolation
+        if workspace:
+            self.input_dir = self.base_input_dir / workspace
+        else:
+            self.input_dir = self.base_input_dir
+
+        # Create input directory if it doesn't exist
+        self.input_dir.mkdir(parents=True, exist_ok=True)
+
+    def scan_directory_for_new_files(self) -> list[Path]:
+        """Scan input directory for new files"""
+        new_files = []
+        for ext in self.supported_extensions:
+            logger.debug(f'Scanning for {ext} files in {self.input_dir}')
+            for file_path in self.input_dir.glob(f'*{ext}'):
+                if file_path not in self.indexed_files:
+                    new_files.append(file_path)
+        return new_files
+
+    def mark_as_indexed(self, file_path: Path):
+        self.indexed_files.add(file_path)
+
+    def is_supported_file(self, filename: str) -> bool:
+        return any(filename.lower().endswith(ext) for ext in self.supported_extensions)
+
+
+def validate_file_path_security(file_path_str: str, base_dir: Path) -> Path | None:
+    """
+    Validate file path security to prevent Path Traversal attacks.
+
+    Args:
+        file_path_str: The file path string to validate
+        base_dir: The base directory that the file must be within
+
+    Returns:
+        Path: Safe file path if valid, None if unsafe or invalid
+    """
+    if not file_path_str or not file_path_str.strip():
+        return None
+
+    try:
+        # Clean the file path string
+        clean_path_str = file_path_str.strip()
+
+        # Check for obvious path traversal patterns before processing
+        # This catches both Unix (..) and Windows (..\) style traversals
+        if '..' in clean_path_str and (
+            '\\..\\' in clean_path_str or clean_path_str.startswith('..\\') or clean_path_str.endswith('\\..')
+        ):
+            # logger.warning(
+            #     f"Security violation: Windows path traversal attempt detected - {file_path_str}"
+            # )
+            return None
+
+        # Normalize path separators (convert backslashes to forward slashes)
+        # This helps handle Windows-style paths on Unix systems
+        normalized_path = clean_path_str.replace('\\', '/')
+
+        # Create path object and resolve it (handles symlinks and relative paths)
+        candidate_path = (base_dir / normalized_path).resolve()
+        base_dir_resolved = base_dir.resolve()
+
+        # Check if the resolved path is within the base directory
+        if not candidate_path.is_relative_to(base_dir_resolved):
+            # logger.warning(
+            #     f"Security violation: Path traversal attempt detected - {file_path_str}"
+            # )
+            return None
+
+        return candidate_path
+
+    except (OSError, ValueError, Exception) as e:
+        logger.warning(f'Invalid file path detected: {file_path_str} - {e!s}')
+        return None
+
+
+def get_unique_filename_in_enqueued(target_dir: Path, original_name: str) -> str:
+    """Generate a unique filename in the target directory by adding numeric suffixes if needed
+
+    Args:
+        target_dir: Target directory path
+        original_name: Original filename
+
+    Returns:
+        str: Unique filename (may have numeric suffix added)
+    """
+    import time
+
+    original_path = Path(original_name)
+    base_name = original_path.stem
+    extension = original_path.suffix
+
+    # Try original name first
+    if not (target_dir / original_name).exists():
+        return original_name
+
+    # Try with numeric suffixes 001-999
+    for i in range(1, 1000):
+        suffix = f'{i:03d}'
+        new_name = f'{base_name}_{suffix}{extension}'
+        if not (target_dir / new_name).exists():
+            return new_name
+
+    # Fallback with timestamp if all 999 slots are taken
+    timestamp = int(time.time())
+    return f'{base_name}_{timestamp}{extension}'
+
+
+# Formats supported by Kreuzberg for one-pass extraction+chunking
+# Code files (.py, .js, etc.) are NOT in this list - they use simple UTF-8 read
+KREUZBERG_SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        # Documents
+        '.pdf',
+        '.docx',
+        '.doc',
+        '.odt',
+        '.rtf',
+        '.txt',
+        '.md',
+        '.markdown',
+        # Presentations
+        '.pptx',
+        '.ppsx',  # PowerPoint Show
+        '.ppt',
+        '.odp',
+        # Spreadsheets
+        '.xlsx',
+        '.xls',
+        '.ods',
+        '.csv',
+        # E-books
+        '.epub',
+        '.mobi',
+        # Web/Data
+        '.html',
+        '.htm',
+        '.xml',
+        '.json',
+        # Email
+        '.eml',
+    }
+)
+
+# Code/config files - simple UTF-8 read, no Kreuzberg processing
+CODE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        '.py',
+        '.java',
+        '.js',
+        '.ts',
+        '.tsx',
+        '.jsx',
+        '.c',
+        '.cpp',
+        '.h',
+        '.hpp',
+        '.cs',
+        '.go',
+        '.rb',
+        '.php',
+        '.swift',
+        '.kt',
+        '.rs',
+        '.sh',
+        '.bash',
+        '.bat',
+        '.ps1',
+        '.css',
+        '.scss',
+        '.less',
+        '.sass',
+        '.sql',
+        '.yaml',
+        '.yml',
+        '.toml',
+        '.ini',
+        '.conf',
+        '.properties',
+        '.log',
+        '.tex',
+    }
+)
+
+
+def _extract_and_chunk_with_kreuzberg(
+    file_path: Path,
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    chunking_preset: str | None = 'semantic',
+    enable_ocr: bool = True,
+    ocr_backend: str = 'tesseract',
+    ocr_language: str = 'eng',
+) -> tuple[str, list[dict[str, Any]]]:
+    """One-pass document extraction and chunking using Kreuzberg (synchronous).
+
+    Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
+    This preserves document structure for better semantic chunk boundaries.
+
+    Args:
+        enable_ocr: Enable OCR for images/scanned content (default: True)
+        ocr_backend: OCR backend - 'tesseract', 'easyocr', or 'paddleocr'
+        ocr_language: Language code for OCR (e.g., 'eng' for English)
+    """
+    from yar.document import OcrOptions, chunks_to_yar_format, extract_and_chunk_sync
+
+    # Build OCR options if enabled
+    ocr_options = None
+    if enable_ocr:
+        ocr_options = OcrOptions(backend=ocr_backend, language=ocr_language)
+
+    result = extract_and_chunk_sync(
+        file_path,
+        chunk_token_size=chunk_token_size,
+        chunk_overlap_token_size=chunk_overlap_token_size,
+        chunking_preset=chunking_preset,
+        ocr_options=ocr_options,
+    )
+
+    chunks = chunks_to_yar_format(result)
+    return result.content, chunks
+
+
+def _extract_and_chunk_bytes_with_kreuzberg(
+    data: bytes,
+    mime_type: str,
+    chunk_token_size: int = 1200,
+    chunk_overlap_token_size: int = 100,
+    chunking_preset: str | None = 'semantic',
+    enable_ocr: bool = True,
+    ocr_backend: str = 'tesseract',
+    ocr_language: str = 'eng',
+) -> tuple[str, list[dict[str, Any]], list[Any] | None]:
+    """One-pass document extraction and chunking from bytes using Kreuzberg (synchronous).
+
+    This extracts text directly from bytes without writing to disk. Used for
+    S3-based workflows where we want to avoid local file storage.
+
+    Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
+
+    Args:
+        enable_ocr: Enable OCR for images/scanned content (default: True)
+        ocr_backend: OCR backend - 'tesseract', 'easyocr', or 'paddleocr'
+        ocr_language: Language code for OCR (e.g., 'eng' for English)
+
+    Returns:
+        Tuple of (content, chunks, tables) where tables can be used for Markdown output.
+    """
+    from yar.document import (
+        ChunkingOptions,
+        ExtractionOptions,
+        OcrOptions,
+        chunks_to_yar_format,
+        extract_bytes_with_kreuzberg_sync,
+        tokens_to_chars,
+    )
+
+    max_chars = tokens_to_chars(chunk_token_size)
+    max_overlap = tokens_to_chars(chunk_overlap_token_size)
+
+    chunking_options = ChunkingOptions(
+        enabled=True,
+        max_chars=max_chars,
+        max_overlap=max_overlap,
+        preset=chunking_preset,
+    )
+
+    # Build OCR options if enabled
+    ocr_options = None
+    if enable_ocr:
+        ocr_options = OcrOptions(backend=ocr_backend, language=ocr_language)
+
+    options = ExtractionOptions(chunking=chunking_options, ocr=ocr_options)
+
+    # Fallback for PPTX txBody errors is handled in kreuzberg_adapter
+    result = extract_bytes_with_kreuzberg_sync(data, mime_type, options)
+    chunks = chunks_to_yar_format(result)
+    return result.content, chunks, result.tables
+
+
+async def pipeline_enqueue_file(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
+) -> tuple[bool, str]:
+    """Add a file to the queue for processing with one-pass extraction+chunking.
+
+    For PDF/DOCX files, this performs extraction and chunking in a single pass
+    using Kreuzberg, preserving document structure for better chunk boundaries.
+
+    Args:
+        rag: LightRAG instance
+        file_path: Path to the saved file
+        track_id: Optional tracking ID, if not provided will be generated
+        metadata: Optional metadata dict (e.g., chunking_preset)
+        chunk_token_size: Max tokens per chunk (uses rag.chunk_token_size if None)
+        chunk_overlap_token_size: Overlap tokens (uses rag.chunk_overlap_token_size if None)
+        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
+
+    Returns:
+        tuple: (success: bool, track_id: str)
+    """
+    if track_id is None:
+        track_id = generate_track_id('unknown')
+
+    effective_chunk_size = chunk_token_size or rag.chunk_token_size
+    effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
+    effective_preset = chunking_preset or metadata.get('chunking_preset') if metadata else None
+    if effective_preset is None:
+        effective_preset = 'semantic'
+
+    try:
+        content = ''
+        pre_chunks: list[dict[str, Any]] | None = None
+        ext = file_path.suffix.lower()
+        file_size = 0
+
+        # Get file size for error reporting
+        try:
+            file_size = file_path.stat().st_size
+        except OSError:
+            file_size = 0
+
+        file = None
+        try:
+            async with aiofiles.open(file_path, 'rb') as f:
+                file = await f.read()
+        except PermissionError as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]Permission denied - cannot read file',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Permission denied reading file: {file_path.name}')
+            return False, track_id
+        except FileNotFoundError as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File not found',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]File not found: {file_path.name}')
+            return False, track_id
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File reading error',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Error reading file {file_path.name}: {e!s}')
+            return False, track_id
+
+        # Process based on file type
+        try:
+            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
+                try:
+                    content, pre_chunks = await asyncio.to_thread(
+                        _extract_and_chunk_with_kreuzberg,
+                        file_path,
+                        effective_chunk_size,
+                        effective_overlap,
+                        effective_preset,
+                        getattr(global_args, 'enable_ocr', True),
+                        getattr(global_args, 'ocr_backend', 'tesseract'),
+                        getattr(global_args, 'ocr_language', 'eng'),
+                    )
+                    logger.info(
+                        f'[File Extraction] One-pass extraction: {file_path.name} -> '
+                        f'{len(pre_chunks)} chunks (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
+                    )
+                except Exception as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
+                            'original_error': f'Failed to extract text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
+                    return False, track_id
+
+            elif ext in CODE_EXTENSIONS:
+                try:
+                    content = file.decode('utf-8')
+
+                    if not content or len(content.strip()) == 0:
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Empty file content',
+                                'original_error': 'File contains no content or only whitespace',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
+                        return False, track_id
+
+                    if content.startswith("b'") or content.startswith('b"'):
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Binary data in text file',
+                                'original_error': 'File appears to contain binary data representation instead of text',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(
+                            f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
+                        )
+                        return False, track_id
+
+                except UnicodeDecodeError as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
+                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(
+                        f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
+                    )
+                    return False, track_id
+
+            else:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': f'[File Extraction]Unsupported file type: {ext}',
+                        'original_error': f'File extension {ext} is not supported',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
+                return False, track_id
+
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File format processing error',
+                    'original_error': f'Unexpected error during file extracting: {e!s}',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Unexpected error during {file_path.name} extracting: {e!s}')
+            return False, track_id
+
+        # Insert into the RAG queue
+        if content:
+            # Check if content contains only whitespace characters
+            if not content.strip():
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': '[File Extraction]File contains only whitespace',
+                        'original_error': 'File content contains only whitespace characters',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.warning(f'[File Extraction]File contains only whitespace characters: {file_path.name}')
+                return False, track_id
+
+            try:
+                enqueue_metadata = metadata.copy() if metadata else {}
+                enqueue_metadata['chunking_preset'] = effective_preset
+                enqueue_metadata['chunk_token_size'] = effective_chunk_size
+                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
+
+                if pre_chunks:
+                    enqueue_metadata['pre_chunks'] = pre_chunks
+
+                await rag.apipeline_enqueue_documents(
+                    content, file_paths=file_path.name, track_id=track_id, metadata=enqueue_metadata
+                )
+
+                logger.info(f'Successfully extracted and enqueued file: {file_path.name}')
+
+                # Move file to __enqueued__ directory after enqueuing
+                try:
+                    enqueued_dir = file_path.parent / '__enqueued__'
+                    enqueued_dir.mkdir(exist_ok=True)
+
+                    # Generate unique filename to avoid conflicts
+                    unique_filename = get_unique_filename_in_enqueued(enqueued_dir, file_path.name)
+                    target_path = enqueued_dir / unique_filename
+
+                    # Move the file
+                    file_path.rename(target_path)
+                    logger.debug(f'Moved file to enqueued directory: {file_path.name} -> {unique_filename}')
+
+                except Exception as move_error:
+                    logger.error(f'Failed to move file {file_path.name} to __enqueued__ directory: {move_error}')
+                    # Don't affect the main function's success status
+
+                return True, track_id
+
+            except Exception as e:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': 'Document enqueue error',
+                        'original_error': f'Failed to enqueue document: {e!s}',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'Error enqueueing document {file_path.name}: {e!s}')
+                return False, track_id
+        else:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': 'No content extracted',
+                    'original_error': 'No content could be extracted from file',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'No content extracted from file: {file_path.name}')
+            return False, track_id
+
+    except Exception as e:
+        # Catch-all for any unexpected errors
+        try:
+            file_size = file_path.stat().st_size if file_path.exists() else 0
+        except OSError:
+            file_size = 0
+
+        error_files = [
+            {
+                'file_path': str(file_path.name),
+                'error_description': 'Unexpected processing error',
+                'original_error': f'Unexpected error: {e!s}',
+                'file_size': file_size,
+            }
+        ]
+        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+        logger.error(f'Enqueuing file {file_path.name} error: {e!s}')
+        logger.error(traceback.format_exc())
+        return False, track_id
+    finally:
+        if file_path.name.startswith(temp_prefix):
+            try:
+                file_path.unlink()
+            except Exception as e:
+                logger.error(f'Error deleting file {file_path}: {e!s}')
+
+
+async def pipeline_enqueue_file_with_s3(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
+    s3_client: S3Client | None = None,
+    s3_doc_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Enqueue file for processing and upload extracted text to S3.
+
+    This extends pipeline_enqueue_file to upload the extracted/OCR'd text
+    to S3 before enqueueing. The processed text is stored at:
+    {workspace}/{doc_id}/processed.md
+
+    Args:
+        rag: LightRAG instance
+        file_path: Path to the saved file
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict
+        chunk_token_size: Max tokens per chunk
+        chunk_overlap_token_size: Overlap tokens
+        chunking_preset: Chunking preset
+        s3_client: S3Client instance for uploading processed text
+        s3_doc_id: Document ID for S3 path (used for S3 folder naming)
+
+    Returns:
+        Tuple of (processed_s3_key, content_doc_id):
+        - processed_s3_key: S3 key of uploaded processed text, or None if failed
+        - content_doc_id: Actual document ID (hash of extracted content), for DB updates
+    """
+    if track_id is None:
+        track_id = generate_track_id('unknown')
+
+    effective_chunk_size = chunk_token_size or rag.chunk_token_size
+    effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
+    effective_preset = chunking_preset or (metadata.get('chunking_preset') if metadata else None)
+    if effective_preset is None:
+        effective_preset = 'semantic'
+
+    processed_s3_key: str | None = None
+    content_doc_id: str | None = None  # Actual doc ID based on extracted content
+
+    try:
+        content = ''
+        pre_chunks: list[dict[str, Any]] | None = None
+        ext = file_path.suffix.lower()
+        file_size = 0
+
+        # Get file size for error reporting
+        try:
+            file_size = file_path.stat().st_size
+        except OSError:
+            file_size = 0
+
+        file = None
+        try:
+            async with aiofiles.open(file_path, 'rb') as f:
+                file = await f.read()
+        except PermissionError as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]Permission denied - cannot read file',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Permission denied reading file: {file_path.name}')
+            return (None, None)
+        except FileNotFoundError as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File not found',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]File not found: {file_path.name}')
+            return (None, None)
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File reading error',
+                    'original_error': str(e),
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Error reading file {file_path.name}: {e!s}')
+            return (None, None)
+
+        # Process based on file type
+        try:
+            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
+                try:
+                    content, pre_chunks = await asyncio.to_thread(
+                        _extract_and_chunk_with_kreuzberg,
+                        file_path,
+                        effective_chunk_size,
+                        effective_overlap,
+                        effective_preset,
+                        getattr(global_args, 'enable_ocr', True),
+                        getattr(global_args, 'ocr_backend', 'tesseract'),
+                        getattr(global_args, 'ocr_language', 'eng'),
+                    )
+                    logger.info(
+                        f'[File Extraction] One-pass extraction: {file_path.name} -> '
+                        f'{len(pre_chunks)} chunks (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
+                    )
+                except Exception as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
+                            'original_error': f'Failed to extract text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
+                    return (None, None)
+
+            elif ext in CODE_EXTENSIONS:
+                try:
+                    content = file.decode('utf-8')
+
+                    if not content or len(content.strip()) == 0:
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Empty file content',
+                                'original_error': 'File contains no content or only whitespace',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
+                        return (None, None)
+
+                    if content.startswith("b'") or content.startswith('b"'):
+                        error_files = [
+                            {
+                                'file_path': str(file_path.name),
+                                'error_description': '[File Extraction]Binary data in text file',
+                                'original_error': 'File appears to contain binary data representation instead of text',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(
+                            f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
+                        )
+                        return (None, None)
+
+                except UnicodeDecodeError as e:
+                    error_files = [
+                        {
+                            'file_path': str(file_path.name),
+                            'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
+                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(
+                        f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
+                    )
+                    return (None, None)
+
+            else:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': f'[File Extraction]Unsupported file type: {ext}',
+                        'original_error': f'File extension {ext} is not supported',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
+                return (None, None)
+
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': '[File Extraction]File format processing error',
+                    'original_error': f'Unexpected error during file extracting: {e!s}',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[File Extraction]Unexpected error during {file_path.name} extracting: {e!s}')
+            return (None, None)
+
+        # Upload processed text to S3 if extraction succeeded
+        if content and s3_client and s3_doc_id:
+            try:
+                processed_s3_key = await _upload_processed_text_to_s3(
+                    s3_client=s3_client,
+                    workspace=rag.workspace,
+                    doc_id=s3_doc_id,
+                    extracted_text=content,
+                )
+            except Exception as e:
+                logger.error(f'Failed to upload processed text to S3: {e}')
+                # Continue processing even if S3 upload fails
+
+        # Insert into the RAG queue
+        if content:
+            # Check if content contains only whitespace characters
+            if not content.strip():
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': '[File Extraction]File contains only whitespace',
+                        'original_error': 'File content contains only whitespace characters',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.warning(f'[File Extraction]File contains only whitespace characters: {file_path.name}')
+                return (None, None)
+
+            try:
+                enqueue_metadata = metadata.copy() if metadata else {}
+                enqueue_metadata['chunking_preset'] = effective_preset
+                enqueue_metadata['chunk_token_size'] = effective_chunk_size
+                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
+
+                if pre_chunks:
+                    enqueue_metadata['pre_chunks'] = pre_chunks
+
+                await rag.apipeline_enqueue_documents(
+                    content, file_paths=file_path.name, track_id=track_id, metadata=enqueue_metadata
+                )
+
+                logger.info(f'Successfully extracted and enqueued file: {file_path.name}')
+
+                # Move file to __enqueued__ directory after enqueuing
+                try:
+                    enqueued_dir = file_path.parent / '__enqueued__'
+                    enqueued_dir.mkdir(exist_ok=True)
+
+                    # Generate unique filename to avoid conflicts
+                    unique_filename = get_unique_filename_in_enqueued(enqueued_dir, file_path.name)
+                    target_path = enqueued_dir / unique_filename
+
+                    # Move the file
+                    file_path.rename(target_path)
+                    logger.debug(f'Moved file to enqueued directory: {file_path.name} -> {unique_filename}')
+
+                except Exception as move_error:
+                    logger.error(f'Failed to move file {file_path.name} to __enqueued__ directory: {move_error}')
+                    # Don't affect the main function's success status
+
+                # Compute the actual document ID from SANITIZED extracted content (matches how LightRAG stores it)
+                # LightRAG applies sanitize_text_for_encoding() before hashing - we must do the same!
+                sanitized_content = sanitize_text_for_encoding(content)
+                content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
+                return (processed_s3_key, content_doc_id)
+
+            except Exception as e:
+                error_files = [
+                    {
+                        'file_path': str(file_path.name),
+                        'error_description': 'Document enqueue error',
+                        'original_error': f'Failed to enqueue document: {e!s}',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'Error enqueueing document {file_path.name}: {e!s}')
+                return (None, None)
+        else:
+            error_files = [
+                {
+                    'file_path': str(file_path.name),
+                    'error_description': 'No content extracted',
+                    'original_error': 'No content could be extracted from file',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'No content extracted from file: {file_path.name}')
+            return (None, None)
+
+    except Exception as e:
+        # Catch-all for any unexpected errors
+        try:
+            file_size = file_path.stat().st_size if file_path.exists() else 0
+        except OSError:
+            file_size = 0
+
+        error_files = [
+            {
+                'file_path': str(file_path.name),
+                'error_description': 'Unexpected processing error',
+                'original_error': f'Unexpected error: {e!s}',
+                'file_size': file_size,
+            }
+        ]
+        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+        logger.error(f'Enqueuing file {file_path.name} error: {e!s}')
+        logger.error(traceback.format_exc())
+        return (None, None)
+    finally:
+        if file_path.name.startswith(temp_prefix):
+            try:
+                file_path.unlink()
+            except Exception as e:
+                logger.error(f'Error deleting file {file_path}: {e!s}')
+
+
+async def pipeline_process_bytes_with_s3(
+    rag: LightRAG,
+    file_content: bytes,
+    filename: str,
+    mime_type: str,
+    s3_client: S3Client,
+    s3_doc_id: str,
+    s3_original_key: str,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
+) -> str | None:
+    """Process document bytes directly without local file storage.
+
+    This is the fully S3-integrated flow:
+    1. Original is already uploaded to S3 by caller
+    2. Extract text from bytes in memory
+    3. Upload processed text to S3
+    4. Enqueue to RAG pipeline
+
+    Args:
+        rag: LightRAG instance
+        file_content: Document content as bytes
+        filename: Original filename (for logging/metadata)
+        mime_type: MIME type of the content
+        s3_client: S3Client instance
+        s3_doc_id: Document ID for S3 paths
+        s3_original_key: S3 key of the already-uploaded original
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict
+        chunk_token_size: Max tokens per chunk
+        chunk_overlap_token_size: Overlap tokens
+        chunking_preset: Chunking preset
+
+    Returns:
+        S3 key of the uploaded processed text, or None if processing failed
+    """
+    if track_id is None:
+        track_id = generate_track_id('unknown')
+
+    effective_chunk_size = chunk_token_size or rag.chunk_token_size
+    effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
+    effective_preset = chunking_preset or (metadata.get('chunking_preset') if metadata else None)
+    if effective_preset is None:
+        effective_preset = 'semantic'
+
+    file_size = len(file_content)
+    processed_s3_key: str | None = None
+
+    try:
+        content = ''
+        pre_chunks: list[dict[str, Any]] | None = None
+        ext = Path(filename).suffix.lower()
+
+        tables: list[Any] | None = None
+
+        # Process based on file type
+        try:
+            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
+                try:
+                    content, pre_chunks, tables = await asyncio.to_thread(
+                        _extract_and_chunk_bytes_with_kreuzberg,
+                        file_content,
+                        mime_type,
+                        effective_chunk_size,
+                        effective_overlap,
+                        effective_preset,
+                        getattr(global_args, 'enable_ocr', True),
+                        getattr(global_args, 'ocr_backend', 'tesseract'),
+                        getattr(global_args, 'ocr_language', 'eng'),
+                    )
+                    logger.info(
+                        f'[Bytes Extraction] One-pass extraction: {filename} -> '
+                        f'{len(pre_chunks)} chunks, {len(tables) if tables else 0} tables (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
+                    )
+                except Exception as e:
+                    error_files = [
+                        {
+                            'file_path': filename,
+                            'error_description': f'[Bytes Extraction]{ext.upper()[1:]} processing error',
+                            'original_error': f'Failed to extract text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[Bytes Extraction]Error processing {filename}: {e!s}')
+                    return None
+
+            elif ext in CODE_EXTENSIONS:
+                try:
+                    content = file_content.decode('utf-8')
+
+                    if not content or len(content.strip()) == 0:
+                        error_files = [
+                            {
+                                'file_path': filename,
+                                'error_description': '[Bytes Extraction]Empty file content',
+                                'original_error': 'File contains no content or only whitespace',
+                                'file_size': file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                        logger.error(f'[Bytes Extraction]Empty content in file: {filename}')
+                        return None
+
+                except UnicodeDecodeError as e:
+                    error_files = [
+                        {
+                            'file_path': filename,
+                            'error_description': '[Bytes Extraction]UTF-8 encoding error',
+                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
+                            'file_size': file_size,
+                        }
+                    ]
+                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                    logger.error(f'[Bytes Extraction]File {filename} is not valid UTF-8 encoded text.')
+                    return None
+
+            else:
+                error_files = [
+                    {
+                        'file_path': filename,
+                        'error_description': f'[Bytes Extraction]Unsupported file type: {ext}',
+                        'original_error': f'File extension {ext} is not supported',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'[Bytes Extraction]Unsupported file type: {filename} (extension {ext})')
+                return None
+
+        except Exception as e:
+            error_files = [
+                {
+                    'file_path': filename,
+                    'error_description': '[Bytes Extraction]File format processing error',
+                    'original_error': f'Unexpected error during extraction: {e!s}',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'[Bytes Extraction]Unexpected error during {filename} extraction: {e!s}')
+            return None
+
+        # Upload processed text to S3
+        if content:
+            if not content.strip():
+                error_files = [
+                    {
+                        'file_path': filename,
+                        'error_description': '[Bytes Extraction]File contains only whitespace',
+                        'original_error': 'File content contains only whitespace characters',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.warning(f'[Bytes Extraction]File contains only whitespace: {filename}')
+                return None
+
+            try:
+                processed_s3_key = await _upload_processed_text_to_s3(
+                    s3_client=s3_client,
+                    workspace=rag.workspace,
+                    doc_id=s3_doc_id,
+                    extracted_text=content,
+                    tables=tables,
+                )
+            except Exception as e:
+                logger.error(f'Failed to upload processed Markdown to S3: {e}')
+                # Continue processing even if S3 upload fails
+
+            # Insert into the RAG queue
+            try:
+                enqueue_metadata = metadata.copy() if metadata else {}
+                enqueue_metadata['chunking_preset'] = effective_preset
+                enqueue_metadata['chunk_token_size'] = effective_chunk_size
+                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
+                # Pass original file's S3 key through metadata so chunks get it for citations
+                enqueue_metadata['s3_key'] = s3_original_key
+
+                if pre_chunks:
+                    enqueue_metadata['pre_chunks'] = pre_chunks
+
+                await rag.apipeline_enqueue_documents(
+                    content, file_paths=filename, track_id=track_id, metadata=enqueue_metadata
+                )
+
+                logger.info(f'Successfully extracted and enqueued from bytes: {filename}')
+
+                # Process the enqueued document
+                try:
+                    await rag.apipeline_process_enqueue_documents()
+                except Exception:
+                    raise
+
+                # Update database with S3 keys after processing completes
+                # Compute content_doc_id from SANITIZED extracted content (matches how LightRAG stores it)
+                # LightRAG applies sanitize_text_for_encoding() before hashing - we must do the same!
+                sanitized_content = sanitize_text_for_encoding(content)
+                content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
+                await _update_db_with_s3_keys(
+                    s3_client=s3_client,
+                    rag=rag,
+                    doc_id=content_doc_id,
+                    original_s3_key=s3_original_key,
+                    processed_s3_key=processed_s3_key,
+                )
+
+                return processed_s3_key
+
+            except Exception as e:
+                error_files = [
+                    {
+                        'file_path': filename,
+                        'error_description': 'Document enqueue error',
+                        'original_error': f'Failed to enqueue document: {e!s}',
+                        'file_size': file_size,
+                    }
+                ]
+                await rag.apipeline_enqueue_error_documents(error_files, track_id)
+                logger.error(f'Error enqueueing document {filename}: {e!s}')
+                return None
+        else:
+            error_files = [
+                {
+                    'file_path': filename,
+                    'error_description': 'No content extracted',
+                    'original_error': 'No content could be extracted from bytes',
+                    'file_size': file_size,
+                }
+            ]
+            await rag.apipeline_enqueue_error_documents(error_files, track_id)
+            logger.error(f'No content extracted from bytes: {filename}')
+            return None
+
+    except Exception as e:
+        error_files = [
+            {
+                'file_path': filename,
+                'error_description': 'Unexpected processing error',
+                'original_error': f'Unexpected error: {e!s}',
+                'file_size': file_size,
+            }
+        ]
+        await rag.apipeline_enqueue_error_documents(error_files, track_id)
+        logger.error(f'Processing bytes {filename} error: {e!s}')
+        logger.error(traceback.format_exc())
+        return None
+
+
+async def pipeline_index_file(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    chunk_token_size: int | None = None,
+    chunk_overlap_token_size: int | None = None,
+    chunking_preset: str | None = None,
+):
+    """Index a file with track_id and optional chunking settings.
+
+    Args:
+        rag: LightRAG instance
+        file_path: Path to the saved file
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict (e.g., chunking_preset)
+        chunk_token_size: Max tokens per chunk (uses rag default if None)
+        chunk_overlap_token_size: Overlap tokens (uses rag default if None)
+        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
+    """
+    try:
+        success, _returned_track_id = await pipeline_enqueue_file(
+            rag,
+            file_path,
+            track_id,
+            metadata,
+            chunk_token_size,
+            chunk_overlap_token_size,
+            chunking_preset,
+        )
+        if success:
+            await rag.apipeline_process_enqueue_documents()
+
+    except Exception as e:
+        logger.error(f'Error indexing file {file_path.name}: {e!s}')
+        logger.error(traceback.format_exc())
+
+
+async def pipeline_index_files(rag: LightRAG, file_paths: list[Path], track_id: str | None = None):
+    """Index multiple files sequentially to avoid high CPU load
+
+    Args:
+        rag: LightRAG instance
+        file_paths: Paths to the files to index
+        track_id: Optional tracking ID to pass to all files
+    """
+    if not file_paths:
+        return
+    try:
+        enqueued = False
+
+        # Use get_pinyin_sort_key for Chinese pinyin sorting
+        sorted_file_paths = sorted(file_paths, key=lambda p: get_pinyin_sort_key(str(p)))
+
+        # Process files sequentially with track_id
+        for file_path in sorted_file_paths:
+            success, _ = await pipeline_enqueue_file(rag, file_path, track_id)
+            if success:
+                enqueued = True
+
+        # Process the queue only if at least one file was successfully enqueued
+        if enqueued:
+            await rag.apipeline_process_enqueue_documents()
+    except Exception as e:
+        logger.error(f'Error indexing files: {e!s}')
+        logger.error(traceback.format_exc())
+
+
+async def pipeline_index_texts(
+    rag: LightRAG,
+    texts: list[str],
+    file_sources: list[str] | None = None,
+    track_id: str | None = None,
+):
+    """Index a list of texts with track_id
+
+    Args:
+        rag: LightRAG instance
+        texts: The texts to index
+        file_sources: Sources of the texts
+        track_id: Optional tracking ID
+    """
+    if not texts:
+        return
+    normalized_sources = None
+    if file_sources:
+        normalized_sources = list(file_sources)
+        while len(normalized_sources) < len(texts):
+            normalized_sources.append('unknown_source')
+    await rag.apipeline_enqueue_documents(input=texts, file_paths=normalized_sources, track_id=track_id)
+    await rag.apipeline_process_enqueue_documents()
+
+
+# =============================================================================
+# S3 Integration Helpers
+# =============================================================================
+
+
+async def _upload_to_s3(
+    s3_client: S3Client,
+    workspace: str,
+    doc_id: str,
+    content: bytes,
+    filename: str,
+    content_type: str,
+) -> str:
+    """Upload file to S3 archive. S3 is mandatory - raises on failure.
+
+    Args:
+        s3_client: S3Client instance (required, S3 is mandatory)
+        workspace: Current workspace name
+        doc_id: Document ID (computed from content hash)
+        content: File content as bytes
+        filename: Filename for S3 storage (e.g., 'original.pdf')
+        content_type: MIME type of the file
+
+    Returns:
+        S3 key where the file was uploaded
+
+    Raises:
+        Exception: If upload fails (S3 is mandatory, failures are not swallowed)
+    """
+    s3_key = f'{workspace}/{doc_id}/{filename}'
+    await s3_client.upload_object(
+        key=s3_key,
+        data=content,
+        content_type=content_type,
+    )
+    logger.info(f'Uploaded to S3: {s3_key}')
+    return s3_key
+
+
+async def _upload_processed_text_to_s3(
+    s3_client: S3Client,
+    workspace: str,
+    doc_id: str,
+    extracted_text: str,
+    tables: list[Any] | None = None,
+) -> str:
+    """Upload extracted/OCR'd text to S3 as Markdown.
+
+    If tables are provided, they are appended to the content in Markdown format.
+    This preserves document structure for better citations.
+
+    Args:
+        s3_client: S3Client instance (required, S3 is mandatory)
+        workspace: Current workspace name
+        doc_id: Document ID (same as original file)
+        extracted_text: The extracted text content from kreuzberg
+        tables: Optional list of extracted tables with .markdown property
+
+    Returns:
+        S3 key where the processed Markdown was uploaded
+
+    Raises:
+        Exception: If upload fails
+    """
+    # Build Markdown content
+    markdown_parts = [extracted_text]
+
+    # Append tables in Markdown format if available
+    if tables:
+        table_markdowns = []
+        for table in tables:
+            # Tables from kreuzberg have a .markdown property
+            table_md = getattr(table, 'markdown', None)
+            if table_md:
+                table_markdowns.append(table_md)
+
+        if table_markdowns:
+            markdown_parts.append('\n\n---\n\n## Extracted Tables\n')
+            for idx, md in enumerate(table_markdowns, start=1):
+                markdown_parts.append(f'\n### Table {idx}\n\n{md}\n')
+
+    markdown_content = ''.join(markdown_parts)
+
+    s3_key = f'{workspace}/{doc_id}/processed.md'
+    await s3_client.upload_object(
+        key=s3_key,
+        data=markdown_content.encode('utf-8'),
+        content_type='text/markdown; charset=utf-8',
+    )
+    logger.info(f'Uploaded processed Markdown to S3: {s3_key}')
+    return s3_key
+
+
+async def _update_db_with_s3_keys(
+    s3_client: S3Client,
+    rag: LightRAG,
+    doc_id: str,
+    original_s3_key: str,
+    processed_s3_key: str | None = None,
+):
+    """Update database with S3 keys for original and processed files.
+
+    Called after document processing completes. Updates:
+    - doc_status with original file S3 key
+    - text_chunks with processed text S3 key
+
+    Args:
+        s3_client: S3Client instance (required, S3 is mandatory)
+        rag: LightRAG instance for database updates
+        doc_id: Document ID for database updates
+        original_s3_key: S3 key for the original uploaded file
+        processed_s3_key: S3 key for the processed text (optional)
+    """
+    logger.debug(f'_update_db_with_s3_keys: doc_id={doc_id}, s3_key={original_s3_key}')
+    try:
+        # Update doc_status with original file S3 key
+        if hasattr(rag.doc_status, 'update_s3_key'):
+            await rag.doc_status.update_s3_key(doc_id, original_s3_key)  # type: ignore[misc]
+            logger.info(f'Updated doc_status with original s3_key: {original_s3_key}')
+
+        # Update text_chunks with processed text S3 key
+        if processed_s3_key and hasattr(rag.text_chunks, 'update_s3_key_by_doc_id'):
+            archive_url = s3_client.get_s3_url(processed_s3_key)
+            updated_count = await rag.text_chunks.update_s3_key_by_doc_id(  # type: ignore[misc]
+                full_doc_id=doc_id,
+                s3_key=processed_s3_key,
+                archive_url=archive_url,
+            )
+            logger.info(f'Updated {updated_count} chunks with processed s3_key: {processed_s3_key}')
+
+    except Exception as e:
+        logger.error(f'Failed to update DB with S3 keys for doc {doc_id}: {e}')
+        # Don't raise - processing already succeeded, this is cleanup
+
+
+async def pipeline_index_file_with_s3(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    s3_client: S3Client | None = None,
+):
+    """Index file with S3 archival for original and processed content.
+
+    Flow:
+    1. Original file was already uploaded to S3 at /upload time
+    2. Extract text from file (via pipeline_enqueue_file_with_s3)
+    3. Upload processed text to S3
+    4. Process document through normal RAG pipeline
+    5. Update database with S3 keys
+
+    S3 metadata is passed via underscore-prefixed keys in metadata dict.
+
+    Args:
+        rag: LightRAG instance
+        file_path: Path to the file to index
+        track_id: Optional tracking ID
+        metadata: Optional metadata dict (may contain _s3_* keys)
+        s3_client: S3Client instance (required for S3 operations)
+    """
+    # Extract S3 metadata (stored with _ prefix to mark as internal)
+    s3_original_key = None
+    s3_doc_id = None
+    if metadata:
+        s3_original_key = metadata.pop('_s3_original_key', None)
+        s3_doc_id = metadata.pop('_s3_doc_id', None)
+
+    # Process document and capture extracted content for S3 upload
+    # Returns (processed_s3_key, content_doc_id) - content_doc_id is the actual ID stored in DB
+    processed_s3_key, content_doc_id = await pipeline_enqueue_file_with_s3(
+        rag=rag,
+        file_path=file_path,
+        track_id=track_id,
+        metadata=metadata,
+        s3_client=s3_client,
+        s3_doc_id=s3_doc_id,
+    )
+
+    # Process the enqueued documents
+    try:
+        await rag.apipeline_process_enqueue_documents()
+    except Exception as e:
+        logger.error(f'Error processing enqueued documents: {e!s}')
+        logger.error(traceback.format_exc())
+
+    # Update database with S3 keys after processing completes
+    # Use content_doc_id (from extracted content) NOT s3_doc_id (from raw file bytes)
+    # because the database stores documents by the content-based ID
+    if s3_client and content_doc_id and s3_original_key:
+        await _update_db_with_s3_keys(
+            s3_client=s3_client,
+            rag=rag,
+            doc_id=content_doc_id,
+            original_s3_key=s3_original_key,
+            processed_s3_key=processed_s3_key,
+        )
+
+
+async def run_scanning_process(rag: LightRAG, doc_manager: DocumentManager, track_id: str | None = None):
+    """Background task to scan and index documents
+
+    Args:
+        rag: LightRAG instance
+        doc_manager: DocumentManager instance
+        track_id: Optional tracking ID to pass to all scanned files
+    """
+    try:
+        new_files = doc_manager.scan_directory_for_new_files()
+        total_files = len(new_files)
+        logger.info(f'Found {total_files} files to index.')
+
+        if new_files:
+            # Check for files with PROCESSED status and filter them out
+            valid_files = []
+            processed_files = []
+
+            for file_path in new_files:
+                filename = file_path.name
+                existing_doc_data = await rag.doc_status.get_doc_by_file_path(filename)
+
+                if existing_doc_data and existing_doc_data.get('status') == 'processed':
+                    # File is already PROCESSED, skip it with warning
+                    processed_files.append(filename)
+                    logger.warning(f'Skipping already processed file: {filename}')
+                else:
+                    # File is new or in non-PROCESSED status, add to processing list
+                    valid_files.append(file_path)
+
+            # Process valid files (new files + non-PROCESSED status files)
+            if valid_files:
+                await pipeline_index_files(rag, valid_files, track_id)
+                if processed_files:
+                    logger.info(
+                        f'Scanning process completed: {len(valid_files)} files Processed {len(processed_files)} skipped.'
+                    )
+                else:
+                    logger.info(f'Scanning process completed: {len(valid_files)} files Processed.')
+            else:
+                logger.info('No files to process after filtering already processed files.')
+        else:
+            # No new files to index, check if there are any documents in the queue
+            logger.info('No upload file found, check if there are any documents in the queue...')
+            await rag.apipeline_process_enqueue_documents()
+
+    except Exception as e:
+        logger.error(f'Error during scanning process: {e!s}')
+        logger.error(traceback.format_exc())
+
+
+async def background_delete_documents(
+    rag: LightRAG,
+    doc_manager: DocumentManager,
+    doc_ids: list[str],
+    delete_file: bool = False,
+    delete_llm_cache: bool = False,
+):
+    """Background task to delete multiple documents"""
+    from yar.kg.shared_storage import (
+        get_namespace_data,
+        get_namespace_lock,
+    )
+
+    pipeline_status = await get_namespace_data(NS_PIPELINE_STATUS, workspace=rag.workspace)
+    pipeline_status_lock = get_namespace_lock(NS_PIPELINE_STATUS, workspace=rag.workspace)
+
+    total_docs = len(doc_ids)
+    successful_deletions = []
+    failed_deletions = []
+
+    # Double-check pipeline status before proceeding
+    async with pipeline_status_lock:
+        if pipeline_status.get('busy', False):
+            logger.warning('Error: Unexpected pipeline busy state, aborting deletion.')
+            return  # Abort deletion operation
+
+        # Set pipeline status to busy for deletion
+        pipeline_status.update(
+            {
+                'busy': True,
+                # Job name can not be changed, it's verified in adelete_by_doc_id()
+                'job_name': f'Deleting {total_docs} Documents',
+                'job_start': datetime.now().isoformat(),
+                'docs': total_docs,
+                'batchs': total_docs,
+                'cur_batch': 0,
+                'latest_message': 'Starting document deletion process',
+            }
+        )
+        # Use slice assignment to clear the list in place
+        pipeline_status['history_messages'][:] = ['Starting document deletion process']
+        if delete_llm_cache:
+            pipeline_status['history_messages'].append('LLM cache cleanup requested for this deletion job')
+
+    try:
+        # Loop through each document ID and delete them one by one
+        for i, doc_id in enumerate(doc_ids, 1):
+            # Check for cancellation at the start of each document deletion
+            async with pipeline_status_lock:
+                if pipeline_status.get('cancellation_requested', False):
+                    cancel_msg = f'Deletion cancelled by user at document {i}/{total_docs}. {len(successful_deletions)} deleted, {total_docs - i + 1} remaining.'
+                    logger.info(cancel_msg)
+                    pipeline_status['latest_message'] = cancel_msg
+                    pipeline_status['history_messages'].append(cancel_msg)
+                    # Add remaining documents to failed list with cancellation reason
+                    failed_deletions.extend(doc_ids[i - 1 :])  # i-1 because enumerate starts at 1
+                    break  # Exit the loop, remaining documents unchanged
+
+                start_msg = f'Deleting document {i}/{total_docs}: {doc_id}'
+                logger.info(start_msg)
+                pipeline_status['cur_batch'] = i
+                pipeline_status['latest_message'] = start_msg
+                pipeline_status['history_messages'].append(start_msg)
+
+            file_path = '#'
+            try:
+                result = await rag.adelete_by_doc_id(doc_id, delete_llm_cache=delete_llm_cache)
+                file_path = getattr(result, 'file_path', '-')
+                if result.status == 'success':
+                    successful_deletions.append(doc_id)
+                    success_msg = f'Document deleted {i}/{total_docs}: {doc_id}[{file_path}]'
+                    logger.info(success_msg)
+                    async with pipeline_status_lock:
+                        pipeline_status['history_messages'].append(success_msg)
+
+                    # Handle file deletion if requested and file_path is available
+                    if delete_file and result.file_path and result.file_path != 'unknown_source':
+                        try:
+                            deleted_files = []
+                            # SECURITY FIX: Use secure path validation to prevent arbitrary file deletion
+                            safe_file_path = validate_file_path_security(result.file_path, doc_manager.input_dir)
+
+                            if safe_file_path is None:
+                                # Security violation detected - log and skip file deletion
+                                security_msg = (
+                                    f'Security violation: Unsafe file path detected for deletion - {result.file_path}'
+                                )
+                                logger.warning(security_msg)
+                                async with pipeline_status_lock:
+                                    pipeline_status['latest_message'] = security_msg
+                                    pipeline_status['history_messages'].append(security_msg)
+                            else:
+                                # check and delete files from input_dir directory
+                                if safe_file_path.exists():
+                                    try:
+                                        safe_file_path.unlink()
+                                        deleted_files.append(safe_file_path.name)
+                                        file_delete_msg = f'Successfully deleted input_dir file: {result.file_path}'
+                                        logger.info(file_delete_msg)
+                                        async with pipeline_status_lock:
+                                            pipeline_status['latest_message'] = file_delete_msg
+                                            pipeline_status['history_messages'].append(file_delete_msg)
+                                    except Exception as file_error:
+                                        file_error_msg = (
+                                            f'Failed to delete input_dir file {result.file_path}: {file_error!s}'
+                                        )
+                                        logger.debug(file_error_msg)
+                                        async with pipeline_status_lock:
+                                            pipeline_status['latest_message'] = file_error_msg
+                                            pipeline_status['history_messages'].append(file_error_msg)
+
+                                # Also check and delete files from __enqueued__ directory
+                                enqueued_dir = doc_manager.input_dir / '__enqueued__'
+                                if enqueued_dir.exists():
+                                    # SECURITY FIX: Validate that the file path is safe before processing
+                                    # Only proceed if the original path validation passed
+                                    base_name = Path(result.file_path).stem
+                                    extension = Path(result.file_path).suffix
+
+                                    # Search for exact match and files with numeric suffixes
+                                    for enqueued_file in enqueued_dir.glob(f'{base_name}*{extension}'):
+                                        # Additional security check: ensure enqueued file is within enqueued directory
+                                        safe_enqueued_path = validate_file_path_security(
+                                            enqueued_file.name, enqueued_dir
+                                        )
+                                        if safe_enqueued_path is not None:
+                                            try:
+                                                enqueued_file.unlink()
+                                                deleted_files.append(enqueued_file.name)
+                                                logger.info(f'Successfully deleted enqueued file: {enqueued_file.name}')
+                                            except Exception as enqueued_error:
+                                                file_error_msg = f'Failed to delete enqueued file {enqueued_file.name}: {enqueued_error!s}'
+                                                logger.debug(file_error_msg)
+                                                async with pipeline_status_lock:
+                                                    pipeline_status['latest_message'] = file_error_msg
+                                                    pipeline_status['history_messages'].append(file_error_msg)
+                                        else:
+                                            security_msg = f'Security violation: Unsafe enqueued file path detected - {enqueued_file.name}'
+                                            logger.warning(security_msg)
+
+                            if deleted_files == []:
+                                file_error_msg = f'File deletion skipped, missing or unsafe file: {result.file_path}'
+                                logger.warning(file_error_msg)
+                                async with pipeline_status_lock:
+                                    pipeline_status['latest_message'] = file_error_msg
+                                    pipeline_status['history_messages'].append(file_error_msg)
+
+                        except Exception as file_error:
+                            file_error_msg = f'Failed to delete file {result.file_path}: {file_error!s}'
+                            logger.error(file_error_msg)
+                            async with pipeline_status_lock:
+                                pipeline_status['latest_message'] = file_error_msg
+                                pipeline_status['history_messages'].append(file_error_msg)
+                    elif delete_file:
+                        no_file_msg = f'File deletion skipped, missing file path: {doc_id}'
+                        logger.warning(no_file_msg)
+                        async with pipeline_status_lock:
+                            pipeline_status['latest_message'] = no_file_msg
+                            pipeline_status['history_messages'].append(no_file_msg)
+                else:
+                    failed_deletions.append(doc_id)
+                    error_msg = f'Failed to delete {i}/{total_docs}: {doc_id}[{file_path}] - {result.message}'
+                    logger.error(error_msg)
+                    async with pipeline_status_lock:
+                        pipeline_status['latest_message'] = error_msg
+                        pipeline_status['history_messages'].append(error_msg)
+
+            except Exception as e:
+                failed_deletions.append(doc_id)
+                error_msg = f'Error deleting document {i}/{total_docs}: {doc_id}[{file_path}] - {e!s}'
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
+                async with pipeline_status_lock:
+                    pipeline_status['latest_message'] = error_msg
+                    pipeline_status['history_messages'].append(error_msg)
+
+    except Exception as e:
+        error_msg = f'Critical error during batch deletion: {e!s}'
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        async with pipeline_status_lock:
+            pipeline_status['history_messages'].append(error_msg)
+    finally:
+        # Final summary and check for pending requests
+        async with pipeline_status_lock:
+            pipeline_status['busy'] = False
+            pipeline_status['pending_requests'] = False  # Reset pending requests flag
+            pipeline_status['cancellation_requested'] = False  # Always reset cancellation flag
+            completion_msg = (
+                f'Deletion completed: {len(successful_deletions)} successful, {len(failed_deletions)} failed'
+            )
+            pipeline_status['latest_message'] = completion_msg
+            pipeline_status['history_messages'].append(completion_msg)
+
+            # Check if there are pending document indexing requests
+            has_pending_request = pipeline_status.get('request_pending', False)
+
+        # If there are pending requests, start document processing pipeline
+        if has_pending_request:
+            try:
+                logger.info('Processing pending document indexing requests after deletion')
+                await rag.apipeline_process_enqueue_documents()
+            except Exception as e:
+                logger.error(f'Error processing pending documents after deletion: {e}')
+
+
+def create_document_routes(
+    rag: LightRAG,
+    doc_manager: DocumentManager,
+    api_key: str | None = None,
+    s3_client: S3Client | None = None,
+):
+    """Create document routes with optional S3 integration.
+
+    When s3_client is provided, uploaded documents will be stored in S3
+    in addition to local filesystem, and archived after processing.
+    """
+    # Create combined auth dependency for document routes
+    combined_auth = get_combined_auth_dependency(api_key)
+
+    @router.post('/scan', response_model=ScanResponse, dependencies=[Depends(combined_auth)])
+    async def scan_for_new_documents(background_tasks: BackgroundTasks):
+        """
+        Trigger the scanning process for new documents.
+
+        This endpoint initiates a background task that scans the input directory for new documents
+        and processes them. If a scanning process is already running, it returns a status indicating
+        that fact.
+
+        Returns:
+            ScanResponse: A response object containing the scanning status and track_id
+        """
+        # Generate track_id with "scan" prefix for scanning operation
+        track_id = generate_track_id('scan')
+
+        # Start the scanning process in the background with track_id
+        background_tasks.add_task(run_scanning_process, rag, doc_manager, track_id)
+        return ScanResponse(
+            status='scanning_started',
+            message='Scanning process has been initiated in the background',
+            track_id=track_id,
+        )
+
+    @router.post('/upload', response_model=InsertResponse, dependencies=[Depends(combined_auth)])
+    async def upload_to_input_dir(
+        background_tasks: BackgroundTasks,
+        file: Annotated[UploadFile, File(...)],
+        chunking_preset: Annotated[
+            str | None,
+            Form(description="Chunking preset: 'semantic' (default), 'recursive', or empty for basic"),
+        ] = None,
+    ):
+        """
+        Upload a file to the input directory and index it.
+
+        This API endpoint accepts a file through an HTTP POST request, checks if the
+        uploaded file is of a supported type, saves it in the specified input directory,
+        indexes it for retrieval, and returns a success status with relevant details.
+
+        Args:
+            background_tasks: FastAPI BackgroundTasks for async processing
+            file (UploadFile): The file to be uploaded. It must have an allowed extension.
+            chunking_preset: Chunking strategy - 'semantic' (preserves meaning), 'recursive'
+                (splits by paragraphs/sentences/words), or None for basic chunking.
+                If not specified, uses the server default (CHUNKING_PRESET env var).
+
+        Returns:
+            InsertResponse: A response object containing the upload status and a message.
+                status can be "success", "duplicated", or error is thrown.
+
+        Raises:
+            HTTPException: If the file type is not supported (400) or other errors occur (500).
+        """
+        try:
+            # S3 is mandatory - ensure client is available
+            if s3_client is None:
+                raise HTTPException(status_code=500, detail='S3 storage is not configured')
+
+            # Sanitize filename to prevent Path Traversal attacks
+            safe_filename = sanitize_filename(file.filename or '', doc_manager.input_dir)
+
+            if not doc_manager.is_supported_file(safe_filename):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f'Unsupported file type. Supported types: {doc_manager.supported_extensions}',
+                )
+
+            # Check if filename already exists in doc_status storage
+            existing_doc_data = await rag.doc_status.get_doc_by_file_path(safe_filename)
+            if existing_doc_data:
+                # Get document status and track_id from existing document
+                status = existing_doc_data.get('status', 'unknown')
+                # Use `or ""` to handle both missing key and None value (e.g., legacy rows without track_id)
+                existing_track_id = existing_doc_data.get('track_id') or ''
+                return InsertResponse(
+                    status='duplicated',
+                    message=f"File '{safe_filename}' already exists in document storage (Status: {status}).",
+                    track_id=existing_track_id,
+                )
+
+            # Read entire file content (S3-only flow, no local filesystem)
+            file_content = await file.read()
+
+            # Generate stable doc_id from content hash (S3 is mandatory)
+            s3_doc_id = compute_mdhash_id(file_content, prefix='doc_')
+
+            # Determine original file extension and content type
+            original_ext = Path(safe_filename).suffix
+            original_s3_filename = f'original{original_ext}'
+            content_type = file.content_type
+            # Guess MIME type from filename if missing or generic (curl sends application/octet-stream)
+            if not content_type or content_type == 'application/octet-stream':
+                guessed_type, _ = mimetypes.guess_type(safe_filename)
+                content_type = guessed_type or content_type or 'application/octet-stream'
+
+            # Upload original to S3 immediately (S3 is mandatory)
+            s3_original_key = await _upload_to_s3(
+                s3_client=s3_client,
+                workspace=rag.workspace,
+                doc_id=s3_doc_id,
+                content=file_content,
+                filename=original_s3_filename,
+                content_type=content_type,
+            )
+
+            track_id = generate_track_id('upload')
+
+            # Build metadata with chunking preset
+            metadata: dict[str, Any] = {}
+            if chunking_preset:
+                metadata['chunking_preset'] = chunking_preset
+
+            # Process bytes directly without saving to local filesystem
+            # This extracts text, uploads processed text to S3, and enqueues
+            background_tasks.add_task(
+                pipeline_process_bytes_with_s3,
+                rag,
+                file_content,
+                safe_filename,
+                content_type,
+                s3_client,
+                s3_doc_id,
+                s3_original_key,
+                track_id,
+                metadata,
+            )
+
+            return InsertResponse(
+                status='success',
+                message=f"File '{safe_filename}' uploaded successfully. Processing will continue in background.",
+                track_id=track_id,
+            )
+
+        except Exception as e:
+            logger.error(f'Error /documents/upload: {file.filename}: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.post('/text', response_model=InsertResponse, dependencies=[Depends(combined_auth)])
+    async def insert_text(request: InsertTextRequest, background_tasks: BackgroundTasks):
+        """
+        Insert text into the RAG system.
+
+        This endpoint allows you to insert text data into the RAG system for later retrieval
+        and use in generating responses.
+
+        Args:
+            request (InsertTextRequest): The request body containing the text to be inserted.
+            background_tasks: FastAPI BackgroundTasks for async processing
+
+        Returns:
+            InsertResponse: A response object containing the status of the operation.
+
+        Raises:
+            HTTPException: If an error occurs during text processing (500).
+        """
+        try:
+            # Check if file_source already exists in doc_status storage
+            if request.file_source and request.file_source.strip() and request.file_source != 'unknown_source':
+                existing_doc_data = await rag.doc_status.get_doc_by_file_path(request.file_source)
+                if existing_doc_data:
+                    # Get document status and track_id from existing document
+                    status = existing_doc_data.get('status', 'unknown')
+                    # Use `or ""` to handle both missing key and None value (e.g., legacy rows without track_id)
+                    existing_track_id = existing_doc_data.get('track_id') or ''
+                    return InsertResponse(
+                        status='duplicated',
+                        message=f"File source '{request.file_source}' already exists in document storage (Status: {status}).",
+                        track_id=existing_track_id,
+                    )
+
+            # Check if content already exists by computing content hash (doc_id)
+            sanitized_text = sanitize_text_for_encoding(request.text)
+            content_doc_id = compute_mdhash_id(sanitized_text, prefix='doc-')
+            existing_doc = await rag.doc_status.get_by_id(content_doc_id)
+            if existing_doc:
+                # Content already exists, return duplicated with existing track_id
+                status = existing_doc.get('status', 'unknown')
+                existing_track_id = existing_doc.get('track_id') or ''
+                return InsertResponse(
+                    status='duplicated',
+                    message=f'Identical content already exists in document storage (doc_id: {content_doc_id}, Status: {status}).',
+                    track_id=existing_track_id,
+                )
+
+            # Generate track_id for text insertion
+            track_id = generate_track_id('insert')
+
+            background_tasks.add_task(
+                pipeline_index_texts,
+                rag,
+                [request.text],
+                file_sources=[request.file_source or 'unknown_source'],
+                track_id=track_id,
+            )
+
+            return InsertResponse(
+                status='success',
+                message='Text successfully received. Processing will continue in background.',
+                track_id=track_id,
+            )
+        except Exception as e:
+            logger.error(f'Error /documents/text: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.post(
+        '/texts',
+        response_model=InsertResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def insert_texts(request: InsertTextsRequest, background_tasks: BackgroundTasks):
+        """
+        Insert multiple texts into the RAG system.
+
+        This endpoint allows you to insert multiple text entries into the RAG system
+        in a single request.
+
+        Note:
+            If any text content or file_source already exists in the system,
+            the entire batch will be rejected with status "duplicated".
+
+        Args:
+            request (InsertTextsRequest): The request body containing the list of texts.
+            background_tasks: FastAPI BackgroundTasks for async processing
+
+        Returns:
+            InsertResponse: A response object containing the status of the operation.
+
+        Raises:
+            HTTPException: If an error occurs during text processing (500).
+        """
+        try:
+            # Check if any file_sources already exist in doc_status storage
+            if request.file_sources:
+                for file_source in request.file_sources:
+                    if file_source and file_source.strip() and file_source != 'unknown_source':
+                        existing_doc_data = await rag.doc_status.get_doc_by_file_path(file_source)
+                        if existing_doc_data:
+                            # Get document status and track_id from existing document
+                            status = existing_doc_data.get('status', 'unknown')
+                            # Use `or ""` to handle both missing key and None value (e.g., legacy rows without track_id)
+                            existing_track_id = existing_doc_data.get('track_id') or ''
+                            return InsertResponse(
+                                status='duplicated',
+                                message=f"File source '{file_source}' already exists in document storage (Status: {status}).",
+                                track_id=existing_track_id,
+                            )
+
+            # Check if any content already exists by computing content hash (doc_id)
+            for text in request.texts:
+                sanitized_text = sanitize_text_for_encoding(text)
+                content_doc_id = compute_mdhash_id(sanitized_text, prefix='doc-')
+                existing_doc = await rag.doc_status.get_by_id(content_doc_id)
+                if existing_doc:
+                    # Content already exists, return duplicated with existing track_id
+                    status = existing_doc.get('status', 'unknown')
+                    existing_track_id = existing_doc.get('track_id') or ''
+                    return InsertResponse(
+                        status='duplicated',
+                        message=f'Identical content already exists in document storage (doc_id: {content_doc_id}, Status: {status}).',
+                        track_id=existing_track_id,
+                    )
+
+            # Generate track_id for texts insertion
+            track_id = generate_track_id('insert')
+
+            background_tasks.add_task(
+                pipeline_index_texts,
+                rag,
+                request.texts,
+                file_sources=request.file_sources,
+                track_id=track_id,
+            )
+
+            return InsertResponse(
+                status='success',
+                message='Texts successfully received. Processing will continue in background.',
+                track_id=track_id,
+            )
+        except Exception as e:
+            logger.error(f'Error /documents/texts: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.delete('', response_model=ClearDocumentsResponse, dependencies=[Depends(combined_auth)])
+    async def clear_documents():
+        """
+        Clear all documents from the RAG system.
+
+        This endpoint deletes all documents, entities, relationships, and files from the system.
+        It uses the storage drop methods to properly clean up all data and removes all files
+        from the input directory.
+
+        Returns:
+            ClearDocumentsResponse: A response object containing the status and message.
+                - status="success":           All documents and files were successfully cleared.
+                - status="partial_success":   Document clear job exit with some errors.
+                - status="busy":              Operation could not be completed because the pipeline is busy.
+                - status="fail":              All storage drop operations failed, with message
+                - message: Detailed information about the operation results, including counts
+                  of deleted files and any errors encountered.
+
+        Raises:
+            HTTPException: Raised when a serious error occurs during the clearing process,
+                          with status code 500 and error details in the detail field.
+        """
+        from yar.kg.shared_storage import (
+            get_namespace_data,
+            get_namespace_lock,
+        )
+
+        # Get pipeline status and lock
+        pipeline_status = await get_namespace_data(NS_PIPELINE_STATUS, workspace=rag.workspace)
+        pipeline_status_lock = get_namespace_lock(NS_PIPELINE_STATUS, workspace=rag.workspace)
+
+        # Check and set status with lock
+        async with pipeline_status_lock:
+            if pipeline_status.get('busy', False):
+                return ClearDocumentsResponse(
+                    status='busy',
+                    message='Cannot clear documents while pipeline is busy',
+                )
+            # Set busy to true
+            pipeline_status.update(
+                {
+                    'busy': True,
+                    'job_name': 'Clearing Documents',
+                    'job_start': datetime.now().isoformat(),
+                    'docs': 0,
+                    'batchs': 0,
+                    'cur_batch': 0,
+                    'request_pending': False,  # Clear any previous request
+                    'latest_message': 'Starting document clearing process',
+                }
+            )
+            # Cleaning history_messages without breaking it as a shared list object
+            pipeline_status['history_messages'].clear()
+            pipeline_status['history_messages'].append('Starting document clearing process')
+
+        try:
+            # Use drop method to clear all data
+            drop_tasks = []
+            storages = [
+                rag.text_chunks,
+                rag.full_docs,
+                rag.full_entities,
+                rag.full_relations,
+                rag.entity_chunks,
+                rag.relation_chunks,
+                rag.entities_vdb,
+                rag.relationships_vdb,
+                rag.chunks_vdb,
+                rag.chunk_entity_relation_graph,
+                rag.doc_status,
+            ]
+
+            # Log storage drop start
+            if 'history_messages' in pipeline_status:
+                pipeline_status['history_messages'].append('Starting to drop storage components')
+
+            for storage in storages:
+                if storage is not None:
+                    drop_tasks.append(storage.drop())
+
+            # Wait for all drop tasks to complete
+            drop_results = await asyncio.gather(*drop_tasks, return_exceptions=True)
+
+            # Check for errors and log results
+            errors = []
+            storage_success_count = 0
+            storage_error_count = 0
+
+            for i, result in enumerate(drop_results):
+                storage_name = storages[i].__class__.__name__
+                if isinstance(result, Exception):
+                    error_msg = f'Error dropping {storage_name}: {result!s}'
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                    storage_error_count += 1
+                else:
+                    namespace = storages[i].namespace
+                    workspace = storages[i].workspace
+                    logger.info(f'Successfully dropped {storage_name}: {workspace}/{namespace}')
+                    storage_success_count += 1
+
+            # Log storage drop results
+            if 'history_messages' in pipeline_status:
+                if storage_error_count > 0:
+                    pipeline_status['history_messages'].append(
+                        f'Dropped {storage_success_count} storage components with {storage_error_count} errors'
+                    )
+                else:
+                    pipeline_status['history_messages'].append(
+                        f'Successfully dropped all {storage_success_count} storage components'
+                    )
+
+            # If all storage operations failed, return error status and don't proceed with file deletion
+            if storage_success_count == 0 and storage_error_count > 0:
+                error_message = 'All storage drop operations failed. Aborting document clearing process.'
+                logger.error(error_message)
+                if 'history_messages' in pipeline_status:
+                    pipeline_status['history_messages'].append(error_message)
+                return ClearDocumentsResponse(status='fail', message=error_message)
+
+            # Log file deletion start
+            if 'history_messages' in pipeline_status:
+                pipeline_status['history_messages'].append('Starting to delete files in input directory')
+
+            # Delete only files in the current directory, preserve files in subdirectories
+            deleted_files_count = 0
+            file_errors_count = 0
+
+            for file_path in doc_manager.input_dir.glob('*'):
+                if file_path.is_file():
+                    try:
+                        file_path.unlink()
+                        deleted_files_count += 1
+                    except Exception as e:
+                        logger.error(f'Error deleting file {file_path}: {e!s}')
+                        file_errors_count += 1
+
+            # Log file deletion results
+            if 'history_messages' in pipeline_status:
+                if file_errors_count > 0:
+                    pipeline_status['history_messages'].append(
+                        f'Deleted {deleted_files_count} files with {file_errors_count} errors'
+                    )
+                    errors.append(f'Failed to delete {file_errors_count} files')
+                else:
+                    pipeline_status['history_messages'].append(f'Successfully deleted {deleted_files_count} files')
+
+            # Prepare final result message
+            final_message = ''
+            if errors:
+                final_message = f'Cleared documents with some errors. Deleted {deleted_files_count} files.'
+                status = 'partial_success'
+            else:
+                final_message = f'All documents cleared successfully. Deleted {deleted_files_count} files.'
+                status = 'success'
+
+            # Log final result
+            if 'history_messages' in pipeline_status:
+                pipeline_status['history_messages'].append(final_message)
+
+            # Return response based on results
+            return ClearDocumentsResponse(status=status, message=final_message)
+        except Exception as e:
+            error_msg = f'Error clearing documents: {e!s}'
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            if 'history_messages' in pipeline_status:
+                pipeline_status['history_messages'].append(error_msg)
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        finally:
+            # Reset busy status after completion
+            async with pipeline_status_lock:
+                pipeline_status['busy'] = False
+                completion_msg = 'Document clearing process completed'
+                pipeline_status['latest_message'] = completion_msg
+                if 'history_messages' in pipeline_status:
+                    pipeline_status['history_messages'].append(completion_msg)
+
+    @router.get(
+        '/pipeline_status',
+        dependencies=[Depends(combined_auth)],
+        response_model=PipelineStatusResponse,
+    )
+    async def get_pipeline_status() -> PipelineStatusResponse:
+        """
+        Get the current status of the document indexing pipeline.
+
+        This endpoint returns information about the current state of the document processing pipeline,
+        including the processing status, progress information, and history messages.
+
+        Returns:
+            PipelineStatusResponse: A response object containing:
+                - autoscanned (bool): Whether auto-scan has started
+                - busy (bool): Whether the pipeline is currently busy
+                - job_name (str): Current job name (e.g., indexing files/indexing texts)
+                - job_start (str, optional): Job start time as ISO format string
+                - docs (int): Total number of documents to be indexed
+                - batchs (int): Number of batches for processing documents
+                - cur_batch (int): Current processing batch
+                - request_pending (bool): Flag for pending request for processing
+                - latest_message (str): Latest message from pipeline processing
+                - history_messages (List[str], optional): List of history messages (limited to latest 1000 entries,
+                  with truncation message if more than 1000 messages exist)
+
+        Raises:
+            HTTPException: If an error occurs while retrieving pipeline status (500)
+        """
+        try:
+            from yar.kg.shared_storage import (
+                get_all_update_flags_status,
+                get_namespace_data,
+                get_namespace_lock,
+            )
+
+            pipeline_status = await get_namespace_data(NS_PIPELINE_STATUS, workspace=rag.workspace)
+            pipeline_status_lock = get_namespace_lock(NS_PIPELINE_STATUS, workspace=rag.workspace)
+
+            # Get update flags status for all namespaces
+            update_status = await get_all_update_flags_status(workspace=rag.workspace)
+
+            # Convert MutableBoolean objects to regular boolean values
+            processed_update_status = {}
+            for namespace, flags in update_status.items():
+                processed_flags = []
+                for flag in flags:
+                    # Handle both multiprocess and single process cases
+                    if hasattr(flag, 'value'):
+                        processed_flags.append(bool(flag.value))
+                    else:
+                        processed_flags.append(bool(flag))
+                processed_update_status[namespace] = processed_flags
+
+            async with pipeline_status_lock:
+                # Convert to regular dict if it's a Manager.dict
+                status_dict = dict(pipeline_status)
+
+            # Add processed update_status to the status dictionary
+            status_dict['update_status'] = processed_update_status
+
+            # Convert history_messages to a regular list if it's a Manager.list
+            # and limit to latest 1000 entries with truncation message if needed
+            if 'history_messages' in status_dict:
+                history_list = list(status_dict['history_messages'])
+                total_count = len(history_list)
+
+                if total_count > 1000:
+                    # Calculate truncated message count
+                    truncated_count = total_count - 1000
+
+                    # Take only the latest 1000 messages
+                    latest_messages = history_list[-1000:]
+
+                    # Add truncation message at the beginning
+                    truncation_message = f'[Truncated history messages: {truncated_count}/{total_count}]'
+                    status_dict['history_messages'] = [truncation_message, *latest_messages]
+                else:
+                    # No truncation needed, return all messages
+                    status_dict['history_messages'] = history_list
+
+            # Ensure job_start is properly formatted as a string with timezone information
+            if status_dict.get('job_start'):
+                # Use format_datetime to ensure consistent formatting
+                status_dict['job_start'] = format_datetime(status_dict['job_start'])
+
+            return PipelineStatusResponse(**status_dict)
+        except Exception as e:
+            logger.error(f'Error getting pipeline status: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    class DeleteDocByIdResponse(BaseModel):
+        """Response model for single document deletion operation."""
+
+        status: Literal['deletion_started', 'busy', 'not_allowed'] = Field(
+            description='Status of the deletion operation'
+        )
+        message: str = Field(description='Message describing the operation result')
+        doc_id: str = Field(description='The ID of the document to delete')
+
+    @router.delete(
+        '/delete_document',
+        response_model=DeleteDocByIdResponse,
+        dependencies=[Depends(combined_auth)],
+        summary='Delete a document and all its associated data by its ID.',
+    )
+    async def delete_document(
+        delete_request: DeleteDocRequest,
+        background_tasks: BackgroundTasks,
+    ) -> DeleteDocByIdResponse:
+        """
+        Delete documents and all their associated data by their IDs using background processing.
+
+        Deletes specific documents and all their associated data, including their status,
+        text chunks, vector embeddings, and any related graph data. When requested,
+        cached LLM extraction responses are removed after graph deletion/rebuild completes.
+        The deletion process runs in the background to avoid blocking the client connection.
+
+        This operation is irreversible and will interact with the pipeline status.
+
+        Args:
+            delete_request (DeleteDocRequest): The request containing the document IDs and deletion options.
+            background_tasks: FastAPI BackgroundTasks for async processing
+
+        Returns:
+            DeleteDocByIdResponse: The result of the deletion operation.
+                - status="deletion_started": The document deletion has been initiated in the background.
+                - status="busy": The pipeline is busy with another operation.
+
+        Raises:
+            HTTPException:
+              - 500: If an unexpected internal error occurs during initialization.
+        """
+        doc_ids = delete_request.doc_ids
+
+        try:
+            from yar.kg.shared_storage import (
+                get_namespace_data,
+                get_namespace_lock,
+            )
+
+            pipeline_status = await get_namespace_data(NS_PIPELINE_STATUS, workspace=rag.workspace)
+            pipeline_status_lock = get_namespace_lock(NS_PIPELINE_STATUS, workspace=rag.workspace)
+
+            # Check if pipeline is busy with proper lock
+            async with pipeline_status_lock:
+                if pipeline_status.get('busy', False):
+                    return DeleteDocByIdResponse(
+                        status='busy',
+                        message='Cannot delete documents while pipeline is busy',
+                        doc_id=', '.join(doc_ids),
+                    )
+
+            # Add deletion task to background tasks
+            background_tasks.add_task(
+                background_delete_documents,
+                rag,
+                doc_manager,
+                doc_ids,
+                delete_request.delete_file,
+                delete_request.delete_llm_cache,
+            )
+
+            return DeleteDocByIdResponse(
+                status='deletion_started',
+                message=f'Document deletion for {len(doc_ids)} documents has been initiated. Processing will continue in background.',
+                doc_id=', '.join(doc_ids),
+            )
+
+        except Exception as e:
+            error_msg = f'Error initiating document deletion for {delete_request.doc_ids}: {e!s}'
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=error_msg) from e
+
+    @router.post(
+        '/clear_cache',
+        response_model=ClearCacheResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def clear_cache(request: ClearCacheRequest):
+        """
+        Clear all cache data from the LLM response cache storage.
+
+        This endpoint clears all cached LLM responses regardless of mode.
+        The request body is accepted for API compatibility but is ignored.
+
+        Args:
+            request (ClearCacheRequest): The request body (ignored for compatibility).
+
+        Returns:
+            ClearCacheResponse: A response object containing the status and message.
+
+        Raises:
+            HTTPException: If an error occurs during cache clearing (500).
+        """
+        try:
+            # Call the aclear_cache method (no modes parameter)
+            await rag.aclear_cache()
+
+            # Prepare success message
+            message = 'Successfully cleared all cache'
+
+            return ClearCacheResponse(status='success', message=message)
+        except Exception as e:
+            logger.error(f'Error clearing cache: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.delete(
+        '/delete_entity',
+        response_model=DeletionResult,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def delete_entity(request: DeleteEntityRequest):
+        """
+        Delete an entity and all its relationships from the knowledge graph.
+
+        Args:
+            request (DeleteEntityRequest): The request body containing the entity name.
+
+        Returns:
+            DeletionResult: An object containing the outcome of the deletion process.
+
+        Raises:
+            HTTPException: If the entity is not found (404) or an error occurs (500).
+        """
+        try:
+            result = await rag.adelete_by_entity(entity_name=request.entity_name)
+            if result.status == 'not_found':
+                raise HTTPException(status_code=404, detail=result.message)
+            if result.status == 'fail':
+                raise HTTPException(status_code=500, detail=result.message)
+            # Set doc_id to empty string since this is an entity operation, not document
+            result.doc_id = ''
+            return result
+        except HTTPException:
+            raise
+        except Exception as e:
+            error_msg = f"Error deleting entity '{request.entity_name}': {e!s}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=error_msg) from e
+
+    @router.delete(
+        '/delete_relation',
+        response_model=DeletionResult,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def delete_relation(request: DeleteRelationRequest):
+        """
+        Delete a relationship between two entities from the knowledge graph.
+
+        Args:
+            request (DeleteRelationRequest): The request body containing the source and target entity names.
+
+        Returns:
+            DeletionResult: An object containing the outcome of the deletion process.
+
+        Raises:
+            HTTPException: If the relation is not found (404) or an error occurs (500).
+        """
+        try:
+            result = await rag.adelete_by_relation(
+                source_entity=request.source_entity,
+                target_entity=request.target_entity,
+            )
+            if result.status == 'not_found':
+                raise HTTPException(status_code=404, detail=result.message)
+            if result.status == 'fail':
+                raise HTTPException(status_code=500, detail=result.message)
+            # Set doc_id to empty string since this is a relation operation, not document
+            result.doc_id = ''
+            return result
+        except HTTPException:
+            raise
+        except Exception as e:
+            error_msg = f"Error deleting relation from '{request.source_entity}' to '{request.target_entity}': {e!s}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=error_msg) from e
+
+    @router.get(
+        '/track_status/{track_id}',
+        response_model=TrackStatusResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_track_status(track_id: str) -> TrackStatusResponse:
+        """
+        Get the processing status of documents by tracking ID.
+
+        This endpoint retrieves all documents associated with a specific tracking ID,
+        allowing users to monitor the processing progress of their uploaded files or inserted texts.
+
+        Args:
+            track_id (str): The tracking ID returned from upload, text, or texts endpoints
+
+        Returns:
+            TrackStatusResponse: A response object containing:
+                - track_id: The tracking ID
+                - documents: List of documents associated with this track_id
+                - total_count: Total number of documents for this track_id
+
+        Raises:
+            HTTPException: If track_id is invalid (400) or an error occurs (500).
+        """
+        try:
+            # Validate track_id
+            if not track_id or not track_id.strip():
+                raise HTTPException(status_code=400, detail='Track ID cannot be empty')
+
+            track_id = track_id.strip()
+
+            # Get documents by track_id
+            docs_by_track_id = await rag.aget_docs_by_track_id(track_id)
+
+            # Convert to response format
+            documents = []
+            status_summary = {}
+
+            for doc_id, doc_status in docs_by_track_id.items():
+                documents.append(
+                    DocStatusResponse(
+                        id=doc_id,
+                        content_summary=doc_status.content_summary,
+                        content_length=doc_status.content_length,
+                        status=doc_status.status,
+                        created_at=format_datetime(doc_status.created_at),
+                        updated_at=format_datetime(doc_status.updated_at),
+                        track_id=doc_status.track_id,
+                        chunks_count=doc_status.chunks_count,
+                        error_msg=doc_status.error_msg,
+                        metadata=doc_status.metadata,
+                        file_path=doc_status.file_path,
+                        s3_key=doc_status.s3_key,
+                    )
+                )
+
+                # Build status summary
+                # Handle both DocStatus enum and string cases for robust deserialization
+                status_key = str(doc_status.status)
+                status_summary[status_key] = status_summary.get(status_key, 0) + 1
+
+            return TrackStatusResponse(
+                track_id=track_id,
+                documents=documents,
+                total_count=len(documents),
+                status_summary=status_summary,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f'Error getting track status for {track_id}: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.post(
+        '/paginated',
+        response_model=PaginatedDocsResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_documents_paginated(
+        request: DocumentsRequest,
+    ) -> PaginatedDocsResponse:
+        """
+        Get documents with pagination support.
+
+        This endpoint retrieves documents with pagination, filtering, and sorting capabilities.
+        It provides better performance for large document collections by loading only the
+        requested page of data.
+
+        Args:
+            request (DocumentsRequest): The request body containing pagination parameters
+
+        Returns:
+            PaginatedDocsResponse: A response object containing:
+                - documents: List of documents for the current page
+                - pagination: Pagination information (page, total_count, etc.)
+                - status_counts: Count of documents by status for all documents
+
+        Raises:
+            HTTPException: If an error occurs while retrieving documents (500).
+        """
+        try:
+            # Get paginated documents and status counts in parallel
+            docs_task = rag.doc_status.get_docs_paginated(
+                status_filter=request.status_filter,
+                page=request.page,
+                page_size=request.page_size,
+                sort_field=request.sort_field,
+                sort_direction=request.sort_direction,
+            )
+            status_counts_task = rag.doc_status.get_all_status_counts()
+
+            # Execute both queries in parallel
+            (documents_with_ids, total_count), status_counts = await asyncio.gather(docs_task, status_counts_task)
+
+            # Convert documents to response format
+            doc_responses = []
+            for doc_id, doc in documents_with_ids:
+                doc_responses.append(
+                    DocStatusResponse(
+                        id=doc_id,
+                        content_summary=doc.content_summary,
+                        content_length=doc.content_length,
+                        status=doc.status,
+                        created_at=format_datetime(doc.created_at),
+                        updated_at=format_datetime(doc.updated_at),
+                        track_id=doc.track_id,
+                        chunks_count=doc.chunks_count,
+                        error_msg=doc.error_msg,
+                        metadata=doc.metadata,
+                        file_path=doc.file_path,
+                        s3_key=doc.s3_key,
+                    )
+                )
+
+            # Calculate pagination info
+            total_pages = (total_count + request.page_size - 1) // request.page_size
+            has_next = request.page < total_pages
+            has_prev = request.page > 1
+
+            pagination = PaginationInfo(
+                page=request.page,
+                page_size=request.page_size,
+                total_count=total_count,
+                total_pages=total_pages,
+                has_next=has_next,
+                has_prev=has_prev,
+            )
+
+            return PaginatedDocsResponse(
+                documents=doc_responses,
+                pagination=pagination,
+                status_counts=status_counts,
+            )
+
+        except Exception as e:
+            logger.error(f'Error getting paginated documents: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.get(
+        '/status_counts',
+        response_model=StatusCountsResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_document_status_counts() -> StatusCountsResponse:
+        """
+        Get counts of documents by status.
+
+        This endpoint retrieves the count of documents in each processing status
+        (PENDING, PROCESSING, PROCESSED, FAILED) for all documents in the system.
+
+        Returns:
+            StatusCountsResponse: A response object containing status counts
+
+        Raises:
+            HTTPException: If an error occurs while retrieving status counts (500).
+        """
+        try:
+            status_counts = await rag.doc_status.get_all_status_counts()
+            return StatusCountsResponse(status_counts=status_counts)
+
+        except Exception as e:
+            logger.error(f'Error getting document status counts: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.post(
+        '/reprocess_failed',
+        response_model=ReprocessResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def reprocess_failed_documents(background_tasks: BackgroundTasks):
+        """
+        Reprocess failed and pending documents.
+
+        This endpoint triggers the document processing pipeline which automatically
+        picks up and reprocesses documents in the following statuses:
+        - FAILED: Documents that failed during previous processing attempts
+        - PENDING: Documents waiting to be processed
+        - PROCESSING: Documents with abnormally terminated processing (e.g., server crashes)
+
+        This is useful for recovering from server crashes, network errors, LLM service
+        outages, or other temporary failures that caused document processing to fail.
+
+        The processing happens in the background and can be monitored by checking the
+        pipeline status. The reprocessed documents retain their original track_id from
+        initial upload, so use their original track_id to monitor progress.
+
+        Returns:
+            ReprocessResponse: Response with status and message.
+                track_id is always empty string because reprocessed documents retain
+                their original track_id from initial upload.
+
+        Raises:
+            HTTPException: If an error occurs while initiating reprocessing (500).
+        """
+        try:
+            # Start the reprocessing in the background
+            # Note: Reprocessed documents retain their original track_id from initial upload
+            background_tasks.add_task(rag.apipeline_process_enqueue_documents)
+            logger.info('Reprocessing of failed documents initiated')
+
+            return ReprocessResponse(
+                status='reprocessing_started',
+                message='Reprocessing of failed documents has been initiated in background. Documents retain their original track_id.',
+            )
+
+        except Exception as e:
+            logger.error(f'Error initiating reprocessing of failed documents: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @router.post(
+        '/cancel_pipeline',
+        response_model=CancelPipelineResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def cancel_pipeline():
+        """
+        Request cancellation of the currently running pipeline.
+
+        This endpoint sets a cancellation flag in the pipeline status. The pipeline will:
+        1. Check this flag at key processing points
+        2. Stop processing new documents
+        3. Cancel all running document processing tasks
+        4. Mark all PROCESSING documents as FAILED with reason "User cancelled"
+
+        The cancellation is graceful and ensures data consistency. Documents that have
+        completed processing will remain in PROCESSED status.
+
+        Returns:
+            CancelPipelineResponse: Response with status and message
+                - status="cancellation_requested": Cancellation flag has been set
+                - status="not_busy": Pipeline is not currently running
+
+        Raises:
+            HTTPException: If an error occurs while setting cancellation flag (500).
+        """
+        try:
+            from yar.kg.shared_storage import (
+                get_namespace_data,
+                get_namespace_lock,
+            )
+
+            pipeline_status = await get_namespace_data(NS_PIPELINE_STATUS, workspace=rag.workspace)
+            pipeline_status_lock = get_namespace_lock(NS_PIPELINE_STATUS, workspace=rag.workspace)
+
+            async with pipeline_status_lock:
+                if not pipeline_status.get('busy', False):
+                    return CancelPipelineResponse(
+                        status='not_busy',
+                        message='Pipeline is not currently running. No cancellation needed.',
+                    )
+
+                # Set cancellation flag
+                pipeline_status['cancellation_requested'] = True
+                cancel_msg = 'Pipeline cancellation requested by user'
+                logger.info(cancel_msg)
+                pipeline_status['latest_message'] = cancel_msg
+                pipeline_status['history_messages'].append(cancel_msg)
+
+            return CancelPipelineResponse(
+                status='cancellation_requested',
+                message='Pipeline cancellation has been requested. Documents will be marked as FAILED.',
+            )
+
+        except Exception as e:
+            logger.error(f'Error requesting pipeline cancellation: {e!s}')
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return router

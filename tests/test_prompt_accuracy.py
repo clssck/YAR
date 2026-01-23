@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
-from lightrag.prompt import PROMPTS
+from yar.prompt import PROMPTS
 
 # =============================================================================
 # Test Data

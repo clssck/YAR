@@ -8,7 +8,7 @@ import pytest
 class TestOpenAIClientCreation:
     def test_create_openai_client_with_defaults(self):
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
-            from lightrag.llm.openai import create_openai_async_client
+            from yar.llm.openai import create_openai_async_client
 
             client = create_openai_async_client()
             assert client is not None
@@ -16,20 +16,20 @@ class TestOpenAIClientCreation:
 
     def test_create_openai_client_with_custom_base_url(self):
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
-            from lightrag.llm.openai import create_openai_async_client
+            from yar.llm.openai import create_openai_async_client
 
             client = create_openai_async_client(base_url='https://custom.api.com/v1')
             assert client is not None
             assert str(client.base_url) == 'https://custom.api.com/v1/'
 
     def test_create_openai_client_with_explicit_api_key(self):
-        from lightrag.llm.openai import create_openai_async_client
+        from yar.llm.openai import create_openai_async_client
 
         client = create_openai_async_client(api_key='explicit-key')
         assert client.api_key == 'explicit-key'
 
     def test_create_azure_client(self):
-        from lightrag.llm.openai import create_openai_async_client
+        from yar.llm.openai import create_openai_async_client
 
         client = create_openai_async_client(
             api_key='azure-key',
@@ -61,13 +61,13 @@ class TestOpenAIComplete:
     async def test_openai_complete_basic(self):
         mock_response = _create_chat_response('Test response')
 
-        with patch('lightrag.llm.openai.create_openai_async_client') as mock_client_factory:
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
             mock_client.close = AsyncMock()
             mock_client_factory.return_value = mock_client
 
-            from lightrag.llm.openai import openai_complete_if_cache
+            from yar.llm.openai import openai_complete_if_cache
 
             result = await openai_complete_if_cache(
                 model='gpt-4',
@@ -82,13 +82,13 @@ class TestOpenAIComplete:
     async def test_openai_complete_with_system_prompt(self):
         mock_response = _create_chat_response('Response with system', 15, 5)
 
-        with patch('lightrag.llm.openai.create_openai_async_client') as mock_client_factory:
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
             mock_client.close = AsyncMock()
             mock_client_factory.return_value = mock_client
 
-            from lightrag.llm.openai import openai_complete_if_cache
+            from yar.llm.openai import openai_complete_if_cache
 
             result = await openai_complete_if_cache(
                 model='gpt-4',
@@ -109,13 +109,13 @@ class TestOpenAIComplete:
 
         mock_response = _create_chat_response('', 10, 0)
 
-        with patch('lightrag.llm.openai.create_openai_async_client') as mock_client_factory:
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
             mock_client.close = AsyncMock()
             mock_client_factory.return_value = mock_client
 
-            from lightrag.llm.openai import openai_complete_if_cache
+            from yar.llm.openai import openai_complete_if_cache
 
             with pytest.raises(RetryError):
                 await openai_complete_if_cache(
@@ -127,19 +127,19 @@ class TestOpenAIComplete:
 
 class TestTiktokenEncoding:
     def test_get_encoding_for_known_model(self):
-        from lightrag.llm.openai import _get_tiktoken_encoding_for_model
+        from yar.llm.openai import _get_tiktoken_encoding_for_model
 
         encoding = _get_tiktoken_encoding_for_model('gpt-4')
         assert encoding is not None
 
     def test_get_encoding_for_unknown_model_falls_back(self):
-        from lightrag.llm.openai import _get_tiktoken_encoding_for_model
+        from yar.llm.openai import _get_tiktoken_encoding_for_model
 
         encoding = _get_tiktoken_encoding_for_model('unknown-model-xyz')
         assert encoding is not None
 
     def test_encoding_caching(self):
-        from lightrag.llm.openai import _TIKTOKEN_ENCODING_CACHE, _get_tiktoken_encoding_for_model
+        from yar.llm.openai import _TIKTOKEN_ENCODING_CACHE, _get_tiktoken_encoding_for_model
 
         _TIKTOKEN_ENCODING_CACHE.clear()
         enc1 = _get_tiktoken_encoding_for_model('gpt-4')
@@ -156,13 +156,13 @@ class TestOpenAIEmbedding:
         mock_response.data = [mock_embedding]
         mock_response.usage = MagicMock(prompt_tokens=5, total_tokens=5)
 
-        with patch('lightrag.llm.openai.create_openai_async_client') as mock_client_factory:
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
             mock_client = AsyncMock()
             mock_client.embeddings.create = AsyncMock(return_value=mock_response)
             mock_client.close = AsyncMock()
             mock_client_factory.return_value = mock_client
 
-            from lightrag.llm.openai import openai_embed
+            from yar.llm.openai import openai_embed
 
             result = await openai_embed(
                 texts=['test text'],

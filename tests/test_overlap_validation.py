@@ -7,7 +7,7 @@ causes an infinite loop in the chunking function.
 
 import pytest
 
-from lightrag.rerank import chunk_documents_for_rerank
+from yar.rerank import chunk_documents_for_rerank
 
 
 @pytest.mark.offline

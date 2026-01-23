@@ -1,4 +1,4 @@
-"""Tests for S3 client functionality in lightrag/storage/s3_client.py.
+"""Tests for S3 client functionality in yar/storage/s3_client.py.
 
 This module tests S3 operations by mocking the aioboto3 session layer,
 avoiding the moto/aiobotocore async incompatibility issue.
@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Note: The S3Client in lightrag uses aioboto3 which requires proper async mocking
+# Note: The S3Client in yar uses aioboto3 which requires proper async mocking
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def aws_credentials(monkeypatch):
 @pytest.fixture
 def s3_config(aws_credentials):
     """Create S3Config for testing."""
-    from lightrag.storage.s3_client import S3Config
+    from yar.storage.s3_client import S3Config
 
     return S3Config(
         endpoint_url='',
@@ -224,7 +224,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_make_staging_key(self, s3_config):
         """Test staging key format."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         key = client._make_staging_key('default', 'doc123', 'report.pdf')
@@ -233,7 +233,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_make_staging_key_sanitizes_slashes(self, s3_config):
         """Test that slashes in filename are sanitized."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         key = client._make_staging_key('default', 'doc123', 'path/to/file.pdf')
@@ -243,7 +243,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_make_staging_key_sanitizes_backslashes(self, s3_config):
         """Test that backslashes in filename are sanitized."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         key = client._make_staging_key('default', 'doc123', 'path\\to\\file.pdf')
@@ -252,7 +252,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_make_archive_key(self, s3_config):
         """Test archive key format (documents stored at workspace root, no archive prefix)."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         key = client._make_archive_key('workspace1', 'doc456', 'data.json')
@@ -261,7 +261,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_staging_to_archive_key(self, s3_config):
         """Test staging to archive key transformation."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         staging_key = 'staging/default/doc123/report.pdf'
@@ -271,7 +271,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_staging_to_archive_key_non_staging(self, s3_config):
         """Test that non-staging keys are returned unchanged."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         key = 'archive/default/doc123/report.pdf'
@@ -281,7 +281,7 @@ class TestKeyGeneration:
     @pytest.mark.offline
     def test_get_s3_url(self, s3_config):
         """Test S3 URL generation."""
-        from lightrag.storage.s3_client import S3Client
+        from yar.storage.s3_client import S3Client
 
         client = S3Client(config=s3_config)
         url = client.get_s3_url('archive/default/doc123/report.pdf')
@@ -300,7 +300,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_initialize_creates_bucket(self, s3_config, mock_s3_session):
         """Test that initialize checks bucket exists."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, mock_client = mock_s3_session
 
@@ -316,7 +316,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_upload_to_staging(self, s3_config, mock_s3_session):
         """Test uploading content to staging."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, mock_client = mock_s3_session
 
@@ -340,7 +340,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_upload_string_content(self, s3_config, mock_s3_session):
         """Test uploading string content (should be encoded to bytes)."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -364,7 +364,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_get_object(self, s3_config, mock_s3_session):
         """Test retrieving uploaded object."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -394,7 +394,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_move_to_archive(self, s3_config, mock_s3_session):
         """Test moving object from staging to archive."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -429,7 +429,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_delete_object(self, s3_config, mock_s3_session):
         """Test deleting an object."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -458,7 +458,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_list_staging(self, s3_config, mock_s3_session):
         """Test listing objects in staging."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -485,7 +485,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_object_exists_true(self, s3_config, mock_s3_session):
         """Test object_exists returns True for existing object."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -507,7 +507,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_object_exists_false(self, s3_config, mock_s3_session):
         """Test object_exists returns False for non-existing object."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -522,7 +522,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_get_presigned_url(self, s3_config, mock_s3_session):
         """Test generating presigned URL."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -548,7 +548,7 @@ class TestS3ClientOperations:
     @pytest.mark.asyncio
     async def test_upload_with_metadata(self, s3_config, mock_s3_session):
         """Test uploading with custom metadata."""
-        from lightrag.storage.s3_client import S3Client, S3ClientManager
+        from yar.storage.s3_client import S3Client, S3ClientManager
 
         mock_session, _mock_client = mock_s3_session
 
@@ -588,7 +588,7 @@ class TestS3Config:
     @pytest.mark.offline
     def test_config_requires_credentials(self, monkeypatch):
         """Test that S3Config raises error without credentials."""
-        from lightrag.storage.s3_client import S3Config
+        from yar.storage.s3_client import S3Config
 
         monkeypatch.setenv('S3_ACCESS_KEY_ID', '')
         monkeypatch.setenv('S3_SECRET_ACCESS_KEY', '')
@@ -602,7 +602,7 @@ class TestS3Config:
     @pytest.mark.offline
     def test_config_with_valid_credentials(self, aws_credentials):
         """Test that S3Config initializes with valid credentials."""
-        from lightrag.storage.s3_client import S3Config
+        from yar.storage.s3_client import S3Config
 
         config = S3Config(
             access_key_id='valid-key',

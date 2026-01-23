@@ -1,6 +1,6 @@
 #!/bin/bash
-# LightRAG Cleanup Script
-# Removes LightRAG Docker resources WITHOUT touching other stuff
+# YAR Cleanup Script
+# Removes YAR Docker resources WITHOUT touching other stuff
 #
 # Usage:
 #   ./cleanup.sh           # Remove containers, images, network (keeps data)
@@ -20,7 +20,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║              LightRAG Cleanup                                    ║${NC}"
+echo -e "${BLUE}║              YAR Cleanup                                    ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -54,11 +54,11 @@ done
 # Show what will be removed
 # ══════════════════════════════════════════════════════════════════════════════
 
-echo -e "${YELLOW}🔍 Scanning for LightRAG resources...${NC}"
+echo -e "${YELLOW}🔍 Scanning for YAR resources...${NC}"
 echo ""
 
-# Containers (lightrag-stack project)
-CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=lightrag-stack" --format "{{.Names}}" 2>/dev/null || true)
+# Containers (yar-stack project)
+CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=yar-stack" --format "{{.Names}}" 2>/dev/null || true)
 if [ -n "$CONTAINERS" ]; then
     echo -e "${BLUE}Containers:${NC}"
     echo "$CONTAINERS" | while read -r c; do echo "  • $c"; done
@@ -67,7 +67,7 @@ else
 fi
 
 # Images
-IMAGES=$(docker images --filter "reference=lightrag-stack*" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || true)
+IMAGES=$(docker images --filter "reference=yar-stack*" --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || true)
 if [ -n "$IMAGES" ]; then
     echo -e "${BLUE}Images:${NC}"
     echo "$IMAGES" | while read -r i; do echo "  • $i"; done
@@ -76,7 +76,7 @@ else
 fi
 
 # Network
-NETWORK="lightrag-stack_lightrag-network"
+NETWORK="yar-stack_yar-network"
 if docker network inspect "$NETWORK" >/dev/null 2>&1; then
     echo -e "${BLUE}Network:${NC}"
     echo "  • $NETWORK"
@@ -85,10 +85,10 @@ else
 fi
 
 # Volumes
-VOLUMES=$(docker volume ls --filter "label=com.docker.compose.project=lightrag-stack" --format "{{.Name}}" 2>/dev/null || true)
+VOLUMES=$(docker volume ls --filter "label=com.docker.compose.project=yar-stack" --format "{{.Name}}" 2>/dev/null || true)
 if [ -z "$VOLUMES" ]; then
     # Try by name pattern
-    VOLUMES=$(docker volume ls --format "{{.Name}}" 2>/dev/null | grep -E "^lightrag-stack_" || true)
+    VOLUMES=$(docker volume ls --format "{{.Name}}" 2>/dev/null | grep -E "^yar-stack_" || true)
 fi
 if [ -n "$VOLUMES" ]; then
     echo -e "${BLUE}Volumes:${NC}"
@@ -169,8 +169,8 @@ echo -e "${GREEN}✓ Containers removed${NC}"
 echo ""
 echo -e "${YELLOW}🗑️  [Step 2/4] Removing images...${NC}"
 
-# Get image IDs for lightrag-stack
-IMAGE_IDS=$(docker images --filter "reference=lightrag-stack*" -q 2>/dev/null || true)
+# Get image IDs for yar-stack
+IMAGE_IDS=$(docker images --filter "reference=yar-stack*" -q 2>/dev/null || true)
 
 if [ -n "$IMAGE_IDS" ]; then
     echo "$IMAGE_IDS" | xargs -r docker rmi -f 2>&1 | while read -r line; do
@@ -206,7 +206,7 @@ echo -e "${YELLOW}💾 [Step 4/4] Handling volumes...${NC}"
 
 if [ "$REMOVE_VOLUMES" = true ]; then
     # Re-fetch volumes
-    VOLUMES=$(docker volume ls --format "{{.Name}}" 2>/dev/null | grep -E "^lightrag-stack_" || true)
+    VOLUMES=$(docker volume ls --format "{{.Name}}" 2>/dev/null | grep -E "^yar-stack_" || true)
 
     if [ -n "$VOLUMES" ]; then
         echo "$VOLUMES" | while read -r vol; do

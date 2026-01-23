@@ -14,7 +14,7 @@ import tempfile
 
 import pytest
 
-from lightrag.utils import SanitizingJSONEncoder, load_json, write_json
+from yar.utils import SanitizingJSONEncoder, load_json, write_json
 
 
 @pytest.mark.offline

@@ -3,9 +3,9 @@ import logging
 import logging.config
 import os
 
-from lightrag import LightRAG, QueryParam
-from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
-from lightrag.utils import logger, set_verbose_debug
+from yar import YAR, QueryParam
+from yar.llm.openai import gpt_4o_mini_complete, openai_embed
+from yar.utils import logger, set_verbose_debug
 
 WORKING_DIR = './dickens'
 
@@ -14,16 +14,16 @@ def configure_logging():
     """Configure logging for the application"""
 
     # Reset any existing handlers to ensure clean configuration
-    for logger_name in ['uvicorn', 'uvicorn.access', 'uvicorn.error', 'lightrag']:
+    for logger_name in ['uvicorn', 'uvicorn.access', 'uvicorn.error', 'yar']:
         logger_instance = logging.getLogger(logger_name)
         logger_instance.handlers = []
         logger_instance.filters = []
 
     # Get log directory path from environment variable or use current directory
     log_dir = os.getenv('LOG_DIR', os.getcwd())
-    log_file_path = os.path.abspath(os.path.join(log_dir, 'lightrag_demo.log'))
+    log_file_path = os.path.abspath(os.path.join(log_dir, 'yar_demo.log'))
 
-    print(f'\nLightRAG demo log file: {log_file_path}\n')
+    print(f'\nYAR demo log file: {log_file_path}\n')
     os.makedirs(log_dir, exist_ok=True)
 
     # Get log file max size and backup count from environment variables
@@ -58,7 +58,7 @@ def configure_logging():
                 },
             },
             'loggers': {
-                'lightrag': {
+                'yar': {
                     'handlers': ['console', 'file'],
                     'level': 'INFO',
                     'propagate': False,
@@ -78,7 +78,7 @@ if not os.path.exists(WORKING_DIR):
 
 
 async def initialize_rag():
-    rag = LightRAG(
+    rag = YAR(
         working_dir=WORKING_DIR,
         embedding_func=openai_embed,
         llm_model_func=gpt_4o_mini_complete,

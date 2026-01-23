@@ -34,9 +34,9 @@ class TestRouteRegistrationApiKey:
         """
         server_file = (
             Path(__file__).parent.parent.parent
-            / 'lightrag'
+            / 'yar'
             / 'api'
-            / 'lightrag_server.py'
+            / 'yar_server.py'
         )
         source = server_file.read_text()
         tree = ast.parse(source)
@@ -63,9 +63,9 @@ class TestRouteRegistrationApiKey:
         """Verify rerank config uses 'rerank_api_key' not 'api_key'."""
         server_file = (
             Path(__file__).parent.parent.parent
-            / 'lightrag'
+            / 'yar'
             / 'api'
-            / 'lightrag_server.py'
+            / 'yar_server.py'
         )
         source = server_file.read_text()
 
@@ -93,7 +93,7 @@ class TestMultipleRouteAuthConsistency:
 
     def test_all_routes_work_without_api_key(self, mock_rag):
         """When api_key=None, all routes should work without auth."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         # Create app with no auth
         app = FastAPI()
@@ -113,7 +113,7 @@ class TestMultipleRouteAuthConsistency:
 
     def test_all_routes_require_key_when_configured(self, mock_rag):
         """When api_key is set, all routes should require it."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         app = FastAPI()
         router = create_alias_routes(mock_rag, api_key='test-secret-key')
@@ -128,7 +128,7 @@ class TestMultipleRouteAuthConsistency:
 
     def test_correct_key_works_for_all_routes(self, mock_rag):
         """With correct API key, all routes should work."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         app = FastAPI()
         router = create_alias_routes(mock_rag, api_key='test-secret-key')
@@ -167,7 +167,7 @@ class TestRouteIsolation:
 
     def test_multiple_apps_with_different_auth(self, mock_rag):
         """Creating multiple apps with different auth should be independent."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         # App 1: No auth
         app1 = FastAPI()
@@ -196,7 +196,7 @@ class TestRouteIsolation:
 
     def test_sequential_route_creation_isolation(self, mock_rag):
         """Routes created sequentially should not affect each other."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         # Create first router with auth
         router1 = create_alias_routes(mock_rag, api_key='key1')
@@ -219,7 +219,7 @@ class TestAuthDependencyFactory:
 
     def test_dependency_with_none_returns_no_auth(self):
         """get_combined_auth_dependency(api_key=None) should allow all requests."""
-        from lightrag.api.utils_api import get_combined_auth_dependency
+        from yar.api.utils_api import get_combined_auth_dependency
 
         dep = get_combined_auth_dependency(api_key=None)
 
@@ -245,7 +245,7 @@ class TestAuthDependencyFactory:
 
     def test_dependency_with_key_returns_security_requirement(self):
         """get_combined_auth_dependency(api_key='xxx') should require API key."""
-        from lightrag.api.utils_api import get_combined_auth_dependency
+        from yar.api.utils_api import get_combined_auth_dependency
 
         dep = get_combined_auth_dependency(api_key='test-key')
 
@@ -274,7 +274,7 @@ class TestConfigPropagation:
         """Verify EntityResolutionConfig can be accessed from global_config dict."""
         from dataclasses import asdict
 
-        from lightrag.entity_resolution.config import EntityResolutionConfig
+        from yar.entity_resolution.config import EntityResolutionConfig
 
         # Create config as server would (LLM-only approach)
         config = EntityResolutionConfig(

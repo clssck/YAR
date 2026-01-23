@@ -1,8 +1,8 @@
 {
   "venv": ".venv",
   "venvPath": ".",
-  "include": ["lightrag"],
-  "exclude": ["lightrag/evaluation"],
+  "include": ["yar"],
+  "exclude": ["yar/evaluation"],
   "reportMissingImports": "none",
   "reportMissingModuleSource": "none",
   "reportMissingTypeStubs": "none",

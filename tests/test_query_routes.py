@@ -1,4 +1,4 @@
-"""Tests for query routes in lightrag/api/routers/query_routes.py.
+"""Tests for query routes in yar/api/routers/query_routes.py.
 
 This module tests the three main query endpoints:
 - POST /query - Non-streaming RAG query
@@ -55,7 +55,7 @@ class QueryDataResponse(BaseModel):
 
 def create_test_query_routes(rag: Any, api_key: str | None = None):
     """Create query routes for testing (simplified version without auth)."""
-    from lightrag.api.routers.query_routes import (
+    from yar.api.routers.query_routes import (
         QueryRequest,
         deduplicate_references_section,
         renumber_references_sequential,
@@ -159,7 +159,7 @@ class TestHelperFunctions:
 
     def test_strip_reasoning_tags_removes_think_blocks(self):
         """Test that <think>...</think> blocks are removed."""
-        from lightrag.api.routers.query_routes import strip_reasoning_tags
+        from yar.api.routers.query_routes import strip_reasoning_tags
 
         text = 'Hello <think>internal reasoning here</think> World'
         result = strip_reasoning_tags(text)
@@ -167,7 +167,7 @@ class TestHelperFunctions:
 
     def test_strip_reasoning_tags_handles_multiline(self):
         """Test that multiline think blocks are removed."""
-        from lightrag.api.routers.query_routes import strip_reasoning_tags
+        from yar.api.routers.query_routes import strip_reasoning_tags
 
         text = 'Start <think>\nLine 1\nLine 2\n</think> End'
         result = strip_reasoning_tags(text)
@@ -175,7 +175,7 @@ class TestHelperFunctions:
 
     def test_strip_reasoning_tags_empty_input(self):
         """Test that empty input returns empty string."""
-        from lightrag.api.routers.query_routes import strip_reasoning_tags
+        from yar.api.routers.query_routes import strip_reasoning_tags
 
         assert strip_reasoning_tags('') == ''
         # Note: function signature says str, but implementation handles None
@@ -183,7 +183,7 @@ class TestHelperFunctions:
 
     def test_deduplicate_references_section_removes_duplicates(self):
         """Test that duplicate reference entries are removed."""
-        from lightrag.api.routers.query_routes import deduplicate_references_section
+        from yar.api.routers.query_routes import deduplicate_references_section
 
         text = """Some content here.
 
@@ -199,7 +199,7 @@ class TestHelperFunctions:
 
     def test_renumber_references_sequential(self):
         """Test that sparse references are renumbered sequentially."""
-        from lightrag.api.routers.query_routes import renumber_references_sequential
+        from yar.api.routers.query_routes import renumber_references_sequential
 
         text = 'See [2] and [5] and [9] for details.'
         result = renumber_references_sequential(text)
@@ -211,7 +211,7 @@ class TestHelperFunctions:
 
     def test_renumber_references_preserves_order(self):
         """Test that renumbering preserves first-appearance order."""
-        from lightrag.api.routers.query_routes import renumber_references_sequential
+        from yar.api.routers.query_routes import renumber_references_sequential
 
         text = 'First [5], then [2], then [5] again.'
         result = renumber_references_sequential(text)
@@ -220,7 +220,7 @@ class TestHelperFunctions:
 
     def test_renumber_references_empty_input(self):
         """Test that empty input is handled correctly."""
-        from lightrag.api.routers.query_routes import renumber_references_sequential
+        from yar.api.routers.query_routes import renumber_references_sequential
 
         assert renumber_references_sequential('') == ''
         assert renumber_references_sequential('No refs here') == 'No refs here'
@@ -237,7 +237,7 @@ class TestQueryRequestModel:
 
     def test_query_request_valid_basic(self):
         """Test that valid basic query is accepted."""
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         req = QueryRequest(query='What is AI?')
         assert req.query == 'What is AI?'
@@ -245,7 +245,7 @@ class TestQueryRequestModel:
 
     def test_query_request_strips_whitespace(self):
         """Test that query whitespace is stripped."""
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         req = QueryRequest(query='  What is AI?  ')
         assert req.query == 'What is AI?'
@@ -254,14 +254,14 @@ class TestQueryRequestModel:
         """Test that query < 3 chars is rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         with pytest.raises(ValidationError):
             QueryRequest(query='ab')
 
     def test_query_request_valid_modes(self):
         """Test all valid query modes."""
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         # Test each mode individually to satisfy type checker
         assert QueryRequest(query='test query', mode='local').mode == 'local'
@@ -275,14 +275,14 @@ class TestQueryRequestModel:
         """Test that invalid mode is rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         with pytest.raises(ValidationError):
             QueryRequest(query='test query', mode='invalid_mode')  # type: ignore[arg-type]
 
     def test_query_request_conversation_history_valid(self):
         """Test valid conversation history format."""
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         history = [
             {'role': 'user', 'content': 'Hello'},
@@ -296,7 +296,7 @@ class TestQueryRequestModel:
         """Test that conversation history without role is rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         history = [{'content': 'Hello'}]  # missing 'role'
         with pytest.raises(ValidationError):
@@ -304,7 +304,7 @@ class TestQueryRequestModel:
 
     def test_query_request_to_query_params(self):
         """Test conversion to QueryParam."""
-        from lightrag.api.routers.query_routes import QueryRequest
+        from yar.api.routers.query_routes import QueryRequest
 
         req = QueryRequest(query='test query', mode='local', top_k=5)
         param = req.to_query_params(is_stream=False)

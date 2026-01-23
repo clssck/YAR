@@ -1,25 +1,25 @@
 # Repository Guidelines
 
-LightRAG is an advanced Retrieval-Augmented Generation (RAG) framework designed to enhance information retrieval and generation through graph-based knowledge representation.
+YAR is an advanced Retrieval-Augmented Generation (RAG) framework designed to enhance information retrieval and generation through graph-based knowledge representation.
 
 ## Project Structure & Module Organization
-- `lightrag/`: Core Python package with orchestrators (`lightrag/lightrag.py`), storage adapters in `kg/`, LLM bindings in `llm/`, and helpers such as `operate.py` and `utils_*.py`.
-- `lightrag-api/`: FastAPI service (`lightrag_server.py`) with routers under `routers/` and Gunicorn launcher `run_with_gunicorn.py`.
-- `lightrag_webui/`: React 19 + TypeScript client driven by Bun + Vite; UI components live in `src/`.
+- `yar/`: Core Python package with orchestrators (`yar/yar.py`), storage adapters in `kg/`, LLM bindings in `llm/`, and helpers such as `operate.py` and `utils_*.py`.
+- `yar-api/`: FastAPI service (`yar_server.py`) with routers under `routers/` and Gunicorn launcher `run_with_gunicorn.py`.
+- `yar_webui/`: React 19 + TypeScript client driven by Bun + Vite; UI components live in `src/`.
 - Tests live in `tests/` and root-level `test_*.py`. Working datasets stay in `inputs/`, `rag_storage/`, `temp/`; deployment collateral lives in `docs/` and `docker-compose.yml`.
 
 ## Build, Test, and Development Commands
 - `python -m venv .venv && source .venv/bin/activate`: set up the Python runtime.
 - `pip install -e .` / `pip install -e .[api]`: install the package and API extras in editable mode.
-- `lightrag-server` or `uvicorn lightrag.api.lightrag_server:app --reload`: start the API locally; ensure `.env` is present.
+- `yar-server` or `uvicorn yar.api.yar_server:app --reload`: start the API locally; ensure `.env` is present.
 - `python -m pytest tests` (offline markers apply by default) or `python -m pytest tests --run-integration` / `python test_graph_storage.py`: run the full suite, opt into integration coverage, or target an individual script.
 - `ruff check .`: lint Python sources before committing.
 - `bun install`, `bun run dev`, `bun run build`, `bun test`: manage the web UI workflow (Bun is mandatory).
 
 ## Coding Style & Naming Conventions
 - Backend code follow PEP 8 with four-space indentation, annotate functions, and reach for dataclasses when modelling state.
-- Use `lightrag.utils.logger` instead of `print`; respect logger configuration flags.
-- Extend storage or pipeline abstractions via `lightrag.base` and keep reusable helpers in the existing `utils_*.py`.
+- Use `yar.utils.logger` instead of `print`; respect logger configuration flags.
+- Extend storage or pipeline abstractions via `yar.base` and keep reusable helpers in the existing `utils_*.py`.
 - Python modules remain lowercase with underscores; React components use `PascalCase.tsx` and hooks-first patterns.
 - Front-end code should remain in TypeScript with two-space indentation, rely on functional React components with hooks, and follow Tailwind utility style.
 
@@ -41,7 +41,7 @@ LightRAG is an advanced Retrieval-Augmented Generation (RAG) framework designed 
 - Copy `env.example` → `.env` and `config.ini.example` → `config.ini` for local dev
 - These files are in `.gitignore` — keep it that way
 - Configure storage backends through `LIGHTRAG_*` variables and validate them with `docker-compose` services when needed
-- Treat `lightrag.log*` as local artefacts; purge sensitive information before sharing logs or outputs
+- Treat `yar.log*` as local artefacts; purge sensitive information before sharing logs or outputs
 - Before committing, run `git status` to ensure no secrets are staged
 
 ## Automation & Agent Workflow

@@ -6,11 +6,11 @@ FROM oven/bun:latest AS frontend-builder
 WORKDIR /app
 
 # Copy frontend source code
-COPY lightrag_webui/ ./lightrag_webui/
+COPY yar_webui/ ./yar_webui/
 
 # Build frontend assets for inclusion in the API package
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    cd lightrag_webui \
+    cd yar_webui \
     && bun install --frozen-lockfile \
     && bun run build
 
@@ -47,10 +47,10 @@ RUN --mount=type=cache,target=/root/.local/share/uv \
     uv sync --frozen --no-dev --extra api --no-install-project --no-editable
 
 # Copy project sources after dependency layer
-COPY lightrag/ ./lightrag/
+COPY yar/ ./yar/
 
 # Include pre-built frontend assets from the previous stage
-COPY --from=frontend-builder /app/lightrag/api/webui ./lightrag/api/webui
+COPY --from=frontend-builder /app/yar/api/webui ./yar/api/webui
 
 # Sync project in non-editable mode and ensure pip is available for runtime installs
 RUN --mount=type=cache,target=/root/.local/share/uv \
@@ -60,12 +60,12 @@ RUN --mount=type=cache,target=/root/.local/share/uv \
 # Prepare tiktoken cache directory and pre-populate tokenizer data
 # Use uv run to execute commands from the virtual environment
 RUN mkdir -p /app/data/tiktoken \
-    && uv run lightrag-download-cache --cache-dir /app/data/tiktoken || status=$?; \
+    && uv run yar-download-cache --cache-dir /app/data/tiktoken || status=$?; \
     if [ -n "${status:-}" ] && [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then exit "$status"; fi
 
 # Setup pdfium symlink for Kreuzberg PDF support
 # Kreuzberg needs libpdfium which is bundled with pypdfium2
-RUN uv run python -c "from lightrag.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg; _setup_pdfium_for_kreuzberg()"
+RUN uv run python -c "from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg; _setup_pdfium_for_kreuzberg()"
 
 # Final stage
 FROM python:3.13-slim
@@ -85,7 +85,7 @@ ENV UV_SYSTEM_PYTHON=1
 # Copy installed packages and application code
 COPY --from=builder /root/.local /root/.local
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/lightrag ./lightrag
+COPY --from=builder /app/yar ./yar
 COPY pyproject.toml .
 COPY setup.py .
 COPY uv.lock .
@@ -99,7 +99,7 @@ ENV PATH=/app/.venv/bin:/root/.local/bin:$PATH
 RUN --mount=type=cache,target=/root/.local/share/uv \
     uv sync --frozen --no-dev --extra api --no-editable \
     && /app/.venv/bin/python -m ensurepip --upgrade \
-    && /app/.venv/bin/python -c "from lightrag.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg; _setup_pdfium_for_kreuzberg()"
+    && /app/.venv/bin/python -c "from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg; _setup_pdfium_for_kreuzberg()"
 
 # Create persistent data directories AFTER package installation
 RUN mkdir -p /app/data/rag_storage /app/data/inputs /app/data/tiktoken
@@ -115,4 +115,4 @@ ENV INPUT_DIR=/app/data/inputs
 # Expose API port
 EXPOSE 9621
 
-ENTRYPOINT ["python", "-m", "lightrag.api.lightrag_server"]
+ENTRYPOINT ["python", "-m", "yar.api.yar_server"]

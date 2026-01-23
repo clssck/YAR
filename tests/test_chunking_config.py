@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lightrag.operate import create_chunker
+from yar.operate import create_chunker
 
 # ============================================================================
 # create_chunker Factory Tests
@@ -189,7 +189,7 @@ class TestChunkingPresetConfigValidation:
     def test_valid_semantic_preset(self):
         """Test that 'semantic' preset is accepted."""
         with patch.dict(os.environ, {'CHUNKING_PRESET': 'semantic'}):
-            from lightrag.api.config import get_env_value
+            from yar.api.config import get_env_value
 
             value = get_env_value('CHUNKING_PRESET', 'semantic')
             assert value == 'semantic'
@@ -197,7 +197,7 @@ class TestChunkingPresetConfigValidation:
     def test_valid_recursive_preset(self):
         """Test that 'recursive' preset is accepted."""
         with patch.dict(os.environ, {'CHUNKING_PRESET': 'recursive'}):
-            from lightrag.api.config import get_env_value
+            from yar.api.config import get_env_value
 
             value = get_env_value('CHUNKING_PRESET', 'recursive')
             assert value == 'recursive'
@@ -205,7 +205,7 @@ class TestChunkingPresetConfigValidation:
     def test_case_insensitive_preset(self):
         """Test that preset values are case-insensitive."""
         with patch.dict(os.environ, {'CHUNKING_PRESET': 'SEMANTIC'}):
-            from lightrag.api.config import get_env_value
+            from yar.api.config import get_env_value
 
             value = get_env_value('CHUNKING_PRESET', 'semantic')
             # get_env_value returns raw value, normalization happens in parse_args
@@ -216,7 +216,7 @@ class TestChunkingPresetConfigValidation:
         # Clear the env var if set
         env_backup = os.environ.pop('CHUNKING_PRESET', None)
         try:
-            from lightrag.api.config import get_env_value
+            from yar.api.config import get_env_value
 
             value = get_env_value('CHUNKING_PRESET', 'semantic')
             assert value == 'semantic'
@@ -532,8 +532,8 @@ class TestConfigValidationErrors:
         # Test with invalid preset - should raise ValueError
         with patch.dict(os.environ, {'CHUNKING_PRESET': 'invalid_preset'}):
             # Import fresh to pick up env var
-            if 'lightrag.api.config' in sys.modules:
-                del sys.modules['lightrag.api.config']
+            if 'yar.api.config' in sys.modules:
+                del sys.modules['yar.api.config']
 
             try:
                 pass
@@ -548,7 +548,7 @@ class TestConfigValidationErrors:
     def test_preset_normalization_lowercase(self):
         """Test that preset values are normalized to lowercase."""
         with patch.dict(os.environ, {'CHUNKING_PRESET': 'SEMANTIC'}):
-            from lightrag.api.config import get_env_value
+            from yar.api.config import get_env_value
 
             value = get_env_value('CHUNKING_PRESET', 'semantic')
             # Value should be 'SEMANTIC' from env, normalization happens later
@@ -557,7 +557,7 @@ class TestConfigValidationErrors:
     def test_preset_with_leading_trailing_whitespace(self):
         """Test handling of preset with whitespace."""
         with patch.dict(os.environ, {'CHUNKING_PRESET': '  semantic  '}):
-            from lightrag.api.config import get_env_value
+            from yar.api.config import get_env_value
 
             value = get_env_value('CHUNKING_PRESET', 'semantic')
             # Raw value may have whitespace, should be stripped during validation

@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from lightrag.entity_resolution.config import DEFAULT_CONFIG, EntityResolutionConfig
-from lightrag.entity_resolution.resolver import (
+from yar.entity_resolution.config import DEFAULT_CONFIG, EntityResolutionConfig
+from yar.entity_resolution.resolver import (
     _extract_type_from_content,
     _parse_llm_json_response,
     _types_are_compatible,

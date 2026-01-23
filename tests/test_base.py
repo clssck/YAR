@@ -1,5 +1,5 @@
 """
-Tests for lightrag/base.py - Core data structures and abstract base classes.
+Tests for yar/base.py - Core data structures and abstract base classes.
 
 This module tests:
 - QueryParam dataclass with defaults and validation
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lightrag.base import (
+from yar.base import (
     DeletionResult,
     DocProcessingStatus,
     DocStatus,

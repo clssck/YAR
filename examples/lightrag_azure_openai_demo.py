@@ -6,8 +6,8 @@ import numpy as np
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 
-from lightrag import LightRAG, QueryParam
-from lightrag.utils import EmbeddingFunc
+from yar import YAR, QueryParam
+from yar.utils import EmbeddingFunc
 
 logging.basicConfig(level=logging.INFO)
 
@@ -98,7 +98,7 @@ embedding_dimension = 3072
 
 
 async def initialize_rag():
-    rag = LightRAG(
+    rag = YAR(
         working_dir=WORKING_DIR,
         llm_model_func=llm_model_func,
         embedding_func=EmbeddingFunc(

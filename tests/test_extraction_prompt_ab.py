@@ -15,10 +15,10 @@ import pytest
 import tiktoken
 
 # Skip entire module if prompt_optimized doesn't exist yet
-pytest.importorskip('lightrag.prompt_optimized', reason='Optimized prompts module not yet created')
-from lightrag.prompt_optimized import PROMPTS_OPTIMIZED
+pytest.importorskip('yar.prompt_optimized', reason='Optimized prompts module not yet created')
+from yar.prompt_optimized import PROMPTS_OPTIMIZED
 
-from lightrag.prompt import PROMPTS
+from yar.prompt import PROMPTS
 
 # =============================================================================
 # Sample Texts for Testing

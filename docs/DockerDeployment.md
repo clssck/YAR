@@ -1,4 +1,4 @@
-# LightRAG Docker Deployment
+# YAR Docker Deployment
 
 A lightweight Knowledge Graph Retrieval-Augmented Generation system with multiple LLM backend support.
 
@@ -8,13 +8,13 @@ A lightweight Knowledge Graph Retrieval-Augmented Generation system with multipl
 
 ```bash
 # Linux/MacOS
-git clone https://github.com/HKUDS/LightRAG.git
-cd LightRAG
+git clone https://github.com/HKUDS/YAR.git
+cd YAR
 ```
 ```powershell
 # Windows PowerShell
-git clone https://github.com/HKUDS/LightRAG.git
-cd LightRAG
+git clone https://github.com/HKUDS/YAR.git
+cd YAR
 ```
 
 ### Configure your environment:
@@ -30,7 +30,7 @@ Copy-Item .env.example .env
 # Edit .env with your preferred configuration
 ```
 
-LightRAG can be configured using environment variables in the `.env` file:
+YAR can be configured using environment variables in the `.env` file:
 
 **Server Configuration**
 
@@ -68,13 +68,13 @@ The Dockerfile uses BuildKit cache mounts to significantly improve build perform
 - **Efficient package caching**: UV and Bun package downloads are cached across builds
 - **No manual configuration needed**: Works out of the box in Docker Compose and GitHub Actions
 
-### Start LightRAG  server:
+### Start YAR  server:
 
 ```bash
 docker compose up -d
 ```
 
-LightRAG Server uses the following paths for data storage:
+YAR Server uses the following paths for data storage:
 
 ```
 data/
@@ -93,7 +93,7 @@ docker compose up
 
 ### Offline deployment
 
-Software packages requiring `transformers`, `torch`, or `cuda` will is not preinstalled in the dokcer images. Consequently, document extraction tools such as Docling, as well as local LLM models like Hugging Face and LMDeploy, can not be used in an off line enviroment. These high-compute-resource-demanding services should not be integrated into LightRAG. Docling will be decoupled and deployed as a standalone service.
+Software packages requiring `transformers`, `torch`, or `cuda` will is not preinstalled in the dokcer images. Consequently, document extraction tools such as Docling, as well as local LLM models like Hugging Face and LMDeploy, can not be used in an off line enviroment. These high-compute-resource-demanding services should not be integrated into YAR. Docling will be decoupled and deployed as a standalone service.
 
 ## 📦 Build Docker Images
 

@@ -8,8 +8,8 @@ Measures:
 3. Confidence distribution
 
 Usage:
-    POSTGRES_HOST=localhost POSTGRES_PORT=5433 POSTGRES_USER=lightrag \
-    POSTGRES_PASSWORD=lightrag_pass POSTGRES_DATABASE=lightrag \
+    POSTGRES_HOST=localhost POSTGRES_PORT=5433 POSTGRES_USER=yar \
+    POSTGRES_PASSWORD=yar_pass POSTGRES_DATABASE=yar \
     python examples/test_entity_resolution_accuracy.py
 
     # With custom parameters:
@@ -48,15 +48,15 @@ async def run_evaluation(
     sample_size: int,
 ) -> None:
     """Run entity resolution accuracy evaluation."""
-    from lightrag.kg.postgres_impl import PostgreSQLDB
+    from yar.kg.postgres_impl import PostgreSQLDB
 
     # Database config
     db_config = {
         'host': os.getenv('POSTGRES_HOST', 'localhost'),
         'port': int(os.getenv('POSTGRES_PORT', '5432')),
-        'user': os.getenv('POSTGRES_USER', 'lightrag'),
+        'user': os.getenv('POSTGRES_USER', 'yar'),
         'password': os.getenv('POSTGRES_PASSWORD', ''),
-        'database': os.getenv('POSTGRES_DATABASE', 'lightrag'),
+        'database': os.getenv('POSTGRES_DATABASE', 'yar'),
         'workspace': workspace,
         'max_connections': 10,
         'connection_retry_attempts': 3,

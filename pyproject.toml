@@ -3,12 +3,12 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lightrag-hku"
+name = "yar"
 dynamic = ["version"]
 authors = [
     {name = "Zirui Guo"}
 ]
-description = "LightRAG: Simple and Fast Retrieval-Augmented Generation"
+description = "YAR (Yet Another RAG): Simple and Fast Retrieval-Augmented Generation"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.13"
@@ -99,11 +99,11 @@ offline-llm = [
 
 offline = [
     # Complete offline package (includes api for document processing, plus storage and LLM)
-    "lightrag-hku[api,offline-storage,offline-llm]",
+    "yar[api,offline-storage,offline-llm]",
 ]
 
 test = [
-    "lightrag-hku[api]",
+    "yar[api]",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pre-commit",
@@ -119,7 +119,7 @@ lint = [
 ]
 
 evaluation = [
-    "lightrag-hku[api]",
+    "yar[api]",
     "ragas>=0.3.7",
     "datasets>=4.3.0",
 ]
@@ -130,9 +130,9 @@ observability = [
 ]
 
 [project.scripts]
-lightrag-server = "lightrag.api.lightrag_server:main"
-lightrag-gunicorn = "lightrag.api.run_with_gunicorn:main"
-lightrag-download-cache = "lightrag.tools.download_cache:main"
+yar-server = "yar.api.yar_server:main"
+yar-gunicorn = "yar.api.run_with_gunicorn:main"
+yar-download-cache = "yar.tools.download_cache:main"
 
 [project.urls]
 Homepage = "https://github.com/HKUDS/LightRAG"
@@ -141,17 +141,17 @@ Repository = "https://github.com/HKUDS/LightRAG"
 "Bug Tracker" = "https://github.com/HKUDS/LightRAG/issues"
 
 [tool.setuptools.packages.find]
-include = ["lightrag*"]
+include = ["yar*"]
 exclude = ["data*", "tests*", "scripts*", "examples*", "dickens*", "reproduce*", "output_complete*", "rag_storage*", "inputs*"]
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.dynamic]
-version = {attr = "lightrag.__version__"}
+version = {attr = "yar.__version__"}
 
 [tool.setuptools.package-data]
-lightrag = ["api/webui/**/*", "api/static/**/*"]
+yar = ["api/webui/**/*", "api/static/**/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

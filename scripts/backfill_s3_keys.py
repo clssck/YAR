@@ -21,17 +21,17 @@ import asyncpg
 # Configuration from environment
 POSTGRES_HOST = os.environ.get('POSTGRES_HOST', 'localhost')
 POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', '5433'))
-POSTGRES_USER = os.environ.get('POSTGRES_USER', 'lightrag')
-POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'lightrag_pass')
-POSTGRES_DATABASE = os.environ.get('POSTGRES_DATABASE', 'lightrag')
+POSTGRES_USER = os.environ.get('POSTGRES_USER', 'yar')
+POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'yar_pass')
+POSTGRES_DATABASE = os.environ.get('POSTGRES_DATABASE', 'yar')
 
 S3_ENDPOINT_URL = os.environ.get('S3_ENDPOINT_URL', 'http://localhost:9000')
 S3_ACCESS_KEY_ID = os.environ.get('S3_ACCESS_KEY_ID', 'rustfsadmin')
 S3_SECRET_ACCESS_KEY = os.environ.get('S3_SECRET_ACCESS_KEY', 'rustfsadmin')
-S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'lightrag')
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'yar')
 S3_REGION = os.environ.get('S3_REGION', 'us-east-1')
 
-INPUT_DIR = Path(os.environ.get('INPUT_DIR', '/Users/clssck/Projects/LightRAG/inputs'))
+INPUT_DIR = Path(os.environ.get('INPUT_DIR', '/Users/clssck/Projects/YAR/inputs'))
 
 
 async def get_s3_client():
@@ -82,7 +82,7 @@ async def main():
     # Find documents without s3_key
     docs = await conn.fetch("""
         SELECT id, file_path, status, workspace
-        FROM lightrag_doc_status
+        FROM yar_doc_status
         WHERE (s3_key IS NULL OR s3_key = '')
           AND file_path IS NOT NULL
           AND file_path != ''
@@ -125,14 +125,14 @@ async def main():
 
         # Update doc_status
         await conn.execute("""
-            UPDATE lightrag_doc_status
+            UPDATE yar_doc_status
             SET s3_key = $1, updated_at = CURRENT_TIMESTAMP
             WHERE id = $2 AND workspace = $3
         """, s3_key, doc_id, workspace)
 
         # Update doc_chunks
         result = await conn.execute("""
-            UPDATE lightrag_doc_chunks
+            UPDATE yar_doc_chunks
             SET s3_key = $1, update_time = CURRENT_TIMESTAMP
             WHERE full_doc_id = $2 AND workspace = $3
         """, s3_key, doc_id, workspace)

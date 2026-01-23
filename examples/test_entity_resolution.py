@@ -16,10 +16,10 @@ import logging
 import os
 import shutil
 
-from lightrag import LightRAG
-from lightrag.entity_resolution import EntityResolutionConfig
-from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
-from lightrag.utils import logger
+from yar import YAR
+from yar.entity_resolution import EntityResolutionConfig
+from yar.llm.openai import gpt_4o_mini_complete, openai_embed
+from yar.utils import logger
 
 WORKING_DIR = './test_entity_resolution'
 
@@ -50,7 +50,7 @@ async def main():
     print('Entity Resolution Test (LLM-based)')
     print('=' * 60)
 
-    rag = LightRAG(
+    rag = YAR(
         working_dir=WORKING_DIR,
         embedding_func=openai_embed,
         llm_model_func=gpt_4o_mini_complete,

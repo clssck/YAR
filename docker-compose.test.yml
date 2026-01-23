@@ -1,15 +1,15 @@
-name: lightrag-entity-resolution-test
+name: yar-entity-resolution-test
 
 services:
   postgres:
-    container_name: lightrag-postgres
+    container_name: yar-postgres
     build:
       context: ./docker/postgres-age-vector
       dockerfile: Dockerfile
     environment:
-      POSTGRES_DB: lightrag
-      POSTGRES_USER: lightrag
-      POSTGRES_PASSWORD: lightrag_pass
+      POSTGRES_DB: yar
+      POSTGRES_USER: yar
+      POSTGRES_PASSWORD: yar_pass
     ports:
       - '5433:5433' # Use 5433 to avoid conflict with agent-sdk postgres
     volumes:
@@ -39,7 +39,7 @@ services:
       -c default_statistics_target=200
       -c hash_mem_multiplier=4
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U lightrag -d lightrag -p 5433']
+      test: ['CMD-SHELL', 'pg_isready -U yar -d yar -p 5433']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -69,8 +69,8 @@ services:
       retries: 5
     mem_limit: 512m
 
-  lightrag:
-    container_name: lightrag-test
+  yar:
+    container_name: yar-test
     platform: linux/amd64  # Force x86_64 - kreuzberg has no arm64 Linux wheel
     build:
       context: .
@@ -81,9 +81,9 @@ services:
       - ./data/rag_storage_test:/app/data/rag_storage
       - ./data/inputs_test:/app/data/inputs
       # Live reload: Use absolute host path for Docker-in-Docker compatibility (Coder)
-      - /var/lib/docker/volumes/coder-shared-projects-optimized/_data/LightRAG/lightrag:/app/lightrag
+      - /var/lib/docker/volumes/coder-shared-projects-optimized/_data/YAR/yar:/app/yar
     environment:
-      # Live reload: PYTHONPATH makes mounted /app/lightrag take precedence over site-packages
+      # Live reload: PYTHONPATH makes mounted /app/yar take precedence over site-packages
       - PYTHONPATH=/app
 
       # Server
@@ -112,9 +112,9 @@ services:
       - LIGHTRAG_DOC_STATUS_STORAGE=PGDocStatusStorage
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5433
-      - POSTGRES_USER=lightrag
-      - POSTGRES_PASSWORD=lightrag_pass
-      - POSTGRES_DATABASE=lightrag
+      - POSTGRES_USER=yar
+      - POSTGRES_PASSWORD=yar_pass
+      - POSTGRES_DATABASE=yar
 
       # Workspace - must match existing data
       - WORKSPACE=default
@@ -152,7 +152,7 @@ services:
       - S3_ENDPOINT_URL=http://rustfs:9000
       - S3_ACCESS_KEY_ID=rustfsadmin
       - S3_SECRET_ACCESS_KEY=rustfsadmin
-      - S3_BUCKET_NAME=lightrag
+      - S3_BUCKET_NAME=yar
       - S3_REGION=us-east-1
     depends_on:
       postgres:
@@ -163,7 +163,7 @@ services:
     command:
       - python
       - -m
-      - lightrag.api.run_with_gunicorn
+      - yar.api.run_with_gunicorn
       - --workers
       - '8'
       - --llm-binding

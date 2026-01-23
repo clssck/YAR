@@ -517,7 +517,7 @@ def test_aquery_data_endpoint():
 
     except requests.exceptions.ConnectionError:
         print('❌ Connection failed: Please ensure LightRAG API service is running')
-        print('   Start command: python -m lightrag.api.lightrag_server')
+        print('   Start command: python -m yar.api.yar_server')
     except requests.exceptions.Timeout:
         print('❌ Request timeout: Query processing took too long')
     except Exception as e:

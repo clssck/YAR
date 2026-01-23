@@ -1,5 +1,5 @@
 """
-Tests for lightrag/namespace.py - Namespace constants and utilities.
+Tests for yar/namespace.py - Namespace constants and utilities.
 
 This module tests:
 - NameSpace class constants
@@ -8,7 +8,7 @@ This module tests:
 
 from __future__ import annotations
 
-from lightrag.namespace import NameSpace, is_namespace
+from yar.namespace import NameSpace, is_namespace
 
 
 class TestNameSpaceConstants:

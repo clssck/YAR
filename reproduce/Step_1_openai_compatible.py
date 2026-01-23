@@ -5,13 +5,13 @@ import time
 
 import numpy as np
 
-from lightrag import LightRAG
-from lightrag.llm.openai import openai_complete_if_cache, openai_embed
-from lightrag.utils import EmbeddingFunc
+from yar import LightRAG
+from yar.llm.openai import openai_complete_if_cache, openai_embed
+from yar.utils import EmbeddingFunc
 
 
 ## For Upstage API
-# please check if embedding_dim=4096 in lightrag.py and llm.py in lightrag direcotry
+# please check if embedding_dim=4096 in yar.py and llm.py in yar direcotry
 async def llm_model_func(prompt, system_prompt=None, history_messages=None, **kwargs) -> str:
     if history_messages is None:
         history_messages = []

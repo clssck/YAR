@@ -1,7 +1,7 @@
 # Workspace Isolation Test Suite
 
 ## Overview
-Comprehensive test coverage for LightRAG's workspace isolation feature, ensuring that different workspaces (projects) can coexist independently without data contamination or resource conflicts.
+Comprehensive test coverage for YAR's workspace isolation feature, ensuring that different workspaces (projects) can coexist independently without data contamination or resource conflicts.
 
 ## Test Architecture
 
@@ -49,7 +49,7 @@ Comprehensive test coverage for LightRAG's workspace isolation feature, ensuring
 
 ### 5. End-to-End Integration Tests
 **Test:** 11
-**Purpose:** Validate complete LightRAG workflows maintain isolation
+**Purpose:** Validate complete YAR workflows maintain isolation
 
 - Full document insertion pipeline
 - File system separation
@@ -243,7 +243,7 @@ async def test_new_feature():
 
 ## Related Documentation
 
-- [Workspace Isolation Design Doc](../docs/LightRAG_concurrent_explain.md)
+- [Workspace Isolation Design Doc](../docs/YAR_concurrent_explain.md)
 - [Project Intelligence](.clinerules/01-basic.md)
 - [Memory Bank](../.memory-bank/)
 
@@ -254,7 +254,7 @@ async def test_new_feature():
 | shared_storage | ✅ T1, T4 | ✅ T2, T5, T6 | ✅ T3 | ✅ T7 | ✅ T11 |
 | update_flags | ✅ T8 | - | - | - | - |
 | JsonKVStorage | (removed) | - | - | - | ✅ T11 |
-| LightRAG Core | - | - | - | - | ✅ T11 |
+| YAR Core | - | - | - | - | ✅ T11 |
 | Namespace | ✅ T9 | - | ✅ T3 | ✅ T7 | - |
 
 **Legend:** T# = Test number

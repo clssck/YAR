@@ -1,7 +1,7 @@
 """
 Example of directly using modal processors
 
-This example demonstrates how to use LightRAG's modal processors directly without going through MinerU.
+This example demonstrates how to use YAR's modal processors directly without going through MinerU.
 """
 
 import argparse
@@ -13,9 +13,9 @@ from raganything.modalprocessors import (
     TableModalProcessor,
 )
 
-from lightrag import LightRAG
-from lightrag.llm.openai import openai_complete_if_cache, openai_embed
-from lightrag.utils import EmbeddingFunc
+from yar import YAR
+from yar.llm.openai import openai_complete_if_cache, openai_embed
+from yar.utils import EmbeddingFunc
 
 WORKING_DIR = './rag_storage'
 
@@ -80,10 +80,10 @@ def get_vision_model_func(api_key: str, base_url: str | None = None):
     return vision_fn
 
 
-async def process_image_example(lightrag: LightRAG, vision_model_func):
+async def process_image_example(yar: YAR, vision_model_func):
     """Example of processing an image"""
     # Create image processor
-    image_processor = ImageModalProcessor(lightrag=lightrag, modal_caption_func=vision_model_func)
+    image_processor = ImageModalProcessor(yar=yar, modal_caption_func=vision_model_func)
 
     # Prepare image content
     image_content = {
@@ -105,10 +105,10 @@ async def process_image_example(lightrag: LightRAG, vision_model_func):
     print(f'Entity Info: {entity_info}')
 
 
-async def process_table_example(lightrag: LightRAG, llm_model_func):
+async def process_table_example(yar: YAR, llm_model_func):
     """Example of processing a table"""
     # Create table processor
-    table_processor = TableModalProcessor(lightrag=lightrag, modal_caption_func=llm_model_func)
+    table_processor = TableModalProcessor(yar=yar, modal_caption_func=llm_model_func)
 
     # Prepare table content
     table_content = {
@@ -135,10 +135,10 @@ async def process_table_example(lightrag: LightRAG, llm_model_func):
     print(f'Entity Info: {entity_info}')
 
 
-async def process_equation_example(lightrag: LightRAG, llm_model_func):
+async def process_equation_example(yar: YAR, llm_model_func):
     """Example of processing a mathematical equation"""
     # Create equation processor
-    equation_processor = EquationModalProcessor(lightrag=lightrag, modal_caption_func=llm_model_func)
+    equation_processor = EquationModalProcessor(yar=yar, modal_caption_func=llm_model_func)
 
     # Prepare equation content
     equation_content = {'text': 'E = mc^2', 'text_format': 'LaTeX'}
@@ -157,7 +157,7 @@ async def process_equation_example(lightrag: LightRAG, llm_model_func):
 
 
 async def initialize_rag(api_key: str, base_url: str | None = None):
-    rag = LightRAG(
+    rag = YAR(
         working_dir=WORKING_DIR,
         embedding_func=EmbeddingFunc(
             embedding_dim=3072,
@@ -198,17 +198,17 @@ def main():
 
 
 async def main_async(api_key: str, base_url: str | None = None):
-    # Initialize LightRAG
-    lightrag = await initialize_rag(api_key, base_url)
+    # Initialize YAR
+    yar = await initialize_rag(api_key, base_url)
 
     # Get model functions
     llm_model_func = get_llm_model_func(api_key, base_url)
     vision_model_func = get_vision_model_func(api_key, base_url)
 
     # Run examples
-    await process_image_example(lightrag, vision_model_func)
-    await process_table_example(lightrag, llm_model_func)
-    await process_equation_example(lightrag, llm_model_func)
+    await process_image_example(yar, vision_model_func)
+    await process_table_example(yar, llm_model_func)
+    await process_equation_example(yar, llm_model_func)
 
 
 if __name__ == '__main__':

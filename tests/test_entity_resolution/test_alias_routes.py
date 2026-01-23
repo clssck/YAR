@@ -50,7 +50,7 @@ def app_and_client(mock_rag):
     the factory function fresh and creating isolated routes.
     """
     # Import here to get a fresh module state
-    from lightrag.api.routers.alias_routes import create_alias_routes
+    from yar.api.routers.alias_routes import create_alias_routes
 
     app = FastAPI()
     router = create_alias_routes(mock_rag, api_key=None)
@@ -160,7 +160,7 @@ class TestCreateManualAlias:
     def test_create_alias_success(self, client, mock_db):
         """Should create alias successfully."""
         with patch(
-            'lightrag.entity_resolution.resolver.store_alias', new_callable=AsyncMock
+            'yar.entity_resolution.resolver.store_alias', new_callable=AsyncMock
         ) as mock_store:
             response = client.post(
                 '/aliases',
@@ -298,7 +298,7 @@ class TestDatabaseErrorHandling:
 
     def test_list_aliases_handles_query_exception(self, mock_rag_with_db_errors):
         """GET /aliases should handle database query exceptions gracefully."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         rag, mock_db = mock_rag_with_db_errors
         mock_db.query = AsyncMock(side_effect=Exception('Database connection failed'))
@@ -316,8 +316,8 @@ class TestDatabaseErrorHandling:
 
     def test_create_alias_handles_execute_exception(self, mock_rag_with_db_errors):
         """POST /aliases should handle execute() failures gracefully."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
-        from lightrag.entity_resolution import resolver
+        from yar.api.routers.alias_routes import create_alias_routes
+        from yar.entity_resolution import resolver
 
         rag, _mock_db = mock_rag_with_db_errors
 
@@ -342,7 +342,7 @@ class TestDatabaseErrorHandling:
 
     def test_delete_alias_handles_query_exception(self, mock_rag_with_db_errors):
         """DELETE /aliases should handle query exceptions gracefully."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         rag, mock_db = mock_rag_with_db_errors
         mock_db.query = AsyncMock(side_effect=Exception('Query timeout'))
@@ -359,7 +359,7 @@ class TestDatabaseErrorHandling:
 
     def test_delete_alias_returns_not_found_for_missing_alias(self, mock_rag_with_db_errors):
         """DELETE should return 404 when alias doesn't exist (query returns None)."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         rag, mock_db = mock_rag_with_db_errors
         # DELETE RETURNING returns None (no rows deleted)
@@ -377,7 +377,7 @@ class TestDatabaseErrorHandling:
 
     def test_get_aliases_for_entity_handles_exception(self, mock_rag_with_db_errors):
         """GET /aliases/for/{entity} should handle exceptions gracefully."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         rag, mock_db = mock_rag_with_db_errors
         mock_db.query = AsyncMock(side_effect=Exception('Connection lost'))
@@ -394,7 +394,7 @@ class TestDatabaseErrorHandling:
 
     def test_list_aliases_count_query_returns_none(self, mock_rag_with_db_errors):
         """Handle case where COUNT query returns None instead of dict."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         rag, mock_db = mock_rag_with_db_errors
         # COUNT returns None, list returns empty
@@ -414,7 +414,7 @@ class TestDatabaseErrorHandling:
 
     def test_handles_malformed_query_result(self, mock_rag_with_db_errors):
         """Handle malformed query results (missing expected keys)."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         rag, mock_db = mock_rag_with_db_errors
         # COUNT returns dict without 'total' key

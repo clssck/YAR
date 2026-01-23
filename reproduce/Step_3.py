@@ -1,8 +1,8 @@
 import json
 import re
 
-from lightrag import LightRAG, QueryParam
-from lightrag.utils import always_get_an_event_loop, logger
+from yar import LightRAG, QueryParam
+from yar.utils import always_get_an_event_loop, logger
 
 
 def extract_queries(file_path):

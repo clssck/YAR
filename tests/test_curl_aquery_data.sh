@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# LightRAG aquery_data endpoint test script
+# YAR aquery_data endpoint test script
 # Use curl command to test the new /query/data endpoint and validate the new data format
 
-echo "🚀 LightRAG aquery_data Endpoint Test (New Data Format Validation)"
+echo "🚀 YAR aquery_data Endpoint Test (New Data Format Validation)"
 echo "=================================================="
 
 # Base URL (adjust according to actual deployment)
@@ -264,7 +264,7 @@ fi
 
 echo ""
 echo "💡 Usage Instructions:"
-echo "1. Ensure LightRAG API service is running (python -m lightrag.api.lightrag_server)"
+echo "1. Ensure YAR API service is running (python -m yar.api.yar_server)"
 echo "2. Adjust BASE_URL as needed"
 echo "3. If authentication is required, add -H \"Authorization: Bearer your-token\""
 echo "4. Install jq for better JSON formatting output: brew install jq (macOS) or apt install jq (Ubuntu)"

@@ -24,15 +24,15 @@ import pytest_asyncio
 # Set defaults before importing postgres_impl
 os.environ.setdefault('POSTGRES_HOST', 'localhost')
 os.environ.setdefault('POSTGRES_PORT', '5433')
-os.environ.setdefault('POSTGRES_USER', 'lightrag')
-os.environ.setdefault('POSTGRES_PASSWORD', 'lightrag_pass')
-os.environ.setdefault('POSTGRES_DATABASE', 'lightrag')
+os.environ.setdefault('POSTGRES_USER', 'yar')
+os.environ.setdefault('POSTGRES_PASSWORD', 'yar_pass')
+os.environ.setdefault('POSTGRES_DATABASE', 'yar')
 
 
 @pytest_asyncio.fixture
 async def db_client():
     """Get a database client for testing (fresh pool per test function)."""
-    from lightrag.kg.postgres_impl import ClientManager
+    from yar.kg.postgres_impl import ClientManager
 
     # Close any existing DB instance from previous tests to avoid event loop issues
     if ClientManager._db_instance is not None and ClientManager._db_instance.pool is not None:
@@ -57,7 +57,7 @@ class TestSchemaMigrationsTableIntegration:
         result = await db_client.query(
             """SELECT EXISTS (
                 SELECT 1 FROM information_schema.tables
-                WHERE table_name = 'lightrag_schema_migrations'
+                WHERE table_name = 'yar_schema_migrations'
             ) as exists"""
         )
         assert result is not None
@@ -68,7 +68,7 @@ class TestSchemaMigrationsTableIntegration:
         result = await db_client.query(
             """SELECT column_name, data_type
                FROM information_schema.columns
-               WHERE table_name = 'lightrag_schema_migrations'
+               WHERE table_name = 'yar_schema_migrations'
                ORDER BY ordinal_position""",
             multirows=True,
         )
@@ -237,7 +237,7 @@ class TestVectorDimensionValidationIntegration:
         result = await db_client.query(
             """SELECT atttypmod as dimension
                FROM pg_attribute
-               WHERE attrelid = 'lightrag_vdb_entity'::regclass
+               WHERE attrelid = 'yar_vdb_entity'::regclass
                AND attname = 'content_vector'
                AND atttypmod > 0"""
         )
@@ -265,7 +265,7 @@ class TestVectorDimensionValidationIntegration:
         result = await db_client.query(
             """SELECT atttypmod as dimension
                FROM pg_attribute
-               WHERE attrelid = 'lightrag_vdb_entity'::regclass
+               WHERE attrelid = 'yar_vdb_entity'::regclass
                AND attname = 'content_vector'
                AND atttypmod > 0"""
         )
@@ -300,7 +300,7 @@ class TestWorkspaceValidationIntegration:
 
     async def test_invalid_workspace_prevents_db_connection(self):
         """Invalid workspace name should prevent PostgreSQLDB instantiation."""
-        from lightrag.kg.postgres_impl import validate_workspace_name
+        from yar.kg.postgres_impl import validate_workspace_name
 
         # Direct validation should fail
         with pytest.raises(ValueError) as excinfo:
@@ -310,7 +310,7 @@ class TestWorkspaceValidationIntegration:
 
     async def test_empty_workspace_becomes_default(self):
         """Empty workspace should become 'default'."""
-        from lightrag.kg.postgres_impl import validate_workspace_name
+        from yar.kg.postgres_impl import validate_workspace_name
 
         assert validate_workspace_name('') == 'default'
         assert validate_workspace_name(None) == 'default'
@@ -337,14 +337,14 @@ class TestFullInitializationFlow:
         result = await db_client.query(
             """SELECT EXISTS (
                 SELECT 1 FROM information_schema.tables
-                WHERE table_name = 'lightrag_schema_migrations'
+                WHERE table_name = 'yar_schema_migrations'
             ) as exists"""
         )
         assert result.get('exists') is True
 
     async def test_initialization_is_idempotent(self, db_client):
         """Multiple get_client() calls should return same instance."""
-        from lightrag.kg.postgres_impl import ClientManager
+        from yar.kg.postgres_impl import ClientManager
 
         # Get client again (should reuse existing from fixture)
         db2 = await ClientManager.get_client()

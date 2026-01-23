@@ -17,8 +17,8 @@ from pathlib import Path
 
 from raganything import RAGAnything, RAGAnythingConfig
 
-from lightrag.llm.openai import openai_complete_if_cache, openai_embed
-from lightrag.utils import EmbeddingFunc, logger, set_verbose_debug
+from yar.llm.openai import openai_complete_if_cache, openai_embed
+from yar.utils import EmbeddingFunc, logger, set_verbose_debug
 
 
 def configure_logging():
@@ -62,7 +62,7 @@ def configure_logging():
                 },
             },
             'loggers': {
-                'lightrag': {
+                'yar': {
                     'handlers': ['console', 'file'],
                     'level': 'INFO',
                     'propagate': False,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * HonoHub - HTTP reverse proxy for LightRAG Docker services
+ * HonoHub - HTTP reverse proxy for YAR Docker services
  * Proxies requests from localhost to Docker gateway with proper header rewriting
  *
  * This is useful when running in environments like:
@@ -19,7 +19,7 @@ import { $ } from "bun";
 import { existsSync, readFileSync } from "fs";
 import { join, dirname } from "path";
 
-// Load .env from parent directory (LightRAG root)
+// Load .env from parent directory (YAR root)
 const scriptDir = dirname(import.meta.path);
 const envPath = join(scriptDir, "..", ".env");
 if (existsSync(envPath)) {
@@ -36,11 +36,11 @@ if (existsSync(envPath)) {
   }
 }
 
-// LightRAG service port mappings
+// YAR service port mappings
 // For services with targetPort, HonoHub proxies port -> targetPort on specified host
 // For services without targetPort, HonoHub proxies port -> port on Docker gateway
 const PORT_MAPPINGS = [
-  { port: 9621, targetPort: 9622, targetHost: "127.0.0.1", name: "LightRAG API + WebUI" }, // Runs locally on 9622
+  { port: 9621, targetPort: 9622, targetHost: "127.0.0.1", name: "YAR API + WebUI" }, // Runs locally on 9622
   { port: 4000, name: "LiteLLM Proxy" },
   { port: 5173, name: "Vite Dev Server" },
   { port: 9100, name: "RustFS S3 API" },
@@ -55,11 +55,11 @@ const PORTS = HTTP_PORTS.map((m) => m.port);
 async function getServiceHost(): Promise<string> {
   // Strategy: Try to detect the gateway IP where services are bound
 
-  // 1. Try lightrag-specific Docker network first
+  // 1. Try yar-specific Docker network first
   const networkNames = [
-    "lightrag-stack_lightrag-network",
-    "lightrag_default",
-    "lightrag-network",
+    "yar-stack_yar-network",
+    "yar_default",
+    "yar-network",
   ];
 
   for (const networkName of networkNames) {
@@ -70,12 +70,12 @@ async function getServiceHost(): Promise<string> {
 
       if (gateway) {
         console.log(`✓ Detected ${networkName} gateway: ${gateway}`);
-        // Test if we can reach the main LightRAG port on this gateway
+        // Test if we can reach the main YAR port on this gateway
         try {
           const response = await fetch(`http://${gateway}:9621/health`, {
             signal: AbortSignal.timeout(2000),
           });
-          console.log(`✓ LightRAG API accessible at ${gateway}:9621`);
+          console.log(`✓ YAR API accessible at ${gateway}:9621`);
           return gateway;
         } catch {
           console.log(
@@ -103,7 +103,7 @@ async function getServiceHost(): Promise<string> {
         const response = await fetch(`http://${gateway}:9621/health`, {
           signal: AbortSignal.timeout(2000),
         });
-        console.log(`✓ LightRAG API accessible at ${gateway}:9621`);
+        console.log(`✓ YAR API accessible at ${gateway}:9621`);
         return gateway;
       } catch {
         // Not accessible
@@ -306,7 +306,7 @@ function createProxyApp(targetHost: string, targetPort: number) {
 }
 
 async function checkIfServicesAccessibleOnLocalhost(): Promise<boolean> {
-  // Check LightRAG API or LiteLLM - either indicates services are on localhost
+  // Check YAR API or LiteLLM - either indicates services are on localhost
   const endpoints = [
     "http://127.0.0.1:9621/health",
     "http://127.0.0.1:4000/health",
@@ -326,8 +326,8 @@ async function checkIfServicesAccessibleOnLocalhost(): Promise<boolean> {
 }
 
 async function main() {
-  console.log("🚀 Starting HonoHub for LightRAG...\n");
-  console.log("   LightRAG HTTP reverse proxy for Docker/K8s environments\n");
+  console.log("🚀 Starting HonoHub for YAR...\n");
+  console.log("   YAR HTTP reverse proxy for Docker/K8s environments\n");
 
   const forceProxy =
     process.env.HONOHUB_FORCE === "true" || process.env.HONOHUB_FORCE === "1";
@@ -347,7 +347,7 @@ async function main() {
       );
     }
   } else if (servicesOnLocalhost) {
-    console.log("ℹ️  LightRAG services are already accessible on localhost");
+    console.log("ℹ️  YAR services are already accessible on localhost");
     console.log("ℹ️  HonoHub proxy is not needed in this environment");
     console.log(
       "ℹ️  Set HONOHUB_FORCE=true if you need path rewriting for proxies\n"

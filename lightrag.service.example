@@ -1,5 +1,5 @@
 [Unit]
-Description=LightRAG XYJ Service
+Description=YAR XYJ Service
 After=network.target
 
 [Service]
@@ -9,14 +9,14 @@ User=netman
 MemoryHigh=8G
 MemoryMax=12G
 
-# Set the LightRAG installation directory (change this to match your installation path)
-Environment="LIGHTRAG_HOME=/home/netman/lightrag-xyj"
+# Set the YAR installation directory (change this to match your installation path)
+Environment="LIGHTRAG_HOME=/home/netman/yar-xyj"
 
 # Set Environment to your Python virtual environment
 Environment="PATH=${LIGHTRAG_HOME}/.venv/bin"
 WorkingDirectory=${LIGHTRAG_HOME}
-ExecStart=${LIGHTRAG_HOME}/.venv/bin/lightrag-server
-# ExecStart=${LIGHTRAG_HOME}/.venv/bin/lightrag-gunicorn
+ExecStart=${LIGHTRAG_HOME}/.venv/bin/yar-server
+# ExecStart=${LIGHTRAG_HOME}/.venv/bin/yar-gunicorn
 
 # Kill mode require ExecStart must be gunicorn or unvicorn main process
 KillMode=process

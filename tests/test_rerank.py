@@ -15,7 +15,7 @@ from tenacity import RetryError
 
 pytestmark = pytest.mark.offline
 
-from lightrag.rerank import (
+from yar.rerank import (
     aggregate_chunk_scores,
     chunk_documents_for_rerank,
     create_rerank_func,
@@ -160,7 +160,7 @@ class TestChunkingTokenizerFallback:
 
     def test_fallback_produces_valid_chunks(self):
         """DIAGNOSTIC: If this fails, fallback chunking is broken."""
-        with patch('lightrag.rerank.TiktokenTokenizer', side_effect=Exception("No tokenizer")):
+        with patch('yar.rerank.TiktokenTokenizer', side_effect=Exception("No tokenizer")):
             doc = "A" * 200  # 200 chars
             docs = [doc]
 
@@ -291,7 +291,7 @@ class TestDeepInfraFormat:
         """DIAGNOSTIC: If this fails, DeepInfra request format is wrong."""
         factory, _, session = mock_aiohttp(200, {"scores": [0.9, 0.1]})
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             await deepinfra_rerank(
                 query="test query",
                 documents=["doc1", "doc2"],
@@ -311,7 +311,7 @@ class TestDeepInfraFormat:
         """DIAGNOSTIC: If this fails, DeepInfra response parsing is broken."""
         factory, _, _ = mock_aiohttp(200, {"scores": [0.95, 0.30, 0.75]})
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await deepinfra_rerank(
                 query="test",
                 documents=["d1", "d2", "d3"],
@@ -331,7 +331,7 @@ class TestDeepInfraFormat:
         """DIAGNOSTIC: If this fails, top_n filtering is broken."""
         factory, _, _ = mock_aiohttp(200, {"scores": [0.9, 0.8, 0.7, 0.6, 0.5]})
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await deepinfra_rerank(
                 query="test",
                 documents=["d1", "d2", "d3", "d4", "d5"],
@@ -361,7 +361,7 @@ class TestDeepInfraErrors:
         """DIAGNOSTIC: If this fails, retry logic is broken."""
         factory, _, _ = mock_aiohttp(500, text="Server Error")
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             with pytest.raises(RetryError) as exc_info:
                 await deepinfra_rerank(
                     query="test",
@@ -377,7 +377,7 @@ class TestDeepInfraErrors:
         """DIAGNOSTIC: If this fails, empty response handling is broken."""
         factory, _, _ = mock_aiohttp(200, {"scores": []})
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await deepinfra_rerank(
                 query="test",
                 documents=["doc"],
@@ -400,7 +400,7 @@ class TestGenericAPIFormat:
         """DIAGNOSTIC: If this fails, standard format is wrong for Cohere/Jina."""
         factory, _, session = mock_aiohttp(200, {"results": [{"index": 0, "relevance_score": 0.9}]})
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             await generic_rerank_api(
                 query="test",
                 documents=["doc"],
@@ -423,7 +423,7 @@ class TestGenericAPIFormat:
             200, {"output": {"results": [{"index": 0, "relevance_score": 0.9}]}}
         )
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             await generic_rerank_api(
                 query="test",
                 documents=["doc"],
@@ -448,7 +448,7 @@ class TestGenericAPIFormat:
             200, {"results": [{"index": 0, "relevance_score": 0.95, "extra_field": "ignored"}]}
         )
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await generic_rerank_api(
                 query="test",
                 documents=["doc"],
@@ -470,7 +470,7 @@ class TestGenericAPIErrors:
         factory, response, _ = mock_aiohttp(502, text="<!DOCTYPE html><html>...</html>")
         response.headers = {"content-type": "text/html"}
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             with pytest.raises(RetryError) as exc_info:
                 await generic_rerank_api(
                     query="test",
@@ -502,7 +502,7 @@ class TestGenericAPIErrors:
         """DIAGNOSTIC: If this fails, malformed response handling is broken."""
         factory, _, _ = mock_aiohttp(200, {"results": "not a list"})
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await generic_rerank_api(
                 query="test",
                 documents=["doc"],
@@ -533,7 +533,7 @@ class TestGenericAPIChunking:
 
         long_doc = "word " * 200  # Will be chunked with max_tokens=50
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await generic_rerank_api(
                 query="test",
                 documents=[long_doc],
@@ -571,7 +571,7 @@ class TestGenericAPIChunking:
         long_doc1 = "apple " * 100
         long_doc2 = "banana " * 100
 
-        with patch("lightrag.rerank.aiohttp.ClientSession", factory):
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
             results = await generic_rerank_api(
                 query="test",
                 documents=[long_doc1, long_doc2],

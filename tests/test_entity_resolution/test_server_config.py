@@ -23,7 +23,7 @@ class TestApiKeyIsolation:
         import ast
         from pathlib import Path
 
-        server_file = Path(__file__).parent.parent.parent / 'lightrag' / 'api' / 'lightrag_server.py'
+        server_file = Path(__file__).parent.parent.parent / 'yar' / 'api' / 'yar_server.py'
         source = server_file.read_text()
         tree = ast.parse(source)
 
@@ -51,9 +51,9 @@ class TestApiKeyIsolation:
         """Verify rerank module uses dedicated RERANK_BINDING_API_KEY env var."""
         from pathlib import Path
 
-        # Rerank API key is handled in the rerank module, not lightrag_server.py
+        # Rerank API key is handled in the rerank module, not yar_server.py
         # The server delegates to create_rerank_func() which handles API key internally
-        rerank_file = Path(__file__).parent.parent.parent / 'lightrag' / 'rerank.py'
+        rerank_file = Path(__file__).parent.parent.parent / 'yar' / 'rerank.py'
         source = rerank_file.read_text()
 
         # Should find RERANK_BINDING_API_KEY usage in rerank module
@@ -62,7 +62,7 @@ class TestApiKeyIsolation:
         )
 
         # Server should use create_rerank_func factory (not inline api_key handling)
-        server_file = Path(__file__).parent.parent.parent / 'lightrag' / 'api' / 'lightrag_server.py'
+        server_file = Path(__file__).parent.parent.parent / 'yar' / 'api' / 'yar_server.py'
         server_source = server_file.read_text()
 
         assert 'create_rerank_func' in server_source, (
@@ -93,7 +93,7 @@ class TestAuthDependencyConfig:
 
     def test_get_combined_auth_dependency_with_none(self):
         """Auth dependency with api_key=None should not require API key."""
-        from lightrag.api.utils_api import get_combined_auth_dependency
+        from yar.api.utils_api import get_combined_auth_dependency
 
         # Create dependency with no API key
         dep = get_combined_auth_dependency(api_key=None)
@@ -106,7 +106,7 @@ class TestAuthDependencyConfig:
 
     def test_get_combined_auth_dependency_with_key(self):
         """Auth dependency with api_key set should require that key."""
-        from lightrag.api.utils_api import get_combined_auth_dependency
+        from yar.api.utils_api import get_combined_auth_dependency
 
         # Create dependency with API key
         dep = get_combined_auth_dependency(api_key='test-key-123')

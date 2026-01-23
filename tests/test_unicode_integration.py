@@ -22,11 +22,11 @@ import pytest
 
 os.environ.setdefault('POSTGRES_HOST', 'localhost')
 os.environ.setdefault('POSTGRES_PORT', '5433')
-os.environ.setdefault('POSTGRES_USER', 'lightrag')
-os.environ.setdefault('POSTGRES_PASSWORD', 'lightrag_pass')
-os.environ.setdefault('POSTGRES_DATABASE', 'lightrag')
+os.environ.setdefault('POSTGRES_USER', 'yar')
+os.environ.setdefault('POSTGRES_PASSWORD', 'yar_pass')
+os.environ.setdefault('POSTGRES_DATABASE', 'yar')
 
-from lightrag.utils import UNICODE_SECURITY_STRIP
+from yar.utils import UNICODE_SECURITY_STRIP
 
 
 @pytest.fixture
@@ -34,10 +34,10 @@ async def setup_rag(tmp_path):
     """Create a LightRAG instance for testing."""
     import os
 
-    from lightrag import LightRAG
-    from lightrag.kg.postgres_impl import ClientManager
-    from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
-    from lightrag.utils import EmbeddingFunc
+    from yar import LightRAG
+    from yar.kg.postgres_impl import ClientManager
+    from yar.llm.openai import gpt_4o_mini_complete, openai_embed
+    from yar.utils import EmbeddingFunc
 
     # Reset connection pool state before each test
     if ClientManager._db_instance is not None:
@@ -230,7 +230,7 @@ class TestAliasResolutionNormalization:
         If normalize_unicode_for_entity_matching isn't called in resolver.py,
         cache lookups would fail for variant entity names.
         """
-        from lightrag.entity_resolution.resolver import get_cached_alias, store_alias
+        from yar.entity_resolution.resolver import get_cached_alias, store_alias
 
         rag = setup_rag
         db = rag.entities_vdb._db_required()
@@ -261,7 +261,7 @@ class TestAliasResolutionNormalization:
 
     async def test_alias_cache_nfd_lookup(self, setup_rag):
         """Verify alias cache lookups work with NFD accent variants."""
-        from lightrag.entity_resolution.resolver import get_cached_alias, store_alias
+        from yar.entity_resolution.resolver import get_cached_alias, store_alias
 
         rag = setup_rag
         db = rag.entities_vdb._db_required()
@@ -330,8 +330,8 @@ if __name__ == '__main__':
 
     async def run_quick_test():
         """Quick manual test without pytest."""
-        from lightrag import LightRAG
-        from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
+        from yar import LightRAG
+        from yar.llm.openai import gpt_4o_mini_complete, openai_embed
 
         workspace = f'manual_test_{uuid.uuid4().hex[:8]}'
         rag = LightRAG(

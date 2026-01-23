@@ -1,4 +1,4 @@
-"""Tests for upload routes in lightrag/api/routers/upload_routes.py.
+"""Tests for upload routes in yar/api/routers/upload_routes.py.
 
 This module tests the S3 document staging endpoints using httpx AsyncClient
 and FastAPI's TestClient pattern with mocked S3Client and LightRAG.

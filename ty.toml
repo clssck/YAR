@@ -8,13 +8,13 @@ python-version = "3.13"
 # Only exclude files that genuinely can't be type-checked (missing external deps)
 exclude = [
     "reproduce/**",
-    "lightrag/tools/lightrag_visualizer/**",  # imgui_bundle, moderngl not installed
+    "yar/tools/yar_visualizer/**",  # imgui_bundle, moderngl not installed
     "**/graph_visual_with_html.py",           # pyvis not installed
     "**/modalprocessors_example.py",          # raganything not installed
     "**/raganything_example.py",              # raganything not installed
     "**/rerank_example.py",                   # references non-existent cohere_rerank
-    "**/lightrag_azure_openai_demo.py",       # example file
-    "lightrag/evaluation/**",                 # ragas optional dep
+    "**/yar_azure_openai_demo.py",       # example file
+    "yar/evaluation/**",                 # ragas optional dep
     "tests/test_prompt_*.py",                 # heavy mocking
 ]
 

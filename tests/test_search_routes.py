@@ -1,4 +1,4 @@
-"""Tests for search routes in lightrag/api/routers/search_routes.py.
+"""Tests for search routes in yar/api/routers/search_routes.py.
 
 This module tests the BM25 full-text search endpoint using httpx AsyncClient
 and FastAPI's TestClient pattern with mocked PostgreSQLDB.

@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from lightrag.metrics import (
+from yar.metrics import (
     MetricsCollector,
     QueryMetric,
     get_metrics_collector,

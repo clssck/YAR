@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 from dotenv import load_dotenv
 
-from lightrag.kg.postgres_impl import PostgreSQLDB
+from yar.kg.postgres_impl import PostgreSQLDB
 
 asyncpg = pytest.importorskip('asyncpg')
 

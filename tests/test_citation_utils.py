@@ -1,4 +1,4 @@
-"""Tests for citation utility functions in lightrag/utils.py.
+"""Tests for citation utility functions in yar/utils.py.
 
 This module tests the helper functions used for generating citations
 and reference lists from document chunks.
@@ -6,7 +6,7 @@ and reference lists from document chunks.
 
 import pytest
 
-from lightrag.utils import (
+from yar.utils import (
     _extract_document_title,
     _generate_excerpt,
     generate_reference_list_from_chunks,

@@ -1,16 +1,16 @@
-# LightRAG Work Stack - AWS Bedrock Environment
+# YAR Work Stack - AWS Bedrock Environment
 # Usage: ./setup.sh && docker compose up -d
 #
 # Services:
-#   - lightrag:  Main RAG API + WebUI (port 9621)
+#   - yar:  Main RAG API + WebUI (port 9621)
 #   - litellm:   Unified LLM/Embedding proxy (port 4000)
 #   - postgres:  PostgreSQL + pgvector + AGE (port 5432)
 #   - rustfs:    S3-compatible storage (ports 9000, 9001)
 
-name: lightrag-stack
+name: yar-stack
 
 networks:
-  lightrag-network:
+  yar-network:
     driver: bridge
     ipam:
       config:
@@ -22,14 +22,14 @@ services:
   # PostgreSQL with pgvector + Apache AGE
   # ══════════════════════════════════════════════════════════════════════════════
   postgres:
-    container_name: lightrag-postgres
+    container_name: yar-postgres
     build:
       context: ./docker/postgres-age-vector
       dockerfile: Dockerfile
     environment:
-      POSTGRES_DB: lightrag
-      POSTGRES_USER: lightrag
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag_pass}
+      POSTGRES_DB: yar
+      POSTGRES_USER: yar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yar_pass}
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:5432:5432'
     volumes:
@@ -54,12 +54,12 @@ services:
       -c max_parallel_maintenance_workers=4
       -c jit_above_cost=50000
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U lightrag -d lightrag']
+      test: ['CMD-SHELL', 'pg_isready -U yar -d yar']
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - lightrag-network
+      - yar-network
     mem_limit: 2g
     restart: unless-stopped
 
@@ -68,7 +68,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
   rustfs:
     image: rustfs/rustfs:latest
-    container_name: lightrag-rustfs
+    container_name: yar-rustfs
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9100:9000'  # S3 API (mapped to 9100 to avoid conflicts)
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9101:9001'  # Web console
@@ -84,7 +84,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - lightrag-network
+      - yar-network
     mem_limit: 512m
     restart: unless-stopped
 
@@ -92,7 +92,7 @@ services:
   # LiteLLM Proxy - Unified LLM + Embedding gateway (AWS Bedrock)
   # ══════════════════════════════════════════════════════════════════════════════
   litellm:
-    container_name: lightrag-litellm
+    container_name: yar-litellm
     build:
       context: ./services/litellm
       dockerfile: Dockerfile
@@ -121,7 +121,7 @@ services:
       retries: 5
       start_period: 30s
     networks:
-      - lightrag-network
+      - yar-network
     mem_limit: 1g
     restart: unless-stopped
 

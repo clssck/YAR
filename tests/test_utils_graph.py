@@ -1,5 +1,5 @@
 """
-Tests for lightrag/utils_graph.py - Graph utility functions.
+Tests for yar/utils_graph.py - Graph utility functions.
 
 This module tests:
 - _merge_attributes helper function
@@ -8,9 +8,9 @@ This module tests:
 
 from __future__ import annotations
 
-from lightrag.base import DeletionResult
-from lightrag.constants import GRAPH_FIELD_SEP
-from lightrag.utils_graph import _merge_attributes
+from yar.base import DeletionResult
+from yar.constants import GRAPH_FIELD_SEP
+from yar.utils_graph import _merge_attributes
 
 
 class TestMergeAttributes:

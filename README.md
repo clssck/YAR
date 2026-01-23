@@ -1,14 +1,14 @@
 <div align="center">
 
 <div style="margin: 20px 0;">
-  <img src="./assets/logo.png" width="120" height="120" alt="LightRAG Logo" style="border-radius: 20px; box-shadow: 0 8px 32px rgba(0, 217, 255, 0.3);">
+  <img src="./assets/logo.png" width="120" height="120" alt="YAR Logo" style="border-radius: 20px; box-shadow: 0 8px 32px rgba(0, 217, 255, 0.3);">
 </div>
 
-# 🚀 LightRAG: Specialized Production Fork
+# 🚀 YAR: Specialized Production Fork
 
 <div align="center">
     <img src="https://img.shields.io/badge/Release-Specialized%20Fork-00d9ff?style=for-the-badge&logo=git&logoColor=white&labelColor=1a1a2e">
-    <a href="https://github.com/HKUDS/LightRAG"><img src="https://img.shields.io/badge/Upstream-HKUDS%2FLightRAG-7289da?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e"></a>
+    <a href="https://github.com/HKUDS/YAR"><img src="https://img.shields.io/badge/Upstream-HKUDS%2FYAR-7289da?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e"></a>
 </div>
 
 <div align="center">
@@ -16,14 +16,14 @@
 </div>
 
 <p align="center">
-  <b>A production-ready fork of LightRAG featuring S3 storage integration, a modernized Web UI, and a robust API.</b>
+  <b>A production-ready fork of YAR featuring S3 storage integration, a modernized Web UI, and a robust API.</b>
 </p>
 
 </div>
 
 ## 🔱 About This Fork
 
-This repository is a specialized fork of [LightRAG](https://github.com/HKUDS/LightRAG), designed to bridge the gap between research and production. While preserving the core "Simple and Fast" philosophy, we have added critical infrastructure components:
+This repository is a specialized fork of [YAR](https://github.com/HKUDS/YAR), designed to bridge the gap between research and production. While preserving the core "Simple and Fast" philosophy, we have added critical infrastructure components:
 
 - **☁️ S3 Storage Integration**: Native support for S3-compatible object storage (RustFS, AWS S3, Cloudflare R2) for scalable document and artifact management.
 - **🖥️ Modern Web UI**: A completely redesigned interface featuring:
@@ -35,15 +35,15 @@ This repository is a specialized fork of [LightRAG](https://github.com/HKUDS/Lig
 
 ---
 
-## 📖 Introduction to LightRAG
+## 📖 Introduction to YAR
 
-**LightRAG** incorporates graph structures into text indexing and retrieval processes. This innovative framework employs a dual-level retrieval system that enhances comprehensive information retrieval from low-level entities to high-level broader topics.
+**YAR** incorporates graph structures into text indexing and retrieval processes. This innovative framework employs a dual-level retrieval system that enhances comprehensive information retrieval from low-level entities to high-level broader topics.
 
 <details>
   <summary><b>Algorithm Flowchart</b></summary>
 
-![LightRAG Indexing Flowchart](https://learnopencv.com/wp-content/uploads/2024/11/LightRAG-VectorDB-Json-KV-Store-Indexing-Flowchart-scaled.jpg)
-*Figure 1: LightRAG Indexing Flowchart ([Source](https://learnopencv.com/lightrag/))*
+![YAR Indexing Flowchart](https://learnopencv.com/wp-content/uploads/2024/11/YAR-VectorDB-Json-KV-Store-Indexing-Flowchart-scaled.jpg)
+*Figure 1: YAR Indexing Flowchart ([Source](https://learnopencv.com/yar/))*
 
 </details>
 
@@ -55,20 +55,20 @@ This project uses [uv](https://docs.astral.sh/uv/) for fast and reliable package
 
 **Option A: Install from PyPI**
 ```bash
-uv pip install "lightrag-hku[api]"
+uv pip install "yar-hku[api]"
 ```
 
 **Option B: Install from Source (Recommended for this Fork)**
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/LightRAG.git
-cd LightRAG
+git clone https://github.com/YOUR_GITHUB_USERNAME/YAR.git
+cd YAR
 uv sync --extra api
 source .venv/bin/activate
 ```
 
 ### 2. Running the Server (UI + API)
 
-The easiest way to experience the enhancements in this fork is via the LightRAG Server.
+The easiest way to experience the enhancements in this fork is via the YAR Server.
 
 1.  **Configure Environment**:
     ```bash
@@ -78,7 +78,7 @@ The easiest way to experience the enhancements in this fork is via the LightRAG 
 
 2.  **Start the Server**:
     ```bash
-    lightrag-server
+    yar-server
     ```
 
 3.  **Access the UI**:
@@ -86,21 +86,21 @@ The easiest way to experience the enhancements in this fork is via the LightRAG 
 
 ### 3. Python API Example
 
-You can also use LightRAG directly in your Python code:
+You can also use YAR directly in your Python code:
 
 ```python
 import os
 import asyncio
-from lightrag import LightRAG, QueryParam
-from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
+from yar import YAR, QueryParam
+from yar.llm.openai import gpt_4o_mini_complete, openai_embed
 
 WORKING_DIR = "./rag_storage"
 if not os.path.exists(WORKING_DIR):
     os.mkdir(WORKING_DIR)
 
 async def main():
-    # Initialize LightRAG
-    rag = LightRAG(
+    # Initialize YAR
+    rag = YAR(
         working_dir=WORKING_DIR,
         embedding_func=openai_embed,
         llm_model_func=gpt_4o_mini_complete,
@@ -108,11 +108,11 @@ async def main():
     await rag.initialize_storages()
 
     # Insert Document
-    await rag.ainsert("LightRAG is a retrieval-augmented generation framework.")
+    await rag.ainsert("YAR is a retrieval-augmented generation framework.")
 
     # Query
     print(await rag.aquery(
-        "What is LightRAG?",
+        "What is YAR?",
         param=QueryParam(mode="hybrid")
     ))
 
@@ -147,12 +147,12 @@ See `env.example` for a complete list of configuration options. Key variables fo
 S3_ENDPOINT_URL=https://<accountid>.r2.cloudflarestorage.com
 S3_ACCESS_KEY_ID=<your_access_key>
 S3_SECRET_ACCESS_KEY=<your_secret_key>
-S3_BUCKET_NAME=lightrag-docs
+S3_BUCKET_NAME=yar-docs
 ```
 
 ## 📚 Documentation
 
-- [API Documentation](./lightrag/api/README.md)
+- [API Documentation](./yar/api/README.md)
 - [Offline Deployment](./docs/OfflineDeployment.md)
 - [Docker Deployment](./docs/DockerDeployment.md)
 

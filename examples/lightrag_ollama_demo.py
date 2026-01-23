@@ -5,10 +5,10 @@ import logging.config
 import os
 
 from dotenv import load_dotenv
-from lightrag.llm.ollama import ollama_embed, ollama_model_complete
+from yar.llm.ollama import ollama_embed, ollama_model_complete
 
-from lightrag import LightRAG, QueryParam
-from lightrag.utils import EmbeddingFunc, logger, set_verbose_debug
+from yar import YAR, QueryParam
+from yar.utils import EmbeddingFunc, logger, set_verbose_debug
 
 load_dotenv(dotenv_path='.env', override=False)
 
@@ -19,16 +19,16 @@ def configure_logging():
     """Configure logging for the application"""
 
     # Reset any existing handlers to ensure clean configuration
-    for logger_name in ['uvicorn', 'uvicorn.access', 'uvicorn.error', 'lightrag']:
+    for logger_name in ['uvicorn', 'uvicorn.access', 'uvicorn.error', 'yar']:
         logger_instance = logging.getLogger(logger_name)
         logger_instance.handlers = []
         logger_instance.filters = []
 
     # Get log directory path from environment variable or use current directory
     log_dir = os.getenv('LOG_DIR', os.getcwd())
-    log_file_path = os.path.abspath(os.path.join(log_dir, 'lightrag_ollama_demo.log'))
+    log_file_path = os.path.abspath(os.path.join(log_dir, 'yar_ollama_demo.log'))
 
-    print(f'\nLightRAG compatible demo log file: {log_file_path}\n')
+    print(f'\nYAR compatible demo log file: {log_file_path}\n')
     os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
 
     # Get log file max size and backup count from environment variables
@@ -63,7 +63,7 @@ def configure_logging():
                 },
             },
             'loggers': {
-                'lightrag': {
+                'yar': {
                     'handlers': ['console', 'file'],
                     'level': 'INFO',
                     'propagate': False,
@@ -83,7 +83,7 @@ if not os.path.exists(WORKING_DIR):
 
 
 async def initialize_rag():
-    rag = LightRAG(
+    rag = YAR(
         working_dir=WORKING_DIR,
         llm_model_func=ollama_model_complete,
         llm_model_name=os.getenv('LLM_MODEL', 'qwen2.5-coder:7b'),

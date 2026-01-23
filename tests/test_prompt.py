@@ -1,5 +1,5 @@
 """
-Tests for lightrag/prompt.py - Prompt templates and configuration.
+Tests for yar/prompt.py - Prompt templates and configuration.
 
 This module tests:
 - PROMPTS dictionary structure and keys
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from lightrag.prompt import PROMPTS
+from yar.prompt import PROMPTS
 
 
 class TestPromptsStructure:

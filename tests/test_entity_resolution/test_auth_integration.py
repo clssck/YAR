@@ -39,7 +39,7 @@ class TestAuthWithNoApiKey:
 
     def test_aliases_endpoint_works_without_api_key(self, mock_rag, mock_db):
         """GET /aliases should work without API key when auth is disabled."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         # Configure mock
         mock_db.query.side_effect = [{'total': 0}, []]
@@ -55,7 +55,7 @@ class TestAuthWithNoApiKey:
 
     def test_create_alias_works_without_api_key(self, mock_rag, mock_db):
         """POST /aliases should work without API key when auth is disabled."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         mock_db.query.return_value = None  # No existing alias
         mock_db.execute.return_value = None
@@ -73,7 +73,7 @@ class TestAuthWithNoApiKey:
 
     def test_delete_alias_works_without_api_key(self, mock_rag, mock_db):
         """DELETE /aliases/{alias} should work without API key."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         # First query returns the alias exists, second is the delete
         mock_db.query.return_value = {'alias': 'nyc'}
@@ -112,7 +112,7 @@ class TestAuthWithApiKey:
 
     def test_aliases_requires_key_when_configured(self, mock_rag, mock_db):
         """GET /aliases should require API key when configured."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         app = FastAPI()
         router = create_alias_routes(mock_rag, api_key='secret-key-123')
@@ -125,7 +125,7 @@ class TestAuthWithApiKey:
 
     def test_aliases_works_with_correct_key(self, mock_rag, mock_db):
         """GET /aliases should work with correct API key."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         mock_db.query.side_effect = [{'total': 0}, []]
 
@@ -139,7 +139,7 @@ class TestAuthWithApiKey:
 
     def test_aliases_fails_with_wrong_key(self, mock_rag, mock_db):
         """GET /aliases should fail with incorrect API key."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         app = FastAPI()
         router = create_alias_routes(mock_rag, api_key='secret-key-123')
@@ -155,7 +155,7 @@ class TestAuthDependencyBehavior:
 
     def test_dependency_with_none_allows_access(self):
         """When api_key=None, dependency should allow access."""
-        from lightrag.api.utils_api import get_combined_auth_dependency
+        from yar.api.utils_api import get_combined_auth_dependency
 
         dep = get_combined_auth_dependency(api_key=None)
 
@@ -183,7 +183,7 @@ class TestAuthDependencyBehavior:
 
     def test_dependency_with_key_requires_security(self):
         """When api_key is set, dependency should include Security requirement."""
-        from lightrag.api.utils_api import get_combined_auth_dependency
+        from yar.api.utils_api import get_combined_auth_dependency
 
         dep = get_combined_auth_dependency(api_key='test-key')
 
@@ -233,7 +233,7 @@ class TestMultipleRoutesWithSameApiKey:
 
     def test_multiple_route_creations_consistent(self, mock_rag, mock_db):
         """Creating routes multiple times should have consistent auth behavior."""
-        from lightrag.api.routers.alias_routes import create_alias_routes
+        from yar.api.routers.alias_routes import create_alias_routes
 
         mock_db.query.side_effect = [{'total': 0}, [], {'total': 0}, []]
 

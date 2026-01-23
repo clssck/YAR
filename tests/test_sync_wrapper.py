@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from lightrag.utils import sync_wrapper
+from yar.utils import sync_wrapper
 
 
 class TestSyncWrapperBasic:

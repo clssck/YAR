@@ -1,5 +1,5 @@
 """
-Tests for lightrag/types.py - Type definitions and Pydantic models.
+Tests for yar/types.py - Type definitions and Pydantic models.
 
 This module tests:
 - GPTKeywordExtractionFormat model with required and optional fields
@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from lightrag.types import (
+from yar.types import (
     GPTKeywordExtractionFormat,
     KnowledgeGraph,
     KnowledgeGraphEdge,

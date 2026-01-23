@@ -1,5 +1,5 @@
 """
-Tests for lightrag/api/routers/explain_routes.py - Query explain endpoint.
+Tests for yar/api/routers/explain_routes.py - Query explain endpoint.
 
 This module tests:
 - Pydantic request/response models
@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from lightrag.api.routers.explain_routes import (
+from yar.api.routers.explain_routes import (
     ExplainRequest,
     ExplainResponse,
     RetrievalStats,

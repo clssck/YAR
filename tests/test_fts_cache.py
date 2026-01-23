@@ -4,7 +4,7 @@ Unit tests for Full-Text Search caching.
 
 import pytest
 
-from lightrag.cache.fts_cache import (
+from yar.cache.fts_cache import (
     _compute_cache_key,
     _fts_cache,
     get_cached_fts_results,

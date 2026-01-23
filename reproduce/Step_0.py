@@ -3,7 +3,7 @@ import glob
 import json
 import os
 
-from lightrag.utils import logger
+from yar.utils import logger
 
 
 def extract_unique_contexts(input_directory, output_directory):

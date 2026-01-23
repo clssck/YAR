@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-from lightrag import LightRAG
+from yar import LightRAG
 
 
 def insert_text(rag, file_path):

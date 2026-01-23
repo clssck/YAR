@@ -16,7 +16,7 @@ Attack vectors covered:
 
 import unicodedata
 
-from lightrag.utils import (
+from yar.utils import (
     UNICODE_SECURITY_STRIP,
     normalize_unicode_for_entity_matching,
 )

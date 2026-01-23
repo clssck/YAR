@@ -1,5 +1,5 @@
 """
-Tests for lightrag/lightrag.py - Main LightRAG orchestrator class.
+Tests for yar/yar.py - Main LightRAG orchestrator class.
 
 This module tests:
 - LightRAG class initialization and __post_init__ logic
@@ -23,14 +23,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from lightrag.base import (
+from yar.base import (
     DeletionResult,
     DocProcessingStatus,
     DocStatus,
     StoragesStatus,
 )
-from lightrag.entity_resolution import EntityResolutionConfig
-from lightrag.lightrag import LightRAG
+from yar.entity_resolution import EntityResolutionConfig
+from yar.yar import LightRAG
 
 if TYPE_CHECKING:
     pass
@@ -75,8 +75,8 @@ def mock_llm_func():
 class TestLightRAGInitialization:
     """Tests for LightRAG initialization and __post_init__."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_default_initialization(
         self,
         mock_check_env,
@@ -101,8 +101,8 @@ class TestLightRAGInitialization:
         assert rag._storages_status == StoragesStatus.CREATED
         assert os.path.exists(temp_working_dir)
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_working_dir_creation(
         self,
         mock_check_env,
@@ -124,8 +124,8 @@ class TestLightRAGInitialization:
         assert os.path.exists(non_existent)
         assert rag.working_dir == non_existent
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     def test_storage_verification_called(
         self,
         mock_check_env,
@@ -149,8 +149,8 @@ class TestLightRAGInitialization:
         assert ('GRAPH_STORAGE', 'PGGraphStorage') in storage_calls
         assert ('DOC_STATUS_STORAGE', 'PGDocStatusStorage') in storage_calls
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     def test_env_vars_check_called(
         self,
         mock_check_env,
@@ -174,8 +174,8 @@ class TestLightRAGInitialization:
         assert 'PGGraphStorage' in env_calls
         assert 'PGDocStatusStorage' in env_calls
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_embedding_func_required(
         self,
         mock_check_env,
@@ -193,8 +193,8 @@ class TestLightRAGInitialization:
 
         assert 'embedding_func must be provided' in str(exc_info.value)
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_tokenizer_default_initialization(
         self,
         mock_check_env,
@@ -216,8 +216,8 @@ class TestLightRAGInitialization:
         # TiktokenTokenizer should be initialized with default model
         assert hasattr(rag.tokenizer, 'encode')
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_embedding_token_limit_captured(
         self,
         mock_check_env,
@@ -240,9 +240,9 @@ class TestLightRAGInitialization:
 class TestLightRAGConfigValidation:
     """Tests for configuration validation and warnings."""
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
-    @patch('lightrag.lightrag.logger')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @patch('yar.yar.logger')
     def test_force_llm_summary_warning(
         self,
         mock_logger,
@@ -264,9 +264,9 @@ class TestLightRAGConfigValidation:
         warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
         assert any('force_llm_summary_on_merge should be at least 3' in call for call in warning_calls)
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
-    @patch('lightrag.lightrag.logger')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @patch('yar.yar.logger')
     def test_summary_context_size_warning(
         self,
         mock_logger,
@@ -288,9 +288,9 @@ class TestLightRAGConfigValidation:
         warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
         assert any('summary_context_size' in call and 'max_total_tokens' in call for call in warning_calls)
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
-    @patch('lightrag.lightrag.logger')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @patch('yar.yar.logger')
     def test_summary_length_warning(
         self,
         mock_logger,
@@ -317,8 +317,8 @@ class TestLightRAGConfigValidation:
 class TestLightRAGDeprecatedParameters:
     """Tests for deprecated parameter handling."""
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     def test_log_level_deprecated_warning(
         self,
         mock_check_env,
@@ -347,8 +347,8 @@ class TestLightRAGDeprecatedParameters:
         # Actually, dataclasses don't fully delete, they may leave field descriptors
         # Let's just verify the warning was issued
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     def test_log_file_path_deprecated_warning(
         self,
         mock_check_env,
@@ -377,8 +377,8 @@ class TestLightRAGDeprecatedParameters:
 class TestLightRAGWorkspace:
     """Tests for workspace handling."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_default_workspace_from_env(
         self,
         mock_check_env,
@@ -396,8 +396,8 @@ class TestLightRAGWorkspace:
             )
             assert rag.workspace == 'test_workspace'
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_workspace_explicit_override(
         self,
         mock_check_env,
@@ -416,8 +416,8 @@ class TestLightRAGWorkspace:
             )
             assert rag.workspace == 'explicit_workspace'
 
-    @patch('lightrag.lightrag.verify_storage_implementation')
-    @patch('lightrag.lightrag.check_storage_env_vars')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     def test_workspace_empty_default(
         self,
         mock_check_env,
@@ -441,8 +441,8 @@ class TestLightRAGWorkspace:
 class TestLightRAGEntityResolution:
     """Tests for entity resolution configuration."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_entity_resolution_default(
         self,
         mock_check_env,
@@ -460,8 +460,8 @@ class TestLightRAGEntityResolution:
 
         assert isinstance(rag.entity_resolution_config, EntityResolutionConfig)
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_entity_resolution_custom(
         self,
         mock_check_env,
@@ -489,8 +489,8 @@ class TestLightRAGEntityResolution:
 class TestLightRAGQueryParameters:
     """Tests for query parameter defaults."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_query_param_defaults(
         self,
         mock_check_env,
@@ -514,8 +514,8 @@ class TestLightRAGQueryParameters:
         assert rag.max_total_tokens > 0
         assert rag.related_chunk_number > 0
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_query_param_custom_values(
         self,
         mock_check_env,
@@ -542,8 +542,8 @@ class TestLightRAGQueryParameters:
 class TestLightRAGChunkingConfiguration:
     """Tests for text chunking configuration."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_chunk_size_defaults(
         self,
         mock_check_env,
@@ -563,8 +563,8 @@ class TestLightRAGChunkingConfiguration:
         assert rag.chunk_overlap_token_size > 0
         assert rag.chunk_overlap_token_size < rag.chunk_token_size
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_chunk_size_custom(
         self,
         mock_check_env,
@@ -585,8 +585,8 @@ class TestLightRAGChunkingConfiguration:
         assert rag.chunk_token_size == 2000
         assert rag.chunk_overlap_token_size == 200
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_chunking_func_default(
         self,
         mock_check_env,
@@ -609,8 +609,8 @@ class TestLightRAGChunkingConfiguration:
 class TestLightRAGOrphanConnection:
     """Tests for orphan connection configuration."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_orphan_connection_defaults(
         self,
         mock_check_env,
@@ -632,8 +632,8 @@ class TestLightRAGOrphanConnection:
         assert isinstance(rag.orphan_cross_connect, bool)
         assert rag.orphan_connection_max_degree >= 0
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_orphan_connection_custom(
         self,
         mock_check_env,
@@ -665,8 +665,8 @@ class TestLightRAGOrphanConnection:
 class TestLightRAGStorageLifecycle:
     """Tests for storage initialization and finalization lifecycle."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_initialize_storages(
         self,
@@ -711,8 +711,8 @@ class TestLightRAGStorageLifecycle:
         rag.entities_vdb.initialize.assert_called_once()
         rag.doc_status.initialize.assert_called_once()
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_finalize_storages(
         self,
@@ -757,8 +757,8 @@ class TestLightRAGStorageLifecycle:
         rag.entities_vdb.finalize.assert_called_once()
         rag.doc_status.finalize.assert_called_once()
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_finalize_handles_errors(
         self,
@@ -804,8 +804,8 @@ class TestLightRAGStorageLifecycle:
 class TestLightRAGPublicMethods:
     """Tests for key public methods with mocked dependencies."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_adelete_by_doc_id(
         self,
@@ -849,8 +849,8 @@ class TestLightRAGPublicMethods:
         assert result.doc_id == 'test_doc_id'
         assert result.status in ['success', 'not_found', 'fail']
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_adelete_not_found(
         self,
@@ -885,8 +885,8 @@ class TestLightRAGPublicMethods:
 class TestLightRAGStorageClasses:
     """Tests for storage class initialization."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_storage_classes_set(
         self,
         mock_check_env,
@@ -908,8 +908,8 @@ class TestLightRAGStorageClasses:
         assert hasattr(rag, 'graph_storage_cls')
         assert hasattr(rag, 'doc_status_storage_cls')
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_kv_storages_created(
         self,
         mock_check_env,
@@ -934,8 +934,8 @@ class TestLightRAGStorageClasses:
         assert rag.entity_chunks is not None
         assert rag.relation_chunks is not None
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_vector_storages_created(
         self,
         mock_check_env,
@@ -956,8 +956,8 @@ class TestLightRAGStorageClasses:
         assert rag.relationships_vdb is not None
         assert rag.chunks_vdb is not None
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_graph_storage_created(
         self,
         mock_check_env,
@@ -975,8 +975,8 @@ class TestLightRAGStorageClasses:
 
         assert rag.chunk_entity_relation_graph is not None
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_doc_status_storage_created(
         self,
         mock_check_env,
@@ -999,8 +999,8 @@ class TestLightRAGStorageClasses:
 class TestLightRAGEmbeddingConfiguration:
     """Tests for embedding function configuration."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_embedding_cache_config_default(
         self,
         mock_check_env,
@@ -1021,8 +1021,8 @@ class TestLightRAGEmbeddingConfiguration:
         assert 'use_llm_check' in rag.embedding_cache_config
         assert isinstance(rag.embedding_cache_config['enabled'], bool)
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_embedding_batch_num(
         self,
         mock_check_env,
@@ -1041,8 +1041,8 @@ class TestLightRAGEmbeddingConfiguration:
 
         assert rag.embedding_batch_num == 20
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_embedding_func_max_async(
         self,
         mock_check_env,
@@ -1066,8 +1066,8 @@ class TestLightRAGEmbeddingConfiguration:
 class TestLightRAGLLMConfiguration:
     """Tests for LLM configuration."""
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_llm_model_name(
         self,
         mock_check_env,
@@ -1086,8 +1086,8 @@ class TestLightRAGLLMConfiguration:
 
         assert rag.llm_model_name == 'gpt-4o'
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_llm_model_kwargs(
         self,
         mock_check_env,
@@ -1108,8 +1108,8 @@ class TestLightRAGLLMConfiguration:
 
         assert rag.llm_model_kwargs == custom_kwargs
 
-    @patch('lightrag.kg.verify_storage_implementation')
-    @patch('lightrag.utils.check_storage_env_vars')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
     def test_llm_model_max_async(
         self,
         mock_check_env,

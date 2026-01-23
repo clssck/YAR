@@ -161,7 +161,7 @@ def test_embedding_model(client, model_id: str) -> tuple[bool, str]:
 
 
 def test_configured_models(client, region: str) -> None:
-    """Test the specific models configured for LightRAG."""
+    """Test the specific models configured for YAR."""
     print_header("Testing Configured Models")
 
     models_to_test = [
@@ -206,7 +206,7 @@ def test_configured_models(client, region: str) -> None:
 
     if passed == total:
         print(f"\n  {GREEN}✓ All {total} configured models working!{NC}")
-        print("\n  LightRAG is ready to use with AWS Bedrock.")
+        print("\n  YAR is ready to use with AWS Bedrock.")
     else:
         print(f"\n  {YELLOW}⚠ {passed}/{total} models working{NC}")
         print("\n  Failed models may need to be enabled in AWS Bedrock console:")
@@ -350,7 +350,7 @@ def test_all_models(client, models: list[dict]) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Test AWS Bedrock models")
     parser.add_argument("--region", default="us-east-1", help="AWS region (default: us-east-1)")
-    parser.add_argument("--configured-only", action="store_true", help="Test only LightRAG configured models (beepboop, titan-embed)")
+    parser.add_argument("--configured-only", action="store_true", help="Test only YAR configured models (beepboop, titan-embed)")
     parser.add_argument("--list", action="store_true", help="List available models without testing")
     args = parser.parse_args()
 

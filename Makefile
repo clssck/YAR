@@ -40,7 +40,7 @@ clean:
 
 # Start development server
 dev:
-	uv run lightrag-server
+	uv run yar-server
 
 # Install dependencies
 install:

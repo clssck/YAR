@@ -9,7 +9,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/lightrag
+  IMAGE_NAME: ${{ github.repository_owner }}/yar
 
 jobs:
   build:

@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 
 if TYPE_CHECKING:
-    from lightrag.kg.postgres_impl import PGVectorStorage, PostgreSQLDB
+    from yar.kg.postgres_impl import PGVectorStorage, PostgreSQLDB
 
 
 @dataclass
@@ -135,7 +135,7 @@ def generate_test_content(idx: int) -> str:
 @pytest.fixture(scope='function')
 async def db_connection():
     """Create a database connection for benchmarks."""
-    from lightrag.kg.postgres_impl import PostgreSQLDB
+    from yar.kg.postgres_impl import PostgreSQLDB
 
     # Check required environment variables
     required_vars = ['POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DATABASE']
@@ -181,7 +181,7 @@ async def mock_embedding_func(texts: list[str]) -> np.ndarray:
 @pytest.fixture(scope='function')
 async def vector_storage(db_connection: PostgreSQLDB):
     """Create a vector storage instance for benchmarks."""
-    from lightrag.kg.postgres_impl import PGVectorStorage
+    from yar.kg.postgres_impl import PGVectorStorage
 
     workspace = f'benchmark_test_{int(time.time())}'
 
@@ -393,7 +393,7 @@ class TestGraphOperationsPerformance:
     @pytest.fixture
     async def graph_storage(self, db_connection: PostgreSQLDB):
         """Create a graph storage instance for benchmarks."""
-        from lightrag.kg.postgres_impl import PGGraphStorage
+        from yar.kg.postgres_impl import PGGraphStorage
 
         workspace = f'graph_benchmark_{int(time.time())}'
 

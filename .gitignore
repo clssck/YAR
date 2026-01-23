@@ -33,6 +33,7 @@ log/
 .ruff_cache/
 .gradio/
 .history/
+.kreuzberg/
 temp/
 
 # Node/Bun dependencies (scripts/)
@@ -54,8 +55,13 @@ output/
 rag_storage/
 data/
 
+# Built webui assets (regenerated from yar_webui/)
+yar/api/webui/
+
 # Evaluation results
-lightrag/evaluation/results/
+yar/evaluation/results/
+yar/evaluation/*_dataset*.json
+yar/evaluation/sanofi*.json
 
 # Miscellaneous
 .DS_Store

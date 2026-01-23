@@ -21,9 +21,9 @@ EMBEDDING_MODEL = 'text-embedding-3-large'
 LLM_MODEL = 'gpt-4o-mini'
 PG_HOST = os.getenv('POSTGRES_HOST', 'localhost')
 PG_PORT = os.getenv('POSTGRES_PORT', '5433')
-PG_USER = os.getenv('POSTGRES_USER', 'lightrag')
-PG_PASS = os.getenv('POSTGRES_PASSWORD', 'lightrag_pass')
-PG_DB = os.getenv('POSTGRES_DATABASE', 'lightrag')
+PG_USER = os.getenv('POSTGRES_USER', 'yar')
+PG_PASS = os.getenv('POSTGRES_PASSWORD', 'yar_pass')
+PG_DB = os.getenv('POSTGRES_DATABASE', 'yar')
 
 client = AsyncOpenAI()
 
@@ -95,7 +95,7 @@ async def search_chunks(embedding: list[float], top_k: int = 5) -> list[dict]:
         SELECT c.id,
                LEFT(c.content, 200) as content_preview,
                c.content_vector <=> '[{embedding_str}]'::vector as distance
-        FROM lightrag_vdb_chunks c
+        FROM yar_vdb_chunks c
         WHERE c.workspace = 'default'
         ORDER BY c.content_vector <=> '[{embedding_str}]'::vector
         LIMIT $1;

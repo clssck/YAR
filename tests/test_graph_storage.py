@@ -22,15 +22,15 @@ from dotenv import load_dotenv
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lightrag.constants import GRAPH_FIELD_SEP
-from lightrag.kg import (
+from yar.constants import GRAPH_FIELD_SEP
+from yar.kg import (
     STORAGE_ENV_REQUIREMENTS,
     STORAGE_IMPLEMENTATIONS,
     STORAGES,
     verify_storage_implementation,
 )
-from lightrag.kg.shared_storage import initialize_share_data
-from lightrag.types import KnowledgeGraph
+from yar.kg.shared_storage import initialize_share_data
+from yar.types import KnowledgeGraph
 
 
 # Mock embedding function that returns random vectors
@@ -46,7 +46,7 @@ def test_dollar_quote_function():
     handles content containing dollar sign sequences that would break
     PostgreSQL's default $$..$$ quoting.
     """
-    from lightrag.kg.postgres_impl import _dollar_quote
+    from yar.kg.postgres_impl import _dollar_quote
 
     # Test 1: Simple string (should use $AGE1$)
     result = _dollar_quote('hello')
@@ -127,7 +127,7 @@ async def initialize_graph_storage():
         return None
 
     try:
-        module = importlib.import_module(module_path, package='lightrag')
+        module = importlib.import_module(module_path, package='yar')
         storage_class = getattr(module, graph_storage_type)
     except (ImportError, AttributeError) as e:
         ASCIIColors.red(f'Error: Failed to import {graph_storage_type}: {e!s}')
@@ -180,7 +180,7 @@ async def storage():
     load_dotenv()
 
     # Reset the shared storage state to allow re-initialization
-    import lightrag.kg.shared_storage as shared_storage
+    import yar.kg.shared_storage as shared_storage
     shared_storage._initialized = False
     shared_storage._async_locks = {}
 

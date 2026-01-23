@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from lightrag.api.routers.metrics_routes import (
+from yar.api.routers.metrics_routes import (
     CacheStats,
     EmbedStats,
     FTSCacheStats,

@@ -1,5 +1,5 @@
 """
-Tests for lightrag/validators.py - Centralized validation functions.
+Tests for yar/validators.py - Centralized validation functions.
 
 This module tests:
 - validate_workspace_name - PostgreSQL workspace name validation
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from lightrag.validators import (
+from yar.validators import (
     PG_MAX_IDENTIFIER_LENGTH,
     validate_numeric_config,
     validate_sql_identifier,

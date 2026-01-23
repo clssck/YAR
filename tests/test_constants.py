@@ -1,5 +1,5 @@
 """
-Tests for lightrag/constants.py - Centralized configuration constants.
+Tests for yar/constants.py - Centralized configuration constants.
 
 This module tests:
 - Server setting constants
@@ -15,7 +15,7 @@ This module tests:
 
 from __future__ import annotations
 
-from lightrag.constants import (
+from yar.constants import (
     DEFAULT_CHECK_TOPIC_CONNECTIVITY,
     DEFAULT_CHUNK_TOP_K,
     DEFAULT_COSINE_THRESHOLD,
@@ -446,7 +446,7 @@ class TestLoggingConfiguration:
 
     def test_default_log_filename(self):
         """Test DEFAULT_LOG_FILENAME is a string."""
-        assert DEFAULT_LOG_FILENAME == 'lightrag.log'
+        assert DEFAULT_LOG_FILENAME == 'yar.log'
         assert isinstance(DEFAULT_LOG_FILENAME, str)
         assert '.log' in DEFAULT_LOG_FILENAME
 

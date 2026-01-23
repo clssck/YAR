@@ -1,5 +1,5 @@
 """
-Tests for lightrag/operate.py - Core operation functions.
+Tests for yar/operate.py - Core operation functions.
 
 This module tests:
 - Text chunking functions (chunking_by_semantic, create_chunker)
@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from lightrag.base import QueryParam, TextChunkSchema
-from lightrag.constants import DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
-from lightrag.operate import (
+from yar.base import QueryParam, TextChunkSchema
+from yar.constants import DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
+from yar.operate import (
     _truncate_entity_identifier,
     chunking_by_semantic,
     create_chunker,
@@ -226,7 +226,7 @@ class TestTruncateEntityIdentifier:
 
         identifier = "Very Long Entity Name " * 10
 
-        with patch('lightrag.operate.logger') as mock_logger:
+        with patch('yar.operate.logger') as mock_logger:
             result = _truncate_entity_identifier(identifier, limit=50, chunk_key="chunk-123", identifier_role="Entity")
 
             assert len(result) == 50
@@ -238,7 +238,7 @@ class TestTruncateEntityIdentifier:
 
         identifier = "EntityNameThatIsTooLong" + "X" * 100
 
-        with patch('lightrag.operate.logger') as mock_logger:
+        with patch('yar.operate.logger') as mock_logger:
             _truncate_entity_identifier(identifier, limit=50, chunk_key="chunk-456", identifier_role="Entity")
 
             # Should have logged warning with preview
@@ -275,7 +275,7 @@ class TestHandleEntityRelationSummary:
     @pytest.mark.asyncio
     async def test_empty_description_list(self):
         """Test handling of empty description list."""
-        from lightrag.operate import _handle_entity_relation_summary
+        from yar.operate import _handle_entity_relation_summary
 
         result, llm_used = await _handle_entity_relation_summary(
             description_type="entity",
@@ -291,7 +291,7 @@ class TestHandleEntityRelationSummary:
     @pytest.mark.asyncio
     async def test_single_description_no_llm(self):
         """Test that single description doesn't use LLM."""
-        from lightrag.operate import _handle_entity_relation_summary
+        from yar.operate import _handle_entity_relation_summary
 
         result, llm_used = await _handle_entity_relation_summary(
             description_type="entity",
@@ -307,7 +307,7 @@ class TestHandleEntityRelationSummary:
     @pytest.mark.asyncio
     async def test_small_descriptions_no_llm(self):
         """Test that small descriptions don't trigger LLM."""
-        from lightrag.operate import _handle_entity_relation_summary
+        from yar.operate import _handle_entity_relation_summary
 
         mock_tokenizer = Mock()
         mock_tokenizer.encode = Mock(side_effect=lambda x: [0] * len(x.split()))
@@ -334,7 +334,7 @@ class TestHandleEntityRelationSummary:
     @pytest.mark.asyncio
     async def test_large_descriptions_use_llm(self):
         """Test that large descriptions trigger LLM summarization."""
-        from lightrag.operate import _handle_entity_relation_summary
+        from yar.operate import _handle_entity_relation_summary
 
         mock_tokenizer = Mock()
         mock_tokenizer.encode = Mock(side_effect=lambda x: [0] * 500)  # Large token count
@@ -361,7 +361,7 @@ class TestHandleEntityRelationSummary:
 
         descriptions = ["Long description " * 50, "Another long description " * 50]
 
-        with patch('lightrag.operate.use_llm_func_with_cache', new=mock_llm_with_cache):
+        with patch('yar.operate.use_llm_func_with_cache', new=mock_llm_with_cache):
             _result, llm_used = await _handle_entity_relation_summary(
                 description_type="entity",
                 entity_or_relation_name="TestEntity",
@@ -381,7 +381,7 @@ class TestSummarizeDescriptions:
     @pytest.mark.asyncio
     async def test_summarization_call_structure(self):
         """Test that LLM is called with correct structure."""
-        from lightrag.operate import _summarize_descriptions
+        from yar.operate import _summarize_descriptions
 
         mock_tokenizer = Mock()
         mock_tokenizer.encode = Mock(return_value=[0] * 10)
@@ -406,7 +406,7 @@ class TestSummarizeDescriptions:
             'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE},
         }
 
-        with patch('lightrag.operate.use_llm_func_with_cache', new=mock_llm_with_cache):
+        with patch('yar.operate.use_llm_func_with_cache', new=mock_llm_with_cache):
             result = await _summarize_descriptions(
                 description_type="entity",
                 description_name="TestEntity",
@@ -430,7 +430,7 @@ class TestBatchInferEntityTypes:
     @pytest.mark.asyncio
     async def test_empty_entity_list(self):
         """Test handling of empty entity list."""
-        from lightrag.operate import _batch_infer_entity_types
+        from yar.operate import _batch_infer_entity_types
 
         result = await _batch_infer_entity_types(
             unknown_entities=[],
@@ -442,7 +442,7 @@ class TestBatchInferEntityTypes:
     @pytest.mark.asyncio
     async def test_no_unknown_entities(self):
         """Test handling when no UNKNOWN entities present."""
-        from lightrag.operate import _batch_infer_entity_types
+        from yar.operate import _batch_infer_entity_types
 
         entities = [
             {'entity_name': 'John', 'entity_type': 'PERSON'},
@@ -459,7 +459,7 @@ class TestBatchInferEntityTypes:
     @pytest.mark.asyncio
     async def test_batch_size_splitting(self):
         """Test that entities are processed in batches."""
-        from lightrag.operate import _batch_infer_entity_types
+        from yar.operate import _batch_infer_entity_types
 
         mock_llm = AsyncMock(return_value='[{"entity_name": "Entity1", "inferred_type": "organization"}]')
 
@@ -676,7 +676,7 @@ class TestExtractEntities:
     @pytest.mark.asyncio
     async def test_empty_chunks(self):
         """Test handling of empty chunks dictionary."""
-        from lightrag.operate import extract_entities
+        from yar.operate import extract_entities
 
         # Empty chunks raises ValueError from asyncio.wait with empty task set
         # This is expected behavior - the function doesn't handle empty chunks specially
@@ -695,7 +695,7 @@ class TestExtractEntities:
     @pytest.mark.asyncio
     async def test_basic_extraction_structure(self):
         """Test basic extraction with single chunk."""
-        from lightrag.operate import extract_entities
+        from yar.operate import extract_entities
 
         mock_llm = AsyncMock(return_value='("entity1", "PERSON", "A person")')
 
@@ -731,7 +731,7 @@ class TestExtractEntities:
         """Test that pipeline status parameters are accepted."""
         import asyncio
 
-        from lightrag.operate import extract_entities
+        from yar.operate import extract_entities
 
         # Test that function signature accepts pipeline status parameters
         # Complex extraction testing is out of scope - we just verify the params work

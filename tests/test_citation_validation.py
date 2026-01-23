@@ -1,4 +1,4 @@
-"""Tests for citation validation utility functions in lightrag/utils.py.
+"""Tests for citation validation utility functions in yar/utils.py.
 
 This module tests the citation validation and auto-correction functions:
 - has_citation: Check for citation markers [n]
@@ -10,7 +10,7 @@ This module tests the citation validation and auto-correction functions:
 
 import pytest
 
-from lightrag.utils import (
+from yar.utils import (
     find_best_reference,
     has_citation,
     insert_citation,

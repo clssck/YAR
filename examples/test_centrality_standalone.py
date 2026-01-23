@@ -5,8 +5,8 @@ Tests how entity importance (measured by graph connections) would affect ranking
 Run this BEFORE deciding whether to integrate centrality scoring into the core.
 
 Usage:
-    POSTGRES_HOST=localhost POSTGRES_PORT=5433 POSTGRES_USER=lightrag \
-    POSTGRES_PASSWORD=lightrag_pass POSTGRES_DATABASE=lightrag \
+    POSTGRES_HOST=localhost POSTGRES_PORT=5433 POSTGRES_USER=yar \
+    POSTGRES_PASSWORD=yar_pass POSTGRES_DATABASE=yar \
     python examples/test_centrality_standalone.py "your search query"
 
     # With custom parameters:
@@ -84,15 +84,15 @@ async def run_evaluation(
     alpha: float,
 ) -> None:
     """Run centrality evaluation on entities."""
-    from lightrag.kg.postgres_impl import PostgreSQLDB
+    from yar.kg.postgres_impl import PostgreSQLDB
 
     # Database config
     db_config = {
         'host': os.getenv('POSTGRES_HOST', 'localhost'),
         'port': int(os.getenv('POSTGRES_PORT', '5432')),
-        'user': os.getenv('POSTGRES_USER', 'lightrag'),
+        'user': os.getenv('POSTGRES_USER', 'yar'),
         'password': os.getenv('POSTGRES_PASSWORD', ''),
-        'database': os.getenv('POSTGRES_DATABASE', 'lightrag'),
+        'database': os.getenv('POSTGRES_DATABASE', 'yar'),
         'workspace': workspace,
         'max_connections': 10,
         'connection_retry_attempts': 3,

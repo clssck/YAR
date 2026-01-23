@@ -1,5 +1,5 @@
 """
-Tests for lightrag/utils.py - Comprehensive utility function tests.
+Tests for yar/utils.py - Comprehensive utility function tests.
 
 This module tests:
 - Hash computation functions (compute_args_hash, compute_mdhash_id)
@@ -25,12 +25,12 @@ import json
 import numpy as np
 import pytest
 
-from lightrag.constants import (
+from yar.constants import (
     DEFAULT_SOURCE_IDS_LIMIT_METHOD,
     GRAPH_FIELD_SEP,
     SOURCE_IDS_LIMIT_METHOD_FIFO,
 )
-from lightrag.utils import (
+from yar.utils import (
     _normalize_math_alphanumerics,
     _sanitize_string_for_json,
     apply_source_ids_limit,

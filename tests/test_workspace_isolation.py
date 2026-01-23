@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lightrag.kg.shared_storage import (
+from yar.kg.shared_storage import (
     clear_all_update_flags,
     finalize_share_data,
     get_all_update_flags_status,
@@ -732,7 +732,7 @@ async def test_empty_workspace_standardization():
     'See test output - SQL includes workspace filter but documents are found cross-workspace. '
     'Needs investigation in PGKVStorage.get_by_id() or document insertion logic.'
 )
-async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
+async def test_yar_end_to_end_workspace_isolation(keep_test_artifacts):
     """
     End-to-end test: Create two LightRAG instances with different workspaces,
     insert different data, and verify file separation.
@@ -746,7 +746,7 @@ async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
     print('=' * 60)
 
     # Create temporary test directory under project temp/
-    test_dir = str(Path(__file__).parent.parent / 'temp/test_lightrag_end_to_end_workspace_isolation')
+    test_dir = str(Path(__file__).parent.parent / 'temp/test_yar_end_to_end_workspace_isolation')
     if os.path.exists(test_dir):
         shutil.rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
@@ -759,9 +759,9 @@ async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
 
         postgres_host = os.environ.get('POSTGRES_HOST', 'localhost')
         postgres_port = int(os.environ.get('POSTGRES_PORT', '5433'))
-        postgres_user = os.environ.get('POSTGRES_USER', 'lightrag')
-        postgres_password = os.environ.get('POSTGRES_PASSWORD', 'lightrag_pass')
-        postgres_database = os.environ.get('POSTGRES_DATABASE', 'lightrag')
+        postgres_user = os.environ.get('POSTGRES_USER', 'yar')
+        postgres_password = os.environ.get('POSTGRES_PASSWORD', 'yar_pass')
+        postgres_database = os.environ.get('POSTGRES_DATABASE', 'yar')
 
         conn = await asyncpg.connect(
             host=postgres_host,
@@ -793,7 +793,7 @@ async def test_lightrag_end_to_end_workspace_isolation(keep_test_artifacts):
                         await conn.execute(f'DELETE FROM {table} WHERE workspace = $1', workspace)
 
             # Also clean up specific test documents by their computed IDs (in case stored with different workspace)
-            from lightrag.utils import compute_mdhash_id, sanitize_text_for_encoding
+            from yar.utils import compute_mdhash_id, sanitize_text_for_encoding
 
             text_a = (
                 'This document is about Artificial Intelligence and Machine Learning. AI is transforming the world.'
@@ -853,8 +853,8 @@ relation<|#|>Deep Learning<|#|>Neural Networks<|#|>uses, composed of<|#|>Deep Le
         # Test 11.1: Create two LightRAG instances with different workspaces
         print('\nTest 11.1: Create two LightRAG instances with different workspaces')
 
-        from lightrag import LightRAG
-        from lightrag.utils import EmbeddingFunc, Tokenizer
+        from yar import LightRAG
+        from yar.utils import EmbeddingFunc, Tokenizer
 
         # Create different mock LLM functions for each workspace
         mock_llm_func_a = create_mock_llm_func('project_a')
@@ -923,7 +923,7 @@ relation<|#|>Deep Learning<|#|>Neural Networks<|#|>uses, composed of<|#|>Deep Le
         # Test 11.3: Verify workspace isolation via storage APIs
         print('\nTest 11.3: Verify workspace data isolation (storage API)')
 
-        from lightrag.utils import compute_mdhash_id, sanitize_text_for_encoding
+        from yar.utils import compute_mdhash_id, sanitize_text_for_encoding
 
         doc_id_a = compute_mdhash_id(sanitize_text_for_encoding(text_for_project_a), prefix='doc-')
         doc_id_b = compute_mdhash_id(sanitize_text_for_encoding(text_for_project_b), prefix='doc-')

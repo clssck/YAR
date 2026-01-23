@@ -155,7 +155,7 @@ def mock_rag():
 @pytest.fixture
 def app_with_mock_rag(mock_rag):
     """Create FastAPI app with mocked RAG for functional testing."""
-    from lightrag.api.routers.query_routes import create_query_routes
+    from yar.api.routers.query_routes import create_query_routes
 
     app = FastAPI()
     router = create_query_routes(rag=mock_rag, api_key=None)

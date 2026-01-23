@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start LightRAG API server (dev mode via uv)
+# Start YAR API server (dev mode via uv)
 # Requires: ./setup.sh to be run first (starts infra containers)
 
 set -e
@@ -38,11 +38,11 @@ if ! docker compose ps --format "{{.Service}}" 2>/dev/null | grep -q "postgres";
 fi
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║              Starting LightRAG API Server                        ║${NC}"
+echo -e "${BLUE}║              Starting YAR API Server                        ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Export environment variables for LightRAG
+# Export environment variables for YAR
 # Server
 # Port 9622 internally - HonoHub proxies 9621 -> 9622 for path rewriting
 export HOST="${HOST:-0.0.0.0}"
@@ -73,9 +73,9 @@ export LIGHTRAG_GRAPH_STORAGE="${LIGHTRAG_GRAPH_STORAGE:-PGGraphStorage}"
 export LIGHTRAG_DOC_STATUS_STORAGE="${LIGHTRAG_DOC_STATUS_STORAGE:-PGDocStatusStorage}"
 export POSTGRES_HOST="${POSTGRES_HOST:-${SERVICE_HOST}}"
 export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
-export POSTGRES_USER="${POSTGRES_USER:-lightrag}"
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-lightrag_pass}"
-export POSTGRES_DATABASE="${POSTGRES_DATABASE:-lightrag}"
+export POSTGRES_USER="${POSTGRES_USER:-yar}"
+export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-yar_pass}"
+export POSTGRES_DATABASE="${POSTGRES_DATABASE:-yar}"
 
 # Workspace
 export WORKSPACE="${WORKSPACE:-default}"
@@ -92,7 +92,7 @@ export CHUNK_OVERLAP_SIZE="${CHUNK_OVERLAP_SIZE:-100}"
 export S3_ENDPOINT_URL="${S3_ENDPOINT_URL:-http://${SERVICE_HOST}:9100}"
 export S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-rustfsadmin}"
 export S3_SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY:-rustfsadmin}"
-export S3_BUCKET_NAME="${S3_BUCKET_NAME:-lightrag}"
+export S3_BUCKET_NAME="${S3_BUCKET_NAME:-yar}"
 export S3_REGION="${S3_REGION:-us-east-1}"
 
 # Processing
@@ -128,7 +128,7 @@ uv pip install aioboto3 pgvector asyncpg --quiet || {
     uv run pip install aioboto3 pgvector asyncpg --quiet || true
 }
 
-# Start LightRAG
+# Start YAR
 echo ""
 echo -e "  ${GREEN}Launching server...${NC}"
-exec uv run python -m lightrag.api.lightrag_server
+exec uv run python -m yar.api.yar_server

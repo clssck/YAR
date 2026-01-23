@@ -1,4 +1,4 @@
-"""Tests for document routes in lightrag/api/routers/document_routes.py.
+"""Tests for document routes in yar/api/routers/document_routes.py.
 
 This module tests document management endpoints:
 - POST /documents/scan - Scan for new documents
@@ -65,7 +65,7 @@ def create_test_document_routes(
 
     Note: doc_manager and api_key kept for interface compatibility but not used in tests.
     """
-    from lightrag.api.routers.document_routes import (
+    from yar.api.routers.document_routes import (
         InsertTextRequest,
         InsertTextsRequest,
     )
@@ -75,7 +75,7 @@ def create_test_document_routes(
     @router.post('/scan', response_model=ScanResponse)
     async def scan_for_new_documents():
         """Trigger scanning for new documents."""
-        from lightrag.utils import generate_track_id
+        from yar.utils import generate_track_id
 
         track_id = generate_track_id('scan')
         return ScanResponse(
@@ -98,7 +98,7 @@ def create_test_document_routes(
                         track_id=existing.get('track_id', ''),
                     )
 
-            from lightrag.utils import generate_track_id
+            from yar.utils import generate_track_id
 
             track_id = generate_track_id('text')
             return InsertResponse(
@@ -113,7 +113,7 @@ def create_test_document_routes(
     async def insert_texts(request: InsertTextsRequest):
         """Insert multiple texts into the RAG system."""
         try:
-            from lightrag.utils import generate_track_id
+            from yar.utils import generate_track_id
 
             track_id = generate_track_id('texts')
             return InsertResponse(
@@ -196,7 +196,7 @@ class TestHelperFunctions:
         """Test formatting datetime object."""
         from datetime import datetime, timezone
 
-        from lightrag.api.routers.document_routes import format_datetime
+        from yar.api.routers.document_routes import format_datetime
 
         dt = datetime(2025, 1, 19, 12, 0, 0, tzinfo=timezone.utc)
         result = format_datetime(dt)
@@ -208,7 +208,7 @@ class TestHelperFunctions:
         """Test formatting naive datetime (no timezone)."""
         from datetime import datetime
 
-        from lightrag.api.routers.document_routes import format_datetime
+        from yar.api.routers.document_routes import format_datetime
 
         dt = datetime(2025, 1, 19, 12, 0, 0)
         result = format_datetime(dt)
@@ -219,20 +219,20 @@ class TestHelperFunctions:
 
     def test_format_datetime_with_string(self):
         """Test that string input is returned as-is."""
-        from lightrag.api.routers.document_routes import format_datetime
+        from yar.api.routers.document_routes import format_datetime
 
         result = format_datetime('2025-01-19T12:00:00Z')
         assert result == '2025-01-19T12:00:00Z'
 
     def test_format_datetime_with_none(self):
         """Test that None returns None."""
-        from lightrag.api.routers.document_routes import format_datetime
+        from yar.api.routers.document_routes import format_datetime
 
         assert format_datetime(None) is None
 
     def test_sanitize_filename_removes_path_separators(self):
         """Test that path separators are removed."""
-        from lightrag.api.routers.document_routes import sanitize_filename
+        from yar.api.routers.document_routes import sanitize_filename
 
         result = sanitize_filename('path/to/file.txt', Path('/tmp'))
         assert '/' not in result
@@ -240,14 +240,14 @@ class TestHelperFunctions:
 
     def test_sanitize_filename_removes_traversal(self):
         """Test that path traversal sequences are removed."""
-        from lightrag.api.routers.document_routes import sanitize_filename
+        from yar.api.routers.document_routes import sanitize_filename
 
         result = sanitize_filename('..file.txt', Path('/tmp'))
         assert '..' not in result
 
     def test_sanitize_filename_empty_rejected(self):
         """Test that empty filename is rejected."""
-        from lightrag.api.routers.document_routes import sanitize_filename
+        from yar.api.routers.document_routes import sanitize_filename
 
         with pytest.raises(HTTPException) as exc_info:
             sanitize_filename('', Path('/tmp'))
@@ -255,7 +255,7 @@ class TestHelperFunctions:
 
     def test_sanitize_filename_whitespace_only_rejected(self):
         """Test that whitespace-only filename is rejected."""
-        from lightrag.api.routers.document_routes import sanitize_filename
+        from yar.api.routers.document_routes import sanitize_filename
 
         with pytest.raises(HTTPException) as exc_info:
             sanitize_filename('   ', Path('/tmp'))
@@ -273,7 +273,7 @@ class TestRequestModels:
 
     def test_insert_text_request_valid(self):
         """Test valid InsertTextRequest."""
-        from lightrag.api.routers.document_routes import InsertTextRequest
+        from yar.api.routers.document_routes import InsertTextRequest
 
         req = InsertTextRequest(text='This is a test document.')
         assert req.text == 'This is a test document.'
@@ -281,14 +281,14 @@ class TestRequestModels:
 
     def test_insert_text_request_with_source(self):
         """Test InsertTextRequest with file_source."""
-        from lightrag.api.routers.document_routes import InsertTextRequest
+        from yar.api.routers.document_routes import InsertTextRequest
 
         req = InsertTextRequest(text='Test', file_source='source.txt')
         assert req.file_source == 'source.txt'
 
     def test_insert_text_request_strips_whitespace(self):
         """Test that text whitespace is stripped."""
-        from lightrag.api.routers.document_routes import InsertTextRequest
+        from yar.api.routers.document_routes import InsertTextRequest
 
         req = InsertTextRequest(text='  Test text  ')
         assert req.text == 'Test text'
@@ -297,21 +297,21 @@ class TestRequestModels:
         """Test that empty text is rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.document_routes import InsertTextRequest
+        from yar.api.routers.document_routes import InsertTextRequest
 
         with pytest.raises(ValidationError):
             InsertTextRequest(text='')
 
     def test_insert_texts_request_valid(self):
         """Test valid InsertTextsRequest."""
-        from lightrag.api.routers.document_routes import InsertTextsRequest
+        from yar.api.routers.document_routes import InsertTextsRequest
 
         req = InsertTextsRequest(texts=['Text 1', 'Text 2'])
         assert len(req.texts) == 2
 
     def test_insert_texts_request_strips_whitespace(self):
         """Test that all texts are stripped."""
-        from lightrag.api.routers.document_routes import InsertTextsRequest
+        from yar.api.routers.document_routes import InsertTextsRequest
 
         req = InsertTextsRequest(texts=['  Text 1  ', '  Text 2  '])
         assert req.texts == ['Text 1', 'Text 2']
@@ -320,21 +320,21 @@ class TestRequestModels:
         """Test that empty texts list is rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.document_routes import InsertTextsRequest
+        from yar.api.routers.document_routes import InsertTextsRequest
 
         with pytest.raises(ValidationError):
             InsertTextsRequest(texts=[])
 
     def test_delete_doc_request_valid(self):
         """Test valid DeleteDocRequest."""
-        from lightrag.api.routers.document_routes import DeleteDocRequest
+        from yar.api.routers.document_routes import DeleteDocRequest
 
         req = DeleteDocRequest(doc_ids=['doc-1', 'doc-2'])
         assert len(req.doc_ids) == 2
 
     def test_delete_doc_request_strips_ids(self):
         """Test that doc_ids are stripped."""
-        from lightrag.api.routers.document_routes import DeleteDocRequest
+        from yar.api.routers.document_routes import DeleteDocRequest
 
         req = DeleteDocRequest(doc_ids=['  doc-1  ', '  doc-2  '])
         assert req.doc_ids == ['doc-1', 'doc-2']
@@ -343,7 +343,7 @@ class TestRequestModels:
         """Test that empty doc_ids list is rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.document_routes import DeleteDocRequest
+        from yar.api.routers.document_routes import DeleteDocRequest
 
         with pytest.raises(ValidationError):
             DeleteDocRequest(doc_ids=[])
@@ -352,7 +352,7 @@ class TestRequestModels:
         """Test that duplicate doc_ids are rejected."""
         from pydantic import ValidationError
 
-        from lightrag.api.routers.document_routes import DeleteDocRequest
+        from yar.api.routers.document_routes import DeleteDocRequest
 
         with pytest.raises(ValidationError):
             DeleteDocRequest(doc_ids=['doc-1', 'doc-1'])

@@ -14,7 +14,7 @@ For integration tests, see test_postgres_retry_integration.py.
 import pytest
 
 # Private pattern for testing - imported separately
-from lightrag.validators import (
+from yar.validators import (
     _VALID_WORKSPACE_PATTERN,
     PG_MAX_IDENTIFIER_LENGTH,
     validate_numeric_config,
@@ -171,7 +171,7 @@ class TestAdvisoryLockConstants:
     def test_lock_id_is_deterministic(self):
         """Lock ID should be the same across processes."""
         # Import the class to check the constant
-        from lightrag.kg.postgres_impl import PostgreSQLDB
+        from yar.kg.postgres_impl import PostgreSQLDB
 
         # The lock ID should be a positive 31-bit integer
         lock_id = PostgreSQLDB._SCHEMA_MIGRATION_LOCK_ID
@@ -181,10 +181,10 @@ class TestAdvisoryLockConstants:
 
     def test_lock_id_from_string_hash(self):
         """Lock ID generation should be consistent."""
-        lock_name = "lightrag_schema_migration"
+        lock_name = "yar_schema_migration"
         expected_id = hash(lock_name) & 0x7FFFFFFF
 
-        from lightrag.kg.postgres_impl import PostgreSQLDB
+        from yar.kg.postgres_impl import PostgreSQLDB
         assert expected_id == PostgreSQLDB._SCHEMA_MIGRATION_LOCK_ID
 
 
@@ -193,7 +193,7 @@ class TestSchemaTablesDefinition:
 
     def test_migrations_table_in_tables_dict(self):
         """LIGHTRAG_SCHEMA_MIGRATIONS should be defined in TABLES."""
-        from lightrag.kg.postgres_impl import TABLES
+        from yar.kg.postgres_impl import TABLES
 
         assert 'LIGHTRAG_SCHEMA_MIGRATIONS' in TABLES
 
@@ -205,7 +205,7 @@ class TestSchemaTablesDefinition:
 
     def test_migrations_table_not_workspace_scoped(self):
         """Migrations table should NOT have workspace column (global schema)."""
-        from lightrag.kg.postgres_impl import TABLES
+        from yar.kg.postgres_impl import TABLES
 
         ddl = TABLES['LIGHTRAG_SCHEMA_MIGRATIONS']['ddl']
         # The table should have version as primary key, not (workspace, id)
@@ -246,7 +246,7 @@ class TestVectorDimensionValidation:
             'LIGHTRAG_VDB_RELATION',
         ]
 
-        from lightrag.kg.postgres_impl import TABLES
+        from yar.kg.postgres_impl import TABLES
 
         for table in expected_vector_tables:
             assert table in TABLES

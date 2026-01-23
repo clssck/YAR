@@ -1,7 +1,7 @@
 # LiteLLM Unified Config for AWS Bedrock (Work Environment)
 # Provides both LLM and Embedding endpoints via single proxy
 #
-# LightRAG uses:
+# YAR uses:
 #   - LLM_MODEL=beepboop           → Claude 3.5 Sonnet (extraction, queries)
 #   - EMBEDDING_MODEL=titan-embed  → Titan Embed Text v2 (1024 dims)
 

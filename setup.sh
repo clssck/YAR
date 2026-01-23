@@ -1,5 +1,5 @@
 #!/bin/bash
-# LightRAG Work Environment Setup
+# YAR Work Environment Setup
 # Sets up Docker network, environment variables, and starts the stack
 #
 # Usage:
@@ -19,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║          LightRAG Work Environment Setup                        ║${NC}"
+echo -e "${BLUE}║          YAR Work Environment Setup                        ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -55,7 +55,7 @@ fi
 echo ""
 echo -e "${YELLOW}🔧 Configuring Docker network...${NC}"
 
-NETWORK_NAME="lightrag-stack_lightrag-network"
+NETWORK_NAME="yar-stack_yar-network"
 
 # Check if network already exists (from previous run)
 if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
@@ -124,12 +124,12 @@ set_env "CHUNK_SIZE" "1600"           # Max tokens per semantic chunk
 set_env "CHUNK_OVERLAP_SIZE" "100"    # Overlap between chunks
 
 # PostgreSQL
-set_env "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-lightrag_pass}"
+set_env "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-yar_pass}"
 
 # S3/RustFS
 set_env "S3_ACCESS_KEY_ID" "${S3_ACCESS_KEY_ID:-rustfsadmin}"
 set_env "S3_SECRET_ACCESS_KEY" "${S3_SECRET_ACCESS_KEY:-rustfsadmin}"
-set_env "S3_BUCKET_NAME" "${S3_BUCKET_NAME:-lightrag}"
+set_env "S3_BUCKET_NAME" "${S3_BUCKET_NAME:-yar}"
 
 # Workspace
 set_env "WORKSPACE" "${WORKSPACE:-default}"
@@ -162,7 +162,7 @@ if command -v bun &> /dev/null; then
     # Build WebUI
     echo ""
     echo -e "${YELLOW}🔨 Building WebUI frontend...${NC}"
-    cd lightrag_webui
+    cd yar_webui
     bun install || { echo -e "${RED}✗ Failed to install WebUI dependencies${NC}"; cd ..; }
     if bun run build; then
         echo -e "${GREEN}✓ WebUI built${NC}"
@@ -200,7 +200,7 @@ echo -e "  ${GREEN}Embedding Model:${NC}   titan-embed (Bedrock Titan v2, 1024 d
 echo -e "  ${GREEN}Chunking:${NC}          semantic (Kreuzberg, max 1600 tokens)"
 echo ""
 echo -e "${BLUE}Services:${NC}"
-echo -e "  • LightRAG API + WebUI  → http://localhost:9621 (via ./start.sh)"
+echo -e "  • YAR API + WebUI  → http://localhost:9621 (via ./start.sh)"
 echo -e "  • LiteLLM Proxy         → http://localhost:4000"
 echo -e "  • PostgreSQL            → localhost:5432"
 echo -e "  • RustFS S3             → http://localhost:9100"
@@ -249,7 +249,7 @@ echo ""
 echo -e "${YELLOW}⏳ [Step 3/3] Waiting for services to be healthy...${NC}"
 echo ""
 
-# Service list for status tracking (infra only, LightRAG runs locally)
+# Service list for status tracking (infra only, YAR runs locally)
 SERVICES=("postgres" "rustfs" "litellm")
 
 get_service_status() {
@@ -357,8 +357,8 @@ echo -e "    • PostgreSQL:  localhost:5432"
 echo -e "    • LiteLLM:     http://localhost:4000"
 echo -e "    • RustFS S3:   http://localhost:9100"
 echo ""
-echo -e "  ${YELLOW}Start LightRAG:${NC}"
-echo -e "    ./start.sh                # Start LightRAG API server"
+echo -e "  ${YELLOW}Start YAR:${NC}"
+echo -e "    ./start.sh                # Start YAR API server"
 echo ""
 echo -e "  ${BLUE}Other Commands:${NC}"
 echo -e "    docker compose logs -f    # View infra logs"

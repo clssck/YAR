@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from lightrag.api.routers.graph_routes import (
+from yar.api.routers.graph_routes import (
     EntityCreateRequest,
     EntityMergeRequest,
     EntityUpdateRequest,

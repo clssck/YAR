@@ -1,5 +1,5 @@
 """
-Tests for lightrag/citation.py - Citation extraction and footnote generation.
+Tests for yar/citation.py - Citation extraction and footnote generation.
 
 This module tests:
 - extract_title_from_path helper function
@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lightrag.citation import (
+from yar.citation import (
     CitationExtractor,
     CitationResult,
     CitationSpan,

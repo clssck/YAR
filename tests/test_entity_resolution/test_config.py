@@ -5,7 +5,7 @@ import pytest
 # Mark all tests in this module as offline (no external dependencies)
 pytestmark = pytest.mark.offline
 
-from lightrag.entity_resolution.config import EntityResolutionConfig
+from yar.entity_resolution.config import EntityResolutionConfig
 
 
 class TestEntityResolutionConfigDefaults:

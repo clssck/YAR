@@ -79,7 +79,7 @@ Traceback (most recent call last):
   File "/app/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 114, in __call__
     result = await fn(*args, **kwargs)
              ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/llm/openai.py", line 309, in openai_complete_if_cache
+  File "/app/.venv/lib/python3.12/site-packages/yar/llm/openai.py", line 309, in openai_complete_if_cache
     response = await openai_async_client.chat.completions.create(
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/app/.venv/lib/python3.12/site-packages/openai/resources/chat/completions/completions.py", line 2603, in create
@@ -95,25 +95,25 @@ openai.RateLimitError: Error code: 429 - {'error': {'message': 'litellm.RateLimi
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3539, in _process_with_semaphore
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3539, in _process_with_semaphore
     return await_process_single_content(chunk)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3424, in _process_single_content
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3424, in _process_single_content
     final_result, timestamp = await use_llm_func_with_cache(
                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/utils.py", line 1996, in use_llm_func_with_cache
+  File "/app/.venv/lib/python3.12/site-packages/yar/utils.py", line 1996, in use_llm_func_with_cache
     res: str = await use_llm_func(
                ^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/utils.py", line 962, in wait_func
+  File "/app/.venv/lib/python3.12/site-packages/yar/utils.py", line 962, in wait_func
     return await future
            ^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/utils.py", line 666, in worker
+  File "/app/.venv/lib/python3.12/site-packages/yar/utils.py", line 666, in worker
     result = await asyncio.wait_for(
              ^^^^^^^^^^^^^^^^^^^^^^^
   File "/usr/local/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
     return await fut
            ^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/api/lightrag_server.py", line 510, in optimized_openai_alike_model_complete
+  File "/app/.venv/lib/python3.12/site-packages/yar/api/yar_server.py", line 510, in optimized_openai_alike_model_complete
     return await openai_complete_if_cache(
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/app/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 189, in async_wrapped
@@ -135,22 +135,22 @@ tenacity.RetryError: RetryError[<Future at 0x7fa84fe3ec60 state=finished raised 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3543, in _process_with_semaphore
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3543, in _process_with_semaphore
     raise prefixed_exception from e
 tenacity.RetryError: RetryError[chunk-5800f2b1497218995e6983b0bc36db8c: <Future at 0x7fa84fe3ec60 state=finished raised RateLimitError>]
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/lightrag.py", line 1946, in process_document
+  File "/app/.venv/lib/python3.12/site-packages/yar/yar.py", line 1946, in process_document
     chunk_results = await entity_relation_task
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/lightrag.py", line 2230, in _process_extract_entities
+  File "/app/.venv/lib/python3.12/site-packages/yar/yar.py", line 2230, in _process_extract_entities
     raise e
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/lightrag.py", line 2215, in_process_extract_entities
+  File "/app/.venv/lib/python3.12/site-packages/yar/yar.py", line 2215, in_process_extract_entities
     chunk_results = await extract_entities(
                     ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3585, in extract_entities
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3585, in extract_entities
     raise prefixed_exception from first_exception
 tenacity.RetryError: RetryError[C[36/78]: chunk-5800f2b1497218995e6983b0bc36db8c: <Future at 0x7fa84fe3ec60 state=finished raised RateLimitError>]
 Failed to extract document 1/6: 2.3.4.4.4_BLU-808 Process Development Report.pdf
@@ -161,7 +161,7 @@ Traceback (most recent call last):
   File "/app/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 114, in __call__
     result = await fn(*args, **kwargs)
              ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/llm/openai.py", line 309, in openai_complete_if_cache
+  File "/app/.venv/lib/python3.12/site-packages/yar/llm/openai.py", line 309, in openai_complete_if_cache
     response = await openai_async_client.chat.completions.create(
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/app/.venv/lib/python3.12/site-packages/openai/resources/chat/completions/completions.py", line 2603, in create
@@ -177,25 +177,25 @@ openai.RateLimitError: Error code: 429 - {'error': {'message': 'litellm.RateLimi
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3539, in _process_with_semaphore
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3539, in _process_with_semaphore
     return await_process_single_content(chunk)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3450, in _process_single_content
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3450, in _process_single_content
     glean_result, timestamp = await use_llm_func_with_cache(
                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/utils.py", line 1996, in use_llm_func_with_cache
+  File "/app/.venv/lib/python3.12/site-packages/yar/utils.py", line 1996, in use_llm_func_with_cache
     res: str = await use_llm_func(
                ^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/utils.py", line 962, in wait_func
+  File "/app/.venv/lib/python3.12/site-packages/yar/utils.py", line 962, in wait_func
     return await future
            ^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/utils.py", line 666, in worker
+  File "/app/.venv/lib/python3.12/site-packages/yar/utils.py", line 666, in worker
     result = await asyncio.wait_for(
              ^^^^^^^^^^^^^^^^^^^^^^^
   File "/usr/local/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
     return await fut
            ^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/api/lightrag_server.py", line 510, in optimized_openai_alike_model_complete
+  File "/app/.venv/lib/python3.12/site-packages/yar/api/yar_server.py", line 510, in optimized_openai_alike_model_complete
     return await openai_complete_if_cache(
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/app/.venv/lib/python3.12/site-packages/tenacity/asyncio/__init__.py", line 189, in async_wrapped
@@ -217,22 +217,22 @@ tenacity.RetryError: RetryError[<Future at 0x7fa8525cec90 state=finished raised 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3543, in _process_with_semaphore
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3543, in _process_with_semaphore
     raise prefixed_exception from e
 tenacity.RetryError: RetryError[chunk-8e58aed837bc8d22145f68f3627e00e9: <Future at 0x7fa8525cec90 state=finished raised RateLimitError>]
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/lightrag.py", line 1946, in process_document
+  File "/app/.venv/lib/python3.12/site-packages/yar/yar.py", line 1946, in process_document
     chunk_results = await entity_relation_task
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/lightrag.py", line 2230, in _process_extract_entities
+  File "/app/.venv/lib/python3.12/site-packages/yar/yar.py", line 2230, in _process_extract_entities
     raise e
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/lightrag.py", line 2215, in_process_extract_entities
+  File "/app/.venv/lib/python3.12/site-packages/yar/yar.py", line 2215, in_process_extract_entities
     chunk_results = await extract_entities(
                     ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/app/.venv/lib/python3.12/site-packages/lightrag/operate.py", line 3585, in extract_entities
+  File "/app/.venv/lib/python3.12/site-packages/yar/operate.py", line 3585, in extract_entities
     raise prefixed_exception from first_exception
 tenacity.RetryError: RetryError[C[36/52]: chunk-8e58aed837bc8d22145f68f3627e00e9: <Future at 0x7fa8525cec90 state=finished raised RateLimitError>]
 Failed to extract document 2/6: 2.3.4.4.7_BLU-808 - Polymorph Screening.pdf

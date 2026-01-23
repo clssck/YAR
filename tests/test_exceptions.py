@@ -1,5 +1,5 @@
 """
-Tests for lightrag/exceptions.py - Custom exception classes.
+Tests for yar/exceptions.py - Custom exception classes.
 
 This module tests:
 - APIStatusError and its subclasses
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from lightrag.exceptions import (
+from yar.exceptions import (
     APIConnectionError,
     APIStatusError,
     APITimeoutError,
