@@ -21,7 +21,6 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Response Models (simplified for testing)
 # =============================================================================
@@ -59,8 +58,8 @@ class PipelineStatusResponse(BaseModel):
 
 def create_test_document_routes(
     rag: Any,
-    doc_manager: Any,  # noqa: ARG001
-    api_key: str | None = None,  # noqa: ARG001
+    doc_manager: Any,
+    api_key: str | None = None,
 ):
     """Create document routes for testing (simplified version without auth).
 
@@ -296,8 +295,9 @@ class TestRequestModels:
 
     def test_insert_text_request_empty_rejected(self):
         """Test that empty text is rejected."""
-        from lightrag.api.routers.document_routes import InsertTextRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.document_routes import InsertTextRequest
 
         with pytest.raises(ValidationError):
             InsertTextRequest(text='')
@@ -318,8 +318,9 @@ class TestRequestModels:
 
     def test_insert_texts_request_empty_list_rejected(self):
         """Test that empty texts list is rejected."""
-        from lightrag.api.routers.document_routes import InsertTextsRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.document_routes import InsertTextsRequest
 
         with pytest.raises(ValidationError):
             InsertTextsRequest(texts=[])
@@ -340,16 +341,18 @@ class TestRequestModels:
 
     def test_delete_doc_request_empty_rejected(self):
         """Test that empty doc_ids list is rejected."""
-        from lightrag.api.routers.document_routes import DeleteDocRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.document_routes import DeleteDocRequest
 
         with pytest.raises(ValidationError):
             DeleteDocRequest(doc_ids=[])
 
     def test_delete_doc_request_duplicates_rejected(self):
         """Test that duplicate doc_ids are rejected."""
-        from lightrag.api.routers.document_routes import DeleteDocRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.document_routes import DeleteDocRequest
 
         with pytest.raises(ValidationError):
             DeleteDocRequest(doc_ids=['doc-1', 'doc-1'])

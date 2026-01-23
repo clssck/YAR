@@ -3525,10 +3525,7 @@ def is_factual_sentence(sentence: str) -> bool:
         'in conclusion',
     )
     lower_sentence = sentence.lower()
-    if any(lower_sentence.startswith(phrase) for phrase in meta_phrases):
-        return False
-
-    return True
+    return not any(lower_sentence.startswith(phrase) for phrase in meta_phrases)
 
 
 def find_best_reference(sentence: str, references: list[dict]) -> dict | None:

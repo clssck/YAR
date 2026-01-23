@@ -1060,6 +1060,7 @@ class LightRAG:
         track_id: str | None = None,
     ) -> str:
         """Sync version of :meth:`ainsert`."""
+        ...
 
     async def ainsert(
         self,
@@ -2061,6 +2062,7 @@ class LightRAG:
     @sync_wrapper()
     def insert_custom_kg(self, custom_kg: dict[str, Any], full_doc_id: str | None = None) -> None:
         """Sync version of :meth:`ainsert_custom_kg`."""
+        ...
 
     async def ainsert_custom_kg(
         self,
@@ -2237,6 +2239,7 @@ class LightRAG:
         system_prompt: str | None = None,
     ) -> str | Iterator[str]:
         """Sync version of :meth:`aquery`."""
+        ...
 
     async def aquery(
         self,
@@ -2281,6 +2284,7 @@ class LightRAG:
         param: QueryParam | None = None,
     ) -> dict[str, Any]:
         """Sync version of :meth:`aquery_data`."""
+        ...
 
     async def aquery_data(
         self,
@@ -2654,6 +2658,7 @@ class LightRAG:
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
         """Sync version of :meth:`aquery_llm`."""
+        ...
 
     async def _query_done(self):
         await self.llm_response_cache.index_done_callback()
@@ -3402,6 +3407,7 @@ class LightRAG:
     @sync_wrapper()
     def delete_by_entity(self, entity_name: str) -> DeletionResult:
         """Sync version of :meth:`adelete_by_entity`."""
+        ...
 
     async def adelete_by_relation(self, source_entity: str, target_entity: str) -> DeletionResult:
         """Asynchronously delete a relation between two entities.
@@ -3425,6 +3431,7 @@ class LightRAG:
     @sync_wrapper()
     def delete_by_relation(self, source_entity: str, target_entity: str) -> DeletionResult:
         """Sync version of :meth:`adelete_by_relation`."""
+        ...
 
     async def get_processing_status(self) -> dict[str, int]:
         """Get current document processing status counts
@@ -3516,6 +3523,7 @@ class LightRAG:
         allow_merge: bool = False,
     ) -> dict[str, Any]:
         """Sync version of :meth:`aedit_entity`."""
+        ...
 
     async def aedit_relation(
         self, source_entity: str, target_entity: str, updated_data: dict[str, Any]
@@ -3548,6 +3556,7 @@ class LightRAG:
     @sync_wrapper()
     def edit_relation(self, source_entity: str, target_entity: str, updated_data: dict[str, Any]) -> dict[str, Any]:
         """Sync version of :meth:`aedit_relation`."""
+        ...
 
     async def acreate_entity(self, entity_name: str, entity_data: dict[str, Any]) -> dict[str, Any]:
         """Asynchronously create a new entity.
@@ -3574,6 +3583,7 @@ class LightRAG:
     @sync_wrapper()
     def create_entity(self, entity_name: str, entity_data: dict[str, Any]) -> dict[str, Any]:
         """Sync version of :meth:`acreate_entity`."""
+        ...
 
     async def acreate_relation(
         self, source_entity: str, target_entity: str, relation_data: dict[str, Any]
@@ -3604,6 +3614,7 @@ class LightRAG:
     @sync_wrapper()
     def create_relation(self, source_entity: str, target_entity: str, relation_data: dict[str, Any]) -> dict[str, Any]:
         """Sync version of :meth:`acreate_relation`."""
+        ...
 
     async def amerge_entities(
         self,
@@ -3655,6 +3666,7 @@ class LightRAG:
         target_entity_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Sync version of :meth:`amerge_entities`."""
+        ...
 
     async def aexport_data(
         self,
@@ -3928,6 +3940,7 @@ class LightRAG:
         cross_connect: bool | None = None,
     ) -> dict[str, Any]:
         """Sync version of :meth:`aconnect_orphan_entities`."""
+        ...
 
     async def _append_orphan_message(self, message: str):
         """Add a timestamped message to the orphan connection history."""

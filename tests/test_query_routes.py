@@ -16,7 +16,6 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Response Models (simplified for testing)
 # =============================================================================
@@ -54,7 +53,7 @@ class QueryDataResponse(BaseModel):
 # =============================================================================
 
 
-def create_test_query_routes(rag: Any, api_key: str | None = None):  # noqa: ARG001
+def create_test_query_routes(rag: Any, api_key: str | None = None):
     """Create query routes for testing (simplified version without auth)."""
     from lightrag.api.routers.query_routes import (
         QueryRequest,
@@ -253,8 +252,9 @@ class TestQueryRequestModel:
 
     def test_query_request_too_short_rejected(self):
         """Test that query < 3 chars is rejected."""
-        from lightrag.api.routers.query_routes import QueryRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.query_routes import QueryRequest
 
         with pytest.raises(ValidationError):
             QueryRequest(query='ab')
@@ -273,8 +273,9 @@ class TestQueryRequestModel:
 
     def test_query_request_invalid_mode_rejected(self):
         """Test that invalid mode is rejected."""
-        from lightrag.api.routers.query_routes import QueryRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.query_routes import QueryRequest
 
         with pytest.raises(ValidationError):
             QueryRequest(query='test query', mode='invalid_mode')  # type: ignore[arg-type]
@@ -293,8 +294,9 @@ class TestQueryRequestModel:
 
     def test_query_request_conversation_history_missing_role(self):
         """Test that conversation history without role is rejected."""
-        from lightrag.api.routers.query_routes import QueryRequest
         from pydantic import ValidationError
+
+        from lightrag.api.routers.query_routes import QueryRequest
 
         history = [{'content': 'Hello'}]  # missing 'role'
         with pytest.raises(ValidationError):

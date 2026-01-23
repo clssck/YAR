@@ -203,7 +203,7 @@ class TestQueryEndpoint:
         data = response.json()
 
         # If we got references, validate their structure
-        if 'references' in data and data['references']:
+        if data.get('references'):
             ref = data['references'][0]
             assert 'reference_id' in ref
             assert 'file_path' in ref
@@ -387,13 +387,13 @@ class TestQueryDataEndpoint:
             assert 'entities' in inner or 'chunks' in inner or 'references' in inner
 
             # Validate references structure if present
-            if 'references' in inner and inner['references']:
+            if inner.get('references'):
                 ref = inner['references'][0]
                 assert 'reference_id' in ref
                 assert 'file_path' in ref
 
             # Validate entities have file_path for traceability
-            if 'entities' in inner and inner['entities']:
+            if inner.get('entities'):
                 entity = inner['entities'][0]
                 assert 'file_path' in entity
                 assert 'source_id' in entity

@@ -2075,13 +2075,13 @@ async def _update_db_with_s3_keys(
     try:
         # Update doc_status with original file S3 key
         if hasattr(rag.doc_status, 'update_s3_key'):
-            await rag.doc_status.update_s3_key(doc_id, original_s3_key)
+            await rag.doc_status.update_s3_key(doc_id, original_s3_key)  # type: ignore[misc]
             logger.info(f'Updated doc_status with original s3_key: {original_s3_key}')
 
         # Update text_chunks with processed text S3 key
         if processed_s3_key and hasattr(rag.text_chunks, 'update_s3_key_by_doc_id'):
             archive_url = s3_client.get_s3_url(processed_s3_key)
-            updated_count = await rag.text_chunks.update_s3_key_by_doc_id(
+            updated_count = await rag.text_chunks.update_s3_key_by_doc_id(  # type: ignore[misc]
                 full_doc_id=doc_id,
                 s3_key=processed_s3_key,
                 archive_url=archive_url,

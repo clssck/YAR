@@ -18,7 +18,6 @@ from lightrag.utils import (
     validate_and_fix_citations,
 )
 
-
 # ============================================================================
 # Tests for has_citation()
 # ============================================================================
@@ -282,7 +281,7 @@ class TestValidateAndFixCitations:
 - [1] LightRAG Documentation
 - [2] PostgreSQL Guide'''
 
-        result, was_modified = validate_and_fix_citations(text, sample_references)
+        result, _was_modified = validate_and_fix_citations(text, sample_references)
         # References section should be preserved exactly
         assert '### References' in result
         assert '- [1] LightRAG Documentation' in result
@@ -317,7 +316,7 @@ class TestValidateAndFixCitations:
     def test_questions_not_cited(self, sample_references):
         """Test that questions are not auto-cited."""
         text = 'What does LightRAG do?'
-        result, was_modified = validate_and_fix_citations(text, sample_references)
+        _result, was_modified = validate_and_fix_citations(text, sample_references)
         # Questions should not be considered factual sentences
         assert not was_modified
 
@@ -328,13 +327,13 @@ class TestValidateAndFixCitations:
         # 1/3 = 33% coverage
 
         # With high threshold, should try to fix
-        result, was_modified = validate_and_fix_citations(
+        _result, was_modified = validate_and_fix_citations(
             text, sample_references, min_coverage=0.9
         )
         assert was_modified
 
         # With low threshold, should not fix
-        result, was_modified = validate_and_fix_citations(
+        _result, was_modified = validate_and_fix_citations(
             text, sample_references, min_coverage=0.3
         )
         assert not was_modified

@@ -18,7 +18,6 @@ from lightrag.api.routers.graph_routes import (
     RelationUpdateRequest,
 )
 
-
 # =============================================================================
 # Request Model Validation Tests
 # =============================================================================
@@ -278,29 +277,29 @@ class TestOrphanConnectionStatusResponseValidation:
 # =============================================================================
 
 
-def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:  # noqa: ARG001
+def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
     """Create simplified test routes that mirror graph_routes.py structure."""
     router = APIRouter(tags=['graph'])
 
     @router.get('/graph/label/list')
-    async def get_graph_labels():  # noqa: F841
+    async def get_graph_labels():
         return await rag.get_graph_labels()
 
     @router.get('/graph/label/popular')
-    async def get_popular_labels(  # noqa: F841
+    async def get_popular_labels(
         limit: int = Query(300, ge=1, le=1000),
     ):
         return await rag.chunk_entity_relation_graph.get_popular_labels(limit)
 
     @router.get('/graph/label/search')
-    async def search_labels(  # noqa: F841
+    async def search_labels(
         q: str = Query(...),
         limit: int = Query(50, ge=1, le=100),
     ):
         return await rag.chunk_entity_relation_graph.search_labels(q, limit)
 
     @router.get('/graphs')
-    async def get_knowledge_graph(  # noqa: F841
+    async def get_knowledge_graph(
         label: str = Query(...),
         max_depth: int = Query(3, ge=1),
         max_nodes: int = Query(1000, ge=1),
@@ -316,14 +315,14 @@ def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
         )
 
     @router.get('/graph/entity/exists')
-    async def check_entity_exists(  # noqa: F841
+    async def check_entity_exists(
         name: str = Query(...),
     ):
         exists = await rag.chunk_entity_relation_graph.has_node(name)
         return {'exists': exists}
 
     @router.post('/graph/entity/edit')
-    async def update_entity(request: EntityUpdateRequest):  # noqa: F841
+    async def update_entity(request: EntityUpdateRequest):
         try:
             result = await rag.aedit_entity(
                 entity_name=request.entity_name,
@@ -354,7 +353,7 @@ def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
         }
 
     @router.post('/graph/relation/edit')
-    async def update_relation(request: RelationUpdateRequest):  # noqa: F841
+    async def update_relation(request: RelationUpdateRequest):
         try:
             result = await rag.aedit_relation(
                 source_entity=request.source_id,
@@ -371,7 +370,7 @@ def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
         }
 
     @router.post('/graph/entity/create')
-    async def create_entity(request: EntityCreateRequest):  # noqa: F841
+    async def create_entity(request: EntityCreateRequest):
         try:
             result = await rag.acreate_entity(
                 entity_name=request.entity_name,
@@ -387,7 +386,7 @@ def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
         }
 
     @router.post('/graph/relation/create')
-    async def create_relation(request: RelationCreateRequest):  # noqa: F841
+    async def create_relation(request: RelationCreateRequest):
         try:
             result = await rag.acreate_relation(
                 source_entity=request.source_entity,
@@ -404,7 +403,7 @@ def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
         }
 
     @router.post('/graph/entities/merge')
-    async def merge_entities(request: EntityMergeRequest):  # noqa: F841
+    async def merge_entities(request: EntityMergeRequest):
         try:
             result = await rag.amerge_entities(
                 source_entities=request.entities_to_change,
@@ -420,7 +419,7 @@ def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
         }
 
     @router.post('/graph/orphans/connect')
-    async def connect_orphan_entities(request: OrphanConnectionRequest):  # noqa: F841
+    async def connect_orphan_entities(request: OrphanConnectionRequest):
         result = await rag.aconnect_orphan_entities(
             max_candidates=request.max_candidates,
             similarity_threshold=request.similarity_threshold,

@@ -17,7 +17,6 @@ from lightrag.api.routers.metrics_routes import (
     RecentQueriesResponse,
 )
 
-
 # =============================================================================
 # Response Model Validation Tests
 # =============================================================================
@@ -255,7 +254,7 @@ def create_test_metrics_routes(
     router = APIRouter(tags=['metrics'])
 
     @router.get('/metrics')
-    async def get_metrics_(  # noqa: F841
+    async def get_metrics_(
         window: float = Query(default=3600.0, ge=60.0, le=86400.0),
     ):
         stats = mock_collector.compute_stats(window_seconds=window)
@@ -279,7 +278,7 @@ def create_test_metrics_routes(
         )
 
     @router.get('/metrics/queries')
-    async def get_recent_queries_(  # noqa: F841
+    async def get_recent_queries_(
         limit: int = Query(default=10, ge=1, le=100),
     ):
         queries = mock_collector.get_recent_queries(limit=limit)

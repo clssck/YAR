@@ -177,7 +177,7 @@ class S3Client:
             's3',
             endpoint_url=self.config.endpoint_url if self.config.endpoint_url else None,
             config=boto_config,
-        ) as client:  # type: ignore[attr-defined]
+        ) as client:
             yield client
 
     async def _ensure_bucket_exists(self):

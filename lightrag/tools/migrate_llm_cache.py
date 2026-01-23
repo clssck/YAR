@@ -15,6 +15,7 @@ Supported KV Storage Types:
 """
 
 import asyncio
+import configparser
 import contextlib
 import os
 import sys
@@ -130,8 +131,6 @@ class MigrationTool:
             True if config.ini has the necessary configuration
         """
         try:
-            import configparser
-
             config = configparser.ConfigParser()
             config.read('config.ini', encoding='utf-8')
 
@@ -607,14 +606,12 @@ class MigrationTool:
         self,
         source_data: dict[str, Any],
         target_storage,
-        target_storage_name: str,
     ) -> MigrationStats:
         """Migrate caches in batches with error tracking (Legacy mode - loads all data)
 
         Args:
             source_data: Source cache data
             target_storage: Target storage instance
-            target_storage_name: Target storage type name
 
         Returns:
             MigrationStats object with migration results and errors
@@ -684,7 +681,6 @@ class MigrationTool:
         source_storage,
         source_storage_name: str,
         target_storage,
-        target_storage_name: str,
         total_records: int,
     ) -> MigrationStats:
         """Migrate caches using streaming approach - minimal memory footprint
@@ -693,7 +689,6 @@ class MigrationTool:
             source_storage: Source storage instance
             source_storage_name: Source storage type name
             target_storage: Target storage instance
-            target_storage_name: Target storage type name
             total_records: Total number of records to migrate
 
         Returns:
@@ -921,7 +916,6 @@ class MigrationTool:
                 self.source_storage,
                 source_storage_name,
                 self.target_storage,
-                target_storage_name,
                 source_count,
             )
 
