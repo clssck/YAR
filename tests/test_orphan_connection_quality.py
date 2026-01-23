@@ -102,7 +102,7 @@ TEST_CASES = [
 
 async def run_query(rag, query: str, mode: str = 'local') -> dict:
     """Run a query and return retrieved entities."""
-    # This would need to be adapted based on how LightRAG returns context
+    # This would need to be adapted based on how YAR returns context
     result = await rag.aquery(query, param={'mode': mode})
     return result
 
@@ -112,7 +112,7 @@ async def evaluate_test_case(rag, test_case: QueryTestCase) -> dict:
     await run_query(rag, test_case.query)
 
     # Extract retrieved entities from result
-    # (Implementation depends on LightRAG response format)
+    # (Implementation depends on YAR response format)
     retrieved_entities = []  # Parse from result
 
     # Calculate metrics
@@ -141,7 +141,7 @@ async def run_ab_comparison(rag_with_connections, rag_without_connections, query
     """
     Compare retrieval results with and without orphan connections.
 
-    This requires two separate LightRAG instances:
+    This requires two separate YAR instances:
     - One with orphan connections applied
     - One without (baseline)
     """
@@ -225,5 +225,5 @@ if __name__ == '__main__':
     print(f'- Precision tests: {len([t for t in TEST_CASES if t.category == "precision"])}')
     print(f'- Recall tests: {len([t for t in TEST_CASES if t.category == "recall"])}')
     print(f'- Noise tests: {len([t for t in TEST_CASES if t.category == "noise"])}')
-    print('\nRun with a LightRAG instance to execute tests.')
+    print('\nRun with a YAR instance to execute tests.')
     print(EVALUATION_CHECKLIST)

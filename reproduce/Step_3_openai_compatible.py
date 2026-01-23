@@ -4,7 +4,7 @@ import re
 
 import numpy as np
 
-from yar import LightRAG, QueryParam
+from yar import YAR, QueryParam
 from yar.llm.openai import openai_complete_if_cache, openai_embed
 from yar.utils import EmbeddingFunc, always_get_an_event_loop
 
@@ -86,8 +86,8 @@ if __name__ == '__main__':
     mode = 'hybrid'
     WORKING_DIR = f'../{cls}'
 
-    rag = LightRAG(working_dir=WORKING_DIR)
-    rag = LightRAG(
+    rag = YAR(working_dir=WORKING_DIR)
+    rag = YAR(
         working_dir=WORKING_DIR,
         llm_model_func=llm_model_func,
         embedding_func=EmbeddingFunc(embedding_dim=4096, func=embedding_func),

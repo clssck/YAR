@@ -3,7 +3,7 @@
 Kreuzberg is a polyglot document intelligence framework with Rust core,
 supporting 56+ document formats with built-in semantic chunking for RAG.
 
-This adapter provides a clean interface for LightRAG to use Kreuzberg
+This adapter provides a clean interface for YAR to use Kreuzberg
 for document extraction and optional semantic chunking.
 """
 
@@ -885,9 +885,9 @@ def create_chunking_options(
     chunk_overlap_token_size: int = 100,
     preset: str | None = 'semantic',
 ) -> ChunkingOptions:
-    """Create ChunkingOptions from LightRAG's token-based settings.
+    """Create ChunkingOptions from YAR's token-based settings.
 
-    This is a convenience function that converts LightRAG's token-based
+    This is a convenience function that converts YAR's token-based
     chunking parameters to Kreuzberg's character-based parameters.
 
     Args:
@@ -994,16 +994,16 @@ async def extract_and_chunk(
 
 
 def chunks_to_yar_format(result: ExtractionResult) -> list[dict[str, Any]]:
-    """Convert ExtractionResult chunks to LightRAG's expected chunk format.
+    """Convert ExtractionResult chunks to YAR's expected chunk format.
 
     This converts Kreuzberg's TextChunk objects to the dictionary format
-    expected by LightRAG's document processing pipeline.
+    expected by YAR's document processing pipeline.
 
     Args:
         result: ExtractionResult from extraction (must have chunks)
 
     Returns:
-        List of chunk dictionaries compatible with LightRAG's chunking_func output
+        List of chunk dictionaries compatible with YAR's chunking_func output
     """
     if not result.chunks:
         # Fallback: return whole content as single chunk

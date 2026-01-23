@@ -292,7 +292,7 @@ class PromptOptimizer:
         return True
 
     async def get_context(self, query: str) -> str:
-        """Get context from LightRAG server."""
+        """Get context from YAR server."""
         async with httpx.AsyncClient(timeout=60) as client:
             try:
                 response = await client.post(
@@ -316,7 +316,7 @@ class PromptOptimizer:
         # Format the prompt - handle both {content_data} and {context_data} placeholders
         try:
             formatted = prompt_template.format(
-                content_data=context,  # Original LightRAG placeholder
+                content_data=context,  # Original YAR placeholder
                 context_data=context,  # Alternative placeholder (for mutations)
                 user_prompt=question,
                 response_type='Multiple Paragraphs',
@@ -691,7 +691,7 @@ async def main():
     parser.add_argument('--target-ragas', '-t', type=float, default=0.95, help='Target RAGAS score')
     parser.add_argument('--target-faithfulness', '-f', type=float, default=0.95, help='Target faithfulness score')
     parser.add_argument('--max-iterations', '-i', type=int, default=10, help='Max optimization iterations')
-    parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='LightRAG server URL')
+    parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='YAR server URL')
     parser.add_argument(
         '--prompt-key',
         '-p',

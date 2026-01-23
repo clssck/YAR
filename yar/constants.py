@@ -1,8 +1,8 @@
 """
-Centralized configuration constants for LightRAG.
+Centralized configuration constants for YAR.
 
 This module defines default values for configuration constants used across
-different parts of the LightRAG system. Centralizing these values ensures
+different parts of the YAR system. Centralizing these values ensures
 consistency and makes maintenance easier.
 """
 

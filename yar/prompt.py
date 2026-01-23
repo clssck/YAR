@@ -313,12 +313,12 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   EXAMPLES OF CORRECT CITATION USAGE:
 
   Example 1 (Short Answer - IMPORTANT):
-  Query: "What storage does LightRAG use?"
-  Response: "LightRAG uses PostgreSQL for graph storage [1]."
+  Query: "What storage does YAR use?"
+  Response: "YAR uses PostgreSQL for graph storage [1]."
 
   Example 2 (Multi-Fact Answer):
-  Query: "What are LightRAG's key features?"
-  Response: "LightRAG provides dual-level retrieval combining local and global search [1].
+  Query: "What are YAR's key features?"
+  Response: "YAR provides dual-level retrieval combining local and global search [1].
   It uses graph-based knowledge representation for enhanced accuracy [2]."
 
   Example 3 (Single Source, Multiple Facts):
@@ -326,8 +326,8 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   for retrieval and manages entity relationships through knowledge graphs [1]."
 
   COMMON MISTAKES TO AVOID:
-  - ❌ "LightRAG is a RAG framework." (Missing citation)
-  - ✅ "LightRAG is a RAG framework [1]."
+  - ❌ "YAR is a RAG framework." (Missing citation)
+  - ✅ "YAR is a RAG framework [1]."
   - ❌ "It uses PostgreSQL and supports graph queries." (No citations)
   - ✅ "It uses PostgreSQL [1] and supports graph queries [2]."
 
@@ -395,12 +395,12 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
   EXAMPLES OF CORRECT CITATION USAGE:
 
   Example 1 (Short Answer - IMPORTANT):
-  Query: "What storage does LightRAG use?"
-  Response: "LightRAG uses PostgreSQL for graph storage [1]."
+  Query: "What storage does YAR use?"
+  Response: "YAR uses PostgreSQL for graph storage [1]."
 
   Example 2 (Multi-Fact Answer):
-  Query: "What are LightRAG's key features?"
-  Response: "LightRAG provides dual-level retrieval combining local and global search [1].
+  Query: "What are YAR's key features?"
+  Response: "YAR provides dual-level retrieval combining local and global search [1].
   It uses graph-based knowledge representation for enhanced accuracy [2]."
 
   Example 3 (Single Source, Multiple Facts):
@@ -408,8 +408,8 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
   for retrieval and manages entity relationships through knowledge graphs [1]."
 
   COMMON MISTAKES TO AVOID:
-  - ❌ "LightRAG is a RAG framework." (Missing citation)
-  - ✅ "LightRAG is a RAG framework [1]."
+  - ❌ "YAR is a RAG framework." (Missing citation)
+  - ✅ "YAR is a RAG framework [1]."
   - ❌ "It uses PostgreSQL and supports graph queries." (No citations)
   - ✅ "It uses PostgreSQL [1] and supports graph queries [2]."
 

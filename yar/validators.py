@@ -1,5 +1,5 @@
 """
-Centralized validation and sanitization functions for LightRAG.
+Centralized validation and sanitization functions for YAR.
 
 This module provides reusable validation functions for:
 - SQL identifiers (table names, graph names, workspaces)

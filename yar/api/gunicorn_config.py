@@ -65,7 +65,7 @@ logconfig_dict = {
     },
     'filters': {
         'path_filter': {
-            '()': 'yar.utils.LightragPathFilter',
+            '()': 'yar.utils.YarPathFilter',
         },
     },
     'loggers': {
@@ -115,8 +115,8 @@ def on_starting(server):
     except ImportError:
         print('psutil not installed, skipping memory usage reporting')
 
-    # Log the location of the LightRAG log file
-    print(f'LightRAG log file: {log_file_path}\n')
+    # Log the location of the YAR log file
+    print(f'YAR log file: {log_file_path}\n')
 
     print('Gunicorn initialization complete, forking workers...\n')
 

@@ -25,7 +25,7 @@ from test_prompt_variants import PROMPT_VARIANTS
 
 
 async def get_context(query: str, server_url: str = 'http://localhost:9621') -> str:
-    """Get context from LightRAG server."""
+    """Get context from YAR server."""
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
             f'{server_url}/query', json={'query': query, 'mode': 'mix', 'only_need_context': True}

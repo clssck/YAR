@@ -163,7 +163,7 @@ class TestCreateChunker:
         """Test that adapter accepts expected parameters."""
         chunker = create_chunker()
 
-        # Should accept standard LightRAG chunking_func signature
+        # Should accept standard YAR chunking_func signature
         result = chunker(
             tokenizer=None,
             content="Test",

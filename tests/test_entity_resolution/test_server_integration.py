@@ -28,7 +28,7 @@ class TestRouteRegistrationApiKey:
         """Static analysis: verify api_key is only assigned once in server.py.
 
         This catches the pattern where:
-            api_key = os.getenv('LIGHTRAG_API_KEY')  # auth key
+            api_key = os.getenv('YAR_API_KEY')  # auth key
             ...
             api_key = os.getenv('DEEPINFRA_API_KEY')  # WRONG! overwrites auth
         """
@@ -283,7 +283,7 @@ class TestConfigPropagation:
             batch_size=30,
         )
 
-        # Convert as LightRAG class does
+        # Convert as YAR class does
         config_dict = asdict(config)
 
         # Simulate global_config

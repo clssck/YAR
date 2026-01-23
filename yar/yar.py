@@ -112,7 +112,7 @@ from yar.utils import (
 
 # Public API exports (for re-export via __init__.py)
 __all__ = [
-    'LightRAG',
+    'YAR',
     'QueryParam',
     'create_chunker',
 ]
@@ -125,8 +125,8 @@ load_dotenv(dotenv_path='.env', override=False)
 
 @final
 @dataclass
-class LightRAG:
-    """LightRAG: Simple and Fast Retrieval-Augmented Generation."""
+class YAR:
+    """YAR: Simple and Fast Retrieval-Augmented Generation."""
 
     # Directory
     # ---
@@ -509,12 +509,12 @@ class LightRAG:
         global_config['embedding_func'] = original_embedding_func
 
         _print_config = ',\n  '.join([f'{k} = {v}' for k, v in global_config.items()])
-        logger.debug(f'LightRAG init with param:\n  {_print_config}\n')
+        logger.debug(f'YAR init with param:\n  {_print_config}\n')
 
         # Step 2: Apply priority wrapper decorator to EmbeddingFunc's inner func
         # Create a NEW EmbeddingFunc instance with the wrapped func to avoid mutating the caller's object
         # This ensures _generate_collection_suffix can still access attributes (model_name, embedding_dim)
-        # while preventing side effects when the same EmbeddingFunc is reused across multiple LightRAG instances
+        # while preventing side effects when the same EmbeddingFunc is reused across multiple YAR instances
         if self.embedding_func is not None:
             wrapped_func = priority_limit_async_func_call(
                 self.embedding_func_max_async,
@@ -614,7 +614,7 @@ class LightRAG:
                 set_default_workspace(self.workspace)
             elif default_workspace != self.workspace:
                 logger.info(
-                    f"Creating LightRAG instance with workspace='{self.workspace}' "
+                    f"Creating YAR instance with workspace='{self.workspace}' "
                     f"while default workspace is set to '{default_workspace}'"
                 )
 

@@ -81,7 +81,7 @@ async def run_evaluation(
 
         entity_sql = """
             SELECT entity_name, entity_type, content
-            FROM LIGHTRAG_VDB_ENTITY
+            FROM YAR_VDB_ENTITY
             WHERE workspace = $1
               AND content IS NOT NULL
             LIMIT $2
@@ -113,7 +113,7 @@ async def run_evaluation(
 
         alias_sql = """
             SELECT alias, canonical_entity, method, confidence, entity_type
-            FROM LIGHTRAG_ENTITY_ALIASES
+            FROM YAR_ENTITY_ALIASES
             WHERE workspace = $1
             ORDER BY confidence DESC
             LIMIT $2

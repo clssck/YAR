@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Start LightRAG server with Gunicorn
+Start YAR server with Gunicorn
 """
 
 import argparse
@@ -44,7 +44,7 @@ def main():
     initialize_config()
 
     # Set Gunicorn mode flag for lifespan cleanup detection
-    os.environ['LIGHTRAG_GUNICORN_MODE'] = '1'
+    os.environ['YAR_GUNICORN_MODE'] = '1'
 
     # Check .env file
     if not check_env_file():
@@ -113,7 +113,7 @@ def main():
     # Display startup information
     display_splash_screen(cast(argparse.Namespace, global_args))
 
-    print('🚀 Starting LightRAG with Gunicorn')
+    print('🚀 Starting YAR with Gunicorn')
     print(f'🔄 Worker management: Gunicorn (workers={global_args.workers})')
     print('🔍 Preloading app: Enabled')
     print("📝 Note: Using Gunicorn's preload feature for shared data initialization")
@@ -246,7 +246,7 @@ def main():
     workers_count = global_args.workers
     if workers_count > 1:
         # Set a flag to indicate we're in the main process
-        os.environ['LIGHTRAG_MAIN_PROCESS'] = '1'
+        os.environ['YAR_MAIN_PROCESS'] = '1'
         initialize_share_data(workers_count)
     else:
         initialize_share_data(1)

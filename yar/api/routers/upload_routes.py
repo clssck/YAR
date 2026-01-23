@@ -21,7 +21,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from yar import LightRAG
+from yar import YAR
 from yar.api.utils_api import get_combined_auth_dependency
 from yar.kg.postgres_impl import PGDocStatusStorage, PGKVStorage
 from yar.storage.s3_client import S3Client
@@ -123,7 +123,7 @@ class ProcessS3Response(BaseModel):
 
 
 def create_upload_routes(
-    rag: LightRAG,
+    rag: YAR,
     s3_client: S3Client,
     api_key: str | None = None,
 ) -> APIRouter:
@@ -131,7 +131,7 @@ def create_upload_routes(
     Create upload routes for S3 document staging.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         s3_client: Initialized S3Client instance
         api_key: Optional API key for authentication
 

@@ -76,7 +76,7 @@ T = TypeVar('T')
 
 @dataclass
 class QueryParam:
-    """Configuration parameters for query execution in LightRAG."""
+    """Configuration parameters for query execution in YAR."""
 
     mode: Literal['local', 'global', 'hybrid', 'naive', 'mix', 'bypass'] = 'mix'
     """Specifies the retrieval mode:

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import type { LightragConfiguration, Message, QueryRequest } from '@/api/yar'
+import type { YarConfiguration, Message, QueryRequest } from '@/api/yar'
 import { defaultQueryLabel } from '@/lib/constants'
 import { createSelectors } from '@/lib/utils'
 
@@ -86,8 +86,8 @@ interface SettingsState {
 
   // Storage configuration (for conditional UI)
   // Partial because DEV_STORAGE_CONFIG only includes storage-related fields
-  storageConfig: Partial<LightragConfiguration> | null
-  setStorageConfig: (config: Partial<LightragConfiguration>) => void
+  storageConfig: Partial<YarConfiguration> | null
+  setStorageConfig: (config: Partial<YarConfiguration>) => void
 
   // App settings
   theme: Theme
@@ -250,7 +250,7 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       setApiKey: (apiKey: string | null) => set({ apiKey }),
 
-      setStorageConfig: (config: Partial<LightragConfiguration>) => set({ storageConfig: config }),
+      setStorageConfig: (config: Partial<YarConfiguration>) => set({ storageConfig: config }),
 
       setCurrentTab: (tab: Tab) => set({ currentTab: tab }),
 

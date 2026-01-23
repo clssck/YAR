@@ -2,7 +2,7 @@
 """
 General-purpose graph storage test program.
 
-This program selects the graph storage type to use based on the LIGHTRAG_GRAPH_STORAGE configuration in .env,
+This program selects the graph storage type to use based on the YAR_GRAPH_STORAGE configuration in .env,
 and tests its basic and advanced operations.
 
 Supported graph storage types include:
@@ -98,7 +98,7 @@ async def initialize_graph_storage():
     Returns the initialized storage instance.
     """
     # Get the graph storage type from environment variables
-    graph_storage_type = os.getenv('LIGHTRAG_GRAPH_STORAGE', 'PGGraphStorage')
+    graph_storage_type = os.getenv('YAR_GRAPH_STORAGE', 'PGGraphStorage')
 
     # Validate the storage type
     try:
@@ -1234,7 +1234,7 @@ async def main():
     load_dotenv(dotenv_path='.env', override=False)
 
     # Get graph storage type
-    graph_storage_type = os.getenv('LIGHTRAG_GRAPH_STORAGE', 'NetworkXStorage')
+    graph_storage_type = os.getenv('YAR_GRAPH_STORAGE', 'NetworkXStorage')
     ASCIIColors.magenta(f'\nCurrently configured graph storage type: {graph_storage_type}')
     ASCIIColors.white(
         f'Supported graph storage types: {", ".join(STORAGE_IMPLEMENTATIONS["GRAPH_STORAGE"]["implementations"])}'

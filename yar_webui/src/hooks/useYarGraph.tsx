@@ -5,9 +5,9 @@ import { useTranslation } from 'react-i18next'
 import seedrandom from 'seedrandom'
 import { toast } from 'sonner'
 import {
-  type LightragEdgeType,
-  type LightragGraphType,
-  type LightragNodeType,
+  type YarEdgeType,
+  type YarGraphType,
+  type YarNodeType,
   queryGraphs,
 } from '@/api/yar'
 import * as Constants from '@/lib/constants'
@@ -19,7 +19,7 @@ import { DEFAULT_NODE_COLOR, resolveNodeColor } from '@/utils/graphColor'
 
 // Internal mutable types for graph processing
 // These extend API types with visualization properties added during data transformation
-type MutableNodeType = LightragNodeType & {
+type MutableNodeType = YarNodeType & {
   x: number
   y: number
   degree: number
@@ -28,7 +28,7 @@ type MutableNodeType = LightragNodeType & {
   type?: 'default' | 'orphan'
 }
 
-type MutableEdgeType = LightragEdgeType & {
+type MutableEdgeType = YarEdgeType & {
   dynamicId: string
 }
 
@@ -118,7 +118,7 @@ const fetchGraph = async (
   minDegree = 0,
   includeOrphans = false
 ) => {
-  let rawData: LightragGraphType | null = null
+  let rawData: YarGraphType | null = null
 
   // Trigger GraphLabels component to check if the label is valid
   // console.log('Setting labelsFetchAttempted to true');

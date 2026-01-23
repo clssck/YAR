@@ -1,5 +1,5 @@
 """
-Utility functions for the LightRAG API.
+Utility functions for the YAR API.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ T = TypeVar('T')
 def get_workspace_from_request(request: Request) -> str | None:
     """Extract workspace from request header.
 
-    Reads the 'LIGHTRAG-WORKSPACE' header to determine which workspace
+    Reads the 'YAR-WORKSPACE' header to determine which workspace
     to use for the request. Returns None if header is not present or empty.
 
     Args:
@@ -42,7 +42,7 @@ def get_workspace_from_request(request: Request) -> str | None:
     Returns:
         Workspace name if provided, None otherwise
     """
-    workspace = request.headers.get('LIGHTRAG-WORKSPACE', '').strip()
+    workspace = request.headers.get('YAR-WORKSPACE', '').strip()
     return workspace if workspace else None
 
 
@@ -296,7 +296,7 @@ def get_combined_auth_dependency(api_key: str | None = None):
 
 def display_splash_screen(args: argparse.Namespace) -> None:
     """
-    Display a colorful splash screen showing LightRAG server configuration
+    Display a colorful splash screen showing YAR server configuration
 
     Args:
         args: Parsed command line arguments

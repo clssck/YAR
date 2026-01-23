@@ -252,7 +252,7 @@ async def call_llm(prompt: str, client: AsyncOpenAI) -> tuple[str, float]:
 
 
 async def get_context_from_server(query: str, server_url: str = 'http://localhost:9621') -> str:
-    """Get context from running LightRAG server (only_need_context mode)"""
+    """Get context from running YAR server (only_need_context mode)"""
     import httpx
 
     async with httpx.AsyncClient(timeout=60) as client:
@@ -394,7 +394,7 @@ async def main():
     parser = argparse.ArgumentParser(description='Fast prompt A/B testing')
     parser.add_argument('--num-queries', '-n', type=int, default=3, help='Number of queries to test')
     parser.add_argument('--indices', '-i', type=str, help='Specific query indices (comma-separated)')
-    parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='LightRAG server URL')
+    parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='YAR server URL')
     parser.add_argument('--variants', '-v', type=str, help='Variants to test (comma-separated)')
     args = parser.parse_args()
 

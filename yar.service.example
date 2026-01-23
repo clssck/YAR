@@ -10,13 +10,13 @@ MemoryHigh=8G
 MemoryMax=12G
 
 # Set the YAR installation directory (change this to match your installation path)
-Environment="LIGHTRAG_HOME=/home/netman/yar-xyj"
+Environment="YAR_HOME=/home/netman/yar-xyj"
 
 # Set Environment to your Python virtual environment
-Environment="PATH=${LIGHTRAG_HOME}/.venv/bin"
-WorkingDirectory=${LIGHTRAG_HOME}
-ExecStart=${LIGHTRAG_HOME}/.venv/bin/yar-server
-# ExecStart=${LIGHTRAG_HOME}/.venv/bin/yar-gunicorn
+Environment="PATH=${YAR_HOME}/.venv/bin"
+WorkingDirectory=${YAR_HOME}
+ExecStart=${YAR_HOME}/.venv/bin/yar-server
+# ExecStart=${YAR_HOME}/.venv/bin/yar-gunicorn
 
 # Kill mode require ExecStart must be gunicorn or unvicorn main process
 KillMode=process

@@ -235,14 +235,14 @@ class TestStorageNotInitializedError:
         """Test message includes usage example."""
         exc = StorageNotInitializedError()
 
-        assert 'rag = LightRAG(...)' in str(exc)
+        assert 'rag = YAR(...)' in str(exc)
         assert 'initialize_storages()' in str(exc)
 
     def test_includes_documentation_link(self):
         """Test message includes documentation link."""
         exc = StorageNotInitializedError()
 
-        assert 'github.com/HKUDS/LightRAG' in str(exc)
+        assert 'github.com/HKUDS/YAR' in str(exc)
 
     def test_inheritance(self):
         """Test exception inherits from RuntimeError."""

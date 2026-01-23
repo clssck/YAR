@@ -1,5 +1,5 @@
 """
-Entity Resolution Module for LightRAG
+Entity Resolution Module for YAR
 
 LLM-based entity resolution:
 1. Cache check (instant, free)

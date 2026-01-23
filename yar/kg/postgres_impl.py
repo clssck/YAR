@@ -67,12 +67,12 @@ AGE_MAX_UNWIND_BATCH_SIZE = 5000
 
 # Hybrid search (BM25 + vector) configuration
 # RRF_K: Reciprocal Rank Fusion constant (standard: 60, lower = more weight to top ranks)
-RRF_K = int(os.getenv('LIGHTRAG_RRF_K', '60'))
+RRF_K = int(os.getenv('YAR_RRF_K', '60'))
 # TS_RANK_CD_FLAG: PostgreSQL ts_rank_cd normalization flags (32 = normalize by document length)
-TS_RANK_CD_FLAG = int(os.getenv('LIGHTRAG_TS_RANK_FLAG', '32'))
+TS_RANK_CD_FLAG = int(os.getenv('YAR_TS_RANK_FLAG', '32'))
 # Fetch multipliers for hybrid search (fetch more than top_k to allow RRF fusion)
-VECTOR_FETCH_MULTIPLIER = float(os.getenv('LIGHTRAG_VECTOR_FETCH_MULT', '2.0'))
-BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('LIGHTRAG_BM25_FETCH_MULT', '1.0'))
+VECTOR_FETCH_MULTIPLIER = float(os.getenv('YAR_VECTOR_FETCH_MULT', '2.0'))
+BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('YAR_BM25_FETCH_MULT', '1.0'))
 
 # Default batch size for executemany operations
 # Adjust based on your data size and database resources
@@ -792,7 +792,7 @@ class PostgreSQLDB:
 
         Advisory locks are session-level locks that coordinate between processes
         without blocking table access. This prevents race conditions when multiple
-        LightRAG instances start simultaneously and try to run migrations.
+        YAR instances start simultaneously and try to run migrations.
 
         Args:
             lock_name: Name for the lock (used to generate lock ID)
@@ -829,7 +829,7 @@ class PostgreSQLDB:
         to be idempotent across concurrent processes.
         """
         create_sql = """
-        CREATE TABLE IF NOT EXISTS LIGHTRAG_SCHEMA_MIGRATIONS (
+        CREATE TABLE IF NOT EXISTS YAR_SCHEMA_MIGRATIONS (
             version INTEGER PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -853,7 +853,7 @@ class PostgreSQLDB:
             True if migration was already applied, False otherwise
         """
         result = await self.query(
-            'SELECT version FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
+            'SELECT version FROM YAR_SCHEMA_MIGRATIONS WHERE version = $1',
             [version],
         )
         return result is not None
@@ -867,7 +867,7 @@ class PostgreSQLDB:
             checksum: Optional SHA256 hash of migration SQL for verification
         """
         await self.execute(
-            """INSERT INTO LIGHTRAG_SCHEMA_MIGRATIONS (version, name, checksum)
+            """INSERT INTO YAR_SCHEMA_MIGRATIONS (version, name, checksum)
                VALUES ($1, $2, $3)
                ON CONFLICT (version) DO NOTHING""",
             data={'version': version, 'name': name, 'checksum': checksum},
@@ -884,7 +884,7 @@ class PostgreSQLDB:
             """SELECT version, name,
                       EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
                       checksum
-               FROM LIGHTRAG_SCHEMA_MIGRATIONS
+               FROM YAR_SCHEMA_MIGRATIONS
                ORDER BY version""",
             multirows=True,
         )
@@ -979,30 +979,30 @@ class PostgreSQLDB:
 
             # Add missing chunk_id column
             if 'chunk_id' not in existing_column_names:
-                logger.info('Adding chunk_id column to LIGHTRAG_LLM_CACHE table')
+                logger.info('Adding chunk_id column to YAR_LLM_CACHE table')
                 add_chunk_id_sql = """
-                ALTER TABLE LIGHTRAG_LLM_CACHE
+                ALTER TABLE YAR_LLM_CACHE
                 ADD COLUMN chunk_id VARCHAR(255) NULL
                 """
                 await self.execute(add_chunk_id_sql)
-                logger.info('Successfully added chunk_id column to LIGHTRAG_LLM_CACHE table')
+                logger.info('Successfully added chunk_id column to YAR_LLM_CACHE table')
             else:
-                logger.info('chunk_id column already exists in LIGHTRAG_LLM_CACHE table')
+                logger.info('chunk_id column already exists in YAR_LLM_CACHE table')
 
             # Add missing cache_type column
             if 'cache_type' not in existing_column_names:
-                logger.info('Adding cache_type column to LIGHTRAG_LLM_CACHE table')
+                logger.info('Adding cache_type column to YAR_LLM_CACHE table')
                 add_cache_type_sql = """
-                ALTER TABLE LIGHTRAG_LLM_CACHE
+                ALTER TABLE YAR_LLM_CACHE
                 ADD COLUMN cache_type VARCHAR(32) NULL
                 """
                 await self.execute(add_cache_type_sql)
-                logger.info('Successfully added cache_type column to LIGHTRAG_LLM_CACHE table')
+                logger.info('Successfully added cache_type column to YAR_LLM_CACHE table')
 
                 # Migrate existing data using optimized regex pattern
                 logger.info('Migrating existing LLM cache data to populate cache_type field (optimized)')
                 optimized_update_sql = """
-                UPDATE LIGHTRAG_LLM_CACHE
+                UPDATE YAR_LLM_CACHE
                 SET cache_type = CASE
                     WHEN id ~ '^[^:]+:[^:]+:' THEN split_part(id, ':', 2)
                     ELSE 'extract'
@@ -1012,49 +1012,49 @@ class PostgreSQLDB:
                 await self.execute(optimized_update_sql)
                 logger.info('Successfully migrated existing LLM cache data')
             else:
-                logger.info('cache_type column already exists in LIGHTRAG_LLM_CACHE table')
+                logger.info('cache_type column already exists in YAR_LLM_CACHE table')
 
             # Add missing queryparam column
             if 'queryparam' not in existing_column_names:
-                logger.info('Adding queryparam column to LIGHTRAG_LLM_CACHE table')
+                logger.info('Adding queryparam column to YAR_LLM_CACHE table')
                 add_queryparam_sql = """
-                ALTER TABLE LIGHTRAG_LLM_CACHE
+                ALTER TABLE YAR_LLM_CACHE
                 ADD COLUMN queryparam JSONB NULL
                 """
                 await self.execute(add_queryparam_sql)
-                logger.info('Successfully added queryparam column to LIGHTRAG_LLM_CACHE table')
+                logger.info('Successfully added queryparam column to YAR_LLM_CACHE table')
             else:
-                logger.info('queryparam column already exists in LIGHTRAG_LLM_CACHE table')
+                logger.info('queryparam column already exists in YAR_LLM_CACHE table')
 
             # Remove deprecated mode field if it exists
             if 'mode' in existing_column_names:
-                logger.info('Removing deprecated mode column from LIGHTRAG_LLM_CACHE table')
+                logger.info('Removing deprecated mode column from YAR_LLM_CACHE table')
 
                 # First, drop the primary key constraint that includes mode
                 drop_pk_sql = """
-                ALTER TABLE LIGHTRAG_LLM_CACHE
-                DROP CONSTRAINT IF EXISTS LIGHTRAG_LLM_CACHE_PK
+                ALTER TABLE YAR_LLM_CACHE
+                DROP CONSTRAINT IF EXISTS YAR_LLM_CACHE_PK
                 """
                 await self.execute(drop_pk_sql)
                 logger.info('Dropped old primary key constraint')
 
                 # Drop the mode column
                 drop_mode_sql = """
-                ALTER TABLE LIGHTRAG_LLM_CACHE
+                ALTER TABLE YAR_LLM_CACHE
                 DROP COLUMN mode
                 """
                 await self.execute(drop_mode_sql)
-                logger.info('Successfully removed mode column from LIGHTRAG_LLM_CACHE table')
+                logger.info('Successfully removed mode column from YAR_LLM_CACHE table')
 
                 # Create new primary key constraint without mode
                 add_pk_sql = """
-                ALTER TABLE LIGHTRAG_LLM_CACHE
-                ADD CONSTRAINT LIGHTRAG_LLM_CACHE_PK PRIMARY KEY (workspace, id)
+                ALTER TABLE YAR_LLM_CACHE
+                ADD CONSTRAINT YAR_LLM_CACHE_PK PRIMARY KEY (workspace, id)
                 """
                 await self.execute(add_pk_sql)
                 logger.info('Created new primary key constraint (workspace, id)')
             else:
-                logger.info('mode column does not exist in LIGHTRAG_LLM_CACHE table')
+                logger.info('mode column does not exist in YAR_LLM_CACHE table')
 
         except Exception as e:
             logger.warning(f'Failed to migrate LLM cache schema: {e}')
@@ -1063,10 +1063,10 @@ class PostgreSQLDB:
         """Migrate timestamp columns in tables to witimezone-free types, assuming original data is in UTC time"""
         # Tables and columns that need migration
         tables_to_migrate = {
-            'LIGHTRAG_VDB_ENTITY': ['create_time', 'update_time'],
-            'LIGHTRAG_VDB_RELATION': ['create_time', 'update_time'],
-            'LIGHTRAG_DOC_CHUNKS': ['create_time', 'update_time'],
-            'LIGHTRAG_DOC_STATUS': ['created_at', 'updated_at'],
+            'YAR_VDB_ENTITY': ['create_time', 'update_time'],
+            'YAR_VDB_RELATION': ['create_time', 'update_time'],
+            'YAR_DOC_CHUNKS': ['create_time', 'update_time'],
+            'YAR_DOC_STATUS': ['created_at', 'updated_at'],
         }
 
         try:
@@ -1140,17 +1140,17 @@ class PostgreSQLDB:
 
     async def _migrate_doc_chunks_to_vdb_chunks(self):
         """
-        Migrate data from LIGHTRAG_DOC_CHUNKS to LIGHTRAG_VDB_CHUNKS if specific conditions are met.
+        Migrate data from YAR_DOC_CHUNKS to YAR_VDB_CHUNKS if specific conditions are met.
         This migration is intended for users who are upgrading and have an older table structure
-        where LIGHTRAG_DOC_CHUNKS contained a `content_vector` column.
+        where YAR_DOC_CHUNKS contained a `content_vector` column.
 
         """
         try:
-            # 1. Check if the new table LIGHTRAG_VDB_CHUNKS is empty
-            vdb_chunks_count_sql = 'SELECT COUNT(1) as count FROM LIGHTRAG_VDB_CHUNKS'
+            # 1. Check if the new table YAR_VDB_CHUNKS is empty
+            vdb_chunks_count_sql = 'SELECT COUNT(1) as count FROM YAR_VDB_CHUNKS'
             vdb_chunks_count_result = await self.query(vdb_chunks_count_sql)
             if self._safe_int_field(vdb_chunks_count_result, 'count') > 0:
-                logger.info('Skipping migration: LIGHTRAG_VDB_CHUNKS already contains data.')
+                logger.info('Skipping migration: YAR_VDB_CHUNKS already contains data.')
                 return
 
             # 2. Check if `content_vector` column exists in the old table
@@ -1160,34 +1160,34 @@ class PostgreSQLDB:
             """
             column_exists = await self.query(check_column_sql)
             if not column_exists:
-                logger.info('Skipping migration: `content_vector` not found in LIGHTRAG_DOC_CHUNKS')
+                logger.info('Skipping migration: `content_vector` not found in YAR_DOC_CHUNKS')
                 return
 
-            # 3. Check if the old table LIGHTRAG_DOC_CHUNKS has data
-            doc_chunks_count_sql = 'SELECT COUNT(1) as count FROM LIGHTRAG_DOC_CHUNKS'
+            # 3. Check if the old table YAR_DOC_CHUNKS has data
+            doc_chunks_count_sql = 'SELECT COUNT(1) as count FROM YAR_DOC_CHUNKS'
             doc_chunks_count_result = await self.query(doc_chunks_count_sql)
             if self._safe_int_field(doc_chunks_count_result, 'count') == 0:
-                logger.info('Skipping migration: LIGHTRAG_DOC_CHUNKS is empty.')
+                logger.info('Skipping migration: YAR_DOC_CHUNKS is empty.')
                 return
 
             # 4. Perform the migration
-            logger.info('Starting data migration from LIGHTRAG_DOC_CHUNKS to LIGHTRAG_VDB_CHUNKS...')
+            logger.info('Starting data migration from YAR_DOC_CHUNKS to YAR_VDB_CHUNKS...')
             migration_sql = """
-            INSERT INTO LIGHTRAG_VDB_CHUNKS (
+            INSERT INTO YAR_VDB_CHUNKS (
                 id, workspace, full_doc_id, chunk_order_index, tokens, content,
                 content_vector, file_path, create_time, update_time
             )
             SELECT
                 id, workspace, full_doc_id, chunk_order_index, tokens, content,
                 content_vector, file_path, create_time, update_time
-            FROM LIGHTRAG_DOC_CHUNKS
+            FROM YAR_DOC_CHUNKS
             ON CONFLICT (workspace, id) DO NOTHING;
             """
             await self.execute(migration_sql)
-            logger.info('Data migration to LIGHTRAG_VDB_CHUNKS completed successfully.')
+            logger.info('Data migration to YAR_VDB_CHUNKS completed successfully.')
 
         except Exception as e:
-            logger.error(f'Failed during data migration to LIGHTRAG_VDB_CHUNKS: {e}')
+            logger.error(f'Failed during data migration to YAR_VDB_CHUNKS: {e}')
             # Do not re-raise, to allow the application to start
 
     async def _check_llm_cache_needs_migration(self):
@@ -1195,7 +1195,7 @@ class PostgreSQLDB:
         try:
             # Optimized query: directly check for old format records without sorting
             check_sql = """
-            SELECT 1 FROM LIGHTRAG_LLM_CACHE
+            SELECT 1 FROM YAR_LLM_CACHE
             WHERE id NOT LIKE '%:%'
             LIMIT 1
             """
@@ -1213,7 +1213,7 @@ class PostgreSQLDB:
         try:
             # Check if migration is needed
             check_sql = """
-            SELECT COUNT(*) as count FROM LIGHTRAG_LLM_CACHE
+            SELECT COUNT(*) as count FROM YAR_LLM_CACHE
             WHERE id NOT LIKE '%:%'
             """
             result = await self.query(check_sql)
@@ -1234,12 +1234,12 @@ class PostgreSQLDB:
                     mode || ':' ||
                     CASE WHEN mode = 'default' THEN 'extract' ELSE 'unknown' END || ':' ||
                     md5(original_prompt) as new_id
-                FROM LIGHTRAG_LLM_CACHE
+                FROM YAR_LLM_CACHE
                 WHERE id NOT LIKE '%:%'
             )
             SELECT COUNT(*) as conflicts
             FROM new_ids n1
-            JOIN LIGHTRAG_LLM_CACHE existing
+            JOIN YAR_LLM_CACHE existing
             ON existing.workspace = n1.workspace
             AND existing.mode = n1.mode
             AND existing.id = n1.new_id
@@ -1255,7 +1255,7 @@ class PostgreSQLDB:
             # Execute single UPDATE migration
             logger.info('Starting optimized LLM cache migration...')
             migration_sql = """
-            UPDATE LIGHTRAG_LLM_CACHE
+            UPDATE YAR_LLM_CACHE
             SET
                 id = mode || ':' ||
                      CASE WHEN mode = 'default' THEN 'extract' ELSE 'unknown' END || ':' ||
@@ -1270,7 +1270,7 @@ class PostgreSQLDB:
 
             # Verify migration results
             verify_sql = """
-            SELECT COUNT(*) as remaining_old FROM LIGHTRAG_LLM_CACHE
+            SELECT COUNT(*) as remaining_old FROM YAR_LLM_CACHE
             WHERE id NOT LIKE '%:%'
             """
             verify_result = await self.query(verify_sql)
@@ -1286,7 +1286,7 @@ class PostgreSQLDB:
             raise
 
     async def _migrate_doc_status_add_chunks_list(self):
-        """Add chunks_list column to LIGHTRAG_DOC_STATUS table if it doesn't exist"""
+        """Add chunks_list column to YAR_DOC_STATUS table if it doesn't exist"""
         try:
             # Check if chunks_list column exists
             check_column_sql = """
@@ -1298,20 +1298,20 @@ class PostgreSQLDB:
 
             column_info = await self.query(check_column_sql)
             if not column_info:
-                logger.info('Adding chunks_list column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Adding chunks_list column to YAR_DOC_STATUS table')
                 add_column_sql = """
-                ALTER TABLE LIGHTRAG_DOC_STATUS
+                ALTER TABLE YAR_DOC_STATUS
                 ADD COLUMN chunks_list JSONB NULL DEFAULT '[]'::jsonb
                 """
                 await self.execute(add_column_sql)
-                logger.info('Successfully added chunks_list column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Successfully added chunks_list column to YAR_DOC_STATUS table')
             else:
-                logger.info('chunks_list column already exists in LIGHTRAG_DOC_STATUS table')
+                logger.info('chunks_list column already exists in YAR_DOC_STATUS table')
         except Exception as e:
-            logger.warning(f'Failed to add chunks_list column to LIGHTRAG_DOC_STATUS: {e}')
+            logger.warning(f'Failed to add chunks_list column to YAR_DOC_STATUS: {e}')
 
     async def _migrate_text_chunks_add_llm_cache_list(self):
-        """Add llm_cache_list column to LIGHTRAG_DOC_CHUNKS table if it doesn't exist"""
+        """Add llm_cache_list column to YAR_DOC_CHUNKS table if it doesn't exist"""
         try:
             # Check if llm_cache_list column exists
             check_column_sql = """
@@ -1323,24 +1323,24 @@ class PostgreSQLDB:
 
             column_info = await self.query(check_column_sql)
             if not column_info:
-                logger.info('Adding llm_cache_list column to LIGHTRAG_DOC_CHUNKS table')
+                logger.info('Adding llm_cache_list column to YAR_DOC_CHUNKS table')
                 add_column_sql = """
-                ALTER TABLE LIGHTRAG_DOC_CHUNKS
+                ALTER TABLE YAR_DOC_CHUNKS
                 ADD COLUMN llm_cache_list JSONB NULL DEFAULT '[]'::jsonb
                 """
                 await self.execute(add_column_sql)
-                logger.info('Successfully added llm_cache_list column to LIGHTRAG_DOC_CHUNKS table')
+                logger.info('Successfully added llm_cache_list column to YAR_DOC_CHUNKS table')
             else:
-                logger.info('llm_cache_list column already exists in LIGHTRAG_DOC_CHUNKS table')
+                logger.info('llm_cache_list column already exists in YAR_DOC_CHUNKS table')
         except Exception as e:
-            logger.warning(f'Failed to add llm_cache_list column to LIGHTRAG_DOC_CHUNKS: {e}')
+            logger.warning(f'Failed to add llm_cache_list column to YAR_DOC_CHUNKS: {e}')
 
     async def _migrate_add_s3_key_columns(self):
-        """Add s3_key column to LIGHTRAG_DOC_FULL, LIGHTRAG_DOC_CHUNKS, and LIGHTRAG_DOC_STATUS tables if they don't exist"""
+        """Add s3_key column to YAR_DOC_FULL, YAR_DOC_CHUNKS, and YAR_DOC_STATUS tables if they don't exist"""
         tables = [
-            ('yar_doc_full', 'LIGHTRAG_DOC_FULL'),
-            ('yar_doc_chunks', 'LIGHTRAG_DOC_CHUNKS'),
-            ('yar_doc_status', 'LIGHTRAG_DOC_STATUS'),
+            ('yar_doc_full', 'YAR_DOC_FULL'),
+            ('yar_doc_chunks', 'YAR_DOC_CHUNKS'),
+            ('yar_doc_status', 'YAR_DOC_STATUS'),
         ]
 
         for table_name_lower, table_name in tables:
@@ -1367,7 +1367,7 @@ class PostgreSQLDB:
                 logger.warning(f'Failed to add s3_key column to {table_name}: {e}')
 
     async def _migrate_add_chunk_position_columns(self):
-        """Add char_start and char_end columns to LIGHTRAG_DOC_CHUNKS table if they don't exist"""
+        """Add char_start and char_end columns to YAR_DOC_CHUNKS table if they don't exist"""
         columns = [
             ('char_start', 'INTEGER NULL'),
             ('char_end', 'INTEGER NULL'),
@@ -1384,20 +1384,20 @@ class PostgreSQLDB:
 
                 column_info = await self.query(check_column_sql)
                 if not column_info:
-                    logger.info(f'Adding {column_name} column to LIGHTRAG_DOC_CHUNKS table')
+                    logger.info(f'Adding {column_name} column to YAR_DOC_CHUNKS table')
                     add_column_sql = f"""
-                    ALTER TABLE LIGHTRAG_DOC_CHUNKS
+                    ALTER TABLE YAR_DOC_CHUNKS
                     ADD COLUMN {column_name} {column_type}
                     """
                     await self.execute(add_column_sql)
-                    logger.info(f'Successfully added {column_name} column to LIGHTRAG_DOC_CHUNKS table')
+                    logger.info(f'Successfully added {column_name} column to YAR_DOC_CHUNKS table')
                 else:
-                    logger.info(f'{column_name} column already exists in LIGHTRAG_DOC_CHUNKS table')
+                    logger.info(f'{column_name} column already exists in YAR_DOC_CHUNKS table')
             except Exception as e:
-                logger.warning(f'Failed to add {column_name} column to LIGHTRAG_DOC_CHUNKS: {e}')
+                logger.warning(f'Failed to add {column_name} column to YAR_DOC_CHUNKS: {e}')
 
     async def _migrate_doc_status_add_track_id(self):
-        """Add track_id column to LIGHTRAG_DOC_STATUS table if it doesn't exist and create index"""
+        """Add track_id column to YAR_DOC_STATUS table if it doesn't exist and create index"""
         try:
             # Check if track_id column exists
             check_column_sql = """
@@ -1409,15 +1409,15 @@ class PostgreSQLDB:
 
             column_info = await self.query(check_column_sql)
             if not column_info:
-                logger.info('Adding track_id column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Adding track_id column to YAR_DOC_STATUS table')
                 add_column_sql = """
-                ALTER TABLE LIGHTRAG_DOC_STATUS
+                ALTER TABLE YAR_DOC_STATUS
                 ADD COLUMN track_id VARCHAR(255) NULL
                 """
                 await self.execute(add_column_sql)
-                logger.info('Successfully added track_id column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Successfully added track_id column to YAR_DOC_STATUS table')
             else:
-                logger.info('track_id column already exists in LIGHTRAG_DOC_STATUS table')
+                logger.info('track_id column already exists in YAR_DOC_STATUS table')
 
             # Check if track_id index exists
             check_index_sql = """
@@ -1429,20 +1429,20 @@ class PostgreSQLDB:
 
             index_info = await self.query(check_index_sql)
             if not index_info:
-                logger.info('Creating index on track_id column for LIGHTRAG_DOC_STATUS table')
+                logger.info('Creating index on track_id column for YAR_DOC_STATUS table')
                 create_index_sql = """
-                CREATE INDEX idx_yar_doc_status_track_id ON LIGHTRAG_DOC_STATUS (track_id)
+                CREATE INDEX idx_yar_doc_status_track_id ON YAR_DOC_STATUS (track_id)
                 """
                 await self.execute(create_index_sql)
-                logger.info('Successfully created index on track_id column for LIGHTRAG_DOC_STATUS table')
+                logger.info('Successfully created index on track_id column for YAR_DOC_STATUS table')
             else:
-                logger.info('Index on track_id column already exists for LIGHTRAG_DOC_STATUS table')
+                logger.info('Index on track_id column already exists for YAR_DOC_STATUS table')
 
         except Exception as e:
-            logger.warning(f'Failed to add track_id column or index to LIGHTRAG_DOC_STATUS: {e}')
+            logger.warning(f'Failed to add track_id column or index to YAR_DOC_STATUS: {e}')
 
     async def _migrate_doc_status_add_metadata_error_msg(self):
-        """Add metadata and error_msg columns to LIGHTRAG_DOC_STATUS table if they don't exist"""
+        """Add metadata and error_msg columns to YAR_DOC_STATUS table if they don't exist"""
         try:
             # Check if metadata column exists
             check_metadata_sql = """
@@ -1454,15 +1454,15 @@ class PostgreSQLDB:
 
             metadata_info = await self.query(check_metadata_sql)
             if not metadata_info:
-                logger.info('Adding metadata column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Adding metadata column to YAR_DOC_STATUS table')
                 add_metadata_sql = """
-                ALTER TABLE LIGHTRAG_DOC_STATUS
+                ALTER TABLE YAR_DOC_STATUS
                 ADD COLUMN metadata JSONB NULL DEFAULT '{}'::jsonb
                 """
                 await self.execute(add_metadata_sql)
-                logger.info('Successfully added metadata column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Successfully added metadata column to YAR_DOC_STATUS table')
             else:
-                logger.info('metadata column already exists in LIGHTRAG_DOC_STATUS table')
+                logger.info('metadata column already exists in YAR_DOC_STATUS table')
 
             # Check if error_msg column exists
             check_error_msg_sql = """
@@ -1474,21 +1474,21 @@ class PostgreSQLDB:
 
             error_msg_info = await self.query(check_error_msg_sql)
             if not error_msg_info:
-                logger.info('Adding error_msg column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Adding error_msg column to YAR_DOC_STATUS table')
                 add_error_msg_sql = """
-                ALTER TABLE LIGHTRAG_DOC_STATUS
+                ALTER TABLE YAR_DOC_STATUS
                 ADD COLUMN error_msg TEXT NULL
                 """
                 await self.execute(add_error_msg_sql)
-                logger.info('Successfully added error_msg column to LIGHTRAG_DOC_STATUS table')
+                logger.info('Successfully added error_msg column to YAR_DOC_STATUS table')
             else:
-                logger.info('error_msg column already exists in LIGHTRAG_DOC_STATUS table')
+                logger.info('error_msg column already exists in YAR_DOC_STATUS table')
 
         except Exception as e:
-            logger.warning(f'Failed to add metadata/error_msg columns to LIGHTRAG_DOC_STATUS: {e}')
+            logger.warning(f'Failed to add metadata/error_msg columns to YAR_DOC_STATUS: {e}')
 
     async def _migrate_entity_aliases_add_llm_columns(self):
-        """Add LLM-related columns to LIGHTRAG_ENTITY_ALIASES table for LLM-based entity resolution.
+        """Add LLM-related columns to YAR_ENTITY_ALIASES table for LLM-based entity resolution.
 
         New columns:
         - llm_reasoning: TEXT - LLM's explanation for the alias decision (audit trail)
@@ -1531,53 +1531,53 @@ class PostgreSQLDB:
                 col_exists = await self.query(check_sql, [col['name']])
 
                 if not col_exists:
-                    logger.info(f'Adding {col["name"]} column to LIGHTRAG_ENTITY_ALIASES table')
+                    logger.info(f'Adding {col["name"]} column to YAR_ENTITY_ALIASES table')
                     add_sql = f"""
-                    ALTER TABLE LIGHTRAG_ENTITY_ALIASES
+                    ALTER TABLE YAR_ENTITY_ALIASES
                     ADD COLUMN {col['name']} {col['type']}
                     """
                     await self.execute(add_sql)
-                    logger.info(f'Successfully added {col["name"]} column to LIGHTRAG_ENTITY_ALIASES table')
+                    logger.info(f'Successfully added {col["name"]} column to YAR_ENTITY_ALIASES table')
                 else:
-                    logger.info(f'{col["name"]} column already exists in LIGHTRAG_ENTITY_ALIASES table')
+                    logger.info(f'{col["name"]} column already exists in YAR_ENTITY_ALIASES table')
 
             except Exception as e:
-                logger.warning(f'Failed to add {col["name"]} column to LIGHTRAG_ENTITY_ALIASES: {e}')
+                logger.warning(f'Failed to add {col["name"]} column to YAR_ENTITY_ALIASES: {e}')
 
     async def _migrate_field_lengths(self):
         """Migrate database field lengths: entity_name, source_id, target_id, and file_path"""
         # Define the field changes needed
         field_migrations = [
             {
-                'table': 'LIGHTRAG_VDB_ENTITY',
+                'table': 'YAR_VDB_ENTITY',
                 'column': 'entity_name',
                 'old_type': 'character varying(255)',
                 'new_type': 'VARCHAR(512)',
                 'description': 'entity_name from 255 to 512',
             },
             {
-                'table': 'LIGHTRAG_VDB_RELATION',
+                'table': 'YAR_VDB_RELATION',
                 'column': 'source_id',
                 'old_type': 'character varying(256)',
                 'new_type': 'VARCHAR(512)',
                 'description': 'source_id from 256 to 512',
             },
             {
-                'table': 'LIGHTRAG_VDB_RELATION',
+                'table': 'YAR_VDB_RELATION',
                 'column': 'target_id',
                 'old_type': 'character varying(256)',
                 'new_type': 'VARCHAR(512)',
                 'description': 'target_id from 256 to 512',
             },
             {
-                'table': 'LIGHTRAG_DOC_CHUNKS',
+                'table': 'YAR_DOC_CHUNKS',
                 'column': 'file_path',
                 'old_type': 'character varying(256)',
                 'new_type': 'TEXT',
                 'description': 'file_path to TEXT NULL',
             },
             {
-                'table': 'LIGHTRAG_VDB_CHUNKS',
+                'table': 'YAR_VDB_CHUNKS',
                 'column': 'file_path',
                 'old_type': 'character varying(256)',
                 'new_type': 'TEXT',
@@ -1666,7 +1666,7 @@ class PostgreSQLDB:
     async def _check_tables_locked(self):
         """Internal method that runs table creation under advisory lock."""
         # Tables to skip in the main loop (already created or special handling)
-        skip_tables = {'LIGHTRAG_SCHEMA_MIGRATIONS'}
+        skip_tables = {'YAR_SCHEMA_MIGRATIONS'}
 
         # First create all tables
         for k, v in TABLES.items():
@@ -1710,8 +1710,8 @@ class PostgreSQLDB:
 
             # Create missing indexes
             # Tables that don't have an 'id' column (use different primary key structure)
-            # LIGHTRAG_SCHEMA_MIGRATIONS uses 'version' as PK, no workspace column
-            tables_without_id = {'LIGHTRAG_ENTITY_ALIASES', 'LIGHTRAG_SCHEMA_MIGRATIONS'}
+            # YAR_SCHEMA_MIGRATIONS uses 'version' as PK, no workspace column
+            tables_without_id = {'YAR_ENTITY_ALIASES', 'YAR_SCHEMA_MIGRATIONS'}
 
             for k in table_names:
                 # Skip tables that don't have an 'id' column
@@ -1744,21 +1744,21 @@ class PostgreSQLDB:
         try:
             performance_indexes = [
                 # Entity resolution lookups (used heavily during ingestion)
-                ('idx_yar_vdb_entity_workspace_name', 'LIGHTRAG_VDB_ENTITY', '(workspace, entity_name)'),
+                ('idx_yar_vdb_entity_workspace_name', 'YAR_VDB_ENTITY', '(workspace, entity_name)'),
                 # Graph traversal queries (forward and backward edge lookups)
-                ('idx_yar_vdb_relation_workspace_source', 'LIGHTRAG_VDB_RELATION', '(workspace, source_id)'),
-                ('idx_yar_vdb_relation_workspace_target', 'LIGHTRAG_VDB_RELATION', '(workspace, target_id)'),
+                ('idx_yar_vdb_relation_workspace_source', 'YAR_VDB_RELATION', '(workspace, source_id)'),
+                ('idx_yar_vdb_relation_workspace_target', 'YAR_VDB_RELATION', '(workspace, target_id)'),
                 # Document chunk lookups by document
-                ('idx_yar_doc_chunks_workspace_doc', 'LIGHTRAG_DOC_CHUNKS', '(workspace, full_doc_id)'),
+                ('idx_yar_doc_chunks_workspace_doc', 'YAR_DOC_CHUNKS', '(workspace, full_doc_id)'),
                 # File path lookups in doc status
-                ('idx_yar_doc_status_workspace_path', 'LIGHTRAG_DOC_STATUS', '(workspace, file_path)'),
+                ('idx_yar_doc_status_workspace_path', 'YAR_DOC_STATUS', '(workspace, file_path)'),
             ]
 
             # GIN indexes for array membership queries (chunk_ids lookups)
             # and full-text search (BM25-style keyword search)
             gin_indexes = [
-                ('idx_yar_vdb_entity_chunk_ids_gin', 'LIGHTRAG_VDB_ENTITY', 'USING gin (chunk_ids)'),
-                ('idx_yar_vdb_relation_chunk_ids_gin', 'LIGHTRAG_VDB_RELATION', 'USING gin (chunk_ids)'),
+                ('idx_yar_vdb_entity_chunk_ids_gin', 'YAR_VDB_ENTITY', 'USING gin (chunk_ids)'),
+                ('idx_yar_vdb_relation_chunk_ids_gin', 'YAR_VDB_RELATION', 'USING gin (chunk_ids)'),
                 # Full-text search GIN index for BM25 keyword search on chunks.
                 # IMPORTANT: This index is built for 'english' language. Queries using
                 # hybrid_search() or bm25_search() must use language='english' (the default)
@@ -1767,7 +1767,7 @@ class PostgreSQLDB:
                 #   CREATE INDEX ... USING gin (to_tsvector('german', content))
                 (
                     'idx_yar_doc_chunks_content_fts_gin',
-                    'LIGHTRAG_DOC_CHUNKS',
+                    'YAR_DOC_CHUNKS',
                     "USING gin (to_tsvector('english', content))",
                 ),
             ]
@@ -1935,16 +1935,16 @@ class PostgreSQLDB:
             logger.debug('PostgreSQL, All migrations completed successfully')
 
     async def _migrate_create_full_entities_relations_tables(self):
-        """Create LIGHTRAG_FULL_ENTITIES and LIGHTRAG_FULL_RELATIONS tables if they don't exist"""
+        """Create YAR_FULL_ENTITIES and YAR_FULL_RELATIONS tables if they don't exist"""
         tables_to_check = [
             {
-                'name': 'LIGHTRAG_FULL_ENTITIES',
-                'ddl': TABLES['LIGHTRAG_FULL_ENTITIES']['ddl'],
+                'name': 'YAR_FULL_ENTITIES',
+                'ddl': TABLES['YAR_FULL_ENTITIES']['ddl'],
                 'description': 'Full entities storage table',
             },
             {
-                'name': 'LIGHTRAG_FULL_RELATIONS',
-                'ddl': TABLES['LIGHTRAG_FULL_RELATIONS']['ddl'],
+                'name': 'YAR_FULL_RELATIONS',
+                'ddl': TABLES['YAR_FULL_RELATIONS']['ddl'],
                 'description': 'Full relations storage table',
             },
         ]
@@ -1993,8 +1993,8 @@ class PostgreSQLDB:
                 logger.error(f'Failed to create table {table_name}: {e}')
 
     async def _migrate_entity_aliases_schema(self):
-        """Migrate LIGHTRAG_ENTITY_ALIASES table to add update_time column, canonical index, and confidence constraint"""
-        table_name = 'LIGHTRAG_ENTITY_ALIASES'
+        """Migrate YAR_ENTITY_ALIASES table to add update_time column, canonical index, and confidence constraint"""
+        table_name = 'YAR_ENTITY_ALIASES'
 
         # Check if table exists first
         check_table_sql = """
@@ -2107,7 +2107,7 @@ class PostgreSQLDB:
         Default scale factors (0.2/0.1) are too conservative for tables with
         millions of rows - we use 0.02/0.01 for ~10x more frequent maintenance.
         """
-        tables = ['LIGHTRAG_DOC_STATUS', 'LIGHTRAG_VDB_CHUNKS']
+        tables = ['YAR_DOC_STATUS', 'YAR_VDB_CHUNKS']
 
         for table_name in tables:
             # Check if table exists first
@@ -2148,13 +2148,13 @@ class PostgreSQLDB:
         """
         constraints = [
             {
-                'table': 'LIGHTRAG_VDB_ENTITY',
+                'table': 'YAR_VDB_ENTITY',
                 'constraint': 'yar_vdb_entity_unique',
                 'columns': '(workspace, entity_name)',
                 'dedup_key': 'entity_name',
             },
             {
-                'table': 'LIGHTRAG_VDB_RELATION',
+                'table': 'YAR_VDB_RELATION',
                 'constraint': 'yar_vdb_relation_unique',
                 'columns': '(workspace, source_id, target_id)',
                 'dedup_key': 'source_id, target_id',
@@ -2218,12 +2218,12 @@ class PostgreSQLDB:
                 logger.warning(f'PostgreSQL, Failed to add UNIQUE constraint to {table}: {e}')
 
     async def _migrate_add_entity_type_column(self):
-        """Add entity_type column to LIGHTRAG_VDB_ENTITY table.
+        """Add entity_type column to YAR_VDB_ENTITY table.
 
         This enables type-aware entity resolution - preventing merges between
         entities of incompatible types (e.g., Person vs Organization).
         """
-        table_name = 'LIGHTRAG_VDB_ENTITY'
+        table_name = 'YAR_VDB_ENTITY'
         column_name = 'entity_type'
 
         # Check if table exists
@@ -2258,53 +2258,53 @@ class PostgreSQLDB:
             logger.warning(f'PostgreSQL, Failed to add {column_name} column to {table_name}: {e}')
 
     async def _create_pagination_indexes(self):
-        """Create indexes to optimize pagination queries for LIGHTRAG_DOC_STATUS"""
+        """Create indexes to optimize pagination queries for YAR_DOC_STATUS"""
         indexes = [
             {
                 'name': 'idx_yar_doc_status_workspace_status_updated_at',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_status_updated_at ON LIGHTRAG_DOC_STATUS (workspace, status, updated_at DESC)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_status_updated_at ON YAR_DOC_STATUS (workspace, status, updated_at DESC)',
                 'description': 'Composite index for workspace + status + updated_at pagination',
             },
             {
                 'name': 'idx_yar_doc_status_workspace_status_created_at',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_status_created_at ON LIGHTRAG_DOC_STATUS (workspace, status, created_at DESC)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_status_created_at ON YAR_DOC_STATUS (workspace, status, created_at DESC)',
                 'description': 'Composite index for workspace + status + created_at pagination',
             },
             {
                 'name': 'idx_yar_doc_status_workspace_updated_at',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_updated_at ON LIGHTRAG_DOC_STATUS (workspace, updated_at DESC)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_updated_at ON YAR_DOC_STATUS (workspace, updated_at DESC)',
                 'description': 'Index for workspace + updated_at pagination (all statuses)',
             },
             {
                 'name': 'idx_yar_doc_status_workspace_created_at',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_created_at ON LIGHTRAG_DOC_STATUS (workspace, created_at DESC)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_created_at ON YAR_DOC_STATUS (workspace, created_at DESC)',
                 'description': 'Index for workspace + created_at pagination (all statuses)',
             },
             {
                 'name': 'idx_yar_doc_status_workspace_id',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_id ON LIGHTRAG_DOC_STATUS (workspace, id)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_id ON YAR_DOC_STATUS (workspace, id)',
                 'description': 'Index for workspace + id sorting',
             },
             {
                 'name': 'idx_yar_doc_status_workspace_file_path',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_file_path ON LIGHTRAG_DOC_STATUS (workspace, file_path)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_workspace_file_path ON YAR_DOC_STATUS (workspace, file_path)',
                 'description': 'Index for workspace + file_path sorting',
             },
             # Partial indexes for common status filters - smaller and faster than full indexes
             # These cover the most frequently queried status values
             {
                 'name': 'idx_yar_doc_status_pending',
-                'sql': "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_pending ON LIGHTRAG_DOC_STATUS (workspace, updated_at DESC) WHERE status = 'PENDING'",
+                'sql': "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_pending ON YAR_DOC_STATUS (workspace, updated_at DESC) WHERE status = 'PENDING'",
                 'description': 'Partial index for PENDING status queries',
             },
             {
                 'name': 'idx_yar_doc_status_processing',
-                'sql': "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_processing ON LIGHTRAG_DOC_STATUS (workspace, updated_at DESC) WHERE status = 'PROCESSING'",
+                'sql': "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_processing ON YAR_DOC_STATUS (workspace, updated_at DESC) WHERE status = 'PROCESSING'",
                 'description': 'Partial index for PROCESSING status queries',
             },
             {
                 'name': 'idx_yar_doc_status_failed',
-                'sql': "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_failed ON LIGHTRAG_DOC_STATUS (workspace, updated_at DESC) WHERE status = 'FAILED'",
+                'sql': "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_doc_status_failed ON YAR_DOC_STATUS (workspace, updated_at DESC) WHERE status = 'FAILED'",
                 'description': 'Partial index for FAILED status queries',
             },
         ]
@@ -2314,25 +2314,25 @@ class PostgreSQLDB:
             {
                 'table': 'yar_vdb_entity',
                 'name': 'idx_yar_vdb_entity_name',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_entity_name ON LIGHTRAG_VDB_ENTITY (workspace, entity_name)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_entity_name ON YAR_VDB_ENTITY (workspace, entity_name)',
                 'description': 'Index for entity name lookups',
             },
             {
                 'table': 'yar_vdb_entity',
                 'name': 'idx_yar_vdb_entity_name_trgm',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_entity_name_trgm ON LIGHTRAG_VDB_ENTITY USING gin (entity_name gin_trgm_ops)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_entity_name_trgm ON YAR_VDB_ENTITY USING gin (entity_name gin_trgm_ops)',
                 'description': 'Trigram GIN index for fuzzy entity name matching (ILIKE)',
             },
             {
                 'table': 'yar_vdb_relation',
                 'name': 'idx_yar_vdb_relation_source',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_relation_source ON LIGHTRAG_VDB_RELATION (workspace, source_id)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_relation_source ON YAR_VDB_RELATION (workspace, source_id)',
                 'description': 'Index for relation source lookups',
             },
             {
                 'table': 'yar_vdb_relation',
                 'name': 'idx_yar_vdb_relation_target',
-                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_relation_target ON LIGHTRAG_VDB_RELATION (workspace, target_id)',
+                'sql': 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_yar_vdb_relation_target ON YAR_VDB_RELATION (workspace, target_id)',
                 'description': 'Index for relation target lookups',
             },
         ]
@@ -2383,9 +2383,9 @@ class PostgreSQLDB:
 
     async def _create_vector_indexes(self):
         vdb_tables = [
-            'LIGHTRAG_VDB_CHUNKS',
-            'LIGHTRAG_VDB_ENTITY',
-            'LIGHTRAG_VDB_RELATION',
+            'YAR_VDB_CHUNKS',
+            'YAR_VDB_ENTITY',
+            'YAR_VDB_RELATION',
         ]
 
         # Use configurable distance metric ops class
@@ -2664,7 +2664,7 @@ class PostgreSQLDB:
                     {ts_query_func}('{language}', $1),
                     {TS_RANK_CD_FLAG}
                 ) AS score
-            FROM LIGHTRAG_DOC_CHUNKS
+            FROM YAR_DOC_CHUNKS
             WHERE workspace = $2
               AND to_tsvector('{language}', content) @@ {ts_query_func}('{language}', $1)
             ORDER BY score DESC
@@ -3320,7 +3320,7 @@ class PGKVStorage(BaseKVStorage):
         if archive_url:
             # Update both s3_key and file_path
             sql = """
-                UPDATE LIGHTRAG_DOC_CHUNKS
+                UPDATE YAR_DOC_CHUNKS
                 SET s3_key = $1, file_path = $2, update_time = CURRENT_TIMESTAMP
                 WHERE workspace = $3 AND full_doc_id = $4
             """
@@ -3333,7 +3333,7 @@ class PGKVStorage(BaseKVStorage):
         else:
             # Update only s3_key
             sql = """
-                UPDATE LIGHTRAG_DOC_CHUNKS
+                UPDATE YAR_DOC_CHUNKS
                 SET s3_key = $1, update_time = CURRENT_TIMESTAMP
                 WHERE workspace = $2 AND full_doc_id = $3
             """
@@ -3462,7 +3462,7 @@ class PGVectorStorage(BaseVectorStorage):
         contents = [v['content'] for v in data.values()]
         batches = [contents[i : i + self._max_batch_size] for i in range(0, len(contents), self._max_batch_size)]
 
-        max_concurrent_embeddings = int(os.getenv('LIGHTRAG_MAX_CONCURRENT_EMBEDDINGS', '3'))
+        max_concurrent_embeddings = int(os.getenv('YAR_MAX_CONCURRENT_EMBEDDINGS', '3'))
         semaphore = asyncio.Semaphore(max_concurrent_embeddings)
 
         async def bounded_embedding(batch: list[str]) -> np.ndarray:
@@ -3549,7 +3549,7 @@ class PGVectorStorage(BaseVectorStorage):
 
         # Determine how many results to fetch from each source
         # Fetch more than top_k to allow RRF to work effectively
-        # Configurable via LIGHTRAG_VECTOR_FETCH_MULT and LIGHTRAG_BM25_FETCH_MULT
+        # Configurable via YAR_VECTOR_FETCH_MULT and YAR_BM25_FETCH_MULT
         vector_fetch_k = int(top_k * VECTOR_FETCH_MULTIPLIER)
         bm25_fetch_k = int(top_k * (BM25_FETCH_BASE_MULTIPLIER + bm25_weight))  # Scale by weight
 
@@ -3575,7 +3575,7 @@ class PGVectorStorage(BaseVectorStorage):
                     {ts_query_func}('{language}', $1),
                     {TS_RANK_CD_FLAG}
                 ) AS bm25_score
-            FROM LIGHTRAG_DOC_CHUNKS
+            FROM YAR_DOC_CHUNKS
             WHERE workspace = $2
               AND to_tsvector('{language}', content) @@ {ts_query_func}('{language}', $1)
             ORDER BY bm25_score DESC
@@ -3608,7 +3608,7 @@ class PGVectorStorage(BaseVectorStorage):
         fused_results = reciprocal_rank_fusion(
             [vector_results, bm25_results],
             id_key='id',
-            k=RRF_K,  # Configurable via LIGHTRAG_RRF_K env var
+            k=RRF_K,  # Configurable via YAR_RRF_K env var
         )
 
         logger.debug(
@@ -3658,7 +3658,7 @@ class PGVectorStorage(BaseVectorStorage):
                    content,
                    EXTRACT(EPOCH FROM create_time)::BIGINT AS created_at,
                    similarity(LOWER(entity_name), LOWER($1)) AS trgm_score
-            FROM LIGHTRAG_VDB_ENTITY
+            FROM YAR_VDB_ENTITY
             WHERE workspace = $2
               AND similarity(LOWER(entity_name), LOWER($1)) > $3
             ORDER BY trgm_score DESC
@@ -3724,7 +3724,7 @@ class PGVectorStorage(BaseVectorStorage):
         # Use similarity search on entity names (case-insensitive, partial match)
         entity_search_sql = """
             SELECT entity_name, chunk_ids
-            FROM LIGHTRAG_VDB_ENTITY
+            FROM YAR_VDB_ENTITY
             WHERE workspace = $1
               AND (
                   entity_name ILIKE $2
@@ -3750,7 +3750,7 @@ class PGVectorStorage(BaseVectorStorage):
 
         # Bound concurrent searches to avoid connection pool exhaustion
         # Configurable via environment variable, defaults to 10
-        max_concurrent = int(os.getenv('LIGHTRAG_MAX_CONCURRENT_SEARCHES', '10'))
+        max_concurrent = int(os.getenv('YAR_MAX_CONCURRENT_SEARCHES', '10'))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_search(keyword: str) -> list[dict[str, Any]]:
@@ -3854,7 +3854,7 @@ class PGVectorStorage(BaseVectorStorage):
                     {ts_query_func}('{language}', $1),
                     {TS_RANK_CD_FLAG}
                 ) AS bm25_score
-            FROM LIGHTRAG_DOC_CHUNKS
+            FROM YAR_DOC_CHUNKS
             WHERE workspace = $2
               AND to_tsvector('{language}', content) @@ {ts_query_func}('{language}', $1)
             ORDER BY bm25_score DESC
@@ -3940,7 +3940,7 @@ class PGVectorStorage(BaseVectorStorage):
         """
         try:
             # Construct SQL to delete the entity
-            delete_sql = """DELETE FROM LIGHTRAG_VDB_ENTITY
+            delete_sql = """DELETE FROM YAR_VDB_ENTITY
                             WHERE workspace=$1 AND entity_name=$2"""
 
             db = self._db_required()
@@ -3957,7 +3957,7 @@ class PGVectorStorage(BaseVectorStorage):
         """
         try:
             # Delete relations where the entity is either the source or target
-            delete_sql = """DELETE FROM LIGHTRAG_VDB_RELATION
+            delete_sql = """DELETE FROM YAR_VDB_RELATION
                             WHERE workspace=$1 AND (source_id=$2 OR target_id=$2)"""
 
             db = self._db_required()
@@ -4195,7 +4195,7 @@ class PGDocStatusStorage(DocStatusStorage):
             raise
 
     async def get_by_id(self, id: str) -> dict[str, Any] | None:
-        sql = 'select * from LIGHTRAG_DOC_STATUS where workspace=$1 and id=$2'
+        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and id=$2'
         params = {'workspace': self.workspace, 'id': id}
         db = self._db_required()
         result = await db.query(sql, list(params.values()), multirows=True)
@@ -4223,7 +4223,7 @@ class PGDocStatusStorage(DocStatusStorage):
             return []
 
         db = self._db_required()
-        sql = 'SELECT * FROM LIGHTRAG_DOC_STATUS WHERE workspace=$1 AND id = ANY($2)'
+        sql = 'SELECT * FROM YAR_DOC_STATUS WHERE workspace=$1 AND id = ANY($2)'
         params = {'workspace': self.workspace, 'ids': ids}
 
         results = await db.query(sql, list(params.values()), multirows=True)
@@ -4264,7 +4264,7 @@ class PGDocStatusStorage(DocStatusStorage):
             Returns the same format as get_by_id method
         """
         db = self._db_required()
-        sql = 'select * from LIGHTRAG_DOC_STATUS where workspace=$1 and file_path=$2'
+        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and file_path=$2'
         params = {'workspace': self.workspace, 'file_path': file_path}
         result = await db.query(sql, list(params.values()), multirows=True)
 
@@ -4290,7 +4290,7 @@ class PGDocStatusStorage(DocStatusStorage):
         """Get counts of documents in each status"""
         db = self._db_required()
         sql = """SELECT status as "status", COUNT(1) as "count"
-                   FROM LIGHTRAG_DOC_STATUS
+                   FROM YAR_DOC_STATUS
                   where workspace=$1 GROUP BY STATUS
                  """
         params: dict[str, Any] = {'workspace': self.workspace}
@@ -4303,7 +4303,7 @@ class PGDocStatusStorage(DocStatusStorage):
     async def get_docs_by_status(self, status: DocStatus) -> dict[str, DocProcessingStatus]:
         """all documents with a specific status"""
         db = self._db_required()
-        sql = 'select * from LIGHTRAG_DOC_STATUS where workspace=$1 and status=$2'
+        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and status=$2'
         params = {'workspace': self.workspace, 'status': status.value}
         result = await db.query(sql, list(params.values()), multirows=True)
 
@@ -4330,7 +4330,7 @@ class PGDocStatusStorage(DocStatusStorage):
     async def get_docs_by_track_id(self, track_id: str) -> dict[str, DocProcessingStatus]:
         """Get all documents with a specific track_id"""
         db = self._db_required()
-        sql = 'select * from LIGHTRAG_DOC_STATUS where workspace=$1 and track_id=$2'
+        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and track_id=$2'
         params = {'workspace': self.workspace, 'track_id': track_id}
         result = await db.query(sql, list(params.values()), multirows=True)
 
@@ -4412,7 +4412,7 @@ class PGDocStatusStorage(DocStatusStorage):
         # COUNT(*) OVER() computes total matching rows before LIMIT/OFFSET is applied
         data_sql = f"""
             SELECT *, COUNT(*) OVER() as total_count
-            FROM LIGHTRAG_DOC_STATUS
+            FROM YAR_DOC_STATUS
             {where_clause}
             {order_clause}
             LIMIT ${param_count + 1} OFFSET ${param_count + 2}
@@ -4457,7 +4457,7 @@ class PGDocStatusStorage(DocStatusStorage):
         db = self._db_required()
         sql = """
             SELECT status, COUNT(*) as count
-            FROM LIGHTRAG_DOC_STATUS
+            FROM YAR_DOC_STATUS
             WHERE workspace=$1
             GROUP BY status
         """
@@ -4563,7 +4563,7 @@ class PGDocStatusStorage(DocStatusStorage):
 
         # Modified SQL to include created_at, updated_at, chunks_list, track_id, metadata, error_msg, and s3_key in both INSERT and UPDATE operations
         # All fields are updated from the input data in both INSERT and UPDATE cases
-        sql = """insert into LIGHTRAG_DOC_STATUS(workspace,id,content_summary,content_length,chunks_count,status,file_path,chunks_list,track_id,metadata,error_msg,s3_key,created_at,updated_at)
+        sql = """insert into YAR_DOC_STATUS(workspace,id,content_summary,content_length,chunks_count,status,file_path,chunks_list,track_id,metadata,error_msg,s3_key,created_at,updated_at)
                  values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                   on conflict(id,workspace) do update set
                   content_summary = EXCLUDED.content_summary,
@@ -4619,7 +4619,7 @@ class PGDocStatusStorage(DocStatusStorage):
             True if update was successful
         """
         sql = """
-            UPDATE LIGHTRAG_DOC_STATUS
+            UPDATE YAR_DOC_STATUS
             SET s3_key = $1, updated_at = CURRENT_TIMESTAMP
             WHERE workspace = $2 AND id = $3
         """
@@ -4667,7 +4667,7 @@ class PGGraphQueryException(Exception):
 
 # Graph metadata cache TTL in seconds (default: 60s)
 # Set to 0 to disable caching
-GRAPH_CACHE_TTL = float(os.getenv('LIGHTRAG_GRAPH_CACHE_TTL', '60'))
+GRAPH_CACHE_TTL = float(os.getenv('YAR_GRAPH_CACHE_TTL', '60'))
 
 
 @final
@@ -6589,17 +6589,17 @@ class PGGraphStorage(BaseGraphStorage):
 # Note: Order matters! More specific namespaces (e.g., "full_entities") must come before
 # more general ones (e.g., "entities") because is_namespace() uses endswith() matching
 NAMESPACE_TABLE_MAP = {
-    NameSpace.KV_STORE_FULL_DOCS: 'LIGHTRAG_DOC_FULL',
-    NameSpace.KV_STORE_TEXT_CHUNKS: 'LIGHTRAG_DOC_CHUNKS',
-    NameSpace.KV_STORE_FULL_ENTITIES: 'LIGHTRAG_FULL_ENTITIES',
-    NameSpace.KV_STORE_FULL_RELATIONS: 'LIGHTRAG_FULL_RELATIONS',
-    NameSpace.KV_STORE_ENTITY_CHUNKS: 'LIGHTRAG_ENTITY_CHUNKS',
-    NameSpace.KV_STORE_RELATION_CHUNKS: 'LIGHTRAG_RELATION_CHUNKS',
-    NameSpace.KV_STORE_LLM_RESPONSE_CACHE: 'LIGHTRAG_LLM_CACHE',
-    NameSpace.VECTOR_STORE_CHUNKS: 'LIGHTRAG_VDB_CHUNKS',
-    NameSpace.VECTOR_STORE_ENTITIES: 'LIGHTRAG_VDB_ENTITY',
-    NameSpace.VECTOR_STORE_RELATIONSHIPS: 'LIGHTRAG_VDB_RELATION',
-    NameSpace.DOC_STATUS: 'LIGHTRAG_DOC_STATUS',
+    NameSpace.KV_STORE_FULL_DOCS: 'YAR_DOC_FULL',
+    NameSpace.KV_STORE_TEXT_CHUNKS: 'YAR_DOC_CHUNKS',
+    NameSpace.KV_STORE_FULL_ENTITIES: 'YAR_FULL_ENTITIES',
+    NameSpace.KV_STORE_FULL_RELATIONS: 'YAR_FULL_RELATIONS',
+    NameSpace.KV_STORE_ENTITY_CHUNKS: 'YAR_ENTITY_CHUNKS',
+    NameSpace.KV_STORE_RELATION_CHUNKS: 'YAR_RELATION_CHUNKS',
+    NameSpace.KV_STORE_LLM_RESPONSE_CACHE: 'YAR_LLM_CACHE',
+    NameSpace.VECTOR_STORE_CHUNKS: 'YAR_VDB_CHUNKS',
+    NameSpace.VECTOR_STORE_ENTITIES: 'YAR_VDB_ENTITY',
+    NameSpace.VECTOR_STORE_RELATIONSHIPS: 'YAR_VDB_RELATION',
+    NameSpace.DOC_STATUS: 'YAR_DOC_STATUS',
 }
 
 
@@ -6612,9 +6612,9 @@ def namespace_to_table_name(namespace: str) -> str:
 
 # Columns for each VDB table (excluding content_vector which is not JSON-serializable)
 _VDB_TABLE_COLUMNS = {
-    'LIGHTRAG_VDB_CHUNKS': 'id, workspace, full_doc_id, chunk_order_index, tokens, content, file_path, create_time, update_time',
-    'LIGHTRAG_VDB_ENTITY': 'id, workspace, entity_name, entity_type, content, create_time, update_time, chunk_ids, file_path',
-    'LIGHTRAG_VDB_RELATION': 'id, workspace, source_id, target_id, content, create_time, update_time, chunk_ids, file_path',
+    'YAR_VDB_CHUNKS': 'id, workspace, full_doc_id, chunk_order_index, tokens, content, file_path, create_time, update_time',
+    'YAR_VDB_ENTITY': 'id, workspace, entity_name, entity_type, content, create_time, update_time, chunk_ids, file_path',
+    'YAR_VDB_RELATION': 'id, workspace, source_id, target_id, content, create_time, update_time, chunk_ids, file_path',
 }
 
 
@@ -6624,8 +6624,8 @@ def _get_vdb_columns_for_table(table_name: str) -> str:
 
 
 TABLES = {
-    'LIGHTRAG_DOC_FULL': {
-        'ddl': """CREATE TABLE LIGHTRAG_DOC_FULL (
+    'YAR_DOC_FULL': {
+        'ddl': """CREATE TABLE YAR_DOC_FULL (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     doc_name VARCHAR(1024),
@@ -6634,11 +6634,11 @@ TABLES = {
                     s3_key TEXT NULL,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_DOC_FULL_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_DOC_FULL_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_DOC_CHUNKS': {
-        'ddl': """CREATE TABLE LIGHTRAG_DOC_CHUNKS (
+    'YAR_DOC_CHUNKS': {
+        'ddl': """CREATE TABLE YAR_DOC_CHUNKS (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     full_doc_id VARCHAR(256),
@@ -6652,11 +6652,11 @@ TABLES = {
                     llm_cache_list JSONB NULL DEFAULT '[]'::jsonb,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_DOC_CHUNKS_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_DOC_CHUNKS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_VDB_CHUNKS': {
-        'ddl': f"""CREATE TABLE LIGHTRAG_VDB_CHUNKS (
+    'YAR_VDB_CHUNKS': {
+        'ddl': f"""CREATE TABLE YAR_VDB_CHUNKS (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     full_doc_id VARCHAR(256),
@@ -6667,11 +6667,11 @@ TABLES = {
                     file_path TEXT NULL,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_VDB_CHUNKS_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_VDB_CHUNKS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_VDB_ENTITY': {
-        'ddl': f"""CREATE TABLE LIGHTRAG_VDB_ENTITY (
+    'YAR_VDB_ENTITY': {
+        'ddl': f"""CREATE TABLE YAR_VDB_ENTITY (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     entity_name VARCHAR(512),
@@ -6682,11 +6682,11 @@ TABLES = {
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     chunk_ids VARCHAR(255)[] NULL,
                     file_path TEXT NULL,
-                    CONSTRAINT LIGHTRAG_VDB_ENTITY_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_VDB_ENTITY_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_VDB_RELATION': {
-        'ddl': f"""CREATE TABLE LIGHTRAG_VDB_RELATION (
+    'YAR_VDB_RELATION': {
+        'ddl': f"""CREATE TABLE YAR_VDB_RELATION (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     source_id VARCHAR(512),
@@ -6697,11 +6697,11 @@ TABLES = {
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     chunk_ids VARCHAR(255)[] NULL,
                     file_path TEXT NULL,
-                    CONSTRAINT LIGHTRAG_VDB_RELATION_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_VDB_RELATION_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_LLM_CACHE': {
-        'ddl': """CREATE TABLE LIGHTRAG_LLM_CACHE (
+    'YAR_LLM_CACHE': {
+        'ddl': """CREATE TABLE YAR_LLM_CACHE (
                     workspace varchar(255) NOT NULL,
                     id varchar(255) NOT NULL,
                     original_prompt TEXT,
@@ -6711,11 +6711,11 @@ TABLES = {
                     queryparam JSONB NULL,
                     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_LLM_CACHE_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_LLM_CACHE_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_DOC_STATUS': {
-        'ddl': """CREATE TABLE LIGHTRAG_DOC_STATUS (
+    'YAR_DOC_STATUS': {
+        'ddl': """CREATE TABLE YAR_DOC_STATUS (
                    workspace varchar(255) NOT NULL,
                    id varchar(255) NOT NULL,
                    content_summary varchar(255) NULL,
@@ -6730,55 +6730,55 @@ TABLES = {
                    s3_key TEXT NULL,
                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                   CONSTRAINT LIGHTRAG_DOC_STATUS_PK PRIMARY KEY (workspace, id)
+                   CONSTRAINT YAR_DOC_STATUS_PK PRIMARY KEY (workspace, id)
                   )"""
     },
-    'LIGHTRAG_FULL_ENTITIES': {
-        'ddl': """CREATE TABLE LIGHTRAG_FULL_ENTITIES (
+    'YAR_FULL_ENTITIES': {
+        'ddl': """CREATE TABLE YAR_FULL_ENTITIES (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     entity_names JSONB,
                     count INTEGER,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_FULL_ENTITIES_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_FULL_ENTITIES_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_FULL_RELATIONS': {
-        'ddl': """CREATE TABLE LIGHTRAG_FULL_RELATIONS (
+    'YAR_FULL_RELATIONS': {
+        'ddl': """CREATE TABLE YAR_FULL_RELATIONS (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     relation_pairs JSONB,
                     count INTEGER,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_FULL_RELATIONS_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_FULL_RELATIONS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_ENTITY_CHUNKS': {
-        'ddl': """CREATE TABLE LIGHTRAG_ENTITY_CHUNKS (
+    'YAR_ENTITY_CHUNKS': {
+        'ddl': """CREATE TABLE YAR_ENTITY_CHUNKS (
                     id VARCHAR(512),
                     workspace VARCHAR(255),
                     chunk_ids JSONB,
                     count INTEGER,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_ENTITY_CHUNKS_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_ENTITY_CHUNKS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_RELATION_CHUNKS': {
-        'ddl': """CREATE TABLE LIGHTRAG_RELATION_CHUNKS (
+    'YAR_RELATION_CHUNKS': {
+        'ddl': """CREATE TABLE YAR_RELATION_CHUNKS (
                     id VARCHAR(512),
                     workspace VARCHAR(255),
                     chunk_ids JSONB,
                     count INTEGER,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_RELATION_CHUNKS_PK PRIMARY KEY (workspace, id)
+                    CONSTRAINT YAR_RELATION_CHUNKS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
-    'LIGHTRAG_ENTITY_ALIASES': {
-        'ddl': """CREATE TABLE LIGHTRAG_ENTITY_ALIASES (
+    'YAR_ENTITY_ALIASES': {
+        'ddl': """CREATE TABLE YAR_ENTITY_ALIASES (
                     workspace VARCHAR(255),
                     alias VARCHAR(512),
                     canonical_entity VARCHAR(512),
@@ -6786,13 +6786,13 @@ TABLES = {
                     confidence FLOAT,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT LIGHTRAG_ENTITY_ALIASES_PK PRIMARY KEY (workspace, alias),
+                    CONSTRAINT YAR_ENTITY_ALIASES_PK PRIMARY KEY (workspace, alias),
                     CONSTRAINT confidence_range CHECK (confidence >= 0 AND confidence <= 1)
                     )"""
     },
     # Schema migration tracking table - NOT workspace-scoped (global schema versioning)
-    'LIGHTRAG_SCHEMA_MIGRATIONS': {
-        'ddl': """CREATE TABLE LIGHTRAG_SCHEMA_MIGRATIONS (
+    'YAR_SCHEMA_MIGRATIONS': {
+        'ddl': """CREATE TABLE YAR_SCHEMA_MIGRATIONS (
                     version INTEGER PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -6806,7 +6806,7 @@ SQL_TEMPLATES = {
     # SQL for KVStorage
     'get_by_id_full_docs': """SELECT id, COALESCE(content, '') as content,
                                 COALESCE(doc_name, '') as file_path, s3_key
-                                FROM LIGHTRAG_DOC_FULL WHERE workspace=$1 AND id=$2
+                                FROM YAR_DOC_FULL WHERE workspace=$1 AND id=$2
                             """,
     'get_by_id_text_chunks': """SELECT id, tokens, COALESCE(content, '') as content,
                                 chunk_order_index, full_doc_id, file_path, s3_key,
@@ -6814,16 +6814,16 @@ SQL_TEMPLATES = {
                                 COALESCE(llm_cache_list, '[]'::jsonb) as llm_cache_list,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                FROM LIGHTRAG_DOC_CHUNKS WHERE workspace=$1 AND id=$2
+                                FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND id=$2
                             """,
     'get_by_id_llm_response_cache': """SELECT id, original_prompt, return_value, chunk_id, cache_type, queryparam,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                FROM LIGHTRAG_LLM_CACHE WHERE workspace=$1 AND id=$2
+                                FROM YAR_LLM_CACHE WHERE workspace=$1 AND id=$2
                                """,
     'get_by_ids_full_docs': """SELECT id, COALESCE(content, '') as content,
                                  COALESCE(doc_name, '') as file_path, s3_key
-                                 FROM LIGHTRAG_DOC_FULL WHERE workspace=$1 AND id = ANY($2)
+                                 FROM YAR_DOC_FULL WHERE workspace=$1 AND id = ANY($2)
                             """,
     'get_by_ids_text_chunks': """SELECT id, tokens, COALESCE(content, '') as content,
                                   chunk_order_index, full_doc_id, file_path, s3_key,
@@ -6831,64 +6831,64 @@ SQL_TEMPLATES = {
                                   COALESCE(llm_cache_list, '[]'::jsonb) as llm_cache_list,
                                   EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                   EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                   FROM LIGHTRAG_DOC_CHUNKS WHERE workspace=$1 AND id = ANY($2)
+                                   FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'get_by_ids_llm_response_cache': """SELECT id, original_prompt, return_value, chunk_id, cache_type, queryparam,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                 FROM LIGHTRAG_LLM_CACHE WHERE workspace=$1 AND id = ANY($2)
+                                 FROM YAR_LLM_CACHE WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'get_by_id_full_entities': """SELECT id, entity_names, count,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                FROM LIGHTRAG_FULL_ENTITIES WHERE workspace=$1 AND id=$2
+                                FROM YAR_FULL_ENTITIES WHERE workspace=$1 AND id=$2
                                """,
     'get_by_id_full_relations': """SELECT id, relation_pairs, count,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                FROM LIGHTRAG_FULL_RELATIONS WHERE workspace=$1 AND id=$2
+                                FROM YAR_FULL_RELATIONS WHERE workspace=$1 AND id=$2
                                """,
     'get_by_ids_full_entities': """SELECT id, entity_names, count,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                 FROM LIGHTRAG_FULL_ENTITIES WHERE workspace=$1 AND id = ANY($2)
+                                 FROM YAR_FULL_ENTITIES WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'get_by_ids_full_relations': """SELECT id, relation_pairs, count,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                 FROM LIGHTRAG_FULL_RELATIONS WHERE workspace=$1 AND id = ANY($2)
+                                 FROM YAR_FULL_RELATIONS WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'get_by_id_entity_chunks': """SELECT id, chunk_ids, count,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                FROM LIGHTRAG_ENTITY_CHUNKS WHERE workspace=$1 AND id=$2
+                                FROM YAR_ENTITY_CHUNKS WHERE workspace=$1 AND id=$2
                                """,
     'get_by_id_relation_chunks': """SELECT id, chunk_ids, count,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                FROM LIGHTRAG_RELATION_CHUNKS WHERE workspace=$1 AND id=$2
+                                FROM YAR_RELATION_CHUNKS WHERE workspace=$1 AND id=$2
                                """,
     'get_by_ids_entity_chunks': """SELECT id, chunk_ids, count,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                 FROM LIGHTRAG_ENTITY_CHUNKS WHERE workspace=$1 AND id = ANY($2)
+                                 FROM YAR_ENTITY_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'get_by_ids_relation_chunks': """SELECT id, chunk_ids, count,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
-                                 FROM LIGHTRAG_RELATION_CHUNKS WHERE workspace=$1 AND id = ANY($2)
+                                 FROM YAR_RELATION_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
     'filter_keys': 'SELECT id FROM {table_name} WHERE workspace=$1 AND id IN ({ids})',
-    'upsert_doc_full': """INSERT INTO LIGHTRAG_DOC_FULL (id, content, doc_name, workspace, s3_key, meta)
+    'upsert_doc_full': """INSERT INTO YAR_DOC_FULL (id, content, doc_name, workspace, s3_key, meta)
                         VALUES ($1, $2, $3, $4, $5, $6)
                         ON CONFLICT (workspace,id) DO UPDATE
                            SET content = $2,
                                doc_name = $3,
-                               s3_key = COALESCE($5, LIGHTRAG_DOC_FULL.s3_key),
-                               meta = COALESCE($6, LIGHTRAG_DOC_FULL.meta),
+                               s3_key = COALESCE($5, YAR_DOC_FULL.s3_key),
+                               meta = COALESCE($6, YAR_DOC_FULL.meta),
                                update_time = CURRENT_TIMESTAMP
                        """,
-    'upsert_llm_response_cache': """INSERT INTO LIGHTRAG_LLM_CACHE(workspace,id,original_prompt,return_value,chunk_id,cache_type,queryparam)
+    'upsert_llm_response_cache': """INSERT INTO YAR_LLM_CACHE(workspace,id,original_prompt,return_value,chunk_id,cache_type,queryparam)
                                       VALUES ($1, $2, $3, $4, $5, $6, $7)
                                       ON CONFLICT (workspace,id) DO UPDATE
                                       SET original_prompt = EXCLUDED.original_prompt,
@@ -6898,7 +6898,7 @@ SQL_TEMPLATES = {
                                       queryparam=EXCLUDED.queryparam,
                                       update_time = CURRENT_TIMESTAMP
                                      """,
-    'upsert_text_chunk': """INSERT INTO LIGHTRAG_DOC_CHUNKS (workspace, id, tokens,
+    'upsert_text_chunk': """INSERT INTO YAR_DOC_CHUNKS (workspace, id, tokens,
                       chunk_order_index, full_doc_id, content, file_path, s3_key,
                       char_start, char_end, llm_cache_list, create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -6908,13 +6908,13 @@ SQL_TEMPLATES = {
                       full_doc_id=EXCLUDED.full_doc_id,
                       content = EXCLUDED.content,
                       file_path=EXCLUDED.file_path,
-                      s3_key=COALESCE(EXCLUDED.s3_key, LIGHTRAG_DOC_CHUNKS.s3_key),
+                      s3_key=COALESCE(EXCLUDED.s3_key, YAR_DOC_CHUNKS.s3_key),
                       char_start=EXCLUDED.char_start,
                       char_end=EXCLUDED.char_end,
                       llm_cache_list=EXCLUDED.llm_cache_list,
                       update_time = EXCLUDED.update_time
                      """,
-    'upsert_full_entities': """INSERT INTO LIGHTRAG_FULL_ENTITIES (workspace, id, entity_names, count,
+    'upsert_full_entities': """INSERT INTO YAR_FULL_ENTITIES (workspace, id, entity_names, count,
                       create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6)
                       ON CONFLICT (workspace,id) DO UPDATE
@@ -6922,7 +6922,7 @@ SQL_TEMPLATES = {
                       count=EXCLUDED.count,
                       update_time = EXCLUDED.update_time
                      """,
-    'upsert_full_relations': """INSERT INTO LIGHTRAG_FULL_RELATIONS (workspace, id, relation_pairs, count,
+    'upsert_full_relations': """INSERT INTO YAR_FULL_RELATIONS (workspace, id, relation_pairs, count,
                       create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6)
                       ON CONFLICT (workspace,id) DO UPDATE
@@ -6930,7 +6930,7 @@ SQL_TEMPLATES = {
                       count=EXCLUDED.count,
                       update_time = EXCLUDED.update_time
                      """,
-    'upsert_entity_chunks': """INSERT INTO LIGHTRAG_ENTITY_CHUNKS (workspace, id, chunk_ids, count,
+    'upsert_entity_chunks': """INSERT INTO YAR_ENTITY_CHUNKS (workspace, id, chunk_ids, count,
                       create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6)
                       ON CONFLICT (workspace,id) DO UPDATE
@@ -6938,7 +6938,7 @@ SQL_TEMPLATES = {
                       count=EXCLUDED.count,
                       update_time = EXCLUDED.update_time
                      """,
-    'upsert_relation_chunks': """INSERT INTO LIGHTRAG_RELATION_CHUNKS (workspace, id, chunk_ids, count,
+    'upsert_relation_chunks': """INSERT INTO YAR_RELATION_CHUNKS (workspace, id, chunk_ids, count,
                       create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6)
                       ON CONFLICT (workspace,id) DO UPDATE
@@ -6947,7 +6947,7 @@ SQL_TEMPLATES = {
                       update_time = EXCLUDED.update_time
                      """,
     # SQL for VectorStorage
-    'upsert_chunk': """INSERT INTO LIGHTRAG_VDB_CHUNKS (workspace, id, tokens,
+    'upsert_chunk': """INSERT INTO YAR_VDB_CHUNKS (workspace, id, tokens,
                       chunk_order_index, full_doc_id, content, content_vector, file_path,
                       create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -6960,7 +6960,7 @@ SQL_TEMPLATES = {
                       file_path=EXCLUDED.file_path,
                       update_time = EXCLUDED.update_time
                      """,
-    'upsert_entity': """INSERT INTO LIGHTRAG_VDB_ENTITY (workspace, id, entity_name, entity_type, content,
+    'upsert_entity': """INSERT INTO YAR_VDB_ENTITY (workspace, id, entity_name, entity_type, content,
                       content_vector, chunk_ids, file_path, create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8, $9, $10)
                       ON CONFLICT (workspace,id) DO UPDATE
@@ -6972,7 +6972,7 @@ SQL_TEMPLATES = {
                       file_path=EXCLUDED.file_path,
                       update_time=EXCLUDED.update_time
                      """,
-    'upsert_relationship': """INSERT INTO LIGHTRAG_VDB_RELATION (workspace, id, source_id,
+    'upsert_relationship': """INSERT INTO YAR_VDB_RELATION (workspace, id, source_id,
                       target_id, content, content_vector, chunk_ids, file_path, create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8, $9, $10)
                       ON CONFLICT (workspace,id) DO UPDATE
@@ -6988,7 +6988,7 @@ SQL_TEMPLATES = {
                      SELECT r.source_id AS src_id,
                             r.target_id AS tgt_id,
                             EXTRACT(EPOCH FROM r.create_time)::BIGINT AS created_at
-                     FROM LIGHTRAG_VDB_RELATION r
+                     FROM YAR_VDB_RELATION r
                      WHERE r.workspace = $1
                        AND r.content_vector {distance_op} '[{embedding_string}]'::vector < $2
                      ORDER BY r.content_vector {distance_op} '[{embedding_string}]'::vector
@@ -6999,7 +6999,7 @@ SQL_TEMPLATES = {
                        e.entity_type,
                        e.content,
                        EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
-                FROM LIGHTRAG_VDB_ENTITY e
+                FROM YAR_VDB_ENTITY e
                 WHERE e.workspace = $1
                   AND e.content_vector {distance_op} '[{embedding_string}]'::vector < $2
                 ORDER BY e.content_vector {distance_op} '[{embedding_string}]'::vector
@@ -7011,8 +7011,8 @@ SQL_TEMPLATES = {
                      c.file_path,
                      d.s3_key,
                      EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
-              FROM LIGHTRAG_VDB_CHUNKS c
-              LEFT JOIN LIGHTRAG_DOC_CHUNKS d ON c.workspace = d.workspace AND c.id = d.id
+              FROM YAR_VDB_CHUNKS c
+              LEFT JOIN YAR_DOC_CHUNKS d ON c.workspace = d.workspace AND c.id = d.id
               WHERE c.workspace = $1
                 AND c.content_vector {distance_op} '[{embedding_string}]'::vector < $2
               ORDER BY c.content_vector {distance_op} '[{embedding_string}]'::vector
@@ -7025,11 +7025,11 @@ SQL_TEMPLATES = {
     # Entity alias cache
     'get_alias': """
         SELECT canonical_entity, method, confidence
-        FROM LIGHTRAG_ENTITY_ALIASES
+        FROM YAR_ENTITY_ALIASES
         WHERE workspace=$1 AND alias=$2
         """,
     'upsert_alias': """
-        INSERT INTO LIGHTRAG_ENTITY_ALIASES
+        INSERT INTO YAR_ENTITY_ALIASES
             (workspace, alias, canonical_entity, method, confidence, create_time, update_time)
         VALUES ($1, $2, $3, $4, $5, $6, $6)
         ON CONFLICT (workspace, alias) DO UPDATE SET
@@ -7039,7 +7039,7 @@ SQL_TEMPLATES = {
             update_time = CURRENT_TIMESTAMP
         """,
     'upsert_alias_extended': """
-        INSERT INTO LIGHTRAG_ENTITY_ALIASES
+        INSERT INTO YAR_ENTITY_ALIASES
             (workspace, alias, canonical_entity, method, confidence,
              llm_reasoning, source_doc_id, entity_type, create_time, update_time)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
@@ -7054,16 +7054,16 @@ SQL_TEMPLATES = {
         """,
     'get_aliases_for_canonical': """
         SELECT alias, method, confidence
-        FROM LIGHTRAG_ENTITY_ALIASES
+        FROM YAR_ENTITY_ALIASES
         WHERE workspace=$1 AND canonical_entity=$2
         """,
     # Orphan connection queries
     'get_orphan_entities': """
         SELECT e.id, e.entity_name, e.content, e.content_vector
-        FROM LIGHTRAG_VDB_ENTITY e
+        FROM YAR_VDB_ENTITY e
         WHERE e.workspace = $1
           AND NOT EXISTS (
-              SELECT 1 FROM LIGHTRAG_VDB_RELATION r
+              SELECT 1 FROM YAR_VDB_RELATION r
               WHERE r.workspace = $1
                 AND (r.source_id = e.entity_name OR r.target_id = e.entity_name)
           )
@@ -7072,13 +7072,13 @@ SQL_TEMPLATES = {
     # $1 = workspace, $2 = max_degree
     'get_sparse_entities': """
         SELECT e.id, e.entity_name, e.content, e.content_vector, COALESCE(degree_counts.degree, 0) as degree
-        FROM LIGHTRAG_VDB_ENTITY e
+        FROM YAR_VDB_ENTITY e
         LEFT JOIN (
             SELECT entity_name, COUNT(*) as degree
             FROM (
-                SELECT source_id as entity_name FROM LIGHTRAG_VDB_RELATION WHERE workspace = $1
+                SELECT source_id as entity_name FROM YAR_VDB_RELATION WHERE workspace = $1
                 UNION ALL
-                SELECT target_id as entity_name FROM LIGHTRAG_VDB_RELATION WHERE workspace = $1
+                SELECT target_id as entity_name FROM YAR_VDB_RELATION WHERE workspace = $1
             ) as edges
             GROUP BY entity_name
         ) degree_counts ON e.entity_name = degree_counts.entity_name
@@ -7092,7 +7092,7 @@ SQL_TEMPLATES = {
     'get_orphan_candidates': """
         SELECT e.id, e.entity_name, e.content,
                1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) AS similarity
-        FROM LIGHTRAG_VDB_ENTITY e
+        FROM YAR_VDB_ENTITY e
         WHERE e.workspace = $1
           AND e.entity_name != $2
           AND 1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) >= $3
@@ -7102,12 +7102,12 @@ SQL_TEMPLATES = {
     'get_connected_candidates': """
         SELECT e.id, e.entity_name, e.content,
                1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) AS similarity
-        FROM LIGHTRAG_VDB_ENTITY e
+        FROM YAR_VDB_ENTITY e
         WHERE e.workspace = $1
           AND e.entity_name != $2
           AND 1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) >= $3
           AND EXISTS (
-              SELECT 1 FROM LIGHTRAG_VDB_RELATION r
+              SELECT 1 FROM YAR_VDB_RELATION r
               WHERE r.workspace = $1
                 AND (r.source_id = e.entity_name OR r.target_id = e.entity_name)
           )

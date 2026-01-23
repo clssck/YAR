@@ -192,12 +192,12 @@ class TestSchemaTablesDefinition:
     """Tests for schema table definitions."""
 
     def test_migrations_table_in_tables_dict(self):
-        """LIGHTRAG_SCHEMA_MIGRATIONS should be defined in TABLES."""
+        """YAR_SCHEMA_MIGRATIONS should be defined in TABLES."""
         from yar.kg.postgres_impl import TABLES
 
-        assert 'LIGHTRAG_SCHEMA_MIGRATIONS' in TABLES
+        assert 'YAR_SCHEMA_MIGRATIONS' in TABLES
 
-        ddl = TABLES['LIGHTRAG_SCHEMA_MIGRATIONS']['ddl']
+        ddl = TABLES['YAR_SCHEMA_MIGRATIONS']['ddl']
         assert 'version INTEGER PRIMARY KEY' in ddl
         assert 'name VARCHAR' in ddl
         assert 'applied_at TIMESTAMP' in ddl
@@ -207,7 +207,7 @@ class TestSchemaTablesDefinition:
         """Migrations table should NOT have workspace column (global schema)."""
         from yar.kg.postgres_impl import TABLES
 
-        ddl = TABLES['LIGHTRAG_SCHEMA_MIGRATIONS']['ddl']
+        ddl = TABLES['YAR_SCHEMA_MIGRATIONS']['ddl']
         # The table should have version as primary key, not (workspace, id)
         assert 'version INTEGER PRIMARY KEY' in ddl
         # Should not have workspace in the primary key
@@ -241,9 +241,9 @@ class TestVectorDimensionValidation:
         """Vector tables should be correctly identified."""
         # These are the tables that have vector columns
         expected_vector_tables = [
-            'LIGHTRAG_VDB_CHUNKS',
-            'LIGHTRAG_VDB_ENTITY',
-            'LIGHTRAG_VDB_RELATION',
+            'YAR_VDB_CHUNKS',
+            'YAR_VDB_ENTITY',
+            'YAR_VDB_RELATION',
         ]
 
         from yar.kg.postgres_impl import TABLES

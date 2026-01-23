@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Query Cache Cleanup Tool for LightRAG
+LLM Query Cache Cleanup Tool for YAR
 
 This tool cleans up LLM query cache (mix:*, hybrid:*, local:*, global:*)
 from PGKVStorage while preserving workspace isolation.
@@ -360,7 +360,7 @@ class CleanupTool:
     def print_header(self):
         """Print tool header"""
         print('\n' + '=' * 60)
-        print('LLM Query Cache Cleanup Tool - LightRAG')
+        print('LLM Query Cache Cleanup Tool - YAR')
         print('=' * 60)
 
     def print_storage_types(self):

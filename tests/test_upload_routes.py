@@ -1,7 +1,7 @@
 """Tests for upload routes in yar/api/routers/upload_routes.py.
 
 This module tests the S3 document staging endpoints using httpx AsyncClient
-and FastAPI's TestClient pattern with mocked S3Client and LightRAG.
+and FastAPI's TestClient pattern with mocked S3Client and YAR.
 """
 
 import contextlib
@@ -290,7 +290,7 @@ def mock_s3_client():
 
 @pytest.fixture
 def mock_rag():
-    """Create a mock LightRAG instance."""
+    """Create a mock YAR instance."""
     rag = MagicMock()
     rag.ainsert = AsyncMock()
     return rag

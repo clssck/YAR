@@ -1,7 +1,7 @@
 import json
 import re
 
-from yar import LightRAG, QueryParam
+from yar import YAR, QueryParam
 from yar.utils import always_get_an_event_loop, logger
 
 
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     mode = 'hybrid'
     WORKING_DIR = f'../{cls}'
 
-    rag = LightRAG(working_dir=WORKING_DIR)
+    rag = YAR(working_dir=WORKING_DIR)
     query_param = QueryParam(mode=mode)
 
     queries = extract_queries(f'../datasets/questions/{cls}_questions.txt')

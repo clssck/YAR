@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script: Demonstrates usage of aquery_data FastAPI endpoint
-Query content: Who is the author of LightRAG
+Query content: Who is the author of YAR
 
 Updated to handle the new data format where:
 - Response includes status, message, data, and metadata fields at top level
@@ -92,7 +92,7 @@ def test_query_endpoint_references():
     print('Testing /query endpoint references functionality')
     print('=' * 60)
 
-    query_text = 'who authored LightRAG'
+    query_text = 'who authored YAR'
     endpoint = f'{BASE_URL}/query'
 
     # Test 1: References enabled (default)
@@ -197,7 +197,7 @@ def test_query_stream_endpoint_references():
     print('Testing /query/stream endpoint references functionality')
     print('=' * 60)
 
-    query_text = 'who authored LightRAG'
+    query_text = 'who authored YAR'
     endpoint = f'{BASE_URL}/query/stream'
 
     # Test 1: Streaming with references enabled
@@ -326,7 +326,7 @@ def test_references_consistency():
     print('Testing references consistency across endpoints')
     print('=' * 60)
 
-    query_text = 'who authored LightRAG'
+    query_text = 'who authored YAR'
     query_params = {
         'query': query_text,
         'mode': 'mix',
@@ -486,7 +486,7 @@ def test_aquery_data_endpoint():
     }
 
     print('=' * 60)
-    print('LightRAG aquery_data endpoint test')
+    print('YAR aquery_data endpoint test')
     print('   Returns structured data including entities, relationships and text chunks')
     print('   Can be used for custom processing and analysis')
     print('=' * 60)
@@ -516,7 +516,7 @@ def test_aquery_data_endpoint():
             print(f'Error message: {response.text}')
 
     except requests.exceptions.ConnectionError:
-        print('❌ Connection failed: Please ensure LightRAG API service is running')
+        print('❌ Connection failed: Please ensure YAR API service is running')
         print('   Start command: python -m yar.api.yar_server')
     except requests.exceptions.Timeout:
         print('❌ Request timeout: Query processing took too long')
@@ -642,7 +642,7 @@ def print_query_results(data: dict[str, Any]):
 def compare_with_regular_query():
     """Compare results between regular query and data query"""
 
-    query_text = 'LightRAG的作者是谁'
+    query_text = 'YAR的作者是谁'
 
     print('\n🔄 Comparison test: Regular query vs Data query')
     print('-' * 60)
@@ -679,7 +679,7 @@ def run_all_reference_tests():
     """Run all reference-related tests"""
 
     print('\n' + '🚀' * 20)
-    print('LightRAG References Test Suite')
+    print('YAR References Test Suite')
     print('🚀' * 20)
 
     all_tests_passed = True
@@ -746,7 +746,7 @@ if __name__ == '__main__':
         run_all_reference_tests()
 
         print('\n💡 Usage tips:')
-        print('1. Ensure LightRAG API service is running')
+        print('1. Ensure YAR API service is running')
         print('2. Adjust base_url and authentication information as needed')
         print('3. Modify query parameters to test different retrieval strategies')
         print('4. Data query results can be used for further analysis and processing')

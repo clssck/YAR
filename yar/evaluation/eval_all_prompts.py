@@ -249,7 +249,7 @@ class RAGEvaluator:
         self.model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
     async def get_context(self, query: str, mode: str = "mix") -> str:
-        """Get context from LightRAG server."""
+        """Get context from YAR server."""
         import httpx
 
         async with httpx.AsyncClient(timeout=60) as client:
@@ -1159,7 +1159,7 @@ async def main():
     )
     parser.add_argument("--quick", "-q", action="store_true", help="Quick mode (fewer test cases)")
     parser.add_argument("--num-cases", "-n", type=int, help="Number of test cases")
-    parser.add_argument("--server", "-s", type=str, default="http://localhost:9621", help="LightRAG server URL")
+    parser.add_argument("--server", "-s", type=str, default="http://localhost:9621", help="YAR server URL")
     parser.add_argument("--output", "-o", type=str, default="eval_results", help="Output directory")
     parser.add_argument("--report", "-r", type=str, help="Generate markdown report")
     args = parser.parse_args()

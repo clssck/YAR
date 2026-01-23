@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
-import type { LightragStatus } from '@/api/yar'
+import type { YarStatus } from '@/api/yar'
 
-const StatusCard = ({ status }: { status: LightragStatus | null }) => {
+const StatusCard = ({ status }: { status: YarStatus | null }) => {
   const { t } = useTranslation()
   if (!status) {
     return <div className="text-foreground text-xs">{t('graphPanel.statusCard.unavailable')}</div>

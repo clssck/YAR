@@ -31,10 +31,10 @@ from yar.utils import UNICODE_SECURITY_STRIP
 
 @pytest.fixture
 async def setup_rag(tmp_path):
-    """Create a LightRAG instance for testing."""
+    """Create a YAR instance for testing."""
     import os
 
-    from yar import LightRAG
+    from yar import YAR
     from yar.kg.postgres_impl import ClientManager
     from yar.llm.openai import gpt_4o_mini_complete, openai_embed
     from yar.utils import EmbeddingFunc
@@ -56,7 +56,7 @@ async def setup_rag(tmp_path):
     embedding_func.send_dimensions = os.getenv('EMBEDDING_SEND_DIM', 'false').lower() == 'true'
 
     workspace = f'test_unicode_int_{uuid.uuid4().hex[:8]}'
-    rag = LightRAG(
+    rag = YAR(
         working_dir=str(tmp_path / workspace),
         workspace=workspace,
         embedding_func=embedding_func,
@@ -71,13 +71,13 @@ async def setup_rag(tmp_path):
 
     db = rag.entities_vdb._db_required()
     for table in [
-        'LIGHTRAG_DOC_FULL',
-        'LIGHTRAG_DOC_CHUNKS',
-        'LIGHTRAG_DOC_STATUS',
-        'LIGHTRAG_VDB_ENTITY',
-        'LIGHTRAG_VDB_RELATION',
-        'LIGHTRAG_VDB_CHUNKS',
-        'LIGHTRAG_ENTITY_ALIASES',
+        'YAR_DOC_FULL',
+        'YAR_DOC_CHUNKS',
+        'YAR_DOC_STATUS',
+        'YAR_VDB_ENTITY',
+        'YAR_VDB_RELATION',
+        'YAR_VDB_CHUNKS',
+        'YAR_ENTITY_ALIASES',
     ]:
         with contextlib.suppress(Exception):
             await db.execute(f'DELETE FROM {table} WHERE workspace = $1', data={'workspace': workspace})
@@ -125,7 +125,7 @@ class TestUnicodeNormalizationIntegration:
         # Get all entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
@@ -162,7 +162,7 @@ class TestUnicodeNormalizationIntegration:
         # Get entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
@@ -197,7 +197,7 @@ class TestUnicodeNormalizationIntegration:
         # Get entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
@@ -310,7 +310,7 @@ class TestPipelineIntegrationSmoke:
         # Get entity names from database
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
+            'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
 
         entity_names = [e['entity_name'] for e in (entities or [])]
@@ -330,11 +330,11 @@ if __name__ == '__main__':
 
     async def run_quick_test():
         """Quick manual test without pytest."""
-        from yar import LightRAG
+        from yar import YAR
         from yar.llm.openai import gpt_4o_mini_complete, openai_embed
 
         workspace = f'manual_test_{uuid.uuid4().hex[:8]}'
-        rag = LightRAG(
+        rag = YAR(
             working_dir=f'/tmp/{workspace}',
             workspace=workspace,
             embedding_func=openai_embed,
@@ -355,7 +355,7 @@ if __name__ == '__main__':
         # Check entities
         db = rag.entities_vdb._db_required()
         entities = await db.query(
-            'SELECT entity_name FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1', params=[workspace], multirows=True
+            'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[workspace], multirows=True
         )
 
         print(f'\nExtracted entities ({len(entities or [])}):')

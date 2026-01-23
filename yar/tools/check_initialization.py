@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Diagnostic tool to check LightRAG initialization status.
+Diagnostic tool to check YAR initialization status.
 
-This tool helps developers verify that their LightRAG instance is properly
+This tool helps developers verify that their YAR instance is properly
 initialized and ready to use. It should be called AFTER initialize_storages()
 to validate that all components are correctly set up.
 
 Usage:
     # Basic usage in your code:
-    rag = LightRAG(...)
+    rag = YAR(...)
     await rag.initialize_storages()
     await check_yar_setup(rag, verbose=True)
 
@@ -23,17 +23,17 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from yar import LightRAG
+from yar import YAR
 from yar.base import StoragesStatus
 from yar.utils import logger
 
 
-async def check_yar_setup(rag_instance: LightRAG, verbose: bool = False) -> bool:
+async def check_yar_setup(rag_instance: YAR, verbose: bool = False) -> bool:
     """
-    Check if a LightRAG instance is properly initialized.
+    Check if a YAR instance is properly initialized.
 
     Args:
-        rag_instance: The LightRAG instance to check
+        rag_instance: The YAR instance to check
         verbose: If True, print detailed diagnostic information
 
     Returns:
@@ -42,11 +42,11 @@ async def check_yar_setup(rag_instance: LightRAG, verbose: bool = False) -> bool
     issues = []
     warnings = []
 
-    logger.info('🔍 Checking LightRAG initialization status...')
+    logger.info('🔍 Checking YAR initialization status...')
 
     # Check storage initialization status
     if not hasattr(rag_instance, '_storages_status'):
-        issues.append('LightRAG instance missing _storages_status attribute')
+        issues.append('YAR instance missing _storages_status attribute')
     elif rag_instance._storages_status != StoragesStatus.INITIALIZED:
         issues.append(f'Storages not initialized (status: {rag_instance._storages_status.name})')
     else:
@@ -105,7 +105,7 @@ async def check_yar_setup(rag_instance: LightRAG, verbose: bool = False) -> bool
 
         logger.info('📝 To fix, run this initialization sequence:')
         logger.info('  await rag.initialize_storages()')
-        logger.info('📚 Documentation: https://github.com/HKUDS/LightRAG#important-initialization-requirements')
+        logger.info('📚 Documentation: https://github.com/clssck/YAR#important-initialization-requirements')
 
         if warnings and verbose:
             logger.warning('⚠️  Warnings (might be normal):')
@@ -114,7 +114,7 @@ async def check_yar_setup(rag_instance: LightRAG, verbose: bool = False) -> bool
 
         return False
     else:
-        logger.info('✅ LightRAG is properly initialized and ready to use!')
+        logger.info('✅ YAR is properly initialized and ready to use!')
 
         if warnings and verbose:
             logger.warning('⚠️  Warnings (might be normal):')
@@ -129,11 +129,11 @@ async def demo():
     from yar.llm.openai import gpt_4o_mini_complete, openai_embed
 
     logger.info('=' * 50)
-    logger.info('LightRAG Initialization Diagnostic Tool')
+    logger.info('YAR Initialization Diagnostic Tool')
     logger.info('=' * 50)
 
     # Create test instance
-    rag = LightRAG(
+    rag = YAR(
         working_dir='./test_diagnostic',
         embedding_func=openai_embed,
         llm_model_func=gpt_4o_mini_complete,
@@ -157,7 +157,7 @@ async def demo():
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Check LightRAG initialization status')
+    parser = argparse.ArgumentParser(description='Check YAR initialization status')
     parser.add_argument('--demo', action='store_true', help='Run a demonstration with a test instance')
     parser.add_argument(
         '--verbose',

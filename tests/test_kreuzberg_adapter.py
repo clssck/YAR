@@ -237,7 +237,7 @@ def hello():
 
         test_file = tmp_path / 'test.json'
         test_content = """{
-    "name": "LightRAG",
+    "name": "YAR",
     "description": "A retrieval-augmented generation framework",
     "features": ["graph-based", "semantic search", "knowledge extraction"]
 }"""
@@ -762,7 +762,7 @@ class TestRealWorldFormats:
         content_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
-    <w:p><w:r><w:t>Test Document for LightRAG</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Test Document for YAR</w:t></w:r></w:p>
     <w:p><w:r><w:t>Section 1: Introduction - This provides context.</w:t></w:r></w:p>
     <w:p><w:r><w:t>Section 2: Methods - The methodology used.</w:t></w:r></w:p>
     <w:p><w:r><w:t>Section 3: Results - Demonstrates effectiveness.</w:t></w:r></w:p>
@@ -804,7 +804,7 @@ class TestRealWorldFormats:
         from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from yar.operate import chunking_by_semantic
 
-        md_content = """# LightRAG Test Document
+        md_content = """# YAR Test Document
 
 ## Introduction
 
@@ -819,13 +819,13 @@ This is a test markdown document for verifying extraction and chunking.
 ## Code Example
 
 ```python
-from yar import LightRAG
-rag = LightRAG(working_dir="./storage")
+from yar import YAR
+rag = YAR(working_dir="./storage")
 ```
 
 ## Conclusion
 
-LightRAG provides powerful RAG capabilities.
+YAR provides powerful RAG capabilities.
 """
         md_path = tmp_path / 'test.md'
         md_path.write_text(md_content)
@@ -833,7 +833,7 @@ LightRAG provides powerful RAG capabilities.
         result = extract_with_kreuzberg_sync(md_path)
 
         assert result.content is not None
-        assert 'LightRAG' in result.content
+        assert 'YAR' in result.content
 
         # Test chunking
         chunks = chunking_by_semantic(result.content, max_chars=300, max_overlap=30)
@@ -1039,7 +1039,7 @@ class TestCreateChunker:
 
         content = 'Test content for chunking. ' * 20
 
-        # Call with all parameters that LightRAG's chunking_func expects
+        # Call with all parameters that YAR's chunking_func expects
         chunks = chunking_func(
             mock_tokenizer,  # tokenizer
             content,  # content
@@ -2177,12 +2177,12 @@ class TestRealEvaluationDocuments:
         assert any(term in content_lower for term in ['fifa', 'world cup', 'football', 'soccer'])
 
     def test_extract_yar_overview_markdown(self, sample_docs_path: Path):
-        """Test extraction of LightRAG overview markdown."""
+        """Test extraction of YAR overview markdown."""
         from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
 
         doc_path = sample_docs_path / '01_yar_overview.md'
         if not doc_path.exists():
-            pytest.skip('LightRAG overview document not available')
+            pytest.skip('YAR overview document not available')
 
         result = extract_with_kreuzberg_sync(doc_path)
 
@@ -2348,14 +2348,14 @@ Content for section C concluding the document.
         assert 'Section C' in all_content or 'section c' in all_content.lower()
 
     def test_pipeline_with_yar_chunking_func(self, tmp_path: Path):
-        """Test pipeline using LightRAG's create_chunker."""
+        """Test pipeline using YAR's create_chunker."""
         from unittest.mock import MagicMock
 
         from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from yar.operate import create_chunker
 
         doc_path = tmp_path / 'test_doc.txt'
-        doc_path.write_text('This is test content for LightRAG pipeline. ' * 50)
+        doc_path.write_text('This is test content for YAR pipeline. ' * 50)
 
         # Extract
         result = extract_with_kreuzberg_sync(doc_path)
@@ -2663,20 +2663,20 @@ Third paragraph concluding the document.
 
 
 # =============================================================================
-# Integration with LightRAG Class
+# Integration with YAR Class
 # =============================================================================
 
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
-class TestLightRAGIntegration:
-    """Test integration with the main LightRAG class."""
+class TestYARIntegration:
+    """Test integration with the main YAR class."""
 
     def test_yar_default_chunking_is_semantic(self):
-        """Verify LightRAG uses semantic chunking by default."""
-        from yar.yar import LightRAG
+        """Verify YAR uses semantic chunking by default."""
+        from yar.yar import YAR
 
         # Create with minimal config (no actual LLM)
-        rag = LightRAG.__new__(LightRAG)
+        rag = YAR.__new__(YAR)
         rag.chunk_token_size = 1200
         rag.chunk_overlap_token_size = 100
         _ = rag  # Use the instance
@@ -3011,7 +3011,7 @@ Section
 
         test_file = tmp_path / 'test.yaml'
         content = """
-name: LightRAG
+name: YAR
 version: 1.0.0
 features:
   - graph_based: true
@@ -3933,9 +3933,9 @@ pip install yar
 ## Quick Start
 
 ```python
-from yar import LightRAG
+from yar import YAR
 
-rag = LightRAG(working_dir="./storage")
+rag = YAR(working_dir="./storage")
 rag.insert("Your document content here")
 result = rag.query("What is this about?")
 ```
@@ -3949,7 +3949,7 @@ result = rag.query("What is this about?")
 
 ## Error Handling
 
-The library raises `LightRAGError` for configuration issues.
+The library raises `YARError` for configuration issues.
 """
         doc_path = tmp_path / 'docs.md'
         doc_path.write_text(content)
@@ -4718,7 +4718,7 @@ class TestKreuzbergPerformanceCharacteristics:
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
 class TestKreuzbergAdapterConversion:
-    """Test adapter conversion between Kreuzberg and LightRAG formats."""
+    """Test adapter conversion between Kreuzberg and YAR formats."""
 
     def test_extraction_result_conversion(self, tmp_path: Path):
         """Test that Kreuzberg results are properly converted."""
@@ -4760,7 +4760,7 @@ class TestKreuzbergAdapterConversion:
             assert hasattr(chunk, 'index')
 
     def test_options_conversion(self):
-        """Test that LightRAG options convert to Kreuzberg config."""
+        """Test that YAR options convert to Kreuzberg config."""
         from yar.document.kreuzberg_adapter import (
             ChunkingOptions,
             ExtractionOptions,
@@ -5060,11 +5060,11 @@ This is the second section with different content.
 
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
-class TestChunksToLightRAGFormat:
+class TestChunksToYARFormat:
     """Test chunks_to_yar_format conversion function."""
 
     def test_chunks_to_yar_format_basic(self, tmp_path: Path):
-        """Test basic conversion of chunks to LightRAG format."""
+        """Test basic conversion of chunks to YAR format."""
         from yar.document import chunks_to_yar_format, extract_and_chunk_sync
 
         test_file = tmp_path / 'format_test.txt'
@@ -5195,7 +5195,7 @@ class TestOnePassIntegration:
         assert result.chunks is not None
         assert len(result.chunks) >= 1
 
-        # Convert to LightRAG format
+        # Convert to YAR format
         chunks = chunks_to_yar_format(result)
         assert len(chunks) >= 1
         for chunk in chunks:

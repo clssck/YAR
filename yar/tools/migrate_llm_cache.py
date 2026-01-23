@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cache Migration Tool for LightRAG (PostgreSQL only)
+LLM Cache Migration Tool for YAR (PostgreSQL only)
 
 This tool migrates LLM response cache (default:extract:* and default:summary:*)
 between PostgreSQL-backed KV storage instances while preserving workspace isolation.
@@ -442,7 +442,7 @@ class MigrationTool:
     def print_header(self):
         """Print tool header"""
         print('\n' + '=' * 50)
-        print('LLM Cache Migration Tool - LightRAG')
+        print('LLM Cache Migration Tool - YAR')
         print('=' * 50)
 
     def print_storage_types(self):

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Ingest test documents into LightRAG for testing.
+Ingest test documents into YAR for testing.
 
 This script reads text files from a directory and batch-uploads them to
-LightRAG via the /documents/texts API endpoint, then polls for completion.
+YAR via the /documents/texts API endpoint, then polls for completion.
 
 Usage:
     python yar/evaluation/ingest_test_docs.py
@@ -25,17 +25,17 @@ async def ingest_documents(
     input_dir: Path,
     rag_url: str,
 ) -> dict:
-    """Ingest all text files from directory into LightRAG.
+    """Ingest all text files from directory into YAR.
 
     Args:
         input_dir: Directory containing .txt or .md files
-        rag_url: LightRAG API base URL
+        rag_url: YAR API base URL
 
     Returns:
         Dict with ingestion statistics
     """
     timeout = httpx.Timeout(120.0, connect=30.0)
-    api_key = os.getenv('LIGHTRAG_API_KEY')
+    api_key = os.getenv('YAR_API_KEY')
     headers = {'X-API-Key': api_key} if api_key else {}
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -43,11 +43,11 @@ async def ingest_documents(
         try:
             health = await client.get(f'{rag_url}/health')
             if health.status_code != 200:
-                raise ConnectionError(f'LightRAG not healthy: {health.status_code}')
+                raise ConnectionError(f'YAR not healthy: {health.status_code}')
         except httpx.ConnectError as e:
-            raise ConnectionError(f'Cannot connect to LightRAG at {rag_url}') from e
+            raise ConnectionError(f'Cannot connect to YAR at {rag_url}') from e
 
-        print(f'✓ Connected to LightRAG at {rag_url}')
+        print(f'✓ Connected to YAR at {rag_url}')
 
         # Collect all text files
         files = list(input_dir.glob('*.txt')) + list(input_dir.glob('*.md'))
@@ -130,7 +130,7 @@ async def ingest_documents(
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='Ingest test documents into LightRAG')
+    parser = argparse.ArgumentParser(description='Ingest test documents into YAR')
     parser.add_argument(
         '--input',
         '-i',
@@ -143,14 +143,14 @@ async def main():
         '-r',
         type=str,
         default=None,
-        help=f'LightRAG API URL (default: {DEFAULT_RAG_URL})',
+        help=f'YAR API URL (default: {DEFAULT_RAG_URL})',
     )
     args = parser.parse_args()
 
     input_dir = Path(args.input)
-    rag_url = args.rag_url or os.getenv('LIGHTRAG_API_URL', DEFAULT_RAG_URL)
+    rag_url = args.rag_url or os.getenv('YAR_API_URL', DEFAULT_RAG_URL)
 
-    print('=== LightRAG Document Ingestion ===')
+    print('=== YAR Document Ingestion ===')
     print(f'Input: {input_dir}/')
     print(f'RAG URL: {rag_url}')
     print()

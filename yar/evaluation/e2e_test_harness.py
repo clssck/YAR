@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-E2E RAGAS Test Harness for LightRAG
+E2E RAGAS Test Harness for YAR
 
 Complete end-to-end testing pipeline:
 1. Download arXiv papers (reproducible test data)
 2. Clear existing data (optional)
-3. Ingest papers into LightRAG
+3. Ingest papers into YAR
 4. Wait for processing
 5. Generate Q&A dataset
 6. Run RAGAS evaluation
@@ -53,7 +53,7 @@ MAX_WAIT_SECONDS = 600  # 10 minutes max wait for processing
 
 
 class E2ETestHarness:
-    """End-to-end test harness for LightRAG RAGAS evaluation."""
+    """End-to-end test harness for YAR RAGAS evaluation."""
 
     def __init__(
         self,
@@ -65,7 +65,7 @@ class E2ETestHarness:
         dataset_path: str | None = None,
         output_dir: str | None = None,
     ):
-        self.rag_url = (rag_url or os.getenv('LIGHTRAG_API_URL', DEFAULT_RAG_URL)).rstrip('/')
+        self.rag_url = (rag_url or os.getenv('YAR_API_URL', DEFAULT_RAG_URL)).rstrip('/')
         self.paper_ids = paper_ids or DEFAULT_PAPERS
         self.questions_per_paper = questions_per_paper
         self.skip_download = skip_download
@@ -78,19 +78,19 @@ class E2ETestHarness:
         self.results_dir = Path(output_dir) if output_dir else self.eval_dir / 'results'
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        # API key for LightRAG
-        self.api_key = os.getenv('LIGHTRAG_API_KEY')
+        # API key for YAR
+        self.api_key = os.getenv('YAR_API_KEY')
 
     async def check_yar_health(self) -> bool:
-        """Check if LightRAG API is accessible."""
+        """Check if YAR API is accessible."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(f'{self.rag_url}/health')
                 response.raise_for_status()
-                logger.info(f'LightRAG API accessible at {self.rag_url}')
+                logger.info(f'YAR API accessible at {self.rag_url}')
                 return True
         except Exception as e:
-            logger.error(f'Cannot connect to LightRAG API: {e}')
+            logger.error(f'Cannot connect to YAR API: {e}')
             return False
 
     async def download_papers(self) -> list[str]:
@@ -114,7 +114,7 @@ class E2ETestHarness:
         return [r['path'] for r in results if r['status'] in ('downloaded', 'exists')]
 
     async def clear_existing_data(self) -> bool:
-        """Clear existing documents in LightRAG (optional)."""
+        """Clear existing documents in YAR (optional)."""
         logger.info('Clearing existing data...')
         try:
             headers = {'X-API-Key': self.api_key} if self.api_key else {}
@@ -152,12 +152,12 @@ class E2ETestHarness:
             return False
 
     async def ingest_papers(self, paper_paths: list[str]) -> bool:
-        """Ingest papers into LightRAG."""
+        """Ingest papers into YAR."""
         if self.skip_ingest:
             logger.info('Paper ingestion skipped (--skip-ingest)')
             return True
 
-        logger.info('STEP 2: Ingest Papers into LightRAG')
+        logger.info('STEP 2: Ingest Papers into YAR')
 
         headers = {'X-API-Key': self.api_key} if self.api_key else {}
 
@@ -264,7 +264,7 @@ class E2ETestHarness:
 
     async def run_full_pipeline(self) -> dict:
         """Run the complete E2E test pipeline."""
-        logger.info('E2E RAGAS TEST HARNESS FOR LIGHTRAG')
+        logger.info('E2E RAGAS TEST HARNESS FOR YAR')
         logger.info(f'RAG URL:    {self.rag_url}')
         logger.info(f'Papers:     {", ".join(self.paper_ids)}')
         logger.info(f'Questions:  {self.questions_per_paper} per paper')
@@ -272,9 +272,9 @@ class E2ETestHarness:
 
         start_time = time.time()
 
-        # Check LightRAG is accessible
+        # Check YAR is accessible
         if not await self.check_yar_health():
-            return {'error': 'LightRAG API not accessible'}
+            return {'error': 'YAR API not accessible'}
 
         # Step 1: Download papers
         paper_paths = await self.download_papers()
@@ -408,7 +408,7 @@ async def run_ab_test(
 
 async def main():
     parser = argparse.ArgumentParser(
-        description='E2E RAGAS Test Harness for LightRAG',
+        description='E2E RAGAS Test Harness for YAR',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -431,7 +431,7 @@ Examples:
         '-r',
         type=str,
         default=None,
-        help=f'LightRAG API URL (default: {DEFAULT_RAG_URL})',
+        help=f'YAR API URL (default: {DEFAULT_RAG_URL})',
     )
 
     parser.add_argument(

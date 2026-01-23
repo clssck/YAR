@@ -4,7 +4,7 @@ from typing import Any
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from yar import LightRAG
+from yar import YAR
 from yar.api.utils_api import (
     get_combined_auth_dependency,
     get_workspace_from_request,
@@ -41,14 +41,14 @@ def get_order_clause(ddl: str) -> str:
     return ''
 
 
-def create_table_routes(rag: LightRAG, api_key: str | None = None) -> APIRouter:
+def create_table_routes(rag: YAR, api_key: str | None = None) -> APIRouter:
     router = APIRouter(tags=['Tables'])
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.get('/list', dependencies=[Depends(combined_auth)])
     @handle_api_error('listing tables')
     async def list_tables() -> list[str]:
-        """List all available LightRAG tables."""
+        """List all available YAR tables."""
         return list(TABLES.keys())
 
     @router.get('/{table_name}/schema', dependencies=[Depends(combined_auth)])

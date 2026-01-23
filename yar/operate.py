@@ -206,10 +206,10 @@ def create_chunker(
     [Tokenizer | None, str, str | None, bool, int, int],
     list[dict[str, Any]],
 ]:
-    """Create a semantic chunking function compatible with LightRAG's chunking_func interface.
+    """Create a semantic chunking function compatible with YAR's chunking_func interface.
 
     This factory creates a wrapper around Kreuzberg's semantic chunking that matches
-    the expected signature for LightRAG's chunking_func parameter.
+    the expected signature for YAR's chunking_func parameter.
 
     Args:
         preset: Kreuzberg chunking preset - 'recursive', 'semantic', or None
@@ -218,14 +218,14 @@ def create_chunker(
             - 'semantic': Preserve semantic boundaries for better coherence
 
     Returns:
-        A chunking function with signature compatible with LightRAG.chunking_func
+        A chunking function with signature compatible with YAR.chunking_func
 
     Example:
-        >>> from yar import LightRAG
+        >>> from yar import YAR
         >>> from yar.operate import create_chunker
         >>>
         >>> # Use semantic chunking with recursive preset
-        >>> rag = LightRAG(
+        >>> rag = YAR(
         ...     working_dir="./storage",
         ...     chunking_func=create_chunker(preset='recursive')
         ... )
@@ -239,7 +239,7 @@ def create_chunker(
         chunk_overlap_token_size: int = 100,
         chunk_token_size: int = 1200,
     ) -> list[dict[str, Any]]:
-        """Adapter that wraps chunking_by_semantic with LightRAG's expected signature.
+        """Adapter that wraps chunking_by_semantic with YAR's expected signature.
 
         Note: tokenizer, split_by_character, and split_by_character_only are ignored
         since Kreuzberg handles tokenization and boundary detection internally.

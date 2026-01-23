@@ -2,7 +2,7 @@
 """
 Test script for Workspace Isolation Feature
 
-Comprehensive test suite covering workspace isolation in LightRAG:
+Comprehensive test suite covering workspace isolation in YAR:
 1. Pipeline Status Isolation - Data isolation between workspaces
 2. Lock Mechanism - Parallel execution for different workspaces, serial for same workspace
 3. Backward Compatibility - Legacy code without workspace parameters
@@ -13,7 +13,7 @@ Comprehensive test suite covering workspace isolation in LightRAG:
 8. Update Flags Workspace Isolation - Update flags properly isolated
 9. Empty Workspace Standardization - Empty workspace handling
 10. (removed) Legacy JsonKVStorage workspace isolation
-11. LightRAG End-to-End Workspace Isolation - Complete E2E test with two instances
+11. YAR End-to-End Workspace Isolation - Complete E2E test with two instances
 
 Total: 11 test scenarios
 """
@@ -49,7 +49,7 @@ from yar.kg.shared_storage import (
 
 # Test configuration is handled via pytest fixtures in conftest.py
 # - Use CLI options: --keep-artifacts, --stress-test, --test-workers=N
-# - Or environment variables: LIGHTRAG_KEEP_ARTIFACTS, LIGHTRAG_STRESS_TEST, LIGHTRAG_TEST_WORKERS
+# - Or environment variables: YAR_KEEP_ARTIFACTS, YAR_STRESS_TEST, YAR_TEST_WORKERS
 # Priority: CLI options > Environment variables > Default values
 
 
@@ -721,7 +721,7 @@ async def test_empty_workspace_standardization():
 
 
 # =============================================================================
-# Test 11: LightRAG End-to-End Integration Test
+# Test 11: YAR End-to-End Integration Test
 # =============================================================================
 
 
@@ -734,15 +734,15 @@ async def test_empty_workspace_standardization():
 )
 async def test_yar_end_to_end_workspace_isolation(keep_test_artifacts):
     """
-    End-to-end test: Create two LightRAG instances with different workspaces,
+    End-to-end test: Create two YAR instances with different workspaces,
     insert different data, and verify file separation.
     Uses mock LLM and embedding functions to avoid external API calls.
     """
-    # Purpose: Validate that full LightRAG flows keep artifacts scoped per workspace.
-    # Scope: LightRAG.initialize_storages + ainsert side effects plus filesystem
+    # Purpose: Validate that full YAR flows keep artifacts scoped per workspace.
+    # Scope: YAR.initialize_storages + ainsert side effects plus filesystem
     # verification for generated storage files.
     print('\n' + '=' * 60)
-    print('TEST 11: LightRAG End-to-End Workspace Isolation')
+    print('TEST 11: YAR End-to-End Workspace Isolation')
     print('=' * 60)
 
     # Create temporary test directory under project temp/
@@ -774,18 +774,18 @@ async def test_yar_end_to_end_workspace_isolation(keep_test_artifacts):
             # Clean up all tables for test workspaces
             test_workspaces = ['project_a', 'project_b', '']  # Include empty workspace
             tables_to_clean = [
-                'LIGHTRAG_DOC_FULL',
-                'LIGHTRAG_DOC_CHUNKS',
-                'LIGHTRAG_DOC_STATUS',
-                'LIGHTRAG_VDB_CHUNKS',
-                'LIGHTRAG_VDB_ENTITY',
-                'LIGHTRAG_VDB_RELATION',
-                'LIGHTRAG_LLM_CACHE',
-                'LIGHTRAG_ENTITY_CHUNKS',
-                'LIGHTRAG_RELATION_CHUNKS',
-                'LIGHTRAG_FULL_ENTITIES',
-                'LIGHTRAG_FULL_RELATIONS',
-                'LIGHTRAG_ENTITY_ALIASES',
+                'YAR_DOC_FULL',
+                'YAR_DOC_CHUNKS',
+                'YAR_DOC_STATUS',
+                'YAR_VDB_CHUNKS',
+                'YAR_VDB_ENTITY',
+                'YAR_VDB_RELATION',
+                'YAR_LLM_CACHE',
+                'YAR_ENTITY_CHUNKS',
+                'YAR_RELATION_CHUNKS',
+                'YAR_FULL_ENTITIES',
+                'YAR_FULL_RELATIONS',
+                'YAR_ENTITY_ALIASES',
             ]
             for workspace in test_workspaces:
                 for table in tables_to_clean:
@@ -805,8 +805,8 @@ async def test_yar_end_to_end_workspace_isolation(keep_test_artifacts):
             ]
             for doc_id in doc_ids:
                 try:
-                    await conn.execute('DELETE FROM LIGHTRAG_DOC_FULL WHERE id = $1', doc_id)
-                    await conn.execute('DELETE FROM LIGHTRAG_DOC_STATUS WHERE id = $1', doc_id)
+                    await conn.execute('DELETE FROM YAR_DOC_FULL WHERE id = $1', doc_id)
+                    await conn.execute('DELETE FROM YAR_DOC_STATUS WHERE id = $1', doc_id)
                 except Exception:
                     pass
             print('   Cleaned up existing database data for test workspaces')
@@ -850,10 +850,10 @@ relation<|#|>Deep Learning<|#|>Neural Networks<|#|>uses, composed of<|#|>Deep Le
             await asyncio.sleep(0)
             return np.random.rand(len(texts), embedding_dim)  # match configured embedding dimension
 
-        # Test 11.1: Create two LightRAG instances with different workspaces
-        print('\nTest 11.1: Create two LightRAG instances with different workspaces')
+        # Test 11.1: Create two YAR instances with different workspaces
+        print('\nTest 11.1: Create two YAR instances with different workspaces')
 
-        from yar import LightRAG
+        from yar import YAR
         from yar.utils import EmbeddingFunc, Tokenizer
 
         # Create different mock LLM functions for each workspace
@@ -869,7 +869,7 @@ relation<|#|>Deep Learning<|#|>Neural Networks<|#|>uses, composed of<|#|>Deep Le
 
         tokenizer = Tokenizer('mock-tokenizer', _SimpleTokenizerImpl())
 
-        rag1 = LightRAG(
+        rag1 = YAR(
             working_dir=test_dir,
             workspace='project_a',
             llm_model_func=mock_llm_func_a,
@@ -881,7 +881,7 @@ relation<|#|>Deep Learning<|#|>Neural Networks<|#|>uses, composed of<|#|>Deep Le
             tokenizer=tokenizer,
         )
 
-        rag2 = LightRAG(
+        rag2 = YAR(
             working_dir=test_dir,
             workspace='project_b',
             llm_model_func=mock_llm_func_b,
@@ -957,7 +957,7 @@ relation<|#|>Deep Learning<|#|>Neural Networks<|#|>uses, composed of<|#|>Deep Le
         assert doc_a_in_b is None, 'project_a document should not be visible in project_b workspace'
         assert doc_b_in_a is None, 'project_b document should not be visible in project_a workspace'
 
-        print('✅ PASSED: LightRAG E2E - Data Isolation')
+        print('✅ PASSED: YAR E2E - Data Isolation')
         print('   Document storage correctly isolated between workspaces')
         print('   project_a contains only its own data')
         print('   project_b contains only its own data')

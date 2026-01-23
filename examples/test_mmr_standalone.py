@@ -195,7 +195,7 @@ async def run_evaluation(
         # Get sample chunks with their vectors
         sample_sql = """
             SELECT id, content, content_vector, file_path
-            FROM LIGHTRAG_VDB_CHUNKS
+            FROM YAR_VDB_CHUNKS
             WHERE workspace = $1
               AND content_vector IS NOT NULL
             LIMIT $2

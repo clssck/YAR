@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 
-from yar import LightRAG, create_chunker
+from yar import YAR, create_chunker
 from yar import __version__ as core_version
 from yar.api import __api_version__
 from yar.api.auth import auth_handler
@@ -262,7 +262,7 @@ def create_app(args):
             raise Exception(f'SSL key file not found: {args.ssl_keyfile}')
 
     # Check if API key is provided either through env var or args
-    api_key = os.getenv('LIGHTRAG_API_KEY') or args.key
+    api_key = os.getenv('YAR_API_KEY') or args.key
 
     # Initialize document manager with workspace support for data isolation
     doc_manager = DocumentManager(args.input_dir, workspace=args.workspace)
@@ -318,7 +318,7 @@ def create_app(args):
             # Clean up database connections
             await rag.finalize_storages()
 
-            if 'LIGHTRAG_GUNICORN_MODE' not in os.environ:
+            if 'YAR_GUNICORN_MODE' not in os.environ:
                 # Only perform cleanup in Uvicorn single-process mode
                 logger.debug('Uvicorn Mode: finalizing shared storage...')
                 finalize_share_data()
@@ -637,7 +637,7 @@ def create_app(args):
         chunking_func = create_chunker(preset=chunking_preset)
         logger.info(f'Using chunking preset: {chunking_preset}')
 
-        rag = LightRAG(
+        rag = YAR(
             working_dir=args.working_dir,
             workspace=args.workspace,
             llm_model_func=create_llm_model_func(args.llm_binding),
@@ -1130,7 +1130,7 @@ def configure_logging():
                 },
                 'filters': {
                     'path_filter': {
-                        '()': 'yar.utils.LightragPathFilter',
+                        '()': 'yar.utils.YarPathFilter',
                     },
                 },
             },

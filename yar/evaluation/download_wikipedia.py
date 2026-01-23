@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download Wikipedia articles for LightRAG ingestion testing.
+Download Wikipedia articles for YAR ingestion testing.
 
 This script fetches plain text from Wikipedia articles across diverse domains
 to create a test dataset with intentional entity overlap for testing:
@@ -27,7 +27,7 @@ WIKI_API = 'https://en.wikipedia.org/w/api.php'
 
 # User-Agent required by Wikipedia API policy
 # See: https://meta.wikimedia.org/wiki/User-Agent_policy
-USER_AGENT = 'LightRAG-Test-Downloader/1.0 (https://github.com/HKUDS/LightRAG; claude@example.com)'
+USER_AGENT = 'YAR-Test-Downloader/1.0 (https://github.com/clssck/YAR; claude@example.com)'
 
 # Article selection by domain - chosen for entity overlap
 # WHO → Medical + Climate

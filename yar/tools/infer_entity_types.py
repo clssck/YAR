@@ -203,7 +203,7 @@ async def run_inference(
             print(f"  ... and {len(unknown_entities) - 10} more\n")
 
         # Create LLM function using the direct API
-        # Use LightRAG's env var conventions
+        # Use YAR's env var conventions
         model = os.getenv('LLM_MODEL', 'gpt-4o-mini')
         api_key = os.getenv('LLM_BINDING_API_KEY') or os.getenv('OPENAI_API_KEY')
         base_url = os.getenv('LLM_BINDING_HOST') or os.getenv('OPENAI_API_BASE')

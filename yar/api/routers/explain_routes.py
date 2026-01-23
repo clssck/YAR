@@ -97,7 +97,7 @@ def create_explain_routes(rag, api_key: str | None = None) -> APIRouter:
     """Create explain routes for query debugging.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         api_key: Optional API key for authentication
 
     Returns:

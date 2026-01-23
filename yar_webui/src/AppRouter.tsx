@@ -35,7 +35,7 @@ const AppContent = () => {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+        const token = localStorage.getItem('YAR-API-TOKEN')
 
         if (token && isAuthenticated) {
           setInitializing(false)

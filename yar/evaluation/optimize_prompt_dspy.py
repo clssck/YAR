@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DSPy-based Prompt Optimization for LightRAG.
+DSPy-based Prompt Optimization for YAR.
 
 This script automatically optimizes RAG response prompts using:
 1. DSPy's MIPROv2 optimizer for instruction tuning
@@ -217,7 +217,7 @@ def fast_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> flo
 
 
 async def get_context_from_server(query: str, server_url: str = 'http://localhost:9621') -> str:
-    """Get context from running LightRAG server."""
+    """Get context from running YAR server."""
     import httpx
 
     async with httpx.AsyncClient(timeout=60) as client:
@@ -457,9 +457,9 @@ Answer (grounded only in context above):"""
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='DSPy Prompt Optimization for LightRAG')
+    parser = argparse.ArgumentParser(description='DSPy Prompt Optimization for YAR')
     parser.add_argument('--num-queries', '-n', type=int, help='Number of queries to use')
-    parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='LightRAG server URL')
+    parser.add_argument('--server', '-s', type=str, default='http://localhost:9621', help='YAR server URL')
     parser.add_argument(
         '--mode', '-m', choices=['light', 'medium', 'heavy'], default='light', help='Optimization intensity'
     )
@@ -485,7 +485,7 @@ async def main():
     dspy.configure(lm=lm)
 
     print('=' * 70)
-    print('DSPy Prompt Optimization for LightRAG')
+    print('DSPy Prompt Optimization for YAR')
     print('=' * 70)
     print(f'LLM: {os.getenv("LLM_MODEL", "gpt-4o-mini")}')
     print(f'Optimizer: {args.optimizer}')

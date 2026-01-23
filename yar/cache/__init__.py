@@ -1,7 +1,7 @@
 """
-LightRAG caching infrastructure.
+YAR caching infrastructure.
 
-This module provides caching implementations for various LightRAG components:
+This module provides caching implementations for various YAR components:
 - fts_cache: Full-text search result caching
 """
 

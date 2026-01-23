@@ -1,5 +1,5 @@
 """
-Citation extraction and footnote generation for LightRAG.
+Citation extraction and footnote generation for YAR.
 
 This module provides post-processing capabilities to extract citations from LLM responses
 by matching response sentences to source chunks using embedding similarity.

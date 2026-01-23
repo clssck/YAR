@@ -18,13 +18,13 @@ export type PropertyValue =
   | PropertyValue[]
   | { [key: string]: PropertyValue }
 
-export type LightragNodeType = {
+export type YarNodeType = {
   id: string
   labels: string[]
   properties: Record<string, PropertyValue>
 }
 
-export type LightragEdgeType = {
+export type YarEdgeType = {
   id: string
   source: string
   target: string
@@ -32,13 +32,13 @@ export type LightragEdgeType = {
   properties: Record<string, PropertyValue>
 }
 
-export type LightragGraphType = {
-  nodes: LightragNodeType[]
-  edges: LightragEdgeType[]
+export type YarGraphType = {
+  nodes: YarNodeType[]
+  edges: YarEdgeType[]
   is_truncated?: boolean
 }
 
-export type LightragConfiguration = {
+export type YarConfiguration = {
   llm_binding: string
   llm_binding_host: string
   llm_model: string
@@ -68,11 +68,11 @@ export type LightragConfiguration = {
   enable_s3?: boolean
 }
 
-export type LightragStatus = {
+export type YarStatus = {
   status: 'healthy'
   working_directory: string
   input_directory: string
-  configuration: LightragConfiguration
+  configuration: YarConfiguration
   update_status?: Record<string, PropertyValue>
   core_version?: string
   api_version?: string
@@ -95,7 +95,7 @@ export type LightragStatus = {
   webui_description?: string
 }
 
-export type LightragDocumentsScanProgress = {
+export type YarDocumentsScanProgress = {
   is_scanning: boolean
   current_file: string
   indexed_count: number
@@ -349,7 +349,7 @@ const axiosInstance = axios.create({
 // Interceptor: add api key and check authentication
 axiosInstance.interceptors.request.use((config) => {
   const apiKey = useSettingsStore.getState().apiKey
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+  const token = localStorage.getItem('YAR-API-TOKEN')
 
   // Always include token if it exists, regardless of path
   if (token) {
@@ -394,7 +394,7 @@ export const queryGraphs = async (
   maxNodes: number,
   minDegree = 0,
   includeOrphans = false
-): Promise<LightragGraphType> => {
+): Promise<YarGraphType> => {
   const response = await axiosInstance.get(
     `/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}&min_degree=${minDegree}&include_orphans=${includeOrphans}`
   )
@@ -424,7 +424,7 @@ export const searchLabels = async (
 }
 
 export const checkHealth = async (): Promise<
-  LightragStatus | { status: 'error'; message: string }
+  YarStatus | { status: 'error'; message: string }
 > => {
   try {
     const response = await axiosInstance.get('/health')
@@ -447,7 +447,7 @@ export const reprocessFailedDocuments = async (): Promise<ReprocessFailedRespons
   return response.data
 }
 
-export const getDocumentsScanProgress = async (): Promise<LightragDocumentsScanProgress> => {
+export const getDocumentsScanProgress = async (): Promise<YarDocumentsScanProgress> => {
   const response = await axiosInstance.get('/documents/scan-progress')
   return response.data
 }
@@ -477,7 +477,7 @@ export const queryTextStream = async (
   onReferences?: (references: StreamReference[]) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+  const token = localStorage.getItem('YAR-API-TOKEN')
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     Accept: 'application/x-ndjson',

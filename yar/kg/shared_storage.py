@@ -14,7 +14,7 @@ from yar.constants import NS_ORPHAN_CONNECTION_STATUS, NS_PIPELINE_STATUS
 from yar.exceptions import LockTimeoutError, PipelineCancelledException, PipelineNotInitializedError
 
 # Lock acquisition timeout (configurable via environment variable)
-LOCK_TIMEOUT = float(os.getenv('LIGHTRAG_LOCK_TIMEOUT', '30'))
+LOCK_TIMEOUT = float(os.getenv('YAR_LOCK_TIMEOUT', '30'))
 
 DEBUG_LOCKS = False
 

@@ -129,7 +129,7 @@ function App() {
         setInitializing(true) // Start initialization
 
         // Get version info
-        const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+        const token = localStorage.getItem('YAR-API-TOKEN')
         const status = await getAuthStatus()
 
         // If auth is not configured and a new token is returned, use the new token

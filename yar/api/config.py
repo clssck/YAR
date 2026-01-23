@@ -1,5 +1,5 @@
 """
-Configs for the LightRAG API.
+Configs for the YAR API.
 """
 
 import argparse
@@ -141,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--key',
         type=str,
-        default=get_env_value('LIGHTRAG_API_KEY', None),
+        default=get_env_value('YAR_API_KEY', None),
         help='API key for authentication. This protects yar server against unauthorized access',
     )
 
@@ -218,10 +218,10 @@ def parse_args() -> argparse.Namespace:
     args.input_dir = os.path.abspath(args.input_dir)
 
     # Inject storage configuration from environment variables
-    args.kv_storage = get_env_value('LIGHTRAG_KV_STORAGE', DefaultRAGStorageConfig.KV_STORAGE)
-    args.doc_status_storage = get_env_value('LIGHTRAG_DOC_STATUS_STORAGE', DefaultRAGStorageConfig.DOC_STATUS_STORAGE)
-    args.graph_storage = get_env_value('LIGHTRAG_GRAPH_STORAGE', DefaultRAGStorageConfig.GRAPH_STORAGE)
-    args.vector_storage = get_env_value('LIGHTRAG_VECTOR_STORAGE', DefaultRAGStorageConfig.VECTOR_STORAGE)
+    args.kv_storage = get_env_value('YAR_KV_STORAGE', DefaultRAGStorageConfig.KV_STORAGE)
+    args.doc_status_storage = get_env_value('YAR_DOC_STATUS_STORAGE', DefaultRAGStorageConfig.DOC_STATUS_STORAGE)
+    args.graph_storage = get_env_value('YAR_GRAPH_STORAGE', DefaultRAGStorageConfig.GRAPH_STORAGE)
+    args.vector_storage = get_env_value('YAR_VECTOR_STORAGE', DefaultRAGStorageConfig.VECTOR_STORAGE)
 
     # Get MAX_PARALLEL_INSERT from environment
     args.max_parallel_insert = get_env_value('MAX_PARALLEL_INSERT', 2, int)
@@ -350,7 +350,7 @@ def initialize_config(args=None, force=False):
     """Initialize global configuration
 
     This function allows explicit initialization of the configuration,
-    which is useful for programmatic usage, testing, or embedding LightRAG
+    which is useful for programmatic usage, testing, or embedding YAR
     in other applications.
 
     Args:

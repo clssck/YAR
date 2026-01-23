@@ -4,7 +4,7 @@ Layer 1: Cache check (instant, free)
 Layer 2: VDB similarity search + LLM batch review (semantic matches)
 
 All entity resolution decisions are made by LLM for consistency and accuracy.
-Uses the same LLM that LightRAG is configured with.
+Uses the same LLM that YAR is configured with.
 """
 
 from __future__ import annotations

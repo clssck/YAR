@@ -1,5 +1,5 @@
 """
-This module contains all query-related routes for the LightRAG API.
+This module contains all query-related routes for the YAR API.
 """
 
 import json
@@ -522,7 +522,7 @@ def create_query_routes(
     """Create query routes with optional S3 client for presigned URL generation in citations.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         api_key: Optional API key for authentication
         top_k: Default top_k for retrieval
         s3_client: Optional S3Client for generating presigned URLs in citation responses

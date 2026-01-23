@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RAGAS Evaluation Script for LightRAG System
+RAGAS Evaluation Script for YAR System
 
 Evaluates RAG response quality using RAGAS metrics:
 - Faithfulness: Is the answer factually accurate based on context?
@@ -160,7 +160,7 @@ class RAGEvaluator:
 
         Args:
             test_dataset_path: Path to test dataset JSON file
-            rag_api_url: Base URL of LightRAG API (e.g., http://localhost:9621)
+            rag_api_url: Base URL of YAR API (e.g., http://localhost:9621)
                         If None, will try to read from environment or use default
             query_mode: Query mode for retrieval (local, global, hybrid, mix, naive)
             debug_mode: Enable verbose logging of retrieved contexts
@@ -247,7 +247,7 @@ class RAGEvaluator:
             test_dataset_path = Path(__file__).parent / 'sample_dataset.json'
 
         if rag_api_url is None:
-            rag_api_url = os.getenv('LIGHTRAG_API_URL', 'http://localhost:9621')
+            rag_api_url = os.getenv('YAR_API_URL', 'http://localhost:9621')
 
         self.test_dataset_path = Path(test_dataset_path)
         self.rag_api_url = rag_api_url.rstrip('/')
@@ -304,7 +304,7 @@ class RAGEvaluator:
         logger.info('Test Configuration:')
         logger.info('  • Total Test Cases:     %s', len(self.test_cases))
         logger.info('  • Test Dataset:         %s', self.test_dataset_path.name)
-        logger.info('  • LightRAG API:         %s', self.rag_api_url)
+        logger.info('  • YAR API:         %s', self.rag_api_url)
         logger.info('  • Query Mode:           %s', self.query_mode)
         logger.info('  • Results Directory:    %s', self.results_dir.name)
 
@@ -325,7 +325,7 @@ class RAGEvaluator:
         test_case: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Generate RAG response by calling LightRAG API.
+        Generate RAG response by calling YAR API.
 
         Args:
             question: The user query.
@@ -337,7 +337,7 @@ class RAGEvaluator:
             'contexts' is a list of strings (one per retrieved document).
 
         Raises:
-            Exception: If LightRAG API is unavailable.
+            Exception: If YAR API is unavailable.
         """
         try:
             # Build payload with tunable parameters via environment variables
@@ -373,7 +373,7 @@ class RAGEvaluator:
                         logger.info('[DEBUG] Using LL keywords override: %s', test_case['ll_keywords'])
 
             # Get API key from environment for authentication
-            api_key = os.getenv('LIGHTRAG_API_KEY')
+            api_key = os.getenv('YAR_API_KEY')
 
             # Prepare headers with optional authentication
             headers = {}
@@ -440,19 +440,19 @@ class RAGEvaluator:
 
         except httpx.ConnectError as e:
             raise Exception(
-                f'❌ Cannot connect to LightRAG API at {self.rag_api_url}\n'
-                f'   Make sure LightRAG server is running:\n'
+                f'❌ Cannot connect to YAR API at {self.rag_api_url}\n'
+                f'   Make sure YAR server is running:\n'
                 f'   python -m yar.api.yar_server\n'
                 f'   Error: {e!s}'
             ) from e
         except httpx.HTTPStatusError as e:
-            raise Exception(f'LightRAG API error {e.response.status_code}: {e.response.text}') from e
+            raise Exception(f'YAR API error {e.response.status_code}: {e.response.text}') from e
         except httpx.ReadTimeout as e:
             raise Exception(
                 f'Request timeout after waiting for response\n   Question: {question[:100]}...\n   Error: {e!s}'
             ) from e
         except Exception as e:
-            raise Exception(f'Error calling LightRAG API: {type(e).__name__}: {e!s}') from e
+            raise Exception(f'Error calling YAR API: {type(e).__name__}: {e!s}') from e
 
     async def evaluate_single_case(
         self,
@@ -618,7 +618,7 @@ class RAGEvaluator:
         max_async = int(os.getenv('EVAL_MAX_CONCURRENT', '2'))
 
         logger.info('%s', '=' * 70)
-        logger.info('🚀 Starting RAGAS Evaluation of LightRAG System')
+        logger.info('🚀 Starting RAGAS Evaluation of YAR System')
         logger.info('🔧 RAGAS Evaluation (Stage 2): %s concurrent', max_async)
         logger.info('%s', '=' * 70)
 
@@ -1097,7 +1097,7 @@ async def main():
 
     Command-line arguments:
         --dataset, -d: Path to test dataset JSON file (default: sample_dataset.json)
-        --ragendpoint, -r: LightRAG API endpoint URL (default: http://localhost:9621 or $LIGHTRAG_API_URL)
+        --ragendpoint, -r: YAR API endpoint URL (default: http://localhost:9621 or $YAR_API_URL)
 
     Usage:
         python yar/evaluation/eval_rag_quality.py
@@ -1107,7 +1107,7 @@ async def main():
     try:
         # Parse command-line arguments
         parser = argparse.ArgumentParser(
-            description='RAGAS Evaluation Script for LightRAG System',
+            description='RAGAS Evaluation Script for YAR System',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
@@ -1142,7 +1142,7 @@ Environment Variables (for parameter tuning):
   EVAL_BM25_WEIGHT     BM25 weight for fusion 0.0-1.0 (default: 0.3)
   EVAL_USER_PROMPT     Custom prompt for anti-hedging behavior
   EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 2)
-  LIGHTRAG_API_KEY     API key for LightRAG authentication (optional)
+  YAR_API_KEY     API key for YAR authentication (optional)
             """,
         )
 
@@ -1159,7 +1159,7 @@ Environment Variables (for parameter tuning):
             '-r',
             type=str,
             default=None,
-            help='LightRAG API endpoint URL (default: http://localhost:9621 or $LIGHTRAG_API_URL environment variable)',
+            help='YAR API endpoint URL (default: http://localhost:9621 or $YAR_API_URL environment variable)',
         )
 
         parser.add_argument(
@@ -1187,7 +1187,7 @@ Environment Variables (for parameter tuning):
         args = parser.parse_args()
 
         logger.info('%s', '=' * 70)
-        logger.info('🔍 RAGAS Evaluation - Using Real LightRAG API')
+        logger.info('🔍 RAGAS Evaluation - Using Real YAR API')
         logger.info('%s', '=' * 70)
 
         if args.compare_modes:

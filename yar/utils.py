@@ -271,7 +271,7 @@ def set_verbose_debug(enabled: bool):
 statistic_data = {'llm_call': 0, 'llm_cache': 0, 'embed_call': 0}
 
 
-class LightragPathFilter(logging.Filter):
+class YarPathFilter(logging.Filter):
     """Filter for yar logger to filter out frequent path access logs"""
 
     def __init__(self):
@@ -322,7 +322,7 @@ def setup_logger(
     Args:
         logger_name: Name of the logger to set up
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        add_filter: Whether to add LightragPathFilter to the logger
+        add_filter: Whether to add YarPathFilter to the logger
         log_file_path: Path to the log file. If None and file logging is enabled, defaults to yar.log in LOG_DIR or cwd
         enable_file_logging: Whether to enable logging to a file (defaults to True)
     """
@@ -372,7 +372,7 @@ def setup_logger(
 
     # Add path filter if requested
     if add_filter:
-        path_filter = LightragPathFilter()
+        path_filter = YarPathFilter()
         logger_instance.addFilter(path_filter)
 
 
@@ -424,7 +424,7 @@ class EmbeddingFunc:
     Args:
         embedding_dim: Expected dimension of the embeddings (for dimension checking and workspace data isolation in vector DB)
         func: The actual embedding function to wrap
-        max_token_size: Enable embedding token limit checking for description summarization (set embedding_token_limit in LightRAG)
+        max_token_size: Enable embedding token limit checking for description summarization (set embedding_token_limit in YAR)
         send_dimensions: Whether to inject embedding_dim argument to underlying function
         model_name: Model name for implementing workspace data isolation in vector DB
     """
@@ -1711,7 +1711,7 @@ async def aexport_data(
     elif file_format == 'md':
         # Markdown export
         with open(output_path, 'w', encoding='utf-8') as mdfile:
-            mdfile.write('# LightRAG Data Export\n\n')
+            mdfile.write('# YAR Data Export\n\n')
 
             # Entities
             mdfile.write('## Entities\n\n')
@@ -1757,7 +1757,7 @@ async def aexport_data(
     elif file_format == 'txt':
         # Plain text export
         with open(output_path, 'w', encoding='utf-8') as txtfile:
-            txtfile.write('LIGHTRAG DATA EXPORT\n')
+            txtfile.write('YAR DATA EXPORT\n')
             txtfile.write('=' * 80 + '\n\n')
 
             # Entities
@@ -3591,7 +3591,7 @@ def insert_citation(sentence: str, ref_id: str) -> str:
     Insert a citation [ref_id] before the final punctuation of a sentence.
 
     Examples:
-        "LightRAG is a framework." + "1" -> "LightRAG is a framework [1]."
+        "YAR is a framework." + "1" -> "YAR is a framework [1]."
         "It supports graphs"       + "2" -> "It supports graphs [2]"
     """
     sentence = sentence.rstrip()

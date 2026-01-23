@@ -29,7 +29,7 @@ class TestHasCitation:
     @pytest.mark.offline
     def test_single_citation(self):
         """Test detection of single citation."""
-        assert has_citation('LightRAG uses PostgreSQL for storage [1].')
+        assert has_citation('YAR uses PostgreSQL for storage [1].')
 
     @pytest.mark.offline
     def test_multiple_citations(self):
@@ -44,7 +44,7 @@ class TestHasCitation:
     @pytest.mark.offline
     def test_no_citation(self):
         """Test text without citation returns False."""
-        assert not has_citation('LightRAG is a RAG framework.')
+        assert not has_citation('YAR is a RAG framework.')
 
     @pytest.mark.offline
     def test_similar_but_not_citation(self):
@@ -69,13 +69,13 @@ class TestIsFactualSentence:
     @pytest.mark.offline
     def test_factual_claim(self):
         """Test that factual claims are identified."""
-        assert is_factual_sentence('LightRAG uses PostgreSQL for graph storage.')
+        assert is_factual_sentence('YAR uses PostgreSQL for graph storage.')
         assert is_factual_sentence('The system supports dual-level retrieval.')
 
     @pytest.mark.offline
     def test_question_not_factual(self):
         """Test that questions are not considered factual."""
-        assert not is_factual_sentence('What storage does LightRAG use?')
+        assert not is_factual_sentence('What storage does YAR use?')
         assert not is_factual_sentence('Is this the correct approach?')
 
     @pytest.mark.offline
@@ -88,7 +88,7 @@ class TestIsFactualSentence:
     @pytest.mark.offline
     def test_meta_statements_not_factual(self):
         """Test that meta-statements are not considered factual."""
-        assert not is_factual_sentence('Based on the context, LightRAG uses PostgreSQL.')
+        assert not is_factual_sentence('Based on the context, YAR uses PostgreSQL.')
         assert not is_factual_sentence('According to the context, it supports graphs.')
         assert not is_factual_sentence('Here is the information you requested.')
         assert not is_factual_sentence("I can help you with that question.")
@@ -97,8 +97,8 @@ class TestIsFactualSentence:
     @pytest.mark.offline
     def test_headers_not_factual(self):
         """Test that headers and list markers are not considered factual."""
-        assert not is_factual_sentence('# Introduction to LightRAG')
-        assert not is_factual_sentence('- LightRAG is a framework')
+        assert not is_factual_sentence('# Introduction to YAR')
+        assert not is_factual_sentence('- YAR is a framework')
         assert not is_factual_sentence('* Another bullet point item')
         assert not is_factual_sentence('> This is a quote about RAG')
 
@@ -124,8 +124,8 @@ class TestFindBestReference:
         return [
             {
                 'reference_id': '1',
-                'document_title': 'LightRAG Architecture Guide',
-                'excerpt': 'LightRAG uses PostgreSQL for graph storage and Neo4j for visualization.',
+                'document_title': 'YAR Architecture Guide',
+                'excerpt': 'YAR uses PostgreSQL for graph storage and Neo4j for visualization.',
                 'file_path': '/docs/architecture.pdf',
             },
             {
@@ -190,8 +190,8 @@ class TestInsertCitation:
     @pytest.mark.offline
     def test_insert_before_period(self):
         """Test citation is inserted before period."""
-        result = insert_citation('LightRAG is a framework.', '1')
-        assert result == 'LightRAG is a framework [1].'
+        result = insert_citation('YAR is a framework.', '1')
+        assert result == 'YAR is a framework [1].'
 
     @pytest.mark.offline
     def test_insert_before_exclamation(self):
@@ -232,8 +232,8 @@ class TestValidateAndFixCitations:
         return [
             {
                 'reference_id': '1',
-                'document_title': 'LightRAG Documentation',
-                'excerpt': 'LightRAG is a RAG framework with graph-based retrieval.',
+                'document_title': 'YAR Documentation',
+                'excerpt': 'YAR is a RAG framework with graph-based retrieval.',
                 'file_path': '/docs/main.pdf',
             },
             {
@@ -247,7 +247,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_adequate_citations_unchanged(self, sample_references):
         """Test that text with adequate citations is unchanged."""
-        text = 'LightRAG is a RAG framework [1]. It uses PostgreSQL [2].'
+        text = 'YAR is a RAG framework [1]. It uses PostgreSQL [2].'
         result, was_modified = validate_and_fix_citations(text, sample_references)
         assert not was_modified
         assert result == text
@@ -255,7 +255,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_short_answer_gets_citation(self, sample_references):
         """Test that short uncited answers get citations. This is the key failure mode."""
-        text = 'LightRAG is a RAG framework for graph-based retrieval.'
+        text = 'YAR is a RAG framework for graph-based retrieval.'
         result, was_modified = validate_and_fix_citations(text, sample_references)
         assert was_modified
         assert '[1]' in result
@@ -263,7 +263,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_partial_citations_fixed(self, sample_references):
         """Test that partially cited text gets additional citations."""
-        text = 'LightRAG uses graphs [1]. PostgreSQL handles data storage.'
+        text = 'YAR uses graphs [1]. PostgreSQL handles data storage.'
         result, was_modified = validate_and_fix_citations(
             text, sample_references, min_coverage=0.9
         )
@@ -274,17 +274,17 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_preserves_references_section(self, sample_references):
         """Test that the References section is preserved unchanged."""
-        text = '''LightRAG is a framework.
+        text = '''YAR is a framework.
 
 ### References
 
-- [1] LightRAG Documentation
+- [1] YAR Documentation
 - [2] PostgreSQL Guide'''
 
         result, _was_modified = validate_and_fix_citations(text, sample_references)
         # References section should be preserved exactly
         assert '### References' in result
-        assert '- [1] LightRAG Documentation' in result
+        assert '- [1] YAR Documentation' in result
         assert '- [2] PostgreSQL Guide' in result
 
     @pytest.mark.offline
@@ -297,7 +297,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_empty_references(self):
         """Test handling of empty references list."""
-        text = 'LightRAG is a framework.'
+        text = 'YAR is a framework.'
         result, was_modified = validate_and_fix_citations(text, [])
         assert not was_modified
         assert result == text
@@ -305,7 +305,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_auto_fix_disabled(self, sample_references):
         """Test that auto-fix can be disabled."""
-        text = 'LightRAG is a RAG framework for graph-based retrieval.'
+        text = 'YAR is a RAG framework for graph-based retrieval.'
         result, was_modified = validate_and_fix_citations(
             text, sample_references, enable_auto_fix=False
         )
@@ -315,7 +315,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_questions_not_cited(self, sample_references):
         """Test that questions are not auto-cited."""
-        text = 'What does LightRAG do?'
+        text = 'What does YAR do?'
         _result, was_modified = validate_and_fix_citations(text, sample_references)
         # Questions should not be considered factual sentences
         assert not was_modified
@@ -323,7 +323,7 @@ class TestValidateAndFixCitations:
     @pytest.mark.offline
     def test_coverage_threshold(self, sample_references):
         """Test coverage threshold affects behavior."""
-        text = 'LightRAG is a framework [1]. It supports graphs. PostgreSQL stores data.'
+        text = 'YAR is a framework [1]. It supports graphs. PostgreSQL stores data.'
         # 1/3 = 33% coverage
 
         # With high threshold, should try to fix

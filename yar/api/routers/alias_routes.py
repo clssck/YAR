@@ -1,5 +1,5 @@
 """
-Entity Alias Management Routes for LightRAG API.
+Entity Alias Management Routes for YAR API.
 
 Provides endpoints for:
 - Viewing and managing the alias table
@@ -142,7 +142,7 @@ def create_alias_routes(rag, api_key: str | None = None):
     """Create alias management routes.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         api_key: Optional API key for authentication
 
     Returns:
@@ -183,7 +183,7 @@ def create_alias_routes(rag, api_key: str | None = None):
         where_clause = qb.where_clause()
 
         # Count total (use copy of params since we'll add more for pagination)
-        count_sql = f'SELECT COUNT(*) as total FROM LIGHTRAG_ENTITY_ALIASES WHERE {where_clause}'
+        count_sql = f'SELECT COUNT(*) as total FROM YAR_ENTITY_ALIASES WHERE {where_clause}'
         count_result = await db.query(count_sql, params=qb.params.copy())
         total = count_result.get('total', 0) if count_result else 0
 
@@ -194,7 +194,7 @@ def create_alias_routes(rag, api_key: str | None = None):
 
         list_sql = f"""
             SELECT alias, canonical_entity, method, confidence, create_time, update_time
-            FROM LIGHTRAG_ENTITY_ALIASES
+            FROM YAR_ENTITY_ALIASES
             WHERE {where_clause}
             ORDER BY create_time DESC
             LIMIT {limit_param} OFFSET {offset_param}
@@ -284,12 +284,12 @@ def create_alias_routes(rag, api_key: str | None = None):
         where_clause = qb.where_clause()
 
         # Count first
-        count_sql = f'SELECT COUNT(*) as count FROM LIGHTRAG_ENTITY_ALIASES WHERE {where_clause}'
+        count_sql = f'SELECT COUNT(*) as count FROM YAR_ENTITY_ALIASES WHERE {where_clause}'
         count_result = await db.query(count_sql, params=qb.params)
         count = count_result.get('count', 0) if count_result else 0
 
         # Delete using query (supports params list)
-        delete_sql = f'DELETE FROM LIGHTRAG_ENTITY_ALIASES WHERE {where_clause}'
+        delete_sql = f'DELETE FROM YAR_ENTITY_ALIASES WHERE {where_clause}'
         await db.query(delete_sql, params=qb.params)
 
         return {
@@ -308,7 +308,7 @@ def create_alias_routes(rag, api_key: str | None = None):
         normalized_alias = alias.lower().strip()
 
         delete_sql = """
-            DELETE FROM LIGHTRAG_ENTITY_ALIASES
+            DELETE FROM YAR_ENTITY_ALIASES
             WHERE workspace = $1 AND alias = $2
             RETURNING alias
         """
@@ -332,7 +332,7 @@ def create_alias_routes(rag, api_key: str | None = None):
 
         sql = """
             SELECT alias, method, confidence, create_time
-            FROM LIGHTRAG_ENTITY_ALIASES
+            FROM YAR_ENTITY_ALIASES
             WHERE workspace = $1 AND canonical_entity = $2
             ORDER BY confidence DESC
         """
@@ -377,8 +377,8 @@ def create_alias_routes(rag, api_key: str | None = None):
         # Find aliases where the alias entity still exists
         sql = """
             SELECT a.alias, a.canonical_entity, a.confidence, a.method
-            FROM LIGHTRAG_ENTITY_ALIASES a
-            JOIN LIGHTRAG_VDB_ENTITY e ON LOWER(a.alias) = LOWER(e.entity_name) AND e.workspace = $1
+            FROM YAR_ENTITY_ALIASES a
+            JOIN YAR_VDB_ENTITY e ON LOWER(a.alias) = LOWER(e.entity_name) AND e.workspace = $1
             WHERE a.workspace = $1 AND a.confidence >= $2
             ORDER BY a.confidence DESC
             LIMIT $3
@@ -423,7 +423,7 @@ def create_alias_routes(rag, api_key: str | None = None):
                 logger.info(f'Applied alias: "{alias}" → "{canonical}"')
 
                 # Delete the alias from the table since it's now merged
-                delete_sql = "DELETE FROM LIGHTRAG_ENTITY_ALIASES WHERE workspace = $1 AND alias = $2"
+                delete_sql = "DELETE FROM YAR_ENTITY_ALIASES WHERE workspace = $1 AND alias = $2"
                 await db.query(delete_sql, params=[workspace, alias.lower().strip()])
 
             except Exception as e:
@@ -473,10 +473,10 @@ def create_alias_routes(rag, api_key: str | None = None):
             # Find entities not in alias table
             sql = """
                 SELECT e.entity_name
-                FROM LIGHTRAG_VDB_ENTITY e
+                FROM YAR_VDB_ENTITY e
                 WHERE e.workspace = $1
                   AND NOT EXISTS (
-                      SELECT 1 FROM LIGHTRAG_ENTITY_ALIASES a
+                      SELECT 1 FROM YAR_ENTITY_ALIASES a
                       WHERE a.workspace = $1 AND LOWER(a.alias) = LOWER(e.entity_name)
                   )
                 ORDER BY e.create_time DESC
@@ -571,14 +571,14 @@ def create_alias_routes(rag, api_key: str | None = None):
 
         sql = """
             SELECT e.entity_name, e.content, e.create_time
-            FROM LIGHTRAG_VDB_ENTITY e
+            FROM YAR_VDB_ENTITY e
             WHERE e.workspace = $1
               AND NOT EXISTS (
-                  SELECT 1 FROM LIGHTRAG_ENTITY_ALIASES a
+                  SELECT 1 FROM YAR_ENTITY_ALIASES a
                   WHERE a.workspace = $1 AND LOWER(a.alias) = LOWER(e.entity_name)
               )
               AND NOT EXISTS (
-                  SELECT 1 FROM LIGHTRAG_ENTITY_ALIASES a
+                  SELECT 1 FROM YAR_ENTITY_ALIASES a
                   WHERE a.workspace = $1 AND LOWER(a.canonical_entity) = LOWER(e.entity_name)
               )
             ORDER BY e.create_time DESC
@@ -611,14 +611,14 @@ def create_alias_routes(rag, api_key: str | None = None):
         # Get total count
         count_sql = """
             SELECT COUNT(*) as total
-            FROM LIGHTRAG_VDB_ENTITY e
+            FROM YAR_VDB_ENTITY e
             WHERE e.workspace = $1
               AND NOT EXISTS (
-                  SELECT 1 FROM LIGHTRAG_ENTITY_ALIASES a
+                  SELECT 1 FROM YAR_ENTITY_ALIASES a
                   WHERE a.workspace = $1 AND LOWER(a.alias) = LOWER(e.entity_name)
               )
               AND NOT EXISTS (
-                  SELECT 1 FROM LIGHTRAG_ENTITY_ALIASES a
+                  SELECT 1 FROM YAR_ENTITY_ALIASES a
                   WHERE a.workspace = $1 AND LOWER(a.canonical_entity) = LOWER(e.entity_name)
               )
         """
@@ -647,7 +647,7 @@ def create_alias_routes(rag, api_key: str | None = None):
             SELECT alias, canonical_entity, method, confidence,
                    llm_reasoning, source_doc_id, entity_type, verified,
                    create_time, update_time
-            FROM LIGHTRAG_ENTITY_ALIASES
+            FROM YAR_ENTITY_ALIASES
             WHERE workspace = $1
               AND (verified IS NULL OR verified = FALSE)
               AND confidence >= $2
@@ -706,7 +706,7 @@ def create_alias_routes(rag, api_key: str | None = None):
             # Get the alias info
             get_sql = """
                 SELECT canonical_entity
-                FROM LIGHTRAG_ENTITY_ALIASES
+                FROM YAR_ENTITY_ALIASES
                 WHERE workspace = $1 AND alias = $2
             """
             result = await db.query(get_sql, params=[workspace, normalized_alias])
@@ -729,7 +729,7 @@ def create_alias_routes(rag, api_key: str | None = None):
 
                     # Mark as verified and delete since merged
                     delete_sql = """
-                        DELETE FROM LIGHTRAG_ENTITY_ALIASES
+                        DELETE FROM YAR_ENTITY_ALIASES
                         WHERE workspace = $1 AND alias = $2
                     """
                     await db.query(delete_sql, params=[workspace, normalized_alias])
@@ -745,7 +745,7 @@ def create_alias_routes(rag, api_key: str | None = None):
                 except Exception as e:
                     # If merge fails, just mark as verified
                     update_sql = """
-                        UPDATE LIGHTRAG_ENTITY_ALIASES
+                        UPDATE YAR_ENTITY_ALIASES
                         SET verified = TRUE, update_time = CURRENT_TIMESTAMP
                         WHERE workspace = $1 AND alias = $2
                     """
@@ -761,7 +761,7 @@ def create_alias_routes(rag, api_key: str | None = None):
             else:
                 # Reject - delete the alias
                 delete_sql = """
-                    DELETE FROM LIGHTRAG_ENTITY_ALIASES
+                    DELETE FROM YAR_ENTITY_ALIASES
                     WHERE workspace = $1 AND alias = $2
                 """
                 await db.query(delete_sql, params=[workspace, normalized_alias])

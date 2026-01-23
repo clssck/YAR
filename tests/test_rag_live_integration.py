@@ -1,14 +1,14 @@
 """
-Live integration tests for LightRAG API.
+Live integration tests for YAR API.
 
-These tests query the actual running LightRAG server and validate real responses.
+These tests query the actual running YAR server and validate real responses.
 They require the server to be running with a configured database and LLM.
 
 Run with:
     pytest tests/test_rag_live_integration.py -v --run-integration
 
 Requirements:
-    - LightRAG server running on localhost:9621
+    - YAR server running on localhost:9621
     - PostgreSQL database with data
     - Valid LLM API keys configured
 """
@@ -20,8 +20,8 @@ import pytest
 import requests
 
 # Configuration
-BASE_URL = os.getenv('LIGHTRAG_TEST_URL', 'http://localhost:9621')
-API_KEY = os.getenv('LIGHTRAG_API_KEY', None)
+BASE_URL = os.getenv('YAR_TEST_URL', 'http://localhost:9621')
+API_KEY = os.getenv('YAR_API_KEY', None)
 TIMEOUT = 60  # LLM queries can take time
 
 
@@ -48,7 +48,7 @@ pytestmark = [
     pytest.mark.requires_api,
     pytest.mark.skipif(
         not server_is_available(),
-        reason='LightRAG server not available at ' + BASE_URL,
+        reason='YAR server not available at ' + BASE_URL,
     ),
 ]
 
@@ -104,7 +104,7 @@ class TestQueryEndpoint:
         """Test a simple query returns a response."""
         response = requests.post(
             f'{BASE_URL}/query',
-            json={'query': 'What is LightRAG?', 'mode': 'naive'},
+            json={'query': 'What is YAR?', 'mode': 'naive'},
             headers=get_headers(),
             timeout=TIMEOUT,
         )
@@ -191,7 +191,7 @@ class TestQueryEndpoint:
         response = requests.post(
             f'{BASE_URL}/query',
             json={
-                'query': 'LightRAG features',
+                'query': 'YAR features',
                 'mode': 'hybrid',
                 'include_references': True,
             },
@@ -221,7 +221,7 @@ class TestQueryEndpoint:
         response = requests.post(
             f'{BASE_URL}/query',
             json={
-                'query': 'What is LightRAG?',  # Expects a concise answer
+                'query': 'What is YAR?',  # Expects a concise answer
                 'mode': 'naive',
                 'response_type': 'Single Paragraph',  # Encourage short response
             },
@@ -295,7 +295,7 @@ class TestStreamingQuery:
         )
 
         assert response.status_code == 200
-        # LightRAG uses NDJSON format for streaming
+        # YAR uses NDJSON format for streaming
         content_type = response.headers.get('content-type', '')
         assert 'ndjson' in content_type or 'json' in content_type
 
@@ -373,7 +373,7 @@ class TestQueryDataEndpoint:
         """Test /query/data returns properly structured references."""
         response = requests.post(
             f'{BASE_URL}/query/data',
-            json={'query': 'LightRAG', 'mode': 'hybrid'},
+            json={'query': 'YAR', 'mode': 'hybrid'},
             headers=get_headers(),
             timeout=TIMEOUT,
         )

@@ -151,7 +151,7 @@ def create_openai_async_client(
             api_key = os.environ['OPENAI_API_KEY']
 
         default_headers = {
-            'User-Agent': f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_8) LightRAG/{__api_version__}',
+            'User-Agent': f'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_8) YAR/{__api_version__}',
             'Content-Type': 'application/json',
         }
 

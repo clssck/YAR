@@ -2,7 +2,7 @@
 """
 Orphan Connection Quality Validation Script
 
-Runs actual queries against LightRAG and analyzes whether orphan connections
+Runs actual queries against YAR and analyzes whether orphan connections
 improve or poison retrieval quality.
 """
 
@@ -92,7 +92,7 @@ TEST_CASES = [
 
 
 async def run_query(query: str, mode: str = 'local') -> dict:
-    """Run a query against LightRAG API."""
+    """Run a query against YAR API."""
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             f'{API_BASE}/query', json={'query': query, 'mode': mode, 'only_need_context': True}

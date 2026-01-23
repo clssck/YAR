@@ -1,5 +1,5 @@
 """
-Metrics collection and aggregation for LightRAG.
+Metrics collection and aggregation for YAR.
 
 This module provides lightweight metrics collection without heavy computation
 on each request. Metrics are collected incrementally and aggregated on demand.
@@ -55,7 +55,7 @@ class QueryMetric:
 
 @dataclass
 class MetricsCollector:
-    """Collects and aggregates LightRAG metrics.
+    """Collects and aggregates YAR metrics.
 
     Uses a circular buffer to store recent query metrics, preventing
     unbounded memory growth. Aggregations are computed on-demand.

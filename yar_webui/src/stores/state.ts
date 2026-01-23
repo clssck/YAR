@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { checkHealth, type LightragStatus } from '@/api/yar'
+import { checkHealth, type YarStatus } from '@/api/yar'
 import { healthCheckInterval } from '@/lib/constants'
 import { createSelectors } from '@/lib/utils'
 import { useSettingsStore } from './settings'
@@ -8,7 +8,7 @@ interface BackendState {
   health: boolean
   message: string | null
   messageTitle: string | null
-  status: LightragStatus | null
+  status: YarStatus | null
   lastCheckTime: number
   pipelineBusy: boolean
   healthCheckIntervalId: ReturnType<typeof setInterval> | null
@@ -198,11 +198,11 @@ const initAuthState = (): {
   webuiTitle: string | null
   webuiDescription: string | null
 } => {
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
-  const coreVersion = localStorage.getItem('LIGHTRAG-CORE-VERSION')
-  const apiVersion = localStorage.getItem('LIGHTRAG-API-VERSION')
-  const webuiTitle = localStorage.getItem('LIGHTRAG-WEBUI-TITLE')
-  const webuiDescription = localStorage.getItem('LIGHTRAG-WEBUI-DESCRIPTION')
+  const token = localStorage.getItem('YAR-API-TOKEN')
+  const coreVersion = localStorage.getItem('YAR-CORE-VERSION')
+  const apiVersion = localStorage.getItem('YAR-API-VERSION')
+  const webuiTitle = localStorage.getItem('YAR-WEBUI-TITLE')
+  const webuiDescription = localStorage.getItem('YAR-WEBUI-DESCRIPTION')
   const username = token ? getUsernameFromToken(token) : null
 
   if (!token) {
@@ -249,25 +249,25 @@ export const useAuthStore = create<AuthState>((set) => {
       webuiTitle = null,
       webuiDescription = null
     ) => {
-      localStorage.setItem('LIGHTRAG-API-TOKEN', token)
+      localStorage.setItem('YAR-API-TOKEN', token)
 
       if (coreVersion) {
-        localStorage.setItem('LIGHTRAG-CORE-VERSION', coreVersion)
+        localStorage.setItem('YAR-CORE-VERSION', coreVersion)
       }
       if (apiVersion) {
-        localStorage.setItem('LIGHTRAG-API-VERSION', apiVersion)
+        localStorage.setItem('YAR-API-VERSION', apiVersion)
       }
 
       if (webuiTitle) {
-        localStorage.setItem('LIGHTRAG-WEBUI-TITLE', webuiTitle)
+        localStorage.setItem('YAR-WEBUI-TITLE', webuiTitle)
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-TITLE')
+        localStorage.removeItem('YAR-WEBUI-TITLE')
       }
 
       if (webuiDescription) {
-        localStorage.setItem('LIGHTRAG-WEBUI-DESCRIPTION', webuiDescription)
+        localStorage.setItem('YAR-WEBUI-DESCRIPTION', webuiDescription)
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-DESCRIPTION')
+        localStorage.removeItem('YAR-WEBUI-DESCRIPTION')
       }
 
       const username = getUsernameFromToken(token)
@@ -283,12 +283,12 @@ export const useAuthStore = create<AuthState>((set) => {
     },
 
     logout: () => {
-      localStorage.removeItem('LIGHTRAG-API-TOKEN')
+      localStorage.removeItem('YAR-API-TOKEN')
 
-      const coreVersion = localStorage.getItem('LIGHTRAG-CORE-VERSION')
-      const apiVersion = localStorage.getItem('LIGHTRAG-API-VERSION')
-      const webuiTitle = localStorage.getItem('LIGHTRAG-WEBUI-TITLE')
-      const webuiDescription = localStorage.getItem('LIGHTRAG-WEBUI-DESCRIPTION')
+      const coreVersion = localStorage.getItem('YAR-CORE-VERSION')
+      const apiVersion = localStorage.getItem('YAR-API-VERSION')
+      const webuiTitle = localStorage.getItem('YAR-WEBUI-TITLE')
+      const webuiDescription = localStorage.getItem('YAR-WEBUI-DESCRIPTION')
 
       set({
         isAuthenticated: false,
@@ -304,10 +304,10 @@ export const useAuthStore = create<AuthState>((set) => {
     setVersion: (coreVersion, apiVersion) => {
       // Update localStorage
       if (coreVersion) {
-        localStorage.setItem('LIGHTRAG-CORE-VERSION', coreVersion)
+        localStorage.setItem('YAR-CORE-VERSION', coreVersion)
       }
       if (apiVersion) {
-        localStorage.setItem('LIGHTRAG-API-VERSION', apiVersion)
+        localStorage.setItem('YAR-API-VERSION', apiVersion)
       }
 
       // Update state
@@ -320,15 +320,15 @@ export const useAuthStore = create<AuthState>((set) => {
     setCustomTitle: (webuiTitle, webuiDescription) => {
       // Update localStorage
       if (webuiTitle) {
-        localStorage.setItem('LIGHTRAG-WEBUI-TITLE', webuiTitle)
+        localStorage.setItem('YAR-WEBUI-TITLE', webuiTitle)
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-TITLE')
+        localStorage.removeItem('YAR-WEBUI-TITLE')
       }
 
       if (webuiDescription) {
-        localStorage.setItem('LIGHTRAG-WEBUI-DESCRIPTION', webuiDescription)
+        localStorage.setItem('YAR-WEBUI-DESCRIPTION', webuiDescription)
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-DESCRIPTION')
+        localStorage.removeItem('YAR-WEBUI-DESCRIPTION')
       }
 
       // Update state

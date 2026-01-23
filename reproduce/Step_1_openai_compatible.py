@@ -5,7 +5,7 @@ import time
 
 import numpy as np
 
-from yar import LightRAG
+from yar import YAR
 from yar.llm.openai import openai_complete_if_cache, openai_embed
 from yar.utils import EmbeddingFunc
 
@@ -64,7 +64,7 @@ if not os.path.exists(WORKING_DIR):
 
 
 async def initialize_rag():
-    rag = LightRAG(
+    rag = YAR(
         working_dir=WORKING_DIR,
         llm_model_func=llm_model_func,
         embedding_func=EmbeddingFunc(embedding_dim=4096, func=embedding_func),

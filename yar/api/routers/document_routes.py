@@ -1,5 +1,5 @@
 """
-This module contains all document-related routes for the LightRAG API.
+This module contains all document-related routes for the YAR API.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from yar import LightRAG
+from yar import YAR
 from yar.api.config import global_args
 from yar.api.utils_api import get_combined_auth_dependency
 from yar.base import DeletionResult, DocStatus
@@ -999,7 +999,7 @@ def _extract_and_chunk_bytes_with_kreuzberg(
 
 
 async def pipeline_enqueue_file(
-    rag: LightRAG,
+    rag: YAR,
     file_path: Path,
     track_id: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -1013,7 +1013,7 @@ async def pipeline_enqueue_file(
     using Kreuzberg, preserving document structure for better chunk boundaries.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         file_path: Path to the saved file
         track_id: Optional tracking ID, if not provided will be generated
         metadata: Optional metadata dict (e.g., chunking_preset)
@@ -1293,7 +1293,7 @@ async def pipeline_enqueue_file(
 
 
 async def pipeline_enqueue_file_with_s3(
-    rag: LightRAG,
+    rag: YAR,
     file_path: Path,
     track_id: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -1310,7 +1310,7 @@ async def pipeline_enqueue_file_with_s3(
     {workspace}/{doc_id}/processed.md
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
         metadata: Optional metadata dict
@@ -1555,8 +1555,8 @@ async def pipeline_enqueue_file_with_s3(
                     logger.error(f'Failed to move file {file_path.name} to __enqueued__ directory: {move_error}')
                     # Don't affect the main function's success status
 
-                # Compute the actual document ID from SANITIZED extracted content (matches how LightRAG stores it)
-                # LightRAG applies sanitize_text_for_encoding() before hashing - we must do the same!
+                # Compute the actual document ID from SANITIZED extracted content (matches how YAR stores it)
+                # YAR applies sanitize_text_for_encoding() before hashing - we must do the same!
                 sanitized_content = sanitize_text_for_encoding(content)
                 content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
                 return (processed_s3_key, content_doc_id)
@@ -1614,7 +1614,7 @@ async def pipeline_enqueue_file_with_s3(
 
 
 async def pipeline_process_bytes_with_s3(
-    rag: LightRAG,
+    rag: YAR,
     file_content: bytes,
     filename: str,
     mime_type: str,
@@ -1636,7 +1636,7 @@ async def pipeline_process_bytes_with_s3(
     4. Enqueue to RAG pipeline
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         file_content: Document content as bytes
         filename: Original filename (for logging/metadata)
         mime_type: MIME type of the content
@@ -1811,8 +1811,8 @@ async def pipeline_process_bytes_with_s3(
                     raise
 
                 # Update database with S3 keys after processing completes
-                # Compute content_doc_id from SANITIZED extracted content (matches how LightRAG stores it)
-                # LightRAG applies sanitize_text_for_encoding() before hashing - we must do the same!
+                # Compute content_doc_id from SANITIZED extracted content (matches how YAR stores it)
+                # YAR applies sanitize_text_for_encoding() before hashing - we must do the same!
                 sanitized_content = sanitize_text_for_encoding(content)
                 content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
                 await _update_db_with_s3_keys(
@@ -1866,7 +1866,7 @@ async def pipeline_process_bytes_with_s3(
 
 
 async def pipeline_index_file(
-    rag: LightRAG,
+    rag: YAR,
     file_path: Path,
     track_id: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -1877,7 +1877,7 @@ async def pipeline_index_file(
     """Index a file with track_id and optional chunking settings.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
         metadata: Optional metadata dict (e.g., chunking_preset)
@@ -1903,11 +1903,11 @@ async def pipeline_index_file(
         logger.error(traceback.format_exc())
 
 
-async def pipeline_index_files(rag: LightRAG, file_paths: list[Path], track_id: str | None = None):
+async def pipeline_index_files(rag: YAR, file_paths: list[Path], track_id: str | None = None):
     """Index multiple files sequentially to avoid high CPU load
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         file_paths: Paths to the files to index
         track_id: Optional tracking ID to pass to all files
     """
@@ -1934,7 +1934,7 @@ async def pipeline_index_files(rag: LightRAG, file_paths: list[Path], track_id: 
 
 
 async def pipeline_index_texts(
-    rag: LightRAG,
+    rag: YAR,
     texts: list[str],
     file_sources: list[str] | None = None,
     track_id: str | None = None,
@@ -1942,7 +1942,7 @@ async def pipeline_index_texts(
     """Index a list of texts with track_id
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         texts: The texts to index
         file_sources: Sources of the texts
         track_id: Optional tracking ID
@@ -2053,7 +2053,7 @@ async def _upload_processed_text_to_s3(
 
 async def _update_db_with_s3_keys(
     s3_client: S3Client,
-    rag: LightRAG,
+    rag: YAR,
     doc_id: str,
     original_s3_key: str,
     processed_s3_key: str | None = None,
@@ -2066,7 +2066,7 @@ async def _update_db_with_s3_keys(
 
     Args:
         s3_client: S3Client instance (required, S3 is mandatory)
-        rag: LightRAG instance for database updates
+        rag: YAR instance for database updates
         doc_id: Document ID for database updates
         original_s3_key: S3 key for the original uploaded file
         processed_s3_key: S3 key for the processed text (optional)
@@ -2094,7 +2094,7 @@ async def _update_db_with_s3_keys(
 
 
 async def pipeline_index_file_with_s3(
-    rag: LightRAG,
+    rag: YAR,
     file_path: Path,
     track_id: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -2112,7 +2112,7 @@ async def pipeline_index_file_with_s3(
     S3 metadata is passed via underscore-prefixed keys in metadata dict.
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         file_path: Path to the file to index
         track_id: Optional tracking ID
         metadata: Optional metadata dict (may contain _s3_* keys)
@@ -2156,11 +2156,11 @@ async def pipeline_index_file_with_s3(
         )
 
 
-async def run_scanning_process(rag: LightRAG, doc_manager: DocumentManager, track_id: str | None = None):
+async def run_scanning_process(rag: YAR, doc_manager: DocumentManager, track_id: str | None = None):
     """Background task to scan and index documents
 
     Args:
-        rag: LightRAG instance
+        rag: YAR instance
         doc_manager: DocumentManager instance
         track_id: Optional tracking ID to pass to all scanned files
     """
@@ -2208,7 +2208,7 @@ async def run_scanning_process(rag: LightRAG, doc_manager: DocumentManager, trac
 
 
 async def background_delete_documents(
-    rag: LightRAG,
+    rag: YAR,
     doc_manager: DocumentManager,
     doc_ids: list[str],
     delete_file: bool = False,
@@ -2414,7 +2414,7 @@ async def background_delete_documents(
 
 
 def create_document_routes(
-    rag: LightRAG,
+    rag: YAR,
     doc_manager: DocumentManager,
     api_key: str | None = None,
     s3_client: S3Client | None = None,

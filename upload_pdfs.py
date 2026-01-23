@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload PDFs to LightRAG server."""
+"""Upload PDFs to YAR server."""
 
 import argparse
 import os
@@ -34,7 +34,7 @@ def upload_pdfs(pdf_dir: Path, api_url: str, timeout: float) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Upload PDFs to LightRAG')
+    parser = argparse.ArgumentParser(description='Upload PDFs to YAR')
     parser.add_argument(
         '--pdf-dir',
         default=os.getenv('PDF_DIR', 'documents/questions/docs/pdf'),
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--api-url',
         default=os.getenv('API_URL', 'http://localhost:9621/documents/upload'),
-        help='LightRAG upload endpoint (default: env API_URL or http://localhost:9621/documents/upload)',
+        help='YAR upload endpoint (default: env API_URL or http://localhost:9621/documents/upload)',
     )
     parser.add_argument(
         '--timeout',

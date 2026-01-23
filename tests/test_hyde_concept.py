@@ -6,7 +6,7 @@ Compares retrieval quality between:
 1. Standard: embed query directly
 2. HyDE: embed hypothetical answers, average them
 
-Uses the same embedding model and vector DB as LightRAG.
+Uses the same embedding model and vector DB as YAR.
 """
 
 import asyncio

@@ -110,8 +110,8 @@ class TestExplainRequest:
 
     def test_minimal_request(self):
         """Test request with only required field."""
-        request = ExplainRequest(query='What is LightRAG?')
-        assert request.query == 'What is LightRAG?'
+        request = ExplainRequest(query='What is YAR?')
+        assert request.query == 'What is YAR?'
         assert request.mode == 'mix'  # default
         assert request.top_k is None
         assert request.chunk_top_k is None

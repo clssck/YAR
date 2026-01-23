@@ -2,7 +2,7 @@
 """
 Test two-stage retrieval concept in isolation.
 
-Current LightRAG:
+Current YAR:
 - Entity search: top_k=60, no reranking
 - Chunk search: top_k=30, then rerank (but threshold=0.0)
 
@@ -32,7 +32,7 @@ PG_DB = os.getenv('POSTGRES_DATABASE', 'yar')
 
 client = AsyncOpenAI()
 
-# Load reranker model (same as LightRAG uses)
+# Load reranker model (same as YAR uses)
 print('Loading reranker model...')
 reranker = CrossEncoder('mixedbread-ai/mxbai-rerank-xsmall-v1')
 print('Reranker loaded!')

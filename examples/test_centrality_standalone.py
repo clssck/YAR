@@ -121,9 +121,9 @@ async def run_evaluation(
             WITH entity_degrees AS (
                 SELECT entity_name, COUNT(*) as total_connections
                 FROM (
-                    SELECT source_id as entity_name FROM LIGHTRAG_VDB_RELATION WHERE workspace = $1
+                    SELECT source_id as entity_name FROM YAR_VDB_RELATION WHERE workspace = $1
                     UNION ALL
-                    SELECT target_id as entity_name FROM LIGHTRAG_VDB_RELATION WHERE workspace = $1
+                    SELECT target_id as entity_name FROM YAR_VDB_RELATION WHERE workspace = $1
                 ) connections
                 GROUP BY entity_name
             )
@@ -139,7 +139,7 @@ async def run_evaluation(
             print('No relations found. Checking if entities exist...')
             # Check entity count
             entity_count = await db.query(
-                'SELECT COUNT(*) as cnt FROM LIGHTRAG_VDB_ENTITY WHERE workspace = $1',
+                'SELECT COUNT(*) as cnt FROM YAR_VDB_ENTITY WHERE workspace = $1',
                 params=[workspace],
                 multirows=False,
             )
@@ -171,7 +171,7 @@ async def run_evaluation(
         # Get sample entities with vectors
         entity_sql = """
             SELECT id, entity_name, content, content_vector
-            FROM LIGHTRAG_VDB_ENTITY
+            FROM YAR_VDB_ENTITY
             WHERE workspace = $1
               AND content_vector IS NOT NULL
             LIMIT $2

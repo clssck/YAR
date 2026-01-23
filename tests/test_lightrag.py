@@ -1,8 +1,8 @@
 """
-Tests for yar/yar.py - Main LightRAG orchestrator class.
+Tests for yar/yar.py - Main YAR orchestrator class.
 
 This module tests:
-- LightRAG class initialization and __post_init__ logic
+- YAR class initialization and __post_init__ logic
 - Configuration validation and warnings
 - Storage backend selection and validation
 - Workspace handling
@@ -30,7 +30,7 @@ from yar.base import (
     StoragesStatus,
 )
 from yar.entity_resolution import EntityResolutionConfig
-from yar.yar import LightRAG
+from yar.yar import YAR
 
 if TYPE_CHECKING:
     pass
@@ -72,8 +72,8 @@ def mock_llm_func():
     return llm_func
 
 
-class TestLightRAGInitialization:
-    """Tests for LightRAG initialization and __post_init__."""
+class TestYARInitialization:
+    """Tests for YAR initialization and __post_init__."""
 
     @patch('yar.kg.verify_storage_implementation')
     @patch('yar.utils.check_storage_env_vars')
@@ -85,8 +85,8 @@ class TestLightRAGInitialization:
         mock_embedding_func,
         mock_llm_func,
     ):
-        """Test LightRAG initializes with default values."""
-        rag = LightRAG(
+        """Test YAR initializes with default values."""
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -115,7 +115,7 @@ class TestLightRAGInitialization:
         non_existent = os.path.join(temp_working_dir, 'new_dir')
         assert not os.path.exists(non_existent)
 
-        rag = LightRAG(
+        rag = YAR(
             working_dir=non_existent,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -135,7 +135,7 @@ class TestLightRAGInitialization:
         mock_llm_func,
     ):
         """Test storage implementation verification is called for all storage types."""
-        LightRAG(
+        YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -160,7 +160,7 @@ class TestLightRAGInitialization:
         mock_llm_func,
     ):
         """Test environment variable checking is called for all storage backends."""
-        LightRAG(
+        YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -185,7 +185,7 @@ class TestLightRAGInitialization:
     ):
         """Test ValueError is raised when embedding_func is None."""
         with pytest.raises(ValueError) as exc_info:
-            LightRAG(
+            YAR(
                 working_dir=temp_working_dir,
                 embedding_func=None,
                 llm_model_func=mock_llm_func,
@@ -204,7 +204,7 @@ class TestLightRAGInitialization:
         mock_llm_func,
     ):
         """Test default tokenizer is TiktokenTokenizer."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -227,7 +227,7 @@ class TestLightRAGInitialization:
         mock_llm_func,
     ):
         """Test embedding_token_limit is captured from embedding_func.max_token_size."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -237,7 +237,7 @@ class TestLightRAGInitialization:
         assert rag.embedding_token_limit == mock_embedding_func.max_token_size
 
 
-class TestLightRAGConfigValidation:
+class TestYARConfigValidation:
     """Tests for configuration validation and warnings."""
 
     @patch('yar.yar.verify_storage_implementation')
@@ -253,7 +253,7 @@ class TestLightRAGConfigValidation:
         mock_llm_func,
     ):
         """Test warning when force_llm_summary_on_merge < 3."""
-        LightRAG(
+        YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -277,7 +277,7 @@ class TestLightRAGConfigValidation:
         mock_llm_func,
     ):
         """Test warning when summary_context_size > max_total_tokens."""
-        LightRAG(
+        YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -301,7 +301,7 @@ class TestLightRAGConfigValidation:
         mock_llm_func,
     ):
         """Test warning when summary_length_recommended > summary_max_tokens."""
-        LightRAG(
+        YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -314,7 +314,7 @@ class TestLightRAGConfigValidation:
         assert any('max_total_tokens' in call and 'summary_length_recommended' in call for call in warning_calls)
 
 
-class TestLightRAGDeprecatedParameters:
+class TestYARDeprecatedParameters:
     """Tests for deprecated parameter handling."""
 
     @patch('yar.yar.verify_storage_implementation')
@@ -330,7 +330,7 @@ class TestLightRAGDeprecatedParameters:
         """Test deprecation warning for log_level parameter."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            LightRAG(
+            YAR(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,
@@ -360,7 +360,7 @@ class TestLightRAGDeprecatedParameters:
         """Test deprecation warning for log_file_path parameter."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
-            LightRAG(
+            YAR(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,
@@ -374,7 +374,7 @@ class TestLightRAGDeprecatedParameters:
         # Just verify the warning was issued
 
 
-class TestLightRAGWorkspace:
+class TestYARWorkspace:
     """Tests for workspace handling."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -389,7 +389,7 @@ class TestLightRAGWorkspace:
     ):
         """Test workspace defaults to WORKSPACE environment variable."""
         with patch.dict(os.environ, {'WORKSPACE': 'test_workspace'}):
-            rag = LightRAG(
+            rag = YAR(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,
@@ -408,7 +408,7 @@ class TestLightRAGWorkspace:
     ):
         """Test explicit workspace parameter overrides environment."""
         with patch.dict(os.environ, {'WORKSPACE': 'env_workspace'}):
-            rag = LightRAG(
+            rag = YAR(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,
@@ -429,7 +429,7 @@ class TestLightRAGWorkspace:
         """Test workspace defaults to empty string when not set."""
         # Clear WORKSPACE env var
         with patch.dict(os.environ, {'WORKSPACE': ''}, clear=False):
-            rag = LightRAG(
+            rag = YAR(
                 working_dir=temp_working_dir,
                 embedding_func=mock_embedding_func,
                 llm_model_func=mock_llm_func,
@@ -438,7 +438,7 @@ class TestLightRAGWorkspace:
             assert rag.workspace in ('', 'default')
 
 
-class TestLightRAGEntityResolution:
+class TestYAREntityResolution:
     """Tests for entity resolution configuration."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -452,7 +452,7 @@ class TestLightRAGEntityResolution:
         mock_llm_func,
     ):
         """Test entity resolution config is initialized by default."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -475,7 +475,7 @@ class TestLightRAGEntityResolution:
             enabled=False,
         )
 
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -486,7 +486,7 @@ class TestLightRAGEntityResolution:
         assert rag.entity_resolution_config.enabled is False
 
 
-class TestLightRAGQueryParameters:
+class TestYARQueryParameters:
     """Tests for query parameter defaults."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -500,7 +500,7 @@ class TestLightRAGQueryParameters:
         mock_llm_func,
     ):
         """Test query parameter fields have correct defaults."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -525,7 +525,7 @@ class TestLightRAGQueryParameters:
         mock_llm_func,
     ):
         """Test custom query parameter values."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -539,7 +539,7 @@ class TestLightRAGQueryParameters:
         assert rag.max_entity_tokens == 10000
 
 
-class TestLightRAGChunkingConfiguration:
+class TestYARChunkingConfiguration:
     """Tests for text chunking configuration."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -553,7 +553,7 @@ class TestLightRAGChunkingConfiguration:
         mock_llm_func,
     ):
         """Test chunk size defaults."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -574,7 +574,7 @@ class TestLightRAGChunkingConfiguration:
         mock_llm_func,
     ):
         """Test custom chunk sizes."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -596,7 +596,7 @@ class TestLightRAGChunkingConfiguration:
         mock_llm_func,
     ):
         """Test default chunking function is set."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -606,7 +606,7 @@ class TestLightRAGChunkingConfiguration:
         assert callable(rag.chunking_func)
 
 
-class TestLightRAGOrphanConnection:
+class TestYAROrphanConnection:
     """Tests for orphan connection configuration."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -620,7 +620,7 @@ class TestLightRAGOrphanConnection:
         mock_llm_func,
     ):
         """Test orphan connection defaults."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -643,7 +643,7 @@ class TestLightRAGOrphanConnection:
         mock_llm_func,
     ):
         """Test custom orphan connection config."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -662,7 +662,7 @@ class TestLightRAGOrphanConnection:
 
 
 @pytest.mark.offline
-class TestLightRAGStorageLifecycle:
+class TestYARStorageLifecycle:
     """Tests for storage initialization and finalization lifecycle."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -677,7 +677,7 @@ class TestLightRAGStorageLifecycle:
         mock_llm_func,
     ):
         """Test storage initialization."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -723,7 +723,7 @@ class TestLightRAGStorageLifecycle:
         mock_llm_func,
     ):
         """Test storage finalization."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -769,7 +769,7 @@ class TestLightRAGStorageLifecycle:
         mock_llm_func,
     ):
         """Test finalization continues even if one storage fails."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -801,7 +801,7 @@ class TestLightRAGStorageLifecycle:
 
 
 @pytest.mark.offline
-class TestLightRAGPublicMethods:
+class TestYARPublicMethods:
     """Tests for key public methods with mocked dependencies."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -816,7 +816,7 @@ class TestLightRAGPublicMethods:
         mock_llm_func,
     ):
         """Test adelete_by_doc_id returns DeletionResult."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -861,7 +861,7 @@ class TestLightRAGPublicMethods:
         mock_llm_func,
     ):
         """Test adelete_by_doc_id when document not found."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -882,7 +882,7 @@ class TestLightRAGPublicMethods:
 
 
 @pytest.mark.offline
-class TestLightRAGStorageClasses:
+class TestYARStorageClasses:
     """Tests for storage class initialization."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -896,7 +896,7 @@ class TestLightRAGStorageClasses:
         mock_llm_func,
     ):
         """Test storage classes are properly initialized."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -919,7 +919,7 @@ class TestLightRAGStorageClasses:
         mock_llm_func,
     ):
         """Test KV storage instances are created."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -945,7 +945,7 @@ class TestLightRAGStorageClasses:
         mock_llm_func,
     ):
         """Test vector storage instances are created."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -967,7 +967,7 @@ class TestLightRAGStorageClasses:
         mock_llm_func,
     ):
         """Test graph storage instance is created."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -986,7 +986,7 @@ class TestLightRAGStorageClasses:
         mock_llm_func,
     ):
         """Test doc status storage instance is created."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -996,7 +996,7 @@ class TestLightRAGStorageClasses:
 
 
 @pytest.mark.offline
-class TestLightRAGEmbeddingConfiguration:
+class TestYAREmbeddingConfiguration:
     """Tests for embedding function configuration."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -1010,7 +1010,7 @@ class TestLightRAGEmbeddingConfiguration:
         mock_llm_func,
     ):
         """Test default embedding cache configuration."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -1032,7 +1032,7 @@ class TestLightRAGEmbeddingConfiguration:
         mock_llm_func,
     ):
         """Test embedding batch number configuration."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -1052,7 +1052,7 @@ class TestLightRAGEmbeddingConfiguration:
         mock_llm_func,
     ):
         """Test embedding function max async configuration."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -1063,7 +1063,7 @@ class TestLightRAGEmbeddingConfiguration:
 
 
 @pytest.mark.offline
-class TestLightRAGLLMConfiguration:
+class TestYARLLMConfiguration:
     """Tests for LLM configuration."""
 
     @patch('yar.kg.verify_storage_implementation')
@@ -1077,7 +1077,7 @@ class TestLightRAGLLMConfiguration:
         mock_llm_func,
     ):
         """Test LLM model name configuration."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -1099,7 +1099,7 @@ class TestLightRAGLLMConfiguration:
         """Test LLM model kwargs configuration."""
         custom_kwargs = {'temperature': 0.7, 'max_tokens': 1000}
 
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -1119,7 +1119,7 @@ class TestLightRAGLLMConfiguration:
         mock_llm_func,
     ):
         """Test LLM model max async configuration."""
-        rag = LightRAG(
+        rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,

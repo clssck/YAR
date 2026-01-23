@@ -1,7 +1,7 @@
 import { LogOutIcon } from 'lucide-react'
 import { PirateFlag } from '@/components/icons/PirateFlag'
 import { useTranslation } from 'react-i18next'
-import type { LightragConfiguration } from '@/api/yar'
+import type { YarConfiguration } from '@/api/yar'
 import AppSettings from '@/components/AppSettings'
 import KeyboardShortcutHelp from '@/components/KeyboardShortcutHelp'
 import StatusIndicator from '@/components/status/StatusIndicator'
@@ -34,7 +34,7 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
   )
 }
 
-function shouldShowTableExplorer(storageConfig: Partial<LightragConfiguration> | null) {
+function shouldShowTableExplorer(storageConfig: Partial<YarConfiguration> | null) {
   if (import.meta.env.DEV) return true
   return (
     storageConfig &&

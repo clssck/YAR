@@ -1,4 +1,4 @@
-"""PostgreSQL performance benchmarks for LightRAG.
+"""PostgreSQL performance benchmarks for YAR.
 
 Measures latency percentiles, throughput, and resource usage for:
 - Vector similarity search
@@ -10,8 +10,8 @@ Usage:
     pytest tests/test_postgres_performance.py -v --run-integration
 
 Environment:
-    LIGHTRAG_BENCHMARK_SIZE: small|medium|large (default: small)
-    LIGHTRAG_BENCHMARK_ITERATIONS: int (default: 50)
+    YAR_BENCHMARK_SIZE: small|medium|large (default: small)
+    YAR_BENCHMARK_ITERATIONS: int (default: 50)
 
     Required database connection:
     POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE
@@ -107,8 +107,8 @@ TEST_DATA_SIZES = {
 
 def get_benchmark_config() -> tuple[dict[str, int], int]:
     """Get benchmark configuration from environment."""
-    size = os.getenv('LIGHTRAG_BENCHMARK_SIZE', 'small')
-    iterations = int(os.getenv('LIGHTRAG_BENCHMARK_ITERATIONS', '50'))
+    size = os.getenv('YAR_BENCHMARK_SIZE', 'small')
+    iterations = int(os.getenv('YAR_BENCHMARK_ITERATIONS', '50'))
 
     if size not in TEST_DATA_SIZES:
         size = 'small'
@@ -204,7 +204,7 @@ async def vector_storage(db_connection: PostgreSQLDB):
     # Cleanup: delete test data
     with contextlib.suppress(Exception):
         await db_connection.execute(
-            'DELETE FROM LIGHTRAG_VDB_CHUNKS WHERE workspace = $1', data={'workspace': workspace}
+            'DELETE FROM YAR_VDB_CHUNKS WHERE workspace = $1', data={'workspace': workspace}
         )
 
 
@@ -378,7 +378,7 @@ class TestBulkInsertPerformance:
         try:
             db = vector_storage._db_required()
             await db.execute(
-                "DELETE FROM LIGHTRAG_VDB_CHUNKS WHERE id LIKE 'throughput_test_%' AND workspace = $1",
+                "DELETE FROM YAR_VDB_CHUNKS WHERE id LIKE 'throughput_test_%' AND workspace = $1",
                 data={'workspace': vector_storage.workspace},
             )
         except Exception:

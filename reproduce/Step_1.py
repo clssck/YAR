@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-from yar import LightRAG
+from yar import YAR
 
 
 def insert_text(rag, file_path):
@@ -32,7 +32,7 @@ if not os.path.exists(WORKING_DIR):
 
 
 async def initialize_rag():
-    rag = LightRAG(working_dir=WORKING_DIR)
+    rag = YAR(working_dir=WORKING_DIR)
 
     await rag.initialize_storages()  # Auto-initializes pipeline_status
     return rag

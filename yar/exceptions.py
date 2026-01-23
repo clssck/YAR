@@ -64,10 +64,10 @@ class StorageNotInitializedError(RuntimeError):
         super().__init__(
             f'{storage_type} not initialized. Please ensure proper initialization:\n'
             f'\n'
-            f'  rag = LightRAG(...)\n'
+            f'  rag = YAR(...)\n'
             f'  await rag.initialize_storages()  # Required - auto-initializes pipeline_status\n'
             f'\n'
-            f'See: https://github.com/HKUDS/LightRAG#important-initialization-requirements'
+            f'See: https://github.com/clssck/YAR#important-initialization-requirements'
         )
 
 
@@ -82,10 +82,10 @@ class PipelineNotInitializedError(KeyError):
             f'If you see this error, please ensure:\n'
             f'\n'
             f'  1. You called await rag.initialize_storages()\n'
-            f'  2. For multi-workspace setups, each LightRAG instance was properly initialized\n'
+            f'  2. For multi-workspace setups, each YAR instance was properly initialized\n'
             f'\n'
             f'Standard initialization:\n'
-            f"  rag = LightRAG(workspace='your_workspace')\n"
+            f"  rag = YAR(workspace='your_workspace')\n"
             f'  await rag.initialize_storages()  # Auto-initializes pipeline_status\n'
             f'\n'
             f'If you need manual control (advanced):\n'
@@ -112,11 +112,11 @@ class LockTimeoutError(TimeoutError):
         self.timeout = timeout
 
 
-class LightRAGError(Exception):
-    """Base exception for all LightRAG errors."""
+class YARError(Exception):
+    """Base exception for all YAR errors."""
 
 
-class StorageError(LightRAGError):
+class StorageError(YARError):
     """Raised when a storage operation fails."""
 
     def __init__(self, message: str, storage_type: str | None = None, operation: str | None = None):
@@ -127,7 +127,7 @@ class StorageError(LightRAGError):
         super().__init__(f'{detail} {message}'.strip())
 
 
-class ExtractionError(LightRAGError):
+class ExtractionError(YARError):
     """Raised when entity/relationship extraction fails."""
 
     def __init__(self, message: str, chunk_key: str | None = None):
@@ -136,7 +136,7 @@ class ExtractionError(LightRAGError):
         super().__init__(f'{prefix} {message}'.strip())
 
 
-class QueryError(LightRAGError):
+class QueryError(YARError):
     """Raised when a query operation fails."""
 
     def __init__(self, message: str, query_mode: str | None = None):
@@ -145,7 +145,7 @@ class QueryError(LightRAGError):
         super().__init__(f'{prefix} {message}'.strip())
 
 
-class ConfigurationError(LightRAGError):
+class ConfigurationError(YARError):
     """Raised when configuration is invalid or missing."""
 
     def __init__(self, message: str, config_key: str | None = None):
@@ -154,7 +154,7 @@ class ConfigurationError(LightRAGError):
         super().__init__(f'{prefix} {message}'.strip())
 
 
-class EmbeddingError(LightRAGError):
+class EmbeddingError(YARError):
     """Raised when embedding computation fails."""
 
     def __init__(self, message: str, model: str | None = None):
@@ -163,7 +163,7 @@ class EmbeddingError(LightRAGError):
         super().__init__(f'{prefix} {message}'.strip())
 
 
-class LLMError(LightRAGError):
+class LLMError(YARError):
     """Raised when LLM call fails."""
 
     def __init__(self, message: str, model: str | None = None, operation: str | None = None):

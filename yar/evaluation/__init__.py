@@ -1,5 +1,5 @@
 """
-LightRAG Evaluation Module
+YAR Evaluation Module
 
 RAGAS-based evaluation framework for assessing RAG system quality.
 

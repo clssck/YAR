@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import type { LightragStatus } from '@/api/yar'
+import type { YarStatus } from '@/api/yar'
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,7 @@ import StatusCard from './StatusCard'
 interface StatusDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  status: LightragStatus | null
+  status: YarStatus | null
 }
 
 const StatusDialog = ({ open, onOpenChange, status }: StatusDialogProps) => {

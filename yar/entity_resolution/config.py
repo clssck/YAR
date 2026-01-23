@@ -1,6 +1,6 @@
 """Configuration for Entity Resolution
 
-Uses the same LLM that LightRAG is configured with - no separate model config needed.
+Uses the same LLM that YAR is configured with - no separate model config needed.
 
 All entity resolution is LLM-based:
 - Cache check first (instant, free)

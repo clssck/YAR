@@ -1,5 +1,5 @@
 """
-Full-text search result caching for LightRAG.
+Full-text search result caching for YAR.
 
 Follows the same dual-tier pattern as operate.py's query embedding cache:
 - Local LRU cache for single-process performance

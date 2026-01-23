@@ -1,5 +1,5 @@
 """
-Functional tests for LightRAG query operations.
+Functional tests for YAR query operations.
 
 These tests verify the end-to-end query flow including:
 - Query request validation and processing

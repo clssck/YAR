@@ -50,7 +50,7 @@ async def db_client():
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestSchemaMigrationsTableIntegration:
-    """Integration tests for LIGHTRAG_SCHEMA_MIGRATIONS table."""
+    """Integration tests for YAR_SCHEMA_MIGRATIONS table."""
 
     async def test_migrations_table_exists_in_database(self, db_client):
         """Verify the migrations table actually exists in PostgreSQL."""
@@ -61,7 +61,7 @@ class TestSchemaMigrationsTableIntegration:
             ) as exists"""
         )
         assert result is not None
-        assert result.get('exists') is True, 'LIGHTRAG_SCHEMA_MIGRATIONS table should exist'
+        assert result.get('exists') is True, 'YAR_SCHEMA_MIGRATIONS table should exist'
 
     async def test_migrations_table_has_correct_columns(self, db_client):
         """Verify the table has the expected schema."""
@@ -101,7 +101,7 @@ class TestSchemaMigrationsTableIntegration:
         finally:
             # Cleanup
             await db_client.execute(
-                'DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
+                'DELETE FROM YAR_SCHEMA_MIGRATIONS WHERE version = $1',
                 data={'version': test_version},
             )
 
@@ -121,7 +121,7 @@ class TestSchemaMigrationsTableIntegration:
 
         finally:
             await db_client.execute(
-                'DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
+                'DELETE FROM YAR_SCHEMA_MIGRATIONS WHERE version = $1',
                 data={'version': test_version},
             )
 
@@ -136,14 +136,14 @@ class TestSchemaMigrationsTableIntegration:
 
             # Should still have only one record
             result = await db_client.query(
-                'SELECT COUNT(*) as cnt FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
+                'SELECT COUNT(*) as cnt FROM YAR_SCHEMA_MIGRATIONS WHERE version = $1',
                 [test_version],
             )
             assert result['cnt'] == 1
 
         finally:
             await db_client.execute(
-                'DELETE FROM LIGHTRAG_SCHEMA_MIGRATIONS WHERE version = $1',
+                'DELETE FROM YAR_SCHEMA_MIGRATIONS WHERE version = $1',
                 data={'version': test_version},
             )
 

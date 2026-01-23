@@ -1,7 +1,7 @@
 """
 Metrics routes for operational monitoring.
 
-This module provides endpoints for retrieving LightRAG operational metrics
+This module provides endpoints for retrieving YAR operational metrics
 including query latency percentiles, cache hit rates, and API call counts.
 
 Endpoints:

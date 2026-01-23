@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Regenerate ground truths for pharma_test_dataset.json based on actual LightRAG context.
+Regenerate ground truths for pharma_test_dataset.json based on actual YAR context.
 
 This script:
 1. Reads each question from the test dataset
-2. Queries LightRAG to get the actual retrieved context
+2. Queries YAR to get the actual retrieved context
 3. Uses an LLM to generate ground truth ONLY from that context
 4. Saves the updated dataset
 
-This ensures ground truths match what LightRAG can actually retrieve,
+This ensures ground truths match what YAR can actually retrieve,
 making RAGAS evaluation meaningful.
 
-Configuration is loaded from the project's .env file (same as LightRAG service).
+Configuration is loaded from the project's .env file (same as YAR service).
 """
 
 import asyncio
@@ -24,15 +24,15 @@ import httpx
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-# Load .env from project root (same config as LightRAG service)
+# Load .env from project root (same config as YAR service)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
 
-# Configuration - use same env vars as LightRAG service
-LIGHTRAG_ENDPOINT = os.getenv('LIGHTRAG_ENDPOINT', 'http://localhost:9621')
-LIGHTRAG_WORKSPACE = os.getenv('LIGHTRAG_WORKSPACE', 'default')
+# Configuration - use same env vars as YAR service
+YAR_ENDPOINT = os.getenv('YAR_ENDPOINT', 'http://localhost:9621')
+YAR_WORKSPACE = os.getenv('YAR_WORKSPACE', 'default')
 
-# LLM Configuration (same as LightRAG service)
+# LLM Configuration (same as YAR service)
 LLM_BINDING = os.getenv('LLM_BINDING', 'openai')
 LLM_MODEL = os.getenv('LLM_MODEL', 'gpt-4o-mini')
 LLM_BINDING_HOST = os.getenv('LLM_BINDING_HOST', 'https://api.openai.com/v1')
@@ -143,10 +143,10 @@ def extract_key_terms(question: str) -> str:
 
 
 async def query_yar(query: str, workspace: str = 'default', timeout: float = 120.0) -> dict:
-    """Query LightRAG and get the response with context."""
+    """Query YAR and get the response with context."""
     async with httpx.AsyncClient(timeout=timeout) as http_client:
         response = await http_client.post(
-            f'{LIGHTRAG_ENDPOINT}/query',
+            f'{YAR_ENDPOINT}/query',
             json={
                 'query': query,
                 'mode': 'mix',
@@ -175,7 +175,7 @@ async def generate_ground_truth(question: str, context: str) -> str:
 
 
 def extract_context_text(rag_response: dict) -> tuple[str, int]:
-    """Extract readable context from LightRAG response.
+    """Extract readable context from YAR response.
 
     The API returns references like:
     {
@@ -211,7 +211,7 @@ def extract_context_text(rag_response: dict) -> tuple[str, int]:
 
 
 async def query_with_retry(question: str, workspace: str = 'default', max_retries: int = 2) -> tuple[str, str, int]:
-    """Query LightRAG with retry using simplified query if no context found.
+    """Query YAR with retry using simplified query if no context found.
 
     Returns:
         tuple: (context, query_used, chunk_count)
@@ -265,7 +265,7 @@ async def regenerate_dataset(input_path: str, output_path: str, workspace: str =
         print(f'\n[{i + 1}/{len(test_cases)}] Processing: {question[:60]}...')
 
         try:
-            # Query LightRAG for actual context with retry
+            # Query YAR for actual context with retry
             context, query_used, chunk_count = await query_with_retry(question, workspace)
 
             if chunk_count > 0:
@@ -333,14 +333,14 @@ async def main():
     print(f'{"=" * 60}')
     print(f'Input:     {input_path}')
     print(f'Output:    {output_path}')
-    print(f'LightRAG:  {LIGHTRAG_ENDPOINT}')
-    print(f'Workspace: {LIGHTRAG_WORKSPACE}')
+    print(f'YAR:  {YAR_ENDPOINT}')
+    print(f'Workspace: {YAR_WORKSPACE}')
     print(f'LLM Host:  {LLM_BINDING_HOST}')
     print(f'LLM Model: {LLM_MODEL}')
     print(f'{"=" * 60}')
     print()
 
-    await regenerate_dataset(str(input_path), str(output_path), LIGHTRAG_WORKSPACE)
+    await regenerate_dataset(str(input_path), str(output_path), YAR_WORKSPACE)
 
 
 if __name__ == '__main__':

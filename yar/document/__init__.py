@@ -1,4 +1,4 @@
-"""Document processing module for LightRAG.
+"""Document processing module for YAR.
 
 Powered by Kreuzberg - a polyglot document intelligence framework with Rust core.
 Supports 56+ document formats with built-in semantic chunking for RAG.

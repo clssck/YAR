@@ -96,7 +96,7 @@ const LoginPage = () => {
       const response = await loginToServer(username, password)
 
       // Get previous username from localStorage
-      const previousUsername = localStorage.getItem('LIGHTRAG-PREVIOUS-USER')
+      const previousUsername = localStorage.getItem('YAR-PREVIOUS-USER')
 
       // Check if it's the same user logging in again
       const isSameUser = previousUsername === username
@@ -108,7 +108,7 @@ const LoginPage = () => {
       }
 
       // Update previous username
-      localStorage.setItem('LIGHTRAG-PREVIOUS-USER', username)
+      localStorage.setItem('YAR-PREVIOUS-USER', username)
 
       // Check authentication mode
       const isGuestMode = response.auth_mode === 'disabled'
@@ -145,7 +145,7 @@ const LoginPage = () => {
       // Clear any existing auth state
       useAuthStore.getState().logout()
       // Clear local storage
-      localStorage.removeItem('LIGHTRAG-API-TOKEN')
+      localStorage.removeItem('YAR-API-TOKEN')
     } finally {
       setLoading(false)
     }

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 
 class TestAuthWithNoApiKey:
-    """Tests for when LIGHTRAG_API_KEY is not configured.
+    """Tests for when YAR_API_KEY is not configured.
 
     This is the most common development scenario - auth should be
     completely disabled when no API key is set.
@@ -89,7 +89,7 @@ class TestAuthWithNoApiKey:
 
 
 class TestAuthWithApiKey:
-    """Tests for when LIGHTRAG_API_KEY is configured.
+    """Tests for when YAR_API_KEY is configured.
 
     When an API key is set, endpoints should require that key.
     """

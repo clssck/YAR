@@ -1,5 +1,5 @@
 """
-Pytest configuration for LightRAG tests.
+Pytest configuration for YAR tests.
 
 This file provides command-line options and fixtures for test configuration.
 """
@@ -8,18 +8,18 @@ import pytest
 
 
 def pytest_configure(config):
-    """Register custom markers for LightRAG tests."""
+    """Register custom markers for YAR tests."""
     config.addinivalue_line('markers', 'offline: marks tests as offline (no external dependencies)')
     config.addinivalue_line(
         'markers',
         'integration: marks tests requiring external services (skipped by default)',
     )
     config.addinivalue_line('markers', 'requires_db: marks tests requiring database')
-    config.addinivalue_line('markers', 'requires_api: marks tests requiring LightRAG API server')
+    config.addinivalue_line('markers', 'requires_api: marks tests requiring YAR API server')
 
 
 def pytest_addoption(parser):
-    """Add custom command-line options for LightRAG tests."""
+    """Add custom command-line options for YAR tests."""
 
     parser.addoption(
         '--keep-artifacts',
@@ -82,7 +82,7 @@ def keep_test_artifacts(request):
         return True
 
     # Fall back to environment variable
-    return os.getenv('LIGHTRAG_KEEP_ARTIFACTS', 'false').lower() == 'true'
+    return os.getenv('YAR_KEEP_ARTIFACTS', 'false').lower() == 'true'
 
 
 @pytest.fixture(scope='session')
@@ -99,7 +99,7 @@ def stress_test_mode(request):
         return True
 
     # Fall back to environment variable
-    return os.getenv('LIGHTRAG_STRESS_TEST', 'false').lower() == 'true'
+    return os.getenv('YAR_STRESS_TEST', 'false').lower() == 'true'
 
 
 @pytest.fixture(scope='session')
@@ -117,7 +117,7 @@ def parallel_workers(request):
         return cli_workers
 
     # Fall back to environment variable
-    return int(os.getenv('LIGHTRAG_TEST_WORKERS', '3'))
+    return int(os.getenv('YAR_TEST_WORKERS', '3'))
 
 
 @pytest.fixture(scope='session')
@@ -134,4 +134,4 @@ def run_integration_tests(request):
         return True
 
     # Fall back to environment variable
-    return os.getenv('LIGHTRAG_RUN_INTEGRATION', 'false').lower() == 'true'
+    return os.getenv('YAR_RUN_INTEGRATION', 'false').lower() == 'true'

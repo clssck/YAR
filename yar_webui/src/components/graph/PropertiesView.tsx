@@ -7,7 +7,7 @@ import Button from '@/components/ui/Button'
 import Text from '@/components/ui/Text'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useResponsive } from '@/hooks/useBreakpoint'
-import useLightragGraph from '@/hooks/useLightragGraph'
+import useYarGraph from '@/hooks/useYarGraph'
 import { cn } from '@/lib/utils'
 import { type RawEdgeType, type RawNodeType, useGraphStore } from '@/stores/graph'
 import EditablePropertyRow from './EditablePropertyRow'
@@ -32,7 +32,7 @@ const asNumber = (value: PropertyValue | undefined): number => {
  * Component that view properties of elements in graph.
  */
 const PropertiesView = () => {
-  const { getNode, getEdge } = useLightragGraph()
+  const { getNode, getEdge } = useYarGraph()
   const selectedNode = useGraphStore.use.selectedNode()
   const focusedNode = useGraphStore.use.focusedNode()
   const selectedEdge = useGraphStore.use.selectedEdge()

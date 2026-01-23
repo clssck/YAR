@@ -38,10 +38,10 @@ def download_tiktoken_cache(cache_dir: str | None = None, models: list[str] | No
         cache_dir = os.environ.get('TIKTOKEN_CACHE_DIR', str(Path.home() / '.tiktoken_cache'))
         print(f'Using default cache directory: {cache_dir}')
 
-    # Common models used by LightRAG and OpenAI
+    # Common models used by YAR and OpenAI
     if models is None:
         models = [
-            'gpt-4o-mini',  # Default model for LightRAG
+            'gpt-4o-mini',  # Default model for YAR
             'gpt-4o',  # GPT-4 Omni
             'gpt-4',  # GPT-4
             'gpt-3.5-turbo',  # GPT-3.5 Turbo
@@ -101,7 +101,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog='yar-download-cache',
-        description='Download cache files for LightRAG offline deployment',
+        description='Download cache files for YAR offline deployment',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -114,7 +114,7 @@ Examples:
   # Download specific models only
   yar-download-cache --models gpt-4o-mini gpt-4
 
-For more information, visit: https://github.com/HKUDS/LightRAG
+For more information, visit: https://github.com/clssck/YAR
         """,
     )
 
@@ -129,12 +129,12 @@ For more information, visit: https://github.com/HKUDS/LightRAG
         help='Specific models to download (default: common models)',
         default=None,
     )
-    parser.add_argument('--version', action='version', version='%(prog)s (LightRAG cache downloader)')
+    parser.add_argument('--version', action='version', version='%(prog)s (YAR cache downloader)')
 
     args = parser.parse_args()
 
     print('=' * 70)
-    print('LightRAG Offline Cache Downloader')
+    print('YAR Offline Cache Downloader')
     print('=' * 70)
 
     try:

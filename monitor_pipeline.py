@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor LightRAG pipeline processing status with timeouts and retries."""
+"""Monitor YAR pipeline processing status with timeouts and retries."""
 
 import argparse
 import logging
@@ -30,7 +30,7 @@ def monitor(
 
     Returns exit code: 0 success, 1 timeout, 2 status retries exceeded, 3 doc fetch failed.
     """
-    logger.info('Monitoring LightRAG pipeline... api_url=%s', api_url)
+    logger.info('Monitoring YAR pipeline... api_url=%s', api_url)
     start = time.time()
     consecutive_errors = 0
 
@@ -78,11 +78,11 @@ def monitor(
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Monitor LightRAG pipeline processing status.')
+    parser = argparse.ArgumentParser(description='Monitor YAR pipeline processing status.')
     parser.add_argument(
         '--api-url',
         default=os.getenv('API_URL', 'http://localhost:9621'),
-        help='Base URL of the LightRAG API (default: env API_URL or http://localhost:9621)',
+        help='Base URL of the YAR API (default: env API_URL or http://localhost:9621)',
     )
     parser.add_argument('--interval', type=float, default=10.0, help='Polling interval in seconds (default: 10)')
     parser.add_argument('--request-timeout', type=float, default=10.0, help='Per-request timeout in seconds')
