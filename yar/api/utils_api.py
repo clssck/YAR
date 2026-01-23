@@ -307,8 +307,8 @@ def display_splash_screen(args: argparse.Namespace) -> None:
     bottom_border = '╚══════════════════════════════════════════════════════════════╝'
     width = len(top_border) - 4  # width inside the borders
 
-    line1_text = f'LightRAG Server v{core_version}/{api_version}'
-    line2_text = 'Fast, Lightweight RAG Server Implementation'
+    line1_text = f'YAR Server v{core_version}/{api_version}'
+    line2_text = 'Yet Another RAG - Graph-Based Knowledge Retrieval'
 
     line1 = f'║ {line1_text.center(width)} ║'
     line2 = f'║ {line2_text.center(width)} ║'
