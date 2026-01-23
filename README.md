@@ -1,173 +1,170 @@
 <div align="center">
 
-<div style="margin: 20px 0;">
-  <img src="./assets/logo.png" width="120" height="120" alt="YAR Logo" style="border-radius: 20px; box-shadow: 0 8px 32px rgba(0, 217, 255, 0.3);">
-</div>
-
-# 🚀 YAR: Specialized Production Fork
-
-<div align="center">
-    <img src="https://img.shields.io/badge/Release-Specialized%20Fork-00d9ff?style=for-the-badge&logo=git&logoColor=white&labelColor=1a1a2e">
-    <a href="https://github.com/HKUDS/YAR"><img src="https://img.shields.io/badge/Upstream-HKUDS%2FYAR-7289da?style=for-the-badge&logo=github&logoColor=white&labelColor=1a1a2e"></a>
-</div>
-
-<div align="center">
-  <div style="width: 100%; height: 2px; margin: 20px 0; background: linear-gradient(90deg, transparent, #00d9ff, transparent);"></div>
-</div>
+# 🏴‍☠️ YAR — Yet Another RAG
 
 <p align="center">
-  <b>A production-ready fork of YAR featuring S3 storage integration, a modernized Web UI, and a robust API.</b>
+  <b>A production-grade RAG framework with graph-based knowledge retrieval</b>
 </p>
 
+<div align="center">
+    <img src="https://img.shields.io/badge/Python-3.13+-blue?style=for-the-badge&logo=python&logoColor=white">
+    <img src="https://img.shields.io/badge/PostgreSQL-pgvector%20%2B%20AGE-336791?style=for-the-badge&logo=postgresql&logoColor=white">
+    <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge">
 </div>
 
-## 🔱 About This Fork
-
-This repository is a specialized fork of [YAR](https://github.com/HKUDS/YAR), designed to bridge the gap between research and production. While preserving the core "Simple and Fast" philosophy, we have added critical infrastructure components:
-
-- **☁️ S3 Storage Integration**: Native support for S3-compatible object storage (RustFS, AWS S3, Cloudflare R2) for scalable document and artifact management.
-- **🖥️ Modern Web UI**: A completely redesigned interface featuring:
-  - **S3 Browser**: Integrated file management system.
-  - **File Viewers**: Built-in PDF and text viewers.
-  - **Enhanced Layout**: Resizable panes and improved UX.
-- **🔌 Robust API**: Expanded REST endpoints supporting multipart uploads, bulk operations, and advanced search parameters.
-- **🛡️ Code Quality**: Comprehensive type hinting (Pyright strict), Ruff formatting, and extensive test coverage for critical paths.
+</div>
 
 ---
 
-## 📖 Introduction to YAR
+## 🙏 Acknowledgments
 
-**YAR** incorporates graph structures into text indexing and retrieval processes. This innovative framework employs a dual-level retrieval system that enhances comprehensive information retrieval from low-level entities to high-level broader topics.
+**YAR began as a fork of [LightRAG](https://github.com/HKUDS/LightRAG)** by the brilliant team at HKUDS. Their research on graph-based RAG retrieval and the "Simple and Fast" philosophy laid the foundation for this project.
 
-<details>
-  <summary><b>Algorithm Flowchart</b></summary>
+However, over time, YAR has diverged significantly:
 
-![YAR Indexing Flowchart](https://learnopencv.com/wp-content/uploads/2024/11/YAR-VectorDB-Json-KV-Store-Indexing-Flowchart-scaled.jpg)
-*Figure 1: YAR Indexing Flowchart ([Source](https://learnopencv.com/yar/))*
+- **Different storage backends** — PostgreSQL-native with pgvector and Apache AGE, S3 integration
+- **Different API architecture** — FastAPI with comprehensive document management
+- **Different UI** — Complete React rewrite with modern tooling
+- **Different focus** — Production deployment over research flexibility
 
-</details>
+The codebases have drifted far enough apart that maintaining YAR as a fork is no longer practical. We've rebranded and moved forward independently, while remaining grateful for the excellent foundation LightRAG provided.
 
-## ⚡ Quick Start
+**If you're looking for the original research-focused implementation, please visit [HKUDS/LightRAG](https://github.com/HKUDS/LightRAG).**
 
-### 1. Installation
+---
 
-This project uses [uv](https://docs.astral.sh/uv/) for fast and reliable package management.
+## ⚡ What is YAR?
 
-**Option A: Install from PyPI**
+YAR incorporates **graph structures into text indexing and retrieval**. It employs a dual-level retrieval system:
+
+- **Low-level**: Entity and relationship extraction from documents
+- **High-level**: Topic and concept clustering across the knowledge graph
+
+This enables contextually rich answers that understand connections between concepts, not just keyword matches.
+
+---
+
+## 🚀 Quick Start
+
+### Installation
+
 ```bash
-uv pip install "yar-hku[api]"
-```
-
-**Option B: Install from Source (Recommended for this Fork)**
-```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/YAR.git
+# Clone the repo
+git clone https://github.com/clssck/YAR.git
 cd YAR
+
+# Install with uv (recommended)
 uv sync --extra api
 source .venv/bin/activate
+
+# Configure environment
+cp env.example .env
+# Edit .env with your API keys and database credentials
+
+# Start the server
+yar-server
 ```
 
-### 2. Running the Server (UI + API)
+Open [http://localhost:9600](http://localhost:9600) for the Web UI.
 
-The easiest way to experience the enhancements in this fork is via the YAR Server.
-
-1.  **Configure Environment**:
-    ```bash
-    cp env.example .env
-    # Edit .env to add your API keys (OpenAI/Azure/etc.) and S3 credentials
-    ```
-
-2.  **Start the Server**:
-    ```bash
-    yar-server
-    ```
-
-3.  **Access the UI**:
-    Open [http://localhost:9600](http://localhost:9600) to view the Knowledge Graph, upload files via the S3 browser, and perform queries.
-
-### 3. Python API Example
-
-You can also use YAR directly in your Python code:
+### Python API
 
 ```python
-import os
 import asyncio
-from yar import YAR, QueryParam
+from yar import LightRAG, QueryParam
 from yar.llm.openai import gpt_4o_mini_complete, openai_embed
 
-WORKING_DIR = "./rag_storage"
-if not os.path.exists(WORKING_DIR):
-    os.mkdir(WORKING_DIR)
-
 async def main():
-    # Initialize YAR
-    rag = YAR(
-        working_dir=WORKING_DIR,
+    rag = LightRAG(
+        working_dir="./rag_storage",
         embedding_func=openai_embed,
         llm_model_func=gpt_4o_mini_complete,
     )
     await rag.initialize_storages()
 
-    # Insert Document
-    await rag.ainsert("YAR is a retrieval-augmented generation framework.")
+    # Insert documents
+    await rag.ainsert("Your document content here...")
 
-    # Query
-    print(await rag.aquery(
-        "What is YAR?",
+    # Query with hybrid retrieval
+    result = await rag.aquery(
+        "What are the main concepts?",
         param=QueryParam(mode="hybrid")
-    ))
+    )
+    print(result)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-## 📦 Features & Architecture
+---
 
-### Storage Backends
-Recommended production stack: PostgreSQL + pgvector + AGE-compatible graph, with S3 (or local) object storage. Other supported backends remain available where implemented (e.g., JsonKVStorage/RedisKVStorage, Neo4j/Mongo/Qdrant variants in the codebase); check `env.example` for the current list and maturity notes.
+## 📦 Features
 
-| Type | Implementations (this fork) |
-|------|-----------------------------|
-| **KV Storage** | PGKVStorage (recommended); JsonKVStorage / RedisKVStorage (legacy/optional) |
-| **Vector Storage** | PGVectorStorage (pgvector) |
-| **Graph Storage** | PGGraphStorage (AGE/PG) |
-| **Object Storage** | S3Storage, LocalFileStorage |
+| Feature | Description |
+|---------|-------------|
+| **Graph-Based Retrieval** | Dual-level entity and topic extraction |
+| **PostgreSQL Native** | pgvector for embeddings, Apache AGE for graphs |
+| **S3 Storage** | Native S3/R2/MinIO support for documents |
+| **Modern Web UI** | React + TypeScript with graph visualization |
+| **Document Pipeline** | PDF, DOCX, PPTX, Markdown extraction via Kreuzberg |
+| **Citation Tracking** | Source attribution in responses |
+| **Multi-Workspace** | Isolated knowledge graphs per workspace |
 
-### Specialized API Routes
-This fork exposes additional endpoints:
-- `POST /documents/upload`: Multipart file upload (supports PDF, TXT, MD).
-- `GET /storage/list`: List files in S3/Local storage.
-- `GET /storage/content`: Retrieve file content.
+---
 
 ## 🛠️ Configuration
 
-See `env.example` for a complete list of configuration options. Key variables for this fork:
+Key environment variables (see `env.example` for full list):
 
 ```ini
-# S3 Configuration (Optional)
-S3_ENDPOINT_URL=https://<accountid>.r2.cloudflarestorage.com
-S3_ACCESS_KEY_ID=<your_access_key>
-S3_SECRET_ACCESS_KEY=<your_secret_key>
-S3_BUCKET_NAME=yar-docs
+# LLM
+OPENAI_API_KEY=sk-...
+LLM_MODEL=gpt-4o-mini
+
+# PostgreSQL (recommended)
+POSTGRES_HOST=localhost
+POSTGRES_DB=yar
+POSTGRES_USER=yar
+POSTGRES_PASSWORD=...
+
+# S3 Storage (optional)
+S3_ENDPOINT_URL=https://...
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_BUCKET_NAME=yar-documents
 ```
+
+---
 
 ## 📚 Documentation
 
-- [API Documentation](./yar/api/README.md)
-- [Offline Deployment](./docs/OfflineDeployment.md)
+- [API Reference](./yar/api/README.md)
 - [Docker Deployment](./docs/DockerDeployment.md)
+- [Algorithm Details](./docs/Algorithm.md)
 
-## 🤝 Contribution
+---
 
-Contributions are welcome! Please ensure you:
-1.  Install development dependencies: `uv sync --extra test`
-2.  Run tests before submitting: `pytest tests/`
-3.  Format code: `ruff format .`
+## 🤝 Contributing
+
+```bash
+# Install dev dependencies
+uv sync --extra test
+
+# Run tests
+pytest tests/
+
+# Lint & format
+ruff check . && ruff format .
+```
+
+---
 
 ## 📜 License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT License. See [LICENSE](LICENSE).
 
 ---
+
 <div align="center">
-  <sub>Fork maintained by <a href="https://github.com/clssck">clssck</a>. Based on the excellent work by the <a href="https://github.com/HKUDS">HKUDS</a> team.</sub>
+  <sub>Built with ☕ by <a href="https://github.com/clssck">clssck</a></sub><br>
+  <sub>Standing on the shoulders of <a href="https://github.com/HKUDS/LightRAG">LightRAG</a></sub>
 </div>
