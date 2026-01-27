@@ -13,8 +13,12 @@ from dataclasses import dataclass, field
 from datetime import timezone
 from typing import Any, ClassVar, Literal, TypeVar, cast, final, overload
 
+import asyncpg
 import numpy as np
-import pipmaster as pm
+from asyncpg import Connection, Pool
+from asyncpg.pool import PoolConnectionProxy
+from dotenv import load_dotenv
+from pgvector.asyncpg import register_vector
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
@@ -42,17 +46,6 @@ from yar.validators import (
     validate_sql_identifier,
     validate_workspace_name,
 )
-
-if not pm.is_installed('asyncpg'):
-    pm.install('asyncpg')
-if not pm.is_installed('pgvector'):
-    pm.install('pgvector')
-
-import asyncpg
-from asyncpg import Connection, Pool
-from asyncpg.pool import PoolConnectionProxy
-from dotenv import load_dotenv
-from pgvector.asyncpg import register_vector
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each yar instance

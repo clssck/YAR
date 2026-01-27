@@ -30,7 +30,15 @@ PG_USER = os.getenv('POSTGRES_USER', 'yar')
 PG_PASS = os.getenv('POSTGRES_PASSWORD', 'yar_pass')
 PG_DB = os.getenv('POSTGRES_DATABASE', 'yar')
 
-client = AsyncOpenAI()
+_client = None
+
+
+def get_client():
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI()
+    return _client
+
 
 # Load reranker model (same as YAR uses)
 print('Loading reranker model...')
@@ -40,6 +48,7 @@ print('Reranker loaded!')
 
 async def get_embedding(text: str) -> list[float]:
     """Get embedding for a single text."""
+    client = get_client()
     response = await client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=text,
