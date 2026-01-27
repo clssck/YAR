@@ -70,6 +70,7 @@ api = [
     "aiofiles",
     "ascii_colors",
     "asyncpg",
+    "pgvector",
     "distro",
     "fastapi",
     "httpcore",
@@ -90,6 +91,7 @@ api = [
 offline-storage = [
     # Storage backend dependencies
     "asyncpg>=0.29.0,<1.0.0",
+    "pgvector",
 ]
 
 offline-llm = [
