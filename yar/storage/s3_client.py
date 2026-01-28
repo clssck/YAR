@@ -18,11 +18,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client as S3ClientType
 
-import pipmaster as pm
-
-if not pm.is_installed('aioboto3'):
-    pm.install('aioboto3')
-
 import aioboto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
@@ -173,11 +168,14 @@ class S3Client:
             signature_version='s3v4',
         )
 
-        async with self._session.client(
+        # aioboto3.Session.client returns an async context manager
+        # Use cast or type ignore if type checker complains about _
+        client_ctx = self._session.client(
             's3',
             endpoint_url=self.config.endpoint_url if self.config.endpoint_url else None,
             config=boto_config,
-        ) as client:
+        )
+        async with client_ctx as client:
             yield client
 
     async def _ensure_bucket_exists(self):

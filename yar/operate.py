@@ -403,8 +403,9 @@ async def _summarize_descriptions(
     Returns:
         Summarized description string
     """
-    use_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
-    use_llm_func = partial(use_llm_func, _priority=8)
+    # Cast to Callable[..., Awaitable[str]] for type checking
+    raw_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
+    use_llm_func = partial(raw_llm_func, _priority=8)
 
     language = global_config['addon_params'].get('language', DEFAULT_SUMMARY_LANGUAGE)
 
@@ -503,8 +504,9 @@ async def _batch_infer_entity_types(
     if not to_infer:
         return 0
 
-    use_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
-    use_llm_func = partial(use_llm_func, _priority=6)
+    # Cast to Callable[..., Awaitable[str]] for type checking
+    raw_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
+    use_llm_func = partial(raw_llm_func, _priority=5)
 
     entity_types = global_config['addon_params'].get('entity_types', DEFAULT_ENTITY_TYPES)
     updated_count = 0
@@ -3170,10 +3172,11 @@ async def kg_query(
         return QueryResult(content=PROMPTS['fail_response'])
 
     if query_param.model_func:
-        use_model_func = query_param.model_func
+        use_model_func = cast(Callable[..., Awaitable[str]], query_param.model_func)
     else:
-        use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
-        use_model_func = partial(use_model_func, _priority=5)
+        # Cast to Callable[..., Awaitable[str]] for type checking
+        raw_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
+        use_model_func = partial(raw_model_func, _priority=5)
 
     hl_keywords, ll_keywords = await get_keywords_from_query(query, query_param, global_config, hashing_kv)
 
@@ -3407,7 +3410,7 @@ async def extract_keywords_only(
     logger.debug(f'[extract_keywords] Sending to LLM: {len_of_prompts:,} tokens (Prompt: {len_of_prompts})')
 
     if param.model_func:
-        use_model_func = param.model_func
+        use_model_func = cast(Callable[..., Awaitable[str]], param.model_func)
     else:
         use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
         use_model_func = partial(use_model_func, _priority=5)
@@ -3573,6 +3576,7 @@ async def _perform_kg_search(
         try:
             use_model_func = query_param.model_func or text_chunks_db.global_config.get('llm_model_func')
             if use_model_func:
+                use_model_func = cast(Callable[..., Awaitable[str]], use_model_func)
                 hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
                 hypothetical_answer = cast(str, await use_model_func(hyde_prompt))
                 if hypothetical_answer and isinstance(hypothetical_answer, str) and len(hypothetical_answer) > 20:
@@ -4892,7 +4896,7 @@ async def naive_query(
         return QueryResult(content=PROMPTS['fail_response'])
 
     if query_param.model_func:
-        use_model_func = query_param.model_func
+        use_model_func = cast(Callable[..., Awaitable[str]], query_param.model_func)
     else:
         use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
         use_model_func = partial(use_model_func, _priority=5)

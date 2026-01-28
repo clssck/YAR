@@ -1,21 +1,11 @@
+import base64
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any
-
-import pipmaster as pm
-import tiktoken
-
-from yar.utils import VERBOSE_DEBUG, verbose_debug
-
-# install specific modules
-if not pm.is_installed('openai'):
-    pm.install('openai')
-
-import base64
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
+import tiktoken
 from dotenv import load_dotenv
 from openai import (
     APIConnectionError,
@@ -32,8 +22,10 @@ from tenacity import (
 from yar.api import __api_version__
 from yar.types import GPTKeywordExtractionFormat
 from yar.utils import (
+    VERBOSE_DEBUG,
     logger,
     safe_unicode_decode,
+    verbose_debug,
     wrap_embedding_func_with_attrs,
 )
 

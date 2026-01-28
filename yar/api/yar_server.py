@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, cast
 
-import pipmaster as pm
 import uvicorn
 from ascii_colors import ASCIIColors
 from dotenv import load_dotenv
@@ -287,7 +286,7 @@ def create_app(args):
         ) from e
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Lifespan context manager for startup and shutdown events"""
         # Store background tasks
         app.state.background_tasks = set()
@@ -1138,22 +1137,6 @@ def configure_logging():
     )
 
 
-def check_and_install_dependencies():
-    """Check and install required dependencies"""
-    required_packages = [
-        'uvicorn',
-        'tiktoken',
-        'fastapi',
-        # Add other required packages here
-    ]
-
-    for package in required_packages:
-        if not pm.is_installed(package):
-            print(f'Installing {package}...')
-            pm.install(package)
-            print(f'{package} installed successfully')
-
-
 def main():
     # Explicitly initialize configuration for clarity
     # (The proxy will auto-initialize anyway, but this makes intent clear)
@@ -1170,9 +1153,6 @@ def main():
     # Check .env file
     if not check_env_file():
         sys.exit(1)
-
-    # Check and install dependencies
-    check_and_install_dependencies()
 
     from multiprocessing import freeze_support
 

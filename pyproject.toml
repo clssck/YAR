@@ -27,7 +27,6 @@ dependencies = [
     "json_repair",
     "numpy>=2.0.0",
     "pandas>=2.0.0,<2.4.0",
-    "pipmaster",
     "pydantic",
     "pypinyin",
     "python-dotenv",
@@ -48,6 +47,7 @@ dev = [
     "pre-commit",
     "ruff",
     "ty",  # Fast Python type checker (Rust-based, from Astral)
+    "pyvis",
 ]
 
 api = [
@@ -58,7 +58,6 @@ api = [
     "numpy>=2.0.0",
     "openai>=2.0.0,<3.0.0",
     "pandas>=2.0.0,<2.4.0",
-    "pipmaster",
     "pydantic",
     "pypinyin",
     "python-dotenv",
@@ -84,6 +83,10 @@ api = [
     "pytz",
     "uvicorn",
     "gunicorn",
+    # Optional dependencies that were previously installed at runtime by pipmaster
+    "boto3",
+    "aioboto3",
+    "networkx",
     # Document processing now handled by Kreuzberg (56+ formats, required dependency)
 ]
 

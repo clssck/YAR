@@ -9,8 +9,6 @@ import platform
 import sys
 from typing import cast
 
-import pipmaster as pm
-
 from yar.api.config import global_args
 from yar.api.utils_api import check_env_file, display_splash_screen
 from yar.constants import (
@@ -19,22 +17,6 @@ from yar.constants import (
 )
 from yar.kg.shared_storage import initialize_share_data
 from yar.utils import get_env_value
-
-
-def check_and_install_dependencies():
-    """Check and install required dependencies"""
-    required_packages = [
-        'gunicorn',
-        'tiktoken',
-        'psutil',
-        # Add other required packages here
-    ]
-
-    for package in required_packages:
-        if not pm.is_installed(package):
-            print(f'Installing {package}...')
-            pm.install(package)
-            print(f'{package} installed successfully')
 
 
 def main():
@@ -103,9 +85,6 @@ def main():
         print('     yar-server --workers 1')
         print('=' * 80 + '\n')
         sys.exit(1)
-
-    # Check and install dependencies
-    check_and_install_dependencies()
 
     # Note: Signal handlers are NOT registered here because:
     # - Master cleanup already handled by gunicorn_config.on_exit()
