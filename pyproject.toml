@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools==80.10.2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -21,82 +21,82 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "aiohttp",
-    "configparser",
-    "dspy>=3.0.4",
-    "json_repair",
-    "numpy>=2.0.0",
-    "pandas>=2.0.0,<3.1.0",
-    "pipmaster",
-    "pydantic",
-    "pypinyin",
-    "python-dotenv",
-    "sentence-transformers>=5.1.2",
-    "setuptools",
-    "tenacity",
-    "tiktoken",
-    "xlsxwriter>=3.1.0",
-    "kreuzberg>=4.0.8",
-    "pypdfium2>=5.0.0",  # PDF rendering library for Kreuzberg (pdfium bindings)
+    "aiohttp==3.13.3",
+    "configparser==7.2.0",
+    "dspy==3.1.2",
+    "json_repair==0.55.1",
+    "numpy==2.4.1",
+    "pandas==3.0.0",
+    "pipmaster==1.1.0",
+    "pydantic==2.12.5",
+    "pypinyin==0.55.0",
+    "python-dotenv==1.2.1",
+    "sentence-transformers==5.2.2",
+    "setuptools==80.10.2",
+    "tenacity==9.1.2",
+    "tiktoken==0.12.0",
+    "xlsxwriter==3.2.9",
+    "kreuzberg==4.2.2",
+    "pypdfium2==5.3.0",  # PDF rendering library for Kreuzberg (pdfium bindings)
 ]
 
 [project.optional-dependencies]
 # Test framework and dev tool dependencies (for CI/CD and testing)
 dev = [
-    "pytest>=8.4.2",
-    "pytest-asyncio>=1.2.0",
-    "pre-commit",
-    "ruff",
-    "ty",  # Fast Python type checker (Rust-based, from Astral)
+    "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
+    "pre-commit==4.5.1",
+    "ruff==0.14.14",
+    "ty==0.0.14",  # Fast Python type checker (Rust-based, from Astral)
 ]
 
 api = [
     # Core dependencies
-    "aiohttp",
-    "configparser",
-    "json_repair",
-    "numpy>=2.0.0",
-    "openai>=2.0.0,<3.0.0",
-    "pandas>=2.0.0,<3.1.0",
-    "pipmaster",
-    "pydantic",
-    "pypinyin",
-    "python-dotenv",
-    "setuptools",
-    "tenacity",
-    "tiktoken",
-    "xlsxwriter>=3.1.0",
+    "aiohttp==3.13.3",
+    "configparser==7.2.0",
+    "json_repair==0.55.1",
+    "numpy==2.4.1",
+    "openai==2.16.0",
+    "pandas==3.0.0",
+    "pipmaster==1.1.0",
+    "pydantic==2.12.5",
+    "pypinyin==0.55.0",
+    "python-dotenv==1.2.1",
+    "setuptools==80.10.2",
+    "tenacity==9.1.2",
+    "tiktoken==0.12.0",
+    "xlsxwriter==3.2.9",
     # API-specific dependencies
-    "aiofiles",
-    "ascii_colors",
-    "asyncpg",
-    "pgvector",
-    "distro",
-    "fastapi",
-    "httpcore",
-    "httpx>=0.28.1",
-    "jiter",
-    "bcrypt>=4.0.0",
-    "psutil",
-    "PyJWT>=2.8.0,<3.0.0",
-    "python-jose[cryptography]",
-    "python-multipart",
-    "pytz",
-    "uvicorn",
-    "gunicorn",
+    "aiofiles==25.1.0",
+    "ascii_colors==0.11.7",
+    "asyncpg==0.31.0",
+    "pgvector==0.4.2",
+    "distro==1.9.0",
+    "fastapi==0.128.0",
+    "httpcore==1.0.9",
+    "httpx==0.28.1",
+    "jiter==0.12.0",
+    "bcrypt==5.0.0",
+    "psutil==7.2.2",
+    "PyJWT==2.10.1",
+    "python-jose[cryptography]==3.5.0",
+    "python-multipart==0.0.22",
+    "pytz==2025.2",
+    "uvicorn==0.40.0",
+    "gunicorn==24.1.1",
     # Document processing now handled by Kreuzberg (56+ formats, required dependency)
 ]
 
 # Offline deployment dependencies (layered design for flexibility)
 offline-storage = [
     # Storage backend dependencies
-    "asyncpg>=0.29.0,<1.0.0",
-    "pgvector",
+    "asyncpg==0.31.0",
+    "pgvector==0.4.2",
 ]
 
 offline-llm = [
     # LLM provider dependencies
-    "openai>=2.0.0,<3.0.0",
+    "openai==2.16.0",
 ]
 
 offline = [
@@ -106,29 +106,29 @@ offline = [
 
 test = [
     "yar[api]",
-    "pytest>=8.4.2",
-    "pytest-asyncio>=1.2.0",
-    "pre-commit",
-    "ruff",
-    "moto[s3]>=5.0",  # AWS S3 mocking for S3 client tests
-    "httpx>=0.27",  # Async HTTP client for FastAPI testing
-    "aioboto3>=12.0.0,<16.0.0",  # Required for S3 client tests
+    "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
+    "pre-commit==4.5.1",
+    "ruff==0.14.14",
+    "moto[s3]==5.1.20",  # AWS S3 mocking for S3 client tests
+    "httpx==0.28.1",  # Async HTTP client for FastAPI testing
+    "aioboto3==15.5.0",  # Required for S3 client tests
 ]
 
 # Type-checking/lint extras
 lint = [
-    "ty>=0.0.1a30",
+    "ty==0.0.14",
 ]
 
 evaluation = [
     "yar[api]",
-    "ragas>=0.3.7",
-    "datasets>=4.3.0",
+    "ragas==0.3.1",
+    "datasets==4.5.0",
 ]
 
 observability = [
     # LLM observability and tracing dependencies
-    "langfuse>=3.8.1",
+    "langfuse==3.12.1",
 ]
 
 [project.scripts]

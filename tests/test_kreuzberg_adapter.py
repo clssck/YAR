@@ -343,7 +343,7 @@ class TestEdgeCases:
 
         test_file = tmp_path / 'nonexistent.txt'
 
-        with pytest.raises((ValidationError, FileNotFoundError)):
+        with pytest.raises((ValidationError, FileNotFoundError, OSError)):
             extract_with_kreuzberg_sync(test_file)
 
     def test_special_characters_in_content(self, tmp_path: Path):
@@ -1271,7 +1271,7 @@ class TestAsyncExtraction:
 
         from yar.document.kreuzberg_adapter import extract_with_kreuzberg
 
-        with pytest.raises(ValidationError):
+        with pytest.raises((ValidationError, OSError)):
             await extract_with_kreuzberg('/nonexistent/path/file.txt')
 
 
@@ -4448,7 +4448,7 @@ class TestKreuzbergExceptionHandling:
 
         try:
             extract_file_sync('/nonexistent/path/file.txt')
-        except (ValidationError, FileNotFoundError) as e:
+        except (ValidationError, FileNotFoundError, OSError) as e:
             error_msg = str(e).lower()
             # Error should mention file or path
             assert 'file' in error_msg or 'path' in error_msg or 'not found' in error_msg or 'no such' in error_msg

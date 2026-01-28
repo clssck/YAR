@@ -242,7 +242,7 @@ class TestStorageNotInitializedError:
         """Test message includes documentation link."""
         exc = StorageNotInitializedError()
 
-        assert 'github.com/HKUDS/YAR' in str(exc)
+        assert 'github.com/clssck/YAR' in str(exc)
 
     def test_inheritance(self):
         """Test exception inherits from RuntimeError."""
