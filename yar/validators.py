@@ -26,7 +26,7 @@ _VALID_WORKSPACE_PATTERN = re.compile(r'^[a-zA-Z0-9_]+$')
 _VALID_SQL_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
-def validate_workspace_name(workspace: str) -> str:
+def validate_workspace_name(workspace: str | None) -> str:
     """Validate workspace name to prevent collision issues in PostgreSQL graph names.
 
     Workspace names are used to generate Apache AGE graph names. Special characters

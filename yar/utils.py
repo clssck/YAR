@@ -27,6 +27,7 @@ from typing import (
     Any,
     Protocol,
     cast,
+    overload,
 )
 
 import numpy as np
@@ -1081,7 +1082,11 @@ def load_json(file_name):
         return json.load(f)
 
 
-def _sanitize_string_for_json(text: str) -> str:
+@overload
+def _sanitize_string_for_json(text: str) -> str: ...
+@overload
+def _sanitize_string_for_json(text: None) -> None: ...
+def _sanitize_string_for_json(text: str | None) -> str | None:
     """Remove characters that cannot be encoded in UTF-8 for JSON serialization.
 
     Uses regex for optimal performance with zero-copy optimization for clean strings.
@@ -1292,11 +1297,11 @@ def pack_user_ass_to_openai_messages(*args: str):
     return [{'role': roles[i % 2], 'content': content} for i, content in enumerate(args)]
 
 
-def split_string_by_multi_markers(content: str, markers: list[str]) -> list[str]:
+def split_string_by_multi_markers(content: str | None, markers: list[str]) -> list[str]:
     """Split a string by multiple markers"""
-    if not markers:
-        return [content]
     content = content if content is not None else ''
+    if not markers:
+        return [content] if content else []
     results = re.split('|'.join(re.escape(marker) for marker in markers), content)
     return [r.strip() for r in results if r.strip()]
 
@@ -2145,7 +2150,11 @@ def _normalize_math_alphanumerics(text: str) -> str:
     return ''.join(result)
 
 
-def normalize_unicode_for_entity_matching(text: str) -> str:
+@overload
+def normalize_unicode_for_entity_matching(text: str) -> str: ...
+@overload
+def normalize_unicode_for_entity_matching(text: None) -> None: ...
+def normalize_unicode_for_entity_matching(text: str | None) -> str | None:
     """Normalize Unicode text for consistent entity resolution.
 
     Applies security hardening to prevent adversarial Unicode attacks:

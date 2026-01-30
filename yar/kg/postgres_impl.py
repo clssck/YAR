@@ -5338,7 +5338,7 @@ class PGGraphStorage(BaseGraphStorage):
 
     # Note: Removed @retry decorator - _query() already has retry logic via _run_with_retry.
     # Having both causes excessive retries (3 decorator × 10 connection = 30 attempts).
-    async def upsert_node(self, node_id: str, node_data: dict[str, str]) -> None:
+    async def upsert_node(self, node_id: str, node_data: dict[str, Any]) -> None:
         """
         Upsert a node in the PostgreSQL graph database using Apache AGE.
 
@@ -5373,7 +5373,7 @@ class PGGraphStorage(BaseGraphStorage):
             raise
 
     # Note: Removed @retry decorator - _query() already has retry logic via _run_with_retry.
-    async def upsert_edge(self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]) -> None:
+    async def upsert_edge(self, source_node_id: str, target_node_id: str, edge_data: dict[str, Any]) -> None:
         """
         Upsert an edge and its properties between two nodes identified by their labels.
 
@@ -5411,7 +5411,7 @@ class PGGraphStorage(BaseGraphStorage):
             )
             raise
 
-    async def upsert_nodes_bulk(self, nodes: list[tuple[str, dict[str, str]]], batch_size: int = 500) -> None:
+    async def upsert_nodes_bulk(self, nodes: list[tuple[str, dict[str, Any]]], batch_size: int = 500) -> None:
         """Bulk upsert nodes using UNWIND for efficient batching.
 
         Uses UNWIND with explicit SET clauses for each property, since AGE
@@ -5498,7 +5498,7 @@ class PGGraphStorage(BaseGraphStorage):
 
     async def upsert_edges_bulk(
         self,
-        edges: list[tuple[str, str, dict[str, str]]],
+        edges: list[tuple[str, str, dict[str, Any]]],
         batch_size: int = 500,
     ) -> None:
         """Bulk upsert edges using UNWIND for efficient batching.
