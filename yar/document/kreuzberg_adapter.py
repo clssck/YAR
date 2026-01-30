@@ -399,6 +399,34 @@ class HierarchyOptions:
 
 
 @dataclass
+class KeywordOptions:
+    """Kreuzberg keyword extraction configuration.
+
+    Supports YAKE (Yet Another Keyword Extractor) and RAKE (Rapid Automatic
+    Keyword Extraction) algorithms for extracting important keywords from text.
+    """
+
+    enabled: bool = False
+    algorithm: str = 'yake'  # 'yake' or 'rake'
+    max_keywords: int = 10
+    min_score: float | None = None
+    ngram_range: tuple[int, int] | None = None  # e.g., (1, 3) for 1-3 word phrases
+    language: str | None = None  # Auto-detect if None
+
+
+@dataclass
+class ImageExtractionOptions:
+    """Kreuzberg image extraction configuration for PDFs and documents."""
+
+    extract_images: bool = True
+    target_dpi: int = 150  # Target DPI for extracted images
+    max_image_dimension: int | None = None  # Max width/height in pixels
+    auto_adjust_dpi: bool = True  # Automatically adjust DPI based on content
+    min_dpi: int = 72
+    max_dpi: int = 300
+
+
+@dataclass
 class ExtractionOptions:
     """Combined extraction options for Kreuzberg.
 
@@ -414,6 +442,8 @@ class ExtractionOptions:
     token_reduction: TokenReductionOptions | None = None
     pages: PageOptions | None = None
     hierarchy: HierarchyOptions | None = None
+    keywords: KeywordOptions | None = None
+    images: ImageExtractionOptions | None = None
     mime_type: str | None = None
     use_cache: bool = True
     enable_quality_processing: bool = True
@@ -553,6 +583,35 @@ def _build_extraction_config(options: ExtractionOptions | None = None) -> Any:
         )
         if 'pdf_options' not in config_kwargs:
             config_kwargs['pdf_options'] = PdfConfig(hierarchy=hierarchy_config)
+
+    if options.keywords and options.keywords.enabled:
+        from kreuzberg import KeywordConfig
+
+        keyword_kwargs: dict[str, Any] = {
+            'algorithm': options.keywords.algorithm,
+            'max_keywords': options.keywords.max_keywords,
+        }
+        if options.keywords.min_score is not None:
+            keyword_kwargs['min_score'] = options.keywords.min_score
+        if options.keywords.ngram_range is not None:
+            keyword_kwargs['ngram_range'] = options.keywords.ngram_range
+        if options.keywords.language is not None:
+            keyword_kwargs['language'] = options.keywords.language
+        config_kwargs['keywords'] = KeywordConfig(**keyword_kwargs)
+
+    if options.images and options.images.extract_images:
+        from kreuzberg import ImageExtractionConfig
+
+        image_kwargs: dict[str, Any] = {
+            'extract_images': True,
+            'target_dpi': options.images.target_dpi,
+            'auto_adjust_dpi': options.images.auto_adjust_dpi,
+            'min_dpi': options.images.min_dpi,
+            'max_dpi': options.images.max_dpi,
+        }
+        if options.images.max_image_dimension is not None:
+            image_kwargs['max_image_dimension'] = options.images.max_image_dimension
+        config_kwargs['images'] = ImageExtractionConfig(**image_kwargs)
 
     # New in kreuzberg 4.2.0: output format conversion
     if options.output_format:
@@ -1154,3 +1213,160 @@ def get_supported_formats() -> list[str]:
         '.eml',
         '.msg',
     ]
+
+
+def get_embedding_presets() -> list[str]:
+    """Get available embedding presets from Kreuzberg.
+
+    Returns:
+        List of preset names: 'fast', 'balanced', 'quality', 'multilingual'
+
+    Example:
+        >>> presets = get_embedding_presets()
+        >>> print(presets)
+        ['fast', 'balanced', 'quality', 'multilingual']
+    """
+    if not is_kreuzberg_available():
+        return ['fast', 'balanced', 'quality', 'multilingual']
+
+    from kreuzberg import list_embedding_presets
+
+    return list_embedding_presets()
+
+
+def get_embedding_preset_config(preset_name: str) -> dict[str, Any]:
+    """Get embedding preset configuration for optimal chunking.
+
+    Kreuzberg provides pre-configured chunking settings optimized for different
+    embedding models and use cases. Use these presets to configure chunking
+    that works well with common embedding models.
+
+    Args:
+        preset_name: One of 'fast', 'balanced', 'quality', or 'multilingual'
+
+    Returns:
+        Dictionary with chunk_size, overlap, model_name, dimensions, description
+
+    Example:
+        >>> config = get_embedding_preset_config('balanced')
+        >>> chunking = ChunkingOptions(
+        ...     enabled=True,
+        ...     max_chars=config['chunk_size'],
+        ...     max_overlap=config['overlap'],
+        ... )
+    """
+    if not is_kreuzberg_available():
+        # Fallback defaults
+        defaults = {
+            'fast': {'chunk_size': 512, 'overlap': 50, 'dimensions': 384},
+            'balanced': {'chunk_size': 1024, 'overlap': 100, 'dimensions': 768},
+            'quality': {'chunk_size': 2000, 'overlap': 200, 'dimensions': 1024},
+            'multilingual': {'chunk_size': 1024, 'overlap': 100, 'dimensions': 768},
+        }
+        return defaults.get(preset_name, defaults['balanced'])
+
+    from kreuzberg import get_embedding_preset
+
+    preset = get_embedding_preset(preset_name)
+    return {
+        'chunk_size': preset.chunk_size,
+        'overlap': preset.overlap,
+        'model_name': preset.model_name,
+        'dimensions': preset.dimensions,
+        'description': preset.description,
+    }
+
+
+def create_chunking_from_embedding_preset(preset_name: str = 'balanced') -> ChunkingOptions:
+    """Create ChunkingOptions optimized for a specific embedding model preset.
+
+    This is a convenience function that configures chunking based on Kreuzberg's
+    embedding presets, which are tuned for optimal performance with common
+    embedding models.
+
+    Args:
+        preset_name: One of:
+            - 'fast': Quick prototyping, smaller chunks (512 chars)
+            - 'balanced': General-purpose RAG (1024 chars, recommended)
+            - 'quality': Maximum accuracy, larger chunks (2000 chars)
+            - 'multilingual': Multi-language support (1024 chars)
+
+    Returns:
+        ChunkingOptions configured for the selected preset
+
+    Example:
+        >>> chunking = create_chunking_from_embedding_preset('quality')
+        >>> options = ExtractionOptions(chunking=chunking)
+        >>> result = extract_with_kreuzberg_sync("document.pdf", options)
+    """
+    config = get_embedding_preset_config(preset_name)
+    return ChunkingOptions(
+        enabled=True,
+        max_chars=config['chunk_size'],
+        max_overlap=config['overlap'],
+        preset='semantic',
+    )
+
+
+def create_keyword_extraction_options(
+    algorithm: str = 'yake',
+    max_keywords: int = 10,
+    language: str | None = None,
+) -> ExtractionOptions:
+    """Create options for extracting keywords from documents.
+
+    Kreuzberg supports YAKE and RAKE algorithms for automatic keyword extraction.
+    Keywords are extracted during document processing and stored in metadata.
+
+    Args:
+        algorithm: 'yake' (Yet Another Keyword Extractor) or 'rake' (Rapid Automatic)
+        max_keywords: Maximum number of keywords to extract
+        language: Language code (e.g., 'en', 'de') or None for auto-detection
+
+    Returns:
+        ExtractionOptions configured for keyword extraction
+
+    Example:
+        >>> options = create_keyword_extraction_options(max_keywords=5)
+        >>> result = extract_with_kreuzberg_sync("article.pdf", options)
+        >>> keywords = result.metadata.get('keywords', [])
+    """
+    return ExtractionOptions(
+        keywords=KeywordOptions(
+            enabled=True,
+            algorithm=algorithm,
+            max_keywords=max_keywords,
+            language=language,
+        ),
+    )
+
+
+def create_image_extraction_options(
+    target_dpi: int = 150,
+    max_dimension: int | None = None,
+) -> ExtractionOptions:
+    """Create options for extracting images from PDFs and documents.
+
+    Configures Kreuzberg to extract embedded images during document processing.
+    Extracted images are available in the ExtractionResult.
+
+    Args:
+        target_dpi: Target DPI for extracted images (default: 150)
+        max_dimension: Maximum width/height in pixels (None for unlimited)
+
+    Returns:
+        ExtractionOptions configured for image extraction
+
+    Example:
+        >>> options = create_image_extraction_options(target_dpi=300)
+        >>> result = extract_with_kreuzberg_sync("report.pdf", options)
+        >>> # Images available in result
+    """
+    return ExtractionOptions(
+        images=ImageExtractionOptions(
+            extract_images=True,
+            target_dpi=target_dpi,
+            max_image_dimension=max_dimension,
+        ),
+        pdf=PdfOptions(extract_images=True),
+    )

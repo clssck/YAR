@@ -5726,6 +5726,833 @@ Some paragraph text here.
 
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestTokenReductionOptions:
+    """Tests for token reduction configuration."""
+
+    def test_token_reduction_options_defaults(self):
+        """Test TokenReductionOptions default values."""
+        from yar.document.kreuzberg_adapter import TokenReductionOptions
+
+        options = TokenReductionOptions()
+        assert options.mode is None
+        assert options.preserve_important_words is True
+
+    def test_token_reduction_options_modes(self):
+        """Test all valid token reduction modes."""
+        from yar.document.kreuzberg_adapter import TokenReductionOptions
+
+        valid_modes = ['off', 'light', 'moderate', 'aggressive', 'maximum']
+        for mode in valid_modes:
+            options = TokenReductionOptions(mode=mode)
+            assert options.mode == mode
+
+    def test_token_reduction_in_extraction_options(self):
+        """Test TokenReductionOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            TokenReductionOptions,
+        )
+
+        options = ExtractionOptions(
+            token_reduction=TokenReductionOptions(
+                mode='moderate',
+                preserve_important_words=False,
+            )
+        )
+        assert options.token_reduction is not None
+        assert options.token_reduction.mode == 'moderate'
+        assert options.token_reduction.preserve_important_words is False
+
+    def test_build_config_with_token_reduction(self):
+        """Test _build_extraction_config passes token_reduction to kreuzberg."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            TokenReductionOptions,
+            _build_extraction_config,
+        )
+
+        options = ExtractionOptions(
+            token_reduction=TokenReductionOptions(mode='light')
+        )
+        config = _build_extraction_config(options)
+
+        assert config is not None
+        assert config.token_reduction is not None
+        assert config.token_reduction.mode == 'light'
+
+    def test_extract_with_token_reduction(self, tmp_path: Path):
+        """Test actual extraction with token reduction."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            TokenReductionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'verbose.txt'
+        # Content with redundant words that token reduction can compress
+        test_file.write_text(
+            'The quick brown fox jumps over the lazy dog. '
+            'The fox is very quick and brown. '
+            'The dog is extremely lazy and sleepy.'
+        )
+
+        options = ExtractionOptions(
+            token_reduction=TokenReductionOptions(mode='light')
+        )
+        result = extract_with_kreuzberg_sync(str(test_file), options)
+
+        assert result.content is not None
+        assert len(result.content) > 0
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestLanguageDetectionOptions:
+    """Tests for language detection configuration."""
+
+    def test_language_detection_options_defaults(self):
+        """Test LanguageDetectionOptions default values."""
+        from yar.document.kreuzberg_adapter import LanguageDetectionOptions
+
+        options = LanguageDetectionOptions()
+        assert options.enabled is True
+        assert options.min_confidence == 0.5
+        assert options.detect_multiple is False
+
+    def test_language_detection_options_custom(self):
+        """Test LanguageDetectionOptions with custom values."""
+        from yar.document.kreuzberg_adapter import LanguageDetectionOptions
+
+        options = LanguageDetectionOptions(
+            enabled=True,
+            min_confidence=0.8,
+            detect_multiple=True,
+        )
+        assert options.enabled is True
+        assert options.min_confidence == 0.8
+        assert options.detect_multiple is True
+
+    def test_language_detection_in_extraction_options(self):
+        """Test LanguageDetectionOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            LanguageDetectionOptions,
+        )
+
+        options = ExtractionOptions(
+            language_detection=LanguageDetectionOptions(
+                enabled=True,
+                min_confidence=0.7,
+            )
+        )
+        assert options.language_detection is not None
+        assert options.language_detection.min_confidence == 0.7
+
+    def test_build_config_with_language_detection(self):
+        """Test _build_extraction_config passes language_detection to kreuzberg."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            LanguageDetectionOptions,
+            _build_extraction_config,
+        )
+
+        options = ExtractionOptions(
+            language_detection=LanguageDetectionOptions(
+                enabled=True,
+                detect_multiple=True,
+            )
+        )
+        config = _build_extraction_config(options)
+
+        assert config is not None
+        assert config.language_detection is not None
+        assert config.language_detection.detect_multiple is True
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestPageOptions:
+    """Tests for page tracking configuration."""
+
+    def test_page_options_defaults(self):
+        """Test PageOptions default values."""
+        from yar.document.kreuzberg_adapter import PageOptions
+
+        options = PageOptions()
+        assert options.extract_pages is True
+        assert options.insert_page_markers is True
+        assert options.marker_format is None
+
+    def test_page_options_custom_marker(self):
+        """Test PageOptions with custom marker format."""
+        from yar.document.kreuzberg_adapter import PageOptions
+
+        options = PageOptions(
+            extract_pages=True,
+            insert_page_markers=True,
+            marker_format='--- Page {page} ---',
+        )
+        assert options.marker_format == '--- Page {page} ---'
+
+    def test_page_options_in_extraction_options(self):
+        """Test PageOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            PageOptions,
+        )
+
+        options = ExtractionOptions(
+            pages=PageOptions(insert_page_markers=False)
+        )
+        assert options.pages is not None
+        assert options.pages.insert_page_markers is False
+
+    def test_build_config_with_page_options(self):
+        """Test _build_extraction_config passes page options to kreuzberg."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            PageOptions,
+            _build_extraction_config,
+        )
+
+        options = ExtractionOptions(
+            pages=PageOptions(
+                extract_pages=True,
+                marker_format='[Page {page}]',
+            )
+        )
+        config = _build_extraction_config(options)
+
+        assert config is not None
+        assert config.pages is not None
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestPdfOptions:
+    """Tests for PDF-specific configuration."""
+
+    def test_pdf_options_defaults(self):
+        """Test PdfOptions default values."""
+        from yar.document.kreuzberg_adapter import PdfOptions
+
+        options = PdfOptions()
+        assert options.extract_images is False
+        assert options.extract_metadata is True
+        assert options.enable_hierarchy is False
+
+    def test_pdf_options_with_images(self):
+        """Test PdfOptions with image extraction enabled."""
+        from yar.document.kreuzberg_adapter import PdfOptions
+
+        options = PdfOptions(
+            extract_images=True,
+            extract_metadata=True,
+        )
+        assert options.extract_images is True
+
+    def test_pdf_options_in_extraction_options(self):
+        """Test PdfOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            PdfOptions,
+        )
+
+        options = ExtractionOptions(
+            pdf=PdfOptions(
+                extract_images=True,
+                enable_hierarchy=True,
+            )
+        )
+        assert options.pdf is not None
+        assert options.pdf.extract_images is True
+        assert options.pdf.enable_hierarchy is True
+
+    def test_build_config_with_pdf_options(self):
+        """Test _build_extraction_config passes pdf options to kreuzberg."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            PdfOptions,
+            _build_extraction_config,
+        )
+
+        options = ExtractionOptions(
+            pdf=PdfOptions(extract_images=True)
+        )
+        config = _build_extraction_config(options)
+
+        assert config is not None
+        assert config.pdf_options is not None
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestHierarchyOptions:
+    """Tests for document hierarchy configuration."""
+
+    def test_hierarchy_options_defaults(self):
+        """Test HierarchyOptions default values."""
+        from yar.document.kreuzberg_adapter import HierarchyOptions
+
+        options = HierarchyOptions()
+        assert options.enabled is False
+        assert options.k_clusters == 6
+        assert options.include_bbox is False
+        assert options.ocr_coverage_threshold is None
+
+    def test_hierarchy_options_custom(self):
+        """Test HierarchyOptions with custom values."""
+        from yar.document.kreuzberg_adapter import HierarchyOptions
+
+        options = HierarchyOptions(
+            enabled=True,
+            k_clusters=4,
+            include_bbox=True,
+            ocr_coverage_threshold=0.3,
+        )
+        assert options.enabled is True
+        assert options.k_clusters == 4
+        assert options.include_bbox is True
+        assert options.ocr_coverage_threshold == 0.3
+
+    def test_hierarchy_options_in_extraction_options(self):
+        """Test HierarchyOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            HierarchyOptions,
+        )
+
+        options = ExtractionOptions(
+            hierarchy=HierarchyOptions(enabled=True, k_clusters=5)
+        )
+        assert options.hierarchy is not None
+        assert options.hierarchy.enabled is True
+        assert options.hierarchy.k_clusters == 5
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKreuzbergValidators:
+    """Tests for kreuzberg validation functions."""
+
+    def test_get_valid_ocr_backends(self):
+        """Test getting valid OCR backends."""
+        import kreuzberg
+
+        backends = kreuzberg.get_valid_ocr_backends()
+        assert isinstance(backends, list)
+        assert 'tesseract' in backends
+
+    def test_get_valid_token_reduction_levels(self):
+        """Test getting valid token reduction levels."""
+        import kreuzberg
+
+        levels = kreuzberg.get_valid_token_reduction_levels()
+        assert isinstance(levels, list)
+        assert 'off' in levels
+        assert 'light' in levels
+        assert 'moderate' in levels
+        assert 'aggressive' in levels
+        assert 'maximum' in levels
+
+    def test_get_valid_language_codes(self):
+        """Test getting valid language codes."""
+        import kreuzberg
+
+        codes = kreuzberg.get_valid_language_codes()
+        assert isinstance(codes, list)
+        assert len(codes) > 0
+        assert 'en' in codes
+
+    def test_get_valid_binarization_methods(self):
+        """Test getting valid binarization methods for OCR."""
+        import kreuzberg
+
+        methods = kreuzberg.get_valid_binarization_methods()
+        assert isinstance(methods, list)
+        assert 'otsu' in methods
+
+    def test_validate_output_format(self):
+        """Test output format validation."""
+        import kreuzberg
+
+        # Valid formats should not raise
+        for fmt in ['plain', 'markdown', 'html', 'djot']:
+            kreuzberg.validate_output_format(fmt)
+
+    def test_validate_language_code(self):
+        """Test language code validation."""
+        import kreuzberg
+
+        # Valid language codes should not raise
+        kreuzberg.validate_language_code('en')
+        kreuzberg.validate_language_code('de')
+        kreuzberg.validate_language_code('fr')
+
+    def test_validate_ocr_backend(self):
+        """Test OCR backend validation."""
+        import kreuzberg
+
+        # Valid backends should not raise
+        kreuzberg.validate_ocr_backend('tesseract')
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKreuzbergEmbeddingPresets:
+    """Tests for kreuzberg embedding presets."""
+
+    def test_list_embedding_presets(self):
+        """Test listing available embedding presets."""
+        import kreuzberg
+
+        presets = kreuzberg.list_embedding_presets()
+        assert isinstance(presets, list)
+        assert len(presets) >= 4
+        assert 'fast' in presets
+        assert 'balanced' in presets
+        assert 'quality' in presets
+        assert 'multilingual' in presets
+
+    def test_get_embedding_preset_fast(self):
+        """Test getting 'fast' embedding preset."""
+        import kreuzberg
+
+        preset = kreuzberg.get_embedding_preset('fast')
+        assert preset is not None
+        assert preset.name == 'fast'
+        assert preset.chunk_size > 0
+        assert preset.dimensions > 0
+
+    def test_get_embedding_preset_balanced(self):
+        """Test getting 'balanced' embedding preset."""
+        import kreuzberg
+
+        preset = kreuzberg.get_embedding_preset('balanced')
+        assert preset.name == 'balanced'
+        assert preset.chunk_size >= preset.overlap
+
+    def test_get_embedding_preset_quality(self):
+        """Test getting 'quality' embedding preset."""
+        import kreuzberg
+
+        preset = kreuzberg.get_embedding_preset('quality')
+        assert preset.name == 'quality'
+        assert preset.dimensions >= 768  # Quality should have higher dims
+
+    def test_get_embedding_preset_multilingual(self):
+        """Test getting 'multilingual' embedding preset."""
+        import kreuzberg
+
+        preset = kreuzberg.get_embedding_preset('multilingual')
+        assert preset.name == 'multilingual'
+        assert 'multilingual' in preset.description.lower()
+
+    def test_embedding_preset_has_model_name(self):
+        """Test that embedding presets have model names."""
+        import kreuzberg
+
+        for preset_name in kreuzberg.list_embedding_presets():
+            preset = kreuzberg.get_embedding_preset(preset_name)
+            assert hasattr(preset, 'model_name')
+            assert preset.model_name is not None
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKreuzbergMimeDetection:
+    """Tests for MIME type detection."""
+
+    def test_detect_mime_type_from_path(self, tmp_path: Path):
+        """Test MIME type detection from file path."""
+        import kreuzberg
+
+        # Create test files
+        txt_file = tmp_path / 'test.txt'
+        txt_file.write_text('Hello')
+
+        json_file = tmp_path / 'data.json'
+        json_file.write_text('{}')
+
+        md_file = tmp_path / 'readme.md'
+        md_file.write_text('# Title')
+
+        # Detect MIME types
+        assert kreuzberg.detect_mime_type_from_path(str(txt_file)) == 'text/plain'
+        assert kreuzberg.detect_mime_type_from_path(str(json_file)) == 'application/json'
+        assert kreuzberg.detect_mime_type_from_path(str(md_file)) == 'text/markdown'
+
+    def test_detect_mime_type_from_bytes(self):
+        """Test MIME type detection from bytes."""
+        import kreuzberg
+
+        # Plain text
+        text_bytes = b'Hello, World!'
+        mime = kreuzberg.detect_mime_type_from_bytes(text_bytes)
+        assert 'text' in mime
+
+    def test_get_extensions_for_mime(self):
+        """Test getting file extensions for MIME type."""
+        import kreuzberg
+
+        # PDF extensions (kreuzberg returns without dot prefix)
+        pdf_exts = kreuzberg.get_extensions_for_mime('application/pdf')
+        assert 'pdf' in pdf_exts or '.pdf' in pdf_exts
+
+        # Text extensions
+        text_exts = kreuzberg.get_extensions_for_mime('text/plain')
+        assert 'txt' in text_exts or '.txt' in text_exts
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKreuzbergMetadataExtraction:
+    """Tests for document metadata extraction."""
+
+    def test_extraction_result_has_metadata(self, tmp_path: Path):
+        """Test that extraction results include metadata."""
+        from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
+
+        test_file = tmp_path / 'test.txt'
+        test_file.write_text('Content for metadata test.')
+
+        result = extract_with_kreuzberg_sync(test_file)
+
+        assert result.metadata is not None
+        assert isinstance(result.metadata, dict)
+        assert 'format_type' in result.metadata
+
+    def test_text_metadata_fields(self, tmp_path: Path):
+        """Test text file metadata fields."""
+        from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
+
+        test_file = tmp_path / 'test.txt'
+        content = 'Line 1\nLine 2\nLine 3'
+        test_file.write_text(content)
+
+        result = extract_with_kreuzberg_sync(test_file)
+
+        assert result.metadata is not None
+        # Text files should have word/line/char counts
+        if 'line_count' in result.metadata:
+            assert result.metadata['line_count'] >= 1
+        if 'word_count' in result.metadata:
+            assert result.metadata['word_count'] >= 1
+
+    def test_json_metadata_fields(self, tmp_path: Path):
+        """Test JSON file metadata fields."""
+        from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
+
+        test_file = tmp_path / 'test.json'
+        test_file.write_text('{"key": "value", "number": 42}')
+
+        result = extract_with_kreuzberg_sync(test_file)
+
+        # JSON extraction works, metadata may or may not be present
+        assert result.content is not None
+        assert result.mime_type == 'application/json'
+        # Verify content was extracted (kreuzberg converts JSON to key: value format)
+        assert 'key' in result.content or 'value' in result.content
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestCombinedOptionsIntegration:
+    """Integration tests combining multiple extraction options."""
+
+    def test_combined_chunking_and_language_detection(self, tmp_path: Path):
+        """Test extraction with both chunking and language detection."""
+        from yar.document.kreuzberg_adapter import (
+            ChunkingOptions,
+            ExtractionOptions,
+            LanguageDetectionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'multi.txt'
+        # Create content with multiple paragraphs for better chunking
+        test_file.write_text(
+            'This is the first paragraph with English text.\n\n'
+            + 'Second paragraph continues with more content.\n\n' * 50
+        )
+
+        options = ExtractionOptions(
+            chunking=ChunkingOptions(enabled=True, max_chars=200, max_overlap=20),
+            language_detection=LanguageDetectionOptions(enabled=True),
+        )
+        result = extract_with_kreuzberg_sync(test_file, options)
+
+        assert result.content is not None
+        # Chunking may or may not produce chunks depending on content structure
+        # The important thing is that extraction completed successfully
+        assert len(result.content) > 0
+
+    def test_combined_output_format_and_token_reduction(self, tmp_path: Path):
+        """Test extraction with output format and token reduction."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            TokenReductionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'verbose.txt'
+        test_file.write_text(
+            'The very extremely quick brown fox. ' * 20
+        )
+
+        options = ExtractionOptions(
+            output_format='markdown',
+            token_reduction=TokenReductionOptions(mode='light'),
+        )
+        result = extract_with_kreuzberg_sync(test_file, options)
+
+        assert result.content is not None
+        assert len(result.content) > 0
+
+    def test_all_options_together(self, tmp_path: Path):
+        """Test extraction with all option types combined."""
+        from yar.document.kreuzberg_adapter import (
+            ChunkingOptions,
+            ExtractionOptions,
+            LanguageDetectionOptions,
+            PageOptions,
+            TokenReductionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'comprehensive.txt'
+        test_file.write_text(
+            'First paragraph with lots of content. ' * 30
+            + '\n\nSecond paragraph with different content. ' * 30
+        )
+
+        options = ExtractionOptions(
+            chunking=ChunkingOptions(enabled=True, max_chars=500),
+            language_detection=LanguageDetectionOptions(enabled=True),
+            token_reduction=TokenReductionOptions(mode='off'),
+            pages=PageOptions(extract_pages=True),
+            output_format='plain',
+        )
+        result = extract_with_kreuzberg_sync(test_file, options)
+
+        assert result.content is not None
+        assert result.chunks is not None
+        assert len(result.chunks) >= 1
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKeywordOptions:
+    """Tests for keyword extraction configuration."""
+
+    def test_keyword_options_defaults(self):
+        """Test KeywordOptions default values."""
+        from yar.document.kreuzberg_adapter import KeywordOptions
+
+        options = KeywordOptions()
+        assert options.enabled is False
+        assert options.algorithm == 'yake'
+        assert options.max_keywords == 10
+        assert options.min_score is None
+        assert options.ngram_range is None
+        assert options.language is None
+
+    def test_keyword_options_custom(self):
+        """Test KeywordOptions with custom values."""
+        from yar.document.kreuzberg_adapter import KeywordOptions
+
+        options = KeywordOptions(
+            enabled=True,
+            algorithm='rake',
+            max_keywords=5,
+            ngram_range=(1, 3),
+            language='en',
+        )
+        assert options.enabled is True
+        assert options.algorithm == 'rake'
+        assert options.max_keywords == 5
+        assert options.ngram_range == (1, 3)
+
+    def test_keyword_options_in_extraction_options(self):
+        """Test KeywordOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            KeywordOptions,
+        )
+
+        options = ExtractionOptions(
+            keywords=KeywordOptions(enabled=True, algorithm='yake')
+        )
+        assert options.keywords is not None
+        assert options.keywords.enabled is True
+
+    def test_create_keyword_extraction_options(self):
+        """Test create_keyword_extraction_options convenience function."""
+        from yar.document.kreuzberg_adapter import create_keyword_extraction_options
+
+        options = create_keyword_extraction_options(
+            algorithm='rake',
+            max_keywords=5,
+            language='de',
+        )
+        assert options.keywords is not None
+        assert options.keywords.enabled is True
+        assert options.keywords.algorithm == 'rake'
+        assert options.keywords.max_keywords == 5
+        assert options.keywords.language == 'de'
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestImageExtractionOptions:
+    """Tests for image extraction configuration."""
+
+    def test_image_extraction_options_defaults(self):
+        """Test ImageExtractionOptions default values."""
+        from yar.document.kreuzberg_adapter import ImageExtractionOptions
+
+        options = ImageExtractionOptions()
+        assert options.extract_images is True
+        assert options.target_dpi == 150
+        assert options.max_image_dimension is None
+        assert options.auto_adjust_dpi is True
+        assert options.min_dpi == 72
+        assert options.max_dpi == 300
+
+    def test_image_extraction_options_custom(self):
+        """Test ImageExtractionOptions with custom values."""
+        from yar.document.kreuzberg_adapter import ImageExtractionOptions
+
+        options = ImageExtractionOptions(
+            extract_images=True,
+            target_dpi=300,
+            max_image_dimension=1024,
+            auto_adjust_dpi=False,
+        )
+        assert options.target_dpi == 300
+        assert options.max_image_dimension == 1024
+
+    def test_image_options_in_extraction_options(self):
+        """Test ImageExtractionOptions in ExtractionOptions."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            ImageExtractionOptions,
+        )
+
+        options = ExtractionOptions(
+            images=ImageExtractionOptions(target_dpi=200)
+        )
+        assert options.images is not None
+        assert options.images.target_dpi == 200
+
+    def test_create_image_extraction_options(self):
+        """Test create_image_extraction_options convenience function."""
+        from yar.document.kreuzberg_adapter import create_image_extraction_options
+
+        options = create_image_extraction_options(
+            target_dpi=300,
+            max_dimension=2048,
+        )
+        assert options.images is not None
+        assert options.images.target_dpi == 300
+        assert options.images.max_image_dimension == 2048
+        # Should also enable PDF image extraction
+        assert options.pdf is not None
+        assert options.pdf.extract_images is True
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestEmbeddingPresetFunctions:
+    """Tests for embedding preset convenience functions."""
+
+    def test_get_embedding_presets(self):
+        """Test get_embedding_presets returns valid list."""
+        from yar.document.kreuzberg_adapter import get_embedding_presets
+
+        presets = get_embedding_presets()
+        assert isinstance(presets, list)
+        assert 'fast' in presets
+        assert 'balanced' in presets
+        assert 'quality' in presets
+        assert 'multilingual' in presets
+
+    def test_get_embedding_preset_config_fast(self):
+        """Test getting fast preset configuration."""
+        from yar.document.kreuzberg_adapter import get_embedding_preset_config
+
+        config = get_embedding_preset_config('fast')
+        assert 'chunk_size' in config
+        assert 'overlap' in config
+        assert 'dimensions' in config
+        assert config['chunk_size'] > 0
+        assert config['overlap'] >= 0
+
+    def test_get_embedding_preset_config_balanced(self):
+        """Test getting balanced preset configuration."""
+        from yar.document.kreuzberg_adapter import get_embedding_preset_config
+
+        config = get_embedding_preset_config('balanced')
+        assert config['chunk_size'] >= config['overlap']
+
+    def test_get_embedding_preset_config_quality(self):
+        """Test getting quality preset configuration."""
+        from yar.document.kreuzberg_adapter import get_embedding_preset_config
+
+        config = get_embedding_preset_config('quality')
+        # Quality preset should have larger chunk size
+        assert config['chunk_size'] >= 1000
+
+    def test_get_embedding_preset_config_multilingual(self):
+        """Test getting multilingual preset configuration."""
+        from yar.document.kreuzberg_adapter import get_embedding_preset_config
+
+        config = get_embedding_preset_config('multilingual')
+        assert config['chunk_size'] > 0
+
+    def test_create_chunking_from_embedding_preset(self):
+        """Test create_chunking_from_embedding_preset."""
+        from yar.document.kreuzberg_adapter import (
+            create_chunking_from_embedding_preset,
+        )
+
+        # Default is 'balanced'
+        chunking = create_chunking_from_embedding_preset()
+        assert chunking.enabled is True
+        assert chunking.max_chars > 0
+        assert chunking.max_overlap >= 0
+        assert chunking.preset == 'semantic'
+
+    def test_create_chunking_from_embedding_preset_fast(self):
+        """Test create_chunking_from_embedding_preset with 'fast' preset."""
+        from yar.document.kreuzberg_adapter import (
+            create_chunking_from_embedding_preset,
+        )
+
+        chunking = create_chunking_from_embedding_preset('fast')
+        assert chunking.enabled is True
+        # Fast preset should have smaller chunk size
+        assert chunking.max_chars <= 1024
+
+    def test_create_chunking_from_embedding_preset_quality(self):
+        """Test create_chunking_from_embedding_preset with 'quality' preset."""
+        from yar.document.kreuzberg_adapter import (
+            create_chunking_from_embedding_preset,
+        )
+
+        chunking = create_chunking_from_embedding_preset('quality')
+        assert chunking.enabled is True
+        # Quality preset should have larger chunk size
+        assert chunking.max_chars >= 1000
+
+    def test_embedding_preset_chunking_in_extraction(self, tmp_path: Path):
+        """Test using embedding preset chunking in actual extraction."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            create_chunking_from_embedding_preset,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'test.txt'
+        test_file.write_text('Sample content for extraction. ' * 100)
+
+        chunking = create_chunking_from_embedding_preset('fast')
+        options = ExtractionOptions(chunking=chunking)
+        result = extract_with_kreuzberg_sync(test_file, options)
+
+        assert result.content is not None
+        assert len(result.content) > 0
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
 class TestKreuzberg42AsyncFeatures:
     """Async tests for kreuzberg 4.2.0 features."""
 
