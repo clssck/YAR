@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import type { YarConfiguration, Message, QueryRequest } from '@/api/yar'
+import type { Message, QueryRequest, YarConfiguration } from '@/api/yar'
 import { defaultQueryLabel } from '@/lib/constants'
 import { createSelectors } from '@/lib/utils'
 

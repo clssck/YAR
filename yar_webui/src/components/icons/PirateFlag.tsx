@@ -10,8 +10,10 @@ export function PirateFlag(props: SVGProps<SVGSVGElement>) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-label="YAR pirate flag"
       {...props}
     >
+      <title>YAR</title>
       {/* Pole */}
       <line x1="5" y1="3" x2="5" y2="21" />
       {/* Flag */}

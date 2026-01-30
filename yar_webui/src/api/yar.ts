@@ -423,9 +423,7 @@ export const searchLabels = async (
   return response.data
 }
 
-export const checkHealth = async (): Promise<
-  YarStatus | { status: 'error'; message: string }
-> => {
+export const checkHealth = async (): Promise<YarStatus | { status: 'error'; message: string }> => {
   try {
     const response = await axiosInstance.get('/health')
     return response.data
