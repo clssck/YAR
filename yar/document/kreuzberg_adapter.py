@@ -400,7 +400,12 @@ class HierarchyOptions:
 
 @dataclass
 class ExtractionOptions:
-    """Combined extraction options for Kreuzberg."""
+    """Combined extraction options for Kreuzberg.
+
+    New in kreuzberg 4.2:
+        output_format: Convert extracted content to plain/markdown/html/djot
+        result_format: 'unified' (default) or 'element_based' for semantic elements
+    """
 
     chunking: ChunkingOptions | None = None
     ocr: OcrOptions | None = None
@@ -413,6 +418,9 @@ class ExtractionOptions:
     use_cache: bool = True
     enable_quality_processing: bool = True
     force_ocr: bool = False  # Force OCR even for text-based documents (fallback for PPTX parsing failures)
+    # New in kreuzberg 4.2.0
+    output_format: str | None = None  # 'plain', 'markdown', 'html', 'djot' - converts ANY file to this format
+    result_format: str | None = None  # 'unified' (default) or 'element_based' for semantic extraction
 
 
 @dataclass
@@ -545,6 +553,14 @@ def _build_extraction_config(options: ExtractionOptions | None = None) -> Any:
         )
         if 'pdf_options' not in config_kwargs:
             config_kwargs['pdf_options'] = PdfConfig(hierarchy=hierarchy_config)
+
+    # New in kreuzberg 4.2.0: output format conversion
+    if options.output_format:
+        config_kwargs['output_format'] = options.output_format
+
+    # New in kreuzberg 4.2.0: result format (unified vs element_based)
+    if options.result_format:
+        config_kwargs['result_format'] = options.result_format
 
     return ExtractionConfig(**config_kwargs) if config_kwargs else None
 
@@ -906,6 +922,57 @@ def create_chunking_options(
         max_chars=max_chars,
         max_overlap=max_overlap,
         preset=preset,
+    )
+
+
+def create_markdown_options(
+    chunking: ChunkingOptions | None = None,
+    ocr: OcrOptions | None = None,
+) -> ExtractionOptions:
+    """Create options for extracting document content as Markdown.
+
+    New in kreuzberg 4.2.0: Any document format can be converted to Markdown
+    during extraction, preserving structure like headings, lists, and tables.
+
+    Args:
+        chunking: Optional chunking configuration
+        ocr: Optional OCR configuration for scanned documents
+
+    Returns:
+        ExtractionOptions configured for Markdown output
+
+    Example:
+        >>> options = create_markdown_options()
+        >>> result = extract_with_kreuzberg_sync("report.pdf", options)
+        >>> print(result.content)  # Markdown-formatted content
+    """
+    return ExtractionOptions(
+        output_format='markdown',
+        chunking=chunking,
+        ocr=ocr,
+    )
+
+
+def create_html_options(
+    chunking: ChunkingOptions | None = None,
+    ocr: OcrOptions | None = None,
+) -> ExtractionOptions:
+    """Create options for extracting document content as HTML.
+
+    New in kreuzberg 4.2.0: Any document format can be converted to HTML
+    during extraction, preserving rich formatting and structure.
+
+    Args:
+        chunking: Optional chunking configuration
+        ocr: Optional OCR configuration for scanned documents
+
+    Returns:
+        ExtractionOptions configured for HTML output
+    """
+    return ExtractionOptions(
+        output_format='html',
+        chunking=chunking,
+        ocr=ocr,
     )
 
 

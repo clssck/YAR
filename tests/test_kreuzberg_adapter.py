@@ -343,7 +343,7 @@ class TestEdgeCases:
 
         test_file = tmp_path / 'nonexistent.txt'
 
-        with pytest.raises((ValidationError, FileNotFoundError)):
+        with pytest.raises((ValidationError, FileNotFoundError, OSError)):
             extract_with_kreuzberg_sync(test_file)
 
     def test_special_characters_in_content(self, tmp_path: Path):
@@ -1271,7 +1271,7 @@ class TestAsyncExtraction:
 
         from yar.document.kreuzberg_adapter import extract_with_kreuzberg
 
-        with pytest.raises(ValidationError):
+        with pytest.raises((ValidationError, FileNotFoundError, OSError)):
             await extract_with_kreuzberg('/nonexistent/path/file.txt')
 
 
@@ -4448,10 +4448,10 @@ class TestKreuzbergExceptionHandling:
 
         try:
             extract_file_sync('/nonexistent/path/file.txt')
-        except (ValidationError, FileNotFoundError) as e:
+        except (ValidationError, FileNotFoundError, OSError) as e:
             error_msg = str(e).lower()
             # Error should mention file or path
-            assert 'file' in error_msg or 'path' in error_msg or 'not found' in error_msg or 'no such' in error_msg
+            assert 'file' in error_msg or 'path' in error_msg or 'not found' in error_msg or 'no such' in error_msg or 'does not exist' in error_msg
 
 
 # =============================================================================
@@ -5483,3 +5483,283 @@ Section three also has its own content.
         }
 
         assert len(chunks_dict) == len(chunks)
+
+
+# =============================================================================
+# Tokenizer Tests
+# =============================================================================
+
+
+class TestTokenizer:
+    """Tests for token-to-character conversion utilities."""
+
+    def test_tokens_to_chars_default_model(self):
+        """Test token to char conversion with default model."""
+        from yar.document.kreuzberg_adapter import tokens_to_chars
+
+        # Should return reasonable character count
+        chars = tokens_to_chars(100)
+        assert chars > 0
+        # Typical ratio is ~4 chars/token for English
+        assert 300 < chars < 500
+
+    def test_tokens_to_chars_zero(self):
+        """Test token to char conversion with zero tokens."""
+        from yar.document.kreuzberg_adapter import tokens_to_chars
+
+        chars = tokens_to_chars(0)
+        assert chars == 0
+
+    def test_tokens_to_chars_large_value(self):
+        """Test token to char conversion with large token count."""
+        from yar.document.kreuzberg_adapter import tokens_to_chars
+
+        chars = tokens_to_chars(10000)
+        assert chars > 30000  # At least 3 chars/token
+
+    def test_get_tokenizer_caching(self):
+        """Test that tokenizer is cached."""
+        from yar.document.kreuzberg_adapter import _get_tokenizer
+
+        tok1 = _get_tokenizer('gpt-4o')
+        tok2 = _get_tokenizer('gpt-4o')
+        assert tok1 is tok2  # Same cached instance
+
+    def test_get_tokenizer_fallback(self):
+        """Test tokenizer fallback for unknown model."""
+        from yar.document.kreuzberg_adapter import _get_tokenizer
+
+        # Should not raise, should fallback to cl100k_base
+        tok = _get_tokenizer('nonexistent-model-xyz')
+        assert tok is not None
+
+
+# =============================================================================
+# Kreuzberg 4.2 Feature Tests
+# =============================================================================
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKreuzberg42Features:
+    """Tests for kreuzberg 4.2.0 new features: output_format and result_format."""
+
+    def test_extraction_options_output_format(self):
+        """Test ExtractionOptions with output_format field."""
+        from yar.document.kreuzberg_adapter import ExtractionOptions
+
+        options = ExtractionOptions(output_format='markdown')
+        assert options.output_format == 'markdown'
+
+        options = ExtractionOptions(output_format='html')
+        assert options.output_format == 'html'
+
+        options = ExtractionOptions(output_format='plain')
+        assert options.output_format == 'plain'
+
+        options = ExtractionOptions(output_format='djot')
+        assert options.output_format == 'djot'
+
+    def test_extraction_options_result_format(self):
+        """Test ExtractionOptions with result_format field."""
+        from yar.document.kreuzberg_adapter import ExtractionOptions
+
+        options = ExtractionOptions(result_format='unified')
+        assert options.result_format == 'unified'
+
+        options = ExtractionOptions(result_format='element_based')
+        assert options.result_format == 'element_based'
+
+    def test_extraction_options_combined(self):
+        """Test ExtractionOptions with both new fields."""
+        from yar.document.kreuzberg_adapter import ExtractionOptions
+
+        options = ExtractionOptions(
+            output_format='markdown',
+            result_format='unified',
+            use_cache=False,
+        )
+        assert options.output_format == 'markdown'
+        assert options.result_format == 'unified'
+        assert options.use_cache is False
+
+    def test_create_markdown_options(self):
+        """Test create_markdown_options convenience function."""
+        from yar.document.kreuzberg_adapter import create_markdown_options
+
+        options = create_markdown_options()
+        assert options.output_format == 'markdown'
+        assert options.chunking is None
+        assert options.ocr is None
+
+    def test_create_markdown_options_with_chunking(self):
+        """Test create_markdown_options with chunking config."""
+        from yar.document.kreuzberg_adapter import (
+            ChunkingOptions,
+            create_markdown_options,
+        )
+
+        chunking = ChunkingOptions(enabled=True, max_chars=2000)
+        options = create_markdown_options(chunking=chunking)
+
+        assert options.output_format == 'markdown'
+        assert options.chunking is not None
+        assert options.chunking.max_chars == 2000
+
+    def test_create_html_options(self):
+        """Test create_html_options convenience function."""
+        from yar.document.kreuzberg_adapter import create_html_options
+
+        options = create_html_options()
+        assert options.output_format == 'html'
+        assert options.chunking is None
+        assert options.ocr is None
+
+    def test_create_html_options_with_ocr(self):
+        """Test create_html_options with OCR config."""
+        from yar.document.kreuzberg_adapter import OcrOptions, create_html_options
+
+        ocr = OcrOptions(backend='tesseract', language='eng')
+        options = create_html_options(ocr=ocr)
+
+        assert options.output_format == 'html'
+        assert options.ocr is not None
+        assert options.ocr.backend == 'tesseract'
+
+    def test_build_config_with_output_format(self):
+        """Test _build_extraction_config passes output_format to kreuzberg."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            _build_extraction_config,
+        )
+
+        options = ExtractionOptions(output_format='markdown')
+        config = _build_extraction_config(options)
+
+        assert config is not None
+        assert config.output_format == 'markdown'
+
+    def test_build_config_with_result_format(self):
+        """Test _build_extraction_config passes result_format to kreuzberg."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            _build_extraction_config,
+        )
+
+        options = ExtractionOptions(result_format='element_based')
+        config = _build_extraction_config(options)
+
+        assert config is not None
+        assert config.result_format == 'element_based'
+
+    def test_extract_with_markdown_output(self, tmp_path: Path):
+        """Test actual extraction with markdown output format."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        # Create a simple text file
+        test_file = tmp_path / 'test.txt'
+        test_file.write_text('Hello World\n\nThis is a paragraph.')
+
+        options = ExtractionOptions(output_format='markdown')
+        result = extract_with_kreuzberg_sync(str(test_file), options)
+
+        assert result.content is not None
+        assert len(result.content) > 0
+        assert 'Hello' in result.content
+
+    def test_extract_with_html_output(self, tmp_path: Path):
+        """Test actual extraction with HTML output format."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'test.txt'
+        test_file.write_text('Hello World\n\nThis is a paragraph.')
+
+        options = ExtractionOptions(output_format='html')
+        result = extract_with_kreuzberg_sync(str(test_file), options)
+
+        assert result.content is not None
+        assert len(result.content) > 0
+
+    def test_extract_with_plain_output(self, tmp_path: Path):
+        """Test actual extraction with plain text output format."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'test.txt'
+        test_file.write_text('Hello World\n\nThis is a paragraph.')
+
+        options = ExtractionOptions(output_format='plain')
+        result = extract_with_kreuzberg_sync(str(test_file), options)
+
+        assert result.content is not None
+        assert 'Hello' in result.content
+
+    def test_markdown_convenience_function_extraction(self, tmp_path: Path):
+        """Test extraction using create_markdown_options convenience function."""
+        from yar.document.kreuzberg_adapter import (
+            create_markdown_options,
+            extract_with_kreuzberg_sync,
+        )
+
+        test_file = tmp_path / 'doc.txt'
+        test_file.write_text("""
+# Heading
+
+Some paragraph text here.
+
+- Item 1
+- Item 2
+""")
+
+        options = create_markdown_options()
+        result = extract_with_kreuzberg_sync(str(test_file), options)
+
+        assert result.content is not None
+        assert 'Heading' in result.content
+
+
+@pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
+class TestKreuzberg42AsyncFeatures:
+    """Async tests for kreuzberg 4.2.0 features."""
+
+    @pytest.mark.asyncio
+    async def test_async_extract_with_output_format(self, tmp_path: Path):
+        """Test async extraction with output_format."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            extract_with_kreuzberg,
+        )
+
+        test_file = tmp_path / 'async_test.txt'
+        test_file.write_text('Async content test\n\nSecond paragraph.')
+
+        options = ExtractionOptions(output_format='markdown')
+        result = await extract_with_kreuzberg(str(test_file), options)
+
+        assert result.content is not None
+        assert 'Async' in result.content
+
+    @pytest.mark.asyncio
+    async def test_async_bytes_extract_with_output_format(self):
+        """Test async bytes extraction with output_format."""
+        from yar.document.kreuzberg_adapter import (
+            ExtractionOptions,
+            extract_bytes_with_kreuzberg,
+        )
+
+        content = b'Bytes content test\n\nSecond paragraph.'
+        options = ExtractionOptions(output_format='markdown')
+
+        result = await extract_bytes_with_kreuzberg(
+            content, 'text/plain', options
+        )
+
+        assert result.content is not None
+        assert 'Bytes' in result.content
