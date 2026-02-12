@@ -13,8 +13,12 @@ from dataclasses import dataclass, field
 from datetime import timezone
 from typing import Any, ClassVar, Literal, TypeVar, cast, final, overload
 
+import asyncpg
 import numpy as np
-import pipmaster as pm
+from asyncpg import Connection, Pool
+from asyncpg.pool import PoolConnectionProxy
+from dotenv import load_dotenv
+from pgvector.asyncpg import register_vector
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
@@ -42,17 +46,6 @@ from yar.validators import (
     validate_sql_identifier,
     validate_workspace_name,
 )
-
-if not pm.is_installed('asyncpg'):
-    pm.install('asyncpg')
-if not pm.is_installed('pgvector'):
-    pm.install('pgvector')
-
-import asyncpg
-from asyncpg import Connection, Pool
-from asyncpg.pool import PoolConnectionProxy
-from dotenv import load_dotenv
-from pgvector.asyncpg import register_vector
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each yar instance
@@ -109,6 +102,25 @@ if VECTOR_DISTANCE_METRIC not in VECTOR_OPS_CLASS:
 
 # Patterns for sensitive parameter keys that should be masked in logs
 _SENSITIVE_KEY_PATTERNS = frozenset({'password', 'secret', 'token', 'key', 'credential', 'auth'})
+_VECTOR_TABLE_NAMES = frozenset({'YAR_VDB_CHUNKS', 'YAR_VDB_ENTITY', 'YAR_VDB_RELATION'})
+
+
+def _parse_bool_config(value: Any, *, default: bool, key_name: str) -> bool:
+    """Parse bool-like configuration values with safe fallback."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'1', 'true', 'yes', 'on', 'y', 't'}:
+            return True
+        if normalized in {'0', 'false', 'no', 'off', 'n', 'f'}:
+            return False
+    logger.warning('Invalid %s=%r; falling back to %s', key_name, value, default)
+    return default
 
 
 def _sanitize_for_log(
@@ -251,7 +263,15 @@ class PostgreSQLDB:
         self.ssl_crl = config.get('ssl_crl')
 
         # Vector configuration
-        self.vector_index_type = config.get('vector_index_type')
+        self.enable_vector = _parse_bool_config(
+            config.get('enable_vector', True),
+            default=True,
+            key_name='POSTGRES_ENABLE_VECTOR',
+        )
+        vector_index_type = config.get('vector_index_type')
+        if isinstance(vector_index_type, str):
+            vector_index_type = vector_index_type.strip().upper() or None
+        self.vector_index_type = vector_index_type if self.enable_vector else None
         self.hnsw_m = config.get('hnsw_m')
         self.hnsw_ef = config.get('hnsw_ef')
         self.hnsw_ef_search = config.get('hnsw_ef_search')
@@ -305,6 +325,11 @@ class PostgreSQLDB:
             self.connection_retry_backoff_max,
             self.pool_close_timeout,
             self.command_timeout,
+        )
+        logger.info(
+            'PostgreSQL, Vector config: enable_vector=%s, vector_index_type=%s',
+            self.enable_vector,
+            self.vector_index_type,
         )
 
         # Migration error tracking - stores (migration_name, error_message) tuples
@@ -443,12 +468,13 @@ class PostgreSQLDB:
             Vector index settings (HNSW ef_search, VCHORDRQ probes) are also set here
             once per connection rather than on every query for efficiency.
             """
-            await register_vector(connection)
-            # Configure vector index settings once per connection (not per query)
-            if self.vector_index_type == 'HNSW':
-                await self.configure_hnsw(connection)
-            elif self.vector_index_type == 'VCHORDRQ':
-                await self.configure_vchordrq(connection)
+            if self.enable_vector:
+                await register_vector(connection)
+                # Configure vector index settings once per connection (not per query)
+                if self.vector_index_type == 'HNSW':
+                    await self.configure_hnsw(connection)
+                elif self.vector_index_type == 'VCHORDRQ':
+                    await self.configure_vchordrq(connection)
 
         async def _create_pool_once() -> None:
             # STEP 1: Bootstrap - ensure vector extension exists BEFORE pool creation.
@@ -465,7 +491,8 @@ class PostgreSQLDB:
                 ssl=connection_params.get('ssl'),
             )
             try:
-                await self.configure_vector_extension(bootstrap_conn)
+                if self.enable_vector:
+                    await self.configure_vector_extension(bootstrap_conn)
                 await self.configure_trgm_extension(bootstrap_conn)
             finally:
                 await bootstrap_conn.close()
@@ -908,6 +935,10 @@ class PostgreSQLDB:
             Only validates if vector tables already exist with data. New databases
             are fine because tables will be created with the correct dimension.
         """
+        if not self.enable_vector:
+            logger.info('PostgreSQL, Skipping vector dimension validation (POSTGRES_ENABLE_VECTOR=false)')
+            return
+
         expected_dim = int(os.environ.get('EMBEDDING_DIM', 1024))
 
         # Vector tables to check
@@ -1667,6 +1698,8 @@ class PostgreSQLDB:
         """Internal method that runs table creation under advisory lock."""
         # Tables to skip in the main loop (already created or special handling)
         skip_tables = {'YAR_SCHEMA_MIGRATIONS'}
+        if not self.enable_vector:
+            skip_tables = skip_tables | _VECTOR_TABLE_NAMES
 
         # First create all tables
         for k, v in TABLES.items():
@@ -1693,7 +1726,7 @@ class PostgreSQLDB:
         # Batch check all indexes at once (optimization: single query instead of N queries)
         existing_indexes: set[str] = set()
         try:
-            table_names = list(TABLES.keys())
+            table_names = [table_name for table_name in TABLES if table_name not in skip_tables]
             table_names_lower = [t.lower() for t in table_names]
 
             # Get all existing indexes for our tables in one query
@@ -1743,22 +1776,25 @@ class PostgreSQLDB:
         # Create additional performance indexes for common query patterns
         try:
             performance_indexes = [
-                # Entity resolution lookups (used heavily during ingestion)
-                ('idx_yar_vdb_entity_workspace_name', 'YAR_VDB_ENTITY', '(workspace, entity_name)'),
-                # Graph traversal queries (forward and backward edge lookups)
-                ('idx_yar_vdb_relation_workspace_source', 'YAR_VDB_RELATION', '(workspace, source_id)'),
-                ('idx_yar_vdb_relation_workspace_target', 'YAR_VDB_RELATION', '(workspace, target_id)'),
                 # Document chunk lookups by document
                 ('idx_yar_doc_chunks_workspace_doc', 'YAR_DOC_CHUNKS', '(workspace, full_doc_id)'),
                 # File path lookups in doc status
                 ('idx_yar_doc_status_workspace_path', 'YAR_DOC_STATUS', '(workspace, file_path)'),
             ]
+            if self.enable_vector:
+                performance_indexes.extend(
+                    [
+                        # Entity resolution lookups (used heavily during ingestion)
+                        ('idx_yar_vdb_entity_workspace_name', 'YAR_VDB_ENTITY', '(workspace, entity_name)'),
+                        # Graph traversal queries (forward and backward edge lookups)
+                        ('idx_yar_vdb_relation_workspace_source', 'YAR_VDB_RELATION', '(workspace, source_id)'),
+                        ('idx_yar_vdb_relation_workspace_target', 'YAR_VDB_RELATION', '(workspace, target_id)'),
+                    ]
+                )
 
             # GIN indexes for array membership queries (chunk_ids lookups)
             # and full-text search (BM25-style keyword search)
             gin_indexes = [
-                ('idx_yar_vdb_entity_chunk_ids_gin', 'YAR_VDB_ENTITY', 'USING gin (chunk_ids)'),
-                ('idx_yar_vdb_relation_chunk_ids_gin', 'YAR_VDB_RELATION', 'USING gin (chunk_ids)'),
                 # Full-text search GIN index for BM25 keyword search on chunks.
                 # IMPORTANT: This index is built for 'english' language. Queries using
                 # hybrid_search() or bm25_search() must use language='english' (the default)
@@ -1771,6 +1807,13 @@ class PostgreSQLDB:
                     "USING gin (to_tsvector('english', content))",
                 ),
             ]
+            if self.enable_vector:
+                gin_indexes.extend(
+                    [
+                        ('idx_yar_vdb_entity_chunk_ids_gin', 'YAR_VDB_ENTITY', 'USING gin (chunk_ids)'),
+                        ('idx_yar_vdb_relation_chunk_ids_gin', 'YAR_VDB_RELATION', 'USING gin (chunk_ids)'),
+                    ]
+                )
 
             # Create GIN indexes separately (different syntax)
             # Note: CONCURRENTLY cannot be used with IF NOT EXISTS, so we check first
@@ -1797,7 +1840,7 @@ class PostgreSQLDB:
             logger.error(f'PostgreSQL, Failed to create performance indexes: {e}')
 
         # Create vector indexs
-        if self.vector_index_type:
+        if self.enable_vector and self.vector_index_type:
             logger.info(f'PostgreSQL, Create vector indexs, type: {self.vector_index_type}')
             try:
                 if self.vector_index_type in ['HNSW', 'IVFFLAT', 'VCHORDRQ']:
@@ -1823,11 +1866,12 @@ class PostgreSQLDB:
             'Failed to migrate LLM cache schema',
         )
 
-        await self._run_migration(
-            self._migrate_doc_chunks_to_vdb_chunks(),
-            'doc_chunks_to_vdb',
-            'Failed to migrate doc_chunks to vdb_chunks',
-        )
+        if self.enable_vector:
+            await self._run_migration(
+                self._migrate_doc_chunks_to_vdb_chunks(),
+                'doc_chunks_to_vdb',
+                'Failed to migrate doc_chunks to vdb_chunks',
+            )
 
         # Check and migrate LLM cache to flattened keys if needed
         try:
@@ -2691,6 +2735,64 @@ class ClientManager:
         config = configparser.ConfigParser()
         config.read('config.ini', 'utf-8')
 
+        enable_vector = _parse_bool_config(
+            os.environ.get(
+                'POSTGRES_ENABLE_VECTOR',
+                config.get('postgres', 'enable_vector', fallback='true'),
+            ),
+            default=True,
+            key_name='POSTGRES_ENABLE_VECTOR',
+        )
+        vector_index_type = os.environ.get(
+            'POSTGRES_VECTOR_INDEX_TYPE',
+            config.get('postgres', 'vector_index_type', fallback='HNSW'),
+        )
+        if isinstance(vector_index_type, str):
+            vector_index_type = vector_index_type.strip().upper() or None
+        if not enable_vector:
+            vector_index_type = None
+
+        connection_retry_attempts = max(
+            1,
+            min(
+                30,
+                int(
+                    os.environ.get(
+                        'POSTGRES_CONNECTION_RETRIES',
+                        config.get('postgres', 'connection_retries', fallback=10),
+                    )
+                ),
+            ),
+        )
+        connection_retry_backoff = max(
+            0.0,
+            min(
+                30.0,
+                float(
+                    os.environ.get(
+                        'POSTGRES_CONNECTION_RETRY_BACKOFF',
+                        config.get('postgres', 'connection_retry_backoff', fallback=3.0),
+                    )
+                ),
+            ),
+        )
+        connection_retry_backoff_max = max(
+            connection_retry_backoff,
+            min(
+                300.0,
+                float(
+                    os.environ.get(
+                        'POSTGRES_CONNECTION_RETRY_BACKOFF_MAX',
+                        config.get(
+                            'postgres',
+                            'connection_retry_backoff_max',
+                            fallback=30.0,
+                        ),
+                    )
+                ),
+            ),
+        )
+
         return {
             'host': os.environ.get(
                 'POSTGRES_HOST',
@@ -2743,10 +2845,8 @@ class ClientManager:
                 'POSTGRES_SSL_CRL',
                 config.get('postgres', 'ssl_crl', fallback=None),
             ),
-            'vector_index_type': os.environ.get(
-                'POSTGRES_VECTOR_INDEX_TYPE',
-                config.get('postgres', 'vector_index_type', fallback='HNSW'),
-            ),
+            'enable_vector': enable_vector,
+            'vector_index_type': vector_index_type,
             'hnsw_m': int(
                 os.environ.get(
                     'POSTGRES_HNSW_M',
@@ -2795,37 +2895,9 @@ class ClientManager:
                 config.get('postgres', 'statement_cache_size', fallback='500'),
             ),
             # Connection retry configuration
-            'connection_retry_attempts': min(
-                10,
-                int(
-                    os.environ.get(
-                        'POSTGRES_CONNECTION_RETRIES',
-                        config.get('postgres', 'connection_retries', fallback=3),
-                    )
-                ),
-            ),
-            'connection_retry_backoff': min(
-                5.0,
-                float(
-                    os.environ.get(
-                        'POSTGRES_CONNECTION_RETRY_BACKOFF',
-                        config.get('postgres', 'connection_retry_backoff', fallback=0.5),
-                    )
-                ),
-            ),
-            'connection_retry_backoff_max': min(
-                60.0,
-                float(
-                    os.environ.get(
-                        'POSTGRES_CONNECTION_RETRY_BACKOFF_MAX',
-                        config.get(
-                            'postgres',
-                            'connection_retry_backoff_max',
-                            fallback=5.0,
-                        ),
-                    )
-                ),
-            ),
+            'connection_retry_attempts': connection_retry_attempts,
+            'connection_retry_backoff': connection_retry_backoff,
+            'connection_retry_backoff_max': connection_retry_backoff_max,
             'pool_close_timeout': min(
                 30.0,
                 float(
@@ -3378,6 +3450,9 @@ class PGVectorStorage(BaseVectorStorage):
         async with get_data_init_lock():
             if self.db is None:
                 self.db = await ClientManager.get_client()
+
+            if not getattr(self.db, 'enable_vector', True):
+                raise RuntimeError('PGVectorStorage requires POSTGRES_ENABLE_VECTOR=true for pgvector operations')
 
             if not (hasattr(self, 'workspace') and self.workspace):
                 self.workspace = self.db.workspace if self.db.workspace else 'default'

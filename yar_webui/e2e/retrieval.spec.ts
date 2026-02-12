@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Retrieval Panel', () => {
   test.beforeEach(async ({ page }) => {
@@ -29,7 +29,9 @@ test.describe('Retrieval Panel', () => {
 
   test('shows mode selector', async ({ page }) => {
     // Mode selector button (shows "Default" or a mode name)
-    const modeButton = page.locator('button').filter({ hasText: /Default|Hybrid|Local|Global|Naive|Mix|Bypass/i })
+    const modeButton = page
+      .locator('button')
+      .filter({ hasText: /Default|Hybrid|Local|Global|Naive|Mix|Bypass/i })
     await expect(modeButton.first()).toBeVisible()
   })
 
@@ -68,7 +70,9 @@ test.describe('Retrieval Panel', () => {
 
   test('shows empty state message', async ({ page }) => {
     // Should show prompt to start retrieval
-    await expect(page.getByText(/Start a retrieval by typing your query/i)).toBeVisible()
+    await expect(
+      page.getByText(/Start a retrieval by typing your query/i),
+    ).toBeVisible()
   })
 })
 

@@ -18,8 +18,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from yar.base import QueryParam, TextChunkSchema
-from yar.constants import DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
+from yar.constants import DEFAULT_MAX_FILE_PATHS, DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
 from yar.operate import (
+    _enrich_local_keywords,
+    _resolve_max_file_paths,
+    _split_keyword_terms,
     _truncate_entity_identifier,
     chunking_by_semantic,
     create_chunker,
@@ -773,6 +776,52 @@ class TestExtractEntities:
             # That's acceptable - we're just testing the function signature
             pass
 
+    @pytest.mark.asyncio
+    async def test_extract_entities_truncates_oversized_input(self):
+        """Extraction prompts should apply max_extract_input_tokens guard."""
+        from yar.operate import extract_entities
+
+        content = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        tokenizer = Mock()
+        tokenizer.encode.side_effect = lambda text: list(range(len(text)))
+        tokenizer.decode.side_effect = lambda tokens: 'TRUNCATED_CONTENT'
+
+        chunks: dict[str, TextChunkSchema] = {
+            'chunk-1': {
+                'tokens': 10,
+                'content': content,
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            }
+        }
+
+        captured_prompts: list[str] = []
+
+        async def fake_use_llm_with_cache(prompt, *_args, **_kwargs):
+            captured_prompts.append(prompt)
+            return '(COMPLETE)', 1234567890
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
+            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'max_extract_input_tokens': 8,
+                    'tokenizer': tokenizer,
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert len(captured_prompts) == 1
+        assert 'TRUNCATED_CONTENT' in captured_prompts[0]
+        assert content not in captured_prompts[0]
+
 
 # ============================================================================
 # Edge Cases and Integration Tests
@@ -862,6 +911,13 @@ class TestOperateHelpers:
                 assert 'content' in result[0]
                 assert 'tokens' in result[0]
 
+    def test_resolve_max_file_paths_handles_edge_values(self):
+        """max_file_paths parser should use defaults and clamp negatives."""
+        assert _resolve_max_file_paths({}) == DEFAULT_MAX_FILE_PATHS
+        assert _resolve_max_file_paths({'max_file_paths': '12'}) == 12
+        assert _resolve_max_file_paths({'max_file_paths': -5}) == 0
+        assert _resolve_max_file_paths({'max_file_paths': 'not-a-number'}) == DEFAULT_MAX_FILE_PATHS
+
     def test_chunking_preserves_content_order(self):
         """Test that chunks preserve content order."""
         content = "First. Second. Third. Fourth. Fifth."
@@ -884,3 +940,48 @@ class TestOperateHelpers:
         for chunk in result:
             for field in required_fields:
                 assert field in chunk, f"Missing required field: {field}"
+
+    def test_split_keyword_terms_deduplicates_and_trims(self):
+        """Keyword term splitting should normalize comma-separated strings."""
+        terms = _split_keyword_terms(" Amazon , AWS, amazon ;  cloud platform  ")
+        assert terms == ["Amazon", "AWS", "cloud platform"]
+
+    def test_enrich_local_keywords_promotes_high_level_when_low_missing(self):
+        """Local mode should promote one focused high-level keyword when low-level is empty."""
+        enriched = _enrich_local_keywords(
+            hl_keywords=["quantum computing", "company research"],
+            ll_keywords=[],
+            mode="local",
+            query="What companies are working on quantum computing?",
+        )
+        assert enriched == ["quantum computing"]
+
+    def test_enrich_local_keywords_keeps_existing_low_level_terms(self):
+        """Local mode should keep existing low-level keywords without broadening."""
+        enriched = _enrich_local_keywords(
+            hl_keywords=["technology company", "market profile", "cloud services"],
+            ll_keywords=["Amazon"],
+            mode="local",
+            user_supplied_ll=True,
+        )
+        assert enriched == ["Amazon"]
+
+    def test_enrich_local_keywords_filters_auto_generated_generic_low_level_terms(self):
+        """Auto-generated low-level keywords should be narrowed to focused terms."""
+        enriched = _enrich_local_keywords(
+            hl_keywords=["quantum computing", "company research"],
+            ll_keywords=["quantum computing", "company research", "technology development"],
+            mode="local",
+            user_supplied_ll=False,
+        )
+        assert enriched == ["quantum computing"]
+
+    def test_enrich_local_keywords_falls_back_to_query_when_high_level_is_generic(self):
+        """When all HL terms are generic, local mode should use the original query."""
+        enriched = _enrich_local_keywords(
+            hl_keywords=["company research", "technology development"],
+            ll_keywords=[],
+            mode="local",
+            query="What is Amazon?",
+        )
+        assert enriched == ["What is Amazon?"]

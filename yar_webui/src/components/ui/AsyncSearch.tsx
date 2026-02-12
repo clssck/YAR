@@ -91,7 +91,11 @@ export function AsyncSearch<T>({
   // Handle clicks outside of the component
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node) && open) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node) &&
+        open
+      ) {
         setOpen(false)
       }
     }
@@ -115,7 +119,7 @@ export function AsyncSearch<T>({
         setLoading(false)
       }
     },
-    [fetcher]
+    [fetcher],
   )
 
   // Load options when search term changes
@@ -125,7 +129,9 @@ export function AsyncSearch<T>({
     if (preload) {
       if (debouncedSearchTerm) {
         setOptions((prev) =>
-          prev.filter((option) => (filterFn ? filterFn(option, debouncedSearchTerm) : true))
+          prev.filter((option) =>
+            filterFn ? filterFn(option, debouncedSearchTerm) : true,
+          ),
         )
       }
     } else {
@@ -150,7 +156,7 @@ export function AsyncSearch<T>({
         setOpen(false)
       })
     },
-    [onChange]
+    [onChange],
   )
 
   const handleFocus = useCallback(() => {
@@ -193,12 +199,20 @@ export function AsyncSearch<T>({
           )}
         </div>
         <CommandList hidden={!open}>
-          {error && <div className="text-destructive p-4 text-center">{error}</div>}
-          {loading && options.length === 0 && (loadingSkeleton || <DefaultLoadingSkeleton />)}
+          {error && (
+            <div className="text-destructive p-4 text-center">{error}</div>
+          )}
+          {loading &&
+            options.length === 0 &&
+            (loadingSkeleton || <DefaultLoadingSkeleton />)}
           {!loading &&
             !error &&
             options.length === 0 &&
-            (notFound || <CommandEmpty>{noResultsMessage || 'No results found.'}</CommandEmpty>)}
+            (notFound || (
+              <CommandEmpty>
+                {noResultsMessage || 'No results found.'}
+              </CommandEmpty>
+            ))}
           <CommandGroup>
             {options.map((option, idx) => (
               <React.Fragment key={`${getOptionValue(option)}-fragment-${idx}`}>

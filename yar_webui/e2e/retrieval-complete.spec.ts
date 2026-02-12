@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Query Settings - All Parameters', () => {
   test.beforeEach(async ({ page }) => {
@@ -13,7 +13,9 @@ test.describe('Query Settings - All Parameters', () => {
     // Verify all 6 modes are available
     const modes = ['Naive', 'Local', 'Global', 'Hybrid', 'Mix', 'Bypass']
     for (const mode of modes) {
-      await expect(page.getByRole('option', { name: new RegExp(mode, 'i') })).toBeVisible()
+      await expect(
+        page.getByRole('option', { name: new RegExp(mode, 'i') }),
+      ).toBeVisible()
     }
   })
 
@@ -34,9 +36,9 @@ test.describe('Query Settings - All Parameters', () => {
     const totalTokensLabel = page.getByText(/Max Total Tokens/i)
 
     // At least one should be visible (may need to expand section)
-    const hasEntityTokens = await entityTokensLabel.count() > 0
-    const hasRelationTokens = await relationTokensLabel.count() > 0
-    const hasTotalTokens = await totalTokensLabel.count() > 0
+    const hasEntityTokens = (await entityTokensLabel.count()) > 0
+    const hasRelationTokens = (await relationTokensLabel.count()) > 0
+    const hasTotalTokens = (await totalTokensLabel.count()) > 0
 
     expect(hasEntityTokens || hasRelationTokens || hasTotalTokens).toBeTruthy()
   })
@@ -106,13 +108,17 @@ test.describe('Quick Presets', () => {
   test('has quick preset buttons', async ({ page }) => {
     // Look for preset buttons (Fast, Balanced, Thorough)
     const fastButton = page.locator('button').filter({ hasText: /Fast/i })
-    const balancedButton = page.locator('button').filter({ hasText: /Balanced/i })
-    const thoroughButton = page.locator('button').filter({ hasText: /Thorough/i })
+    const balancedButton = page
+      .locator('button')
+      .filter({ hasText: /Balanced/i })
+    const thoroughButton = page
+      .locator('button')
+      .filter({ hasText: /Thorough/i })
 
     // At least some presets should be visible
-    const hasFast = await fastButton.count() > 0
-    const hasBalanced = await balancedButton.count() > 0
-    const hasThorough = await thoroughButton.count() > 0
+    const hasFast = (await fastButton.count()) > 0
+    const hasBalanced = (await balancedButton.count()) > 0
+    const hasThorough = (await thoroughButton.count()) > 0
 
     // Presets might be in a different UI, this is optional
     if (hasFast || hasBalanced || hasThorough) {
@@ -144,11 +150,13 @@ test.describe('Settings Panel Layout', () => {
 
   test('reset button exists', async ({ page }) => {
     // Look for reset/default button
-    const resetButton = page.locator('button').filter({ hasText: /Reset|Default/i })
+    const resetButton = page
+      .locator('button')
+      .filter({ hasText: /Reset|Default/i })
       .or(page.locator('button[title*="Reset"]'))
       .or(page.locator('button[title*="default"]'))
 
-    if (await resetButton.count() > 0) {
+    if ((await resetButton.count()) > 0) {
       await expect(resetButton.first()).toBeVisible()
     }
   })
@@ -233,7 +241,7 @@ test.describe('Response Format Options', () => {
     // Look for response format option
     const responseFormatLabel = page.getByText(/Response Format/i)
 
-    if (await responseFormatLabel.count() > 0) {
+    if ((await responseFormatLabel.count()) > 0) {
       await expect(responseFormatLabel.first()).toBeVisible()
     }
   })
@@ -248,7 +256,7 @@ test.describe('History Turns Setting', () => {
   test('history turns input exists', async ({ page }) => {
     const historyLabel = page.getByText(/History Turns/i)
 
-    if (await historyLabel.count() > 0) {
+    if ((await historyLabel.count()) > 0) {
       await expect(historyLabel.first()).toBeVisible()
     }
   })

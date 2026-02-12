@@ -5,7 +5,10 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { FileText, Upload, X } from 'lucide-react'
 import * as React from 'react'
-import Dropzone, { type DropzoneProps, type FileRejection } from 'react-dropzone'
+import Dropzone, {
+  type DropzoneProps,
+  type FileRejection,
+} from 'react-dropzone'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
@@ -113,7 +116,7 @@ function formatBytes(
   opts: {
     decimals?: number
     sizeType?: 'accurate' | 'normal'
-  } = {}
+  } = {},
 ) {
   const { decimals = 0, sizeType = 'normal' } = opts
 
@@ -122,7 +125,9 @@ function formatBytes(
   if (bytes === 0) return '0 Byte'
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / 1024 ** i).toFixed(decimals)} ${
-    sizeType === 'accurate' ? (accurateSizes[i] ?? 'Bytes') : (sizes[i] ?? 'Bytes')
+    sizeType === 'accurate'
+      ? (accurateSizes[i] ?? 'Bytes')
+      : (sizes[i] ?? 'Bytes')
   }`
 }
 
@@ -154,17 +159,26 @@ function FileUploader(props: FileUploaderProps) {
   const onDrop = React.useCallback(
     (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
       // Calculate total file count including both accepted and rejected files
-      const totalFileCount = (files?.length ?? 0) + acceptedFiles.length + rejectedFiles.length
+      const totalFileCount =
+        (files?.length ?? 0) + acceptedFiles.length + rejectedFiles.length
 
       // Check file count limits
-      if (!multiple && maxFileCount === 1 && acceptedFiles.length + rejectedFiles.length > 1) {
-        toast.error(t('documentPanel.uploadDocuments.fileUploader.singleFileLimit'))
+      if (
+        !multiple &&
+        maxFileCount === 1 &&
+        acceptedFiles.length + rejectedFiles.length > 1
+      ) {
+        toast.error(
+          t('documentPanel.uploadDocuments.fileUploader.singleFileLimit'),
+        )
         return
       }
 
       if (totalFileCount > maxFileCount) {
         toast.error(
-          t('documentPanel.uploadDocuments.fileUploader.maxFilesLimit', { count: maxFileCount })
+          t('documentPanel.uploadDocuments.fileUploader.maxFilesLimit', {
+            count: maxFileCount,
+          }),
         )
         return
       }
@@ -178,7 +192,9 @@ function FileUploader(props: FileUploaderProps) {
           // Fall back to toast notifications if no callback is provided
           rejectedFiles.forEach(({ file }) => {
             toast.error(
-              t('documentPanel.uploadDocuments.fileUploader.fileRejected', { name: file.name })
+              t('documentPanel.uploadDocuments.fileUploader.fileRejected', {
+                name: file.name,
+              }),
             )
           })
         }
@@ -188,7 +204,7 @@ function FileUploader(props: FileUploaderProps) {
       const newAcceptedFiles = acceptedFiles.map((file) =>
         Object.assign(file, {
           preview: URL.createObjectURL(file),
-        })
+        }),
       )
 
       // Process rejected files for UI display
@@ -196,7 +212,7 @@ function FileUploader(props: FileUploaderProps) {
         Object.assign(file, {
           preview: URL.createObjectURL(file),
           rejected: true,
-        })
+        }),
       )
 
       // Combine all files for display
@@ -217,11 +233,14 @@ function FileUploader(props: FileUploaderProps) {
 
           // Check if file type is accepted
           const fileExt = `.${file.name.split('.').pop()?.toLowerCase() || ''}`
-          const isAccepted = Object.entries(accept || {}).some(([mimeType, extensions]) => {
-            return (
-              file.type === mimeType || (Array.isArray(extensions) && extensions.includes(fileExt))
-            )
-          })
+          const isAccepted = Object.entries(accept || {}).some(
+            ([mimeType, extensions]) => {
+              return (
+                file.type === mimeType ||
+                (Array.isArray(extensions) && extensions.includes(fileExt))
+              )
+            },
+          )
 
           // Check file size
           const isSizeValid = file.size <= maxSize
@@ -234,7 +253,17 @@ function FileUploader(props: FileUploaderProps) {
         }
       }
     },
-    [files, maxFileCount, multiple, onUpload, onReject, setFiles, t, accept, maxSize]
+    [
+      files,
+      maxFileCount,
+      multiple,
+      onUpload,
+      onReject,
+      setFiles,
+      t,
+      accept,
+      maxSize,
+    ],
   )
 
   function onRemove(index: number) {
@@ -275,9 +304,12 @@ function FileUploader(props: FileUploaderProps) {
           if (!file.name) {
             return {
               code: 'invalid-file-name',
-              message: t('documentPanel.uploadDocuments.fileUploader.invalidFileName', {
-                fallback: 'Invalid file name',
-              }),
+              message: t(
+                'documentPanel.uploadDocuments.fileUploader.invalidFileName',
+                {
+                  fallback: 'Invalid file name',
+                },
+              ),
             }
           }
 
@@ -285,17 +317,22 @@ function FileUploader(props: FileUploaderProps) {
           const fileExt = `.${file.name.split('.').pop()?.toLowerCase() || ''}`
 
           // Ensure accept object exists and has correct format
-          const isAccepted = Object.entries(accept || {}).some(([mimeType, extensions]) => {
-            // Ensure extensions is an array before calling includes
-            return (
-              file.type === mimeType || (Array.isArray(extensions) && extensions.includes(fileExt))
-            )
-          })
+          const isAccepted = Object.entries(accept || {}).some(
+            ([mimeType, extensions]) => {
+              // Ensure extensions is an array before calling includes
+              return (
+                file.type === mimeType ||
+                (Array.isArray(extensions) && extensions.includes(fileExt))
+              )
+            },
+          )
 
           if (!isAccepted) {
             return {
               code: 'file-invalid-type',
-              message: t('documentPanel.uploadDocuments.fileUploader.unsupportedType'),
+              message: t(
+                'documentPanel.uploadDocuments.fileUploader.unsupportedType',
+              ),
             }
           }
 
@@ -303,9 +340,12 @@ function FileUploader(props: FileUploaderProps) {
           if (file.size > maxSize) {
             return {
               code: 'file-too-large',
-              message: t('documentPanel.uploadDocuments.fileUploader.fileTooLarge', {
-                maxSize: formatBytes(maxSize),
-              }),
+              message: t(
+                'documentPanel.uploadDocuments.fileUploader.fileTooLarge',
+                {
+                  maxSize: formatBytes(maxSize),
+                },
+              ),
             }
           }
 
@@ -320,7 +360,7 @@ function FileUploader(props: FileUploaderProps) {
               'ring-offset-background focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
               isDragActive && 'border-muted-foreground/50',
               isDisabled && 'pointer-events-none opacity-60',
-              className
+              className,
             )}
             {...dropzoneProps}
           >
@@ -328,7 +368,10 @@ function FileUploader(props: FileUploaderProps) {
             {isDragActive ? (
               <div className="flex flex-col items-center justify-center gap-4 sm:px-5">
                 <div className="rounded-full border border-dashed p-3">
-                  <Upload className="text-muted-foreground size-7" aria-hidden="true" />
+                  <Upload
+                    className="text-muted-foreground size-7"
+                    aria-hidden="true"
+                  />
                 </div>
                 <p className="text-muted-foreground font-medium">
                   {t('documentPanel.uploadDocuments.fileUploader.dropHere')}
@@ -337,21 +380,31 @@ function FileUploader(props: FileUploaderProps) {
             ) : (
               <div className="flex flex-col items-center justify-center gap-4 sm:px-5">
                 <div className="rounded-full border border-dashed p-3">
-                  <Upload className="text-muted-foreground size-7" aria-hidden="true" />
+                  <Upload
+                    className="text-muted-foreground size-7"
+                    aria-hidden="true"
+                  />
                 </div>
                 <div className="flex flex-col gap-px">
                   <p className="text-muted-foreground font-medium">
-                    {t('documentPanel.uploadDocuments.fileUploader.dragAndDrop')}
+                    {t(
+                      'documentPanel.uploadDocuments.fileUploader.dragAndDrop',
+                    )}
                   </p>
                   {description ? (
-                    <p className="text-muted-foreground/70 text-sm">{description}</p>
+                    <p className="text-muted-foreground/70 text-sm">
+                      {description}
+                    </p>
                   ) : (
                     <p className="text-muted-foreground/70 text-sm">
-                      {t('documentPanel.uploadDocuments.fileUploader.uploadDescription', {
-                        count: maxFileCount,
-                        isMultiple: maxFileCount === Number.POSITIVE_INFINITY,
-                        maxSize: formatBytes(maxSize),
-                      })}
+                      {t(
+                        'documentPanel.uploadDocuments.fileUploader.uploadDescription',
+                        {
+                          count: maxFileCount,
+                          isMultiple: maxFileCount === Number.POSITIVE_INFINITY,
+                          maxSize: formatBytes(maxSize),
+                        },
+                      )}
                       {t('documentPanel.uploadDocuments.fileTypes')}
                     </p>
                   )}
@@ -391,7 +444,10 @@ function Progress({ value, error }: ProgressProps) {
     <div className="relative h-2 w-full">
       <div className="h-full w-full overflow-hidden rounded-full bg-secondary">
         <div
-          className={cn('h-full transition-all', error ? 'bg-red-400' : 'bg-primary')}
+          className={cn(
+            'h-full transition-all',
+            error ? 'bg-red-400' : 'bg-primary',
+          )}
           style={{ width: `${value}%` }}
         />
       </div>
@@ -418,8 +474,12 @@ function FileCard({ file, progress, error, onRemove }: FileCardProps) {
         ) : null}
         <div className="flex w-full flex-col gap-2">
           <div className="flex flex-col gap-px">
-            <p className="text-foreground/80 line-clamp-1 text-sm font-medium">{file.name}</p>
-            <p className="text-muted-foreground text-xs">{formatBytes(file.size)}</p>
+            <p className="text-foreground/80 line-clamp-1 text-sm font-medium">
+              {file.name}
+            </p>
+            <p className="text-muted-foreground text-xs">
+              {formatBytes(file.size)}
+            </p>
           </div>
           {error ? (
             <div className="text-red-400 text-sm">
@@ -434,7 +494,13 @@ function FileCard({ file, progress, error, onRemove }: FileCardProps) {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Button type="button" variant="outline" size="icon" className="size-7" onClick={onRemove}>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-7"
+          onClick={onRemove}
+        >
           <X className="size-4" aria-hidden="true" />
           <span className="sr-only">
             {t('documentPanel.uploadDocuments.fileUploader.removeFile')}
@@ -458,7 +524,9 @@ function FilePreview({ file }: FilePreviewProps) {
     return <div className="aspect-square shrink-0 rounded-md object-cover" />
   }
 
-  return <FileText className="text-muted-foreground size-10" aria-hidden="true" />
+  return (
+    <FileText className="text-muted-foreground size-10" aria-hidden="true" />
+  )
 }
 
 export default FileUploader

@@ -7,7 +7,12 @@ import KeyboardShortcutHelp from '@/components/KeyboardShortcutHelp'
 import StatusIndicator from '@/components/status/StatusIndicator'
 import Button from '@/components/ui/Button'
 import { TabsList, TabsTrigger } from '@/components/ui/Tabs'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
 import { webuiPrefix } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { navigationService } from '@/services/navigation'
@@ -26,7 +31,9 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
       value={value}
       className={cn(
         'cursor-pointer px-2 py-1 transition-all',
-        currentTab === value ? '!bg-plum !text-plum-foreground' : 'hover:bg-background/60'
+        currentTab === value
+          ? '!bg-plum !text-plum-foreground'
+          : 'hover:bg-background/60',
       )}
     >
       {children}
@@ -34,7 +41,9 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
   )
 }
 
-function shouldShowTableExplorer(storageConfig: Partial<YarConfiguration> | null) {
+function shouldShowTableExplorer(
+  storageConfig: Partial<YarConfiguration> | null,
+) {
   if (import.meta.env.DEV) return true
   return (
     storageConfig &&
@@ -97,14 +106,20 @@ export default function SiteHeader() {
         </a>
         {webuiTitle && (
           <div className="flex items-center">
-            <span className="mx-1 text-xs text-gray-500 dark:text-gray-400">|</span>
+            <span className="mx-1 text-xs text-gray-500 dark:text-gray-400">
+              |
+            </span>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="font-medium text-sm cursor-default">{webuiTitle}</span>
+                  <span className="font-medium text-sm cursor-default">
+                    {webuiTitle}
+                  </span>
                 </TooltipTrigger>
                 {webuiDescription && (
-                  <TooltipContent side="bottom">{webuiDescription}</TooltipContent>
+                  <TooltipContent side="bottom">
+                    {webuiDescription}
+                  </TooltipContent>
                 )}
               </Tooltip>
             </TooltipProvider>

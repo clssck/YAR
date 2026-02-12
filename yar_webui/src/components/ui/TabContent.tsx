@@ -12,7 +12,11 @@ interface TabContentProps {
  * TabContent component that manages visibility based on tab selection
  * Works with the TabVisibilityContext to show/hide content based on active tab
  */
-const TabContent: React.FC<TabContentProps> = ({ tabId, children, className = '' }) => {
+const TabContent: React.FC<TabContentProps> = ({
+  tabId,
+  children,
+  className = '',
+}) => {
   const { isTabVisible, setTabVisibility } = useTabVisibility()
   const isVisible = isTabVisible(tabId)
 
@@ -28,7 +32,11 @@ const TabContent: React.FC<TabContentProps> = ({ tabId, children, className = ''
 
   // Use CSS to hide content instead of not rendering it
   // This prevents components from unmounting when tabs are switched
-  return <div className={`${className} ${isVisible ? '' : 'hidden'}`}>{children}</div>
+  return (
+    <div className={`${className} ${isVisible ? '' : 'hidden'}`}>
+      {children}
+    </div>
+  )
 }
 
 export default TabContent

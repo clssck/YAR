@@ -11,8 +11,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism'
-import rehypeRaw from 'rehype-raw'
+import {
+  oneDark,
+  oneLight,
+} from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import remarkGfm from 'remark-gfm'
 import { s3Download } from '@/api/yar'
 import Button from '@/components/ui/Button'
@@ -36,7 +38,14 @@ interface FileViewerProps {
   fileSize: number
 }
 
-type FileType = 'text' | 'markdown' | 'json' | 'code' | 'image' | 'pdf' | 'unknown'
+type FileType =
+  | 'text'
+  | 'markdown'
+  | 'json'
+  | 'code'
+  | 'image'
+  | 'pdf'
+  | 'unknown'
 
 // Storage key for persisted width
 const VIEWER_WIDTH_KEY = 'yar-viewer-width'
@@ -55,7 +64,8 @@ function getFileType(fileName: string): FileType {
   if (['md', 'markdown', 'mdx'].includes(ext)) return 'markdown'
 
   // JSON/YAML/Config
-  if (['json', 'yaml', 'yml', 'toml', 'ini', 'conf', 'config'].includes(ext)) return 'json'
+  if (['json', 'yaml', 'yml', 'toml', 'ini', 'conf', 'config'].includes(ext))
+    return 'json'
 
   // Code files
   if (
@@ -92,7 +102,8 @@ function getFileType(fileName: string): FileType {
     return 'code'
 
   // Images
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext)) return 'image'
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext))
+    return 'image'
 
   // PDF
   if (ext === 'pdf') return 'pdf'
@@ -143,7 +154,13 @@ function getLanguage(fileName: string): string {
 }
 
 // Get icon for file type
-function FileTypeIcon({ fileType, className }: { fileType: FileType; className?: string }) {
+function FileTypeIcon({
+  fileType,
+  className,
+}: {
+  fileType: FileType
+  className?: string
+}) {
   switch (fileType) {
     case 'text':
       return <FileTextIcon className={className} />
@@ -186,7 +203,10 @@ export default function FileViewer({
 
   // Resizable width state
   const [width, setWidth] = useState(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem(VIEWER_WIDTH_KEY) : null
+    const saved =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(VIEWER_WIDTH_KEY)
+        : null
     const parsed = saved ? parseInt(saved, 10) : NaN
     return Number.isFinite(parsed) && parsed >= MIN_WIDTH && parsed <= MAX_WIDTH
       ? parsed
@@ -209,7 +229,7 @@ export default function FileViewer({
       setIsResizing(true)
       resizeRef.current = { startX: e.clientX, startWidth: width }
     },
-    [width]
+    [width],
   )
 
   // Handle resize move
@@ -221,7 +241,7 @@ export default function FileViewer({
       const delta = resizeRef.current.startX - e.clientX
       const newWidth = Math.min(
         MAX_WIDTH,
-        Math.max(MIN_WIDTH, resizeRef.current.startWidth + delta)
+        Math.max(MIN_WIDTH, resizeRef.current.startWidth + delta),
       )
       setWidth(newWidth)
     }
@@ -270,7 +290,9 @@ export default function FileViewer({
           setImageUrl(presignedUrl)
         } else if (fileType !== 'unknown') {
           // Fetch text content
-          const textResponse = await fetch(presignedUrl, { signal: controller.signal })
+          const textResponse = await fetch(presignedUrl, {
+            signal: controller.signal,
+          })
           if (!textResponse.ok) {
             throw new Error(`Failed to fetch: ${textResponse.statusText}`)
           }
@@ -298,7 +320,11 @@ export default function FileViewer({
     if (!fileKey) return
     try {
       const response = await s3Download(fileKey)
-      const newWindow = window.open(response.url, '_blank', 'noopener,noreferrer')
+      const newWindow = window.open(
+        response.url,
+        '_blank',
+        'noopener,noreferrer',
+      )
       if (newWindow) {
         newWindow.opener = null
       }
@@ -320,7 +346,7 @@ export default function FileViewer({
           aria-hidden="true"
           className={cn(
             'absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-50 group',
-            isResizing && 'bg-primary/50'
+            isResizing && 'bg-primary/50',
           )}
           onMouseDown={handleResizeStart}
         >
@@ -332,7 +358,10 @@ export default function FileViewer({
         <div className="p-6 pb-0 flex-shrink-0">
           <SheetHeader>
             <div className="flex items-center gap-2 pr-8">
-              <FileTypeIcon fileType={fileType} className="h-5 w-5 text-muted-foreground" />
+              <FileTypeIcon
+                fileType={fileType}
+                className="h-5 w-5 text-muted-foreground"
+              />
               <SheetTitle className="truncate">{fileName}</SheetTitle>
             </div>
             <SheetDescription className="flex items-center justify-between">
@@ -355,7 +384,11 @@ export default function FileViewer({
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-full text-destructive gap-2">
               <p>{error}</p>
-              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+              >
                 {t('common.close')}
               </Button>
             </div>
@@ -372,7 +405,9 @@ export default function FileViewer({
           ) : fileType === 'unknown' && imageUrl ? (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <FileIcon className="h-16 w-16 text-muted-foreground" />
-              <p className="text-muted-foreground">{t('storagePanel.viewer.noPreview')}</p>
+              <p className="text-muted-foreground">
+                {t('storagePanel.viewer.noPreview')}
+              </p>
               <Button variant="default" onClick={handleDownload}>
                 <DownloadIcon className="h-4 w-4 mr-1" />
                 {t('storagePanel.actions.download')}
@@ -383,7 +418,7 @@ export default function FileViewer({
               <div className="prose prose-sm dark:prose-invert max-w-none p-4">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeRaw]}
+                  skipHtml={true}
                   components={{
                     code({ className, children, ...props }) {
                       const match = /language-(\w+)/.exec(className || '')
@@ -402,7 +437,13 @@ export default function FileViewer({
                           {String(children).replace(/\n$/, '')}
                         </SyntaxHighlighter>
                       ) : (
-                        <code className={cn('bg-muted px-1 py-0.5 rounded', className)} {...props}>
+                        <code
+                          className={cn(
+                            'bg-muted px-1 py-0.5 rounded',
+                            className,
+                          )}
+                          {...props}
+                        >
                           {children}
                         </code>
                       )

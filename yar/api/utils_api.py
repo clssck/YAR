@@ -14,9 +14,9 @@ from collections.abc import Awaitable, Callable
 from typing import ParamSpec, TypeVar, cast
 
 from ascii_colors import ASCIIColors
-from fastapi import HTTPException, Request, Security, status
+from fastapi import HTTPException, Request, Security, UploadFile, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
-from starlette.status import HTTP_403_FORBIDDEN
+from starlette.status import HTTP_403_FORBIDDEN, HTTP_413_CONTENT_TOO_LARGE
 
 from yar import __version__ as core_version
 from yar.api import __api_version__ as api_version
@@ -24,7 +24,7 @@ from yar.constants import DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE
 from yar.utils import logger
 
 from .auth import auth_handler
-from .config import get_env_value, global_args
+from .config import get_env_value
 
 P = ParamSpec('P')
 T = TypeVar('T')
@@ -101,6 +101,94 @@ class QueryBuilder:
         return self._params
 
 
+# Streaming chunk size for upload validation (1MB)
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+async def validate_upload_size(file: UploadFile, max_size_mb: int | None) -> bytes:
+    """Validate file upload size with streaming to prevent memory exhaustion.
+
+    Two-phase validation:
+    1. Content-Length header check (instant rejection for known sizes)
+    2. Streaming chunk validation (fallback for chunked transfers)
+
+    Args:
+        file: FastAPI UploadFile object
+        max_size_mb: Maximum allowed size in MB, or None/0 to disable limit
+
+    Returns:
+        bytes: Complete file content if within limits
+
+    Raises:
+        HTTPException: 413 if file exceeds size limit
+    """
+    # Disable limit if None or 0
+    if not max_size_mb:
+        return await file.read()
+
+    max_bytes = max_size_mb * 1024 * 1024
+
+    # Phase 1: Check Content-Length header for instant rejection
+    if file.size is not None and file.size > max_bytes:
+        size_mb = file.size / (1024 * 1024)
+        raise HTTPException(
+            status_code=HTTP_413_CONTENT_TOO_LARGE,
+            detail=f'File too large: {size_mb:.1f}MB exceeds limit of {max_size_mb}MB',
+        )
+
+    # Phase 2: Stream and validate chunks (handles chunked transfers)
+    chunks: list[bytes] = []
+    total_size = 0
+
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+        if not chunk:
+            break
+
+        total_size += len(chunk)
+        if total_size > max_bytes:
+            size_mb = total_size / (1024 * 1024)
+            raise HTTPException(
+                status_code=HTTP_413_CONTENT_TOO_LARGE,
+                detail=f'File too large: {size_mb:.1f}MB exceeds limit of {max_size_mb}MB',
+            )
+
+        chunks.append(chunk)
+
+    return b''.join(chunks)
+
+
+def validate_text_payload_size(
+    texts: list[str],
+    max_size_mb: int | None,
+    *,
+    payload_name: str = 'Text payload',
+) -> None:
+    """Validate combined UTF-8 size for JSON text insertion endpoints.
+
+    Args:
+        texts: Text entries from request payload
+        max_size_mb: Maximum allowed payload size in MB, or None/0 to disable
+        payload_name: Human-readable label for error messages
+
+    Raises:
+        HTTPException: 413 if combined payload exceeds configured limit
+    """
+    if not max_size_mb:
+        return
+
+    max_bytes = max_size_mb * 1024 * 1024
+    total_size = 0
+
+    for text in texts:
+        total_size += len(text.encode('utf-8'))
+        if total_size > max_bytes:
+            size_mb = total_size / (1024 * 1024)
+            raise HTTPException(
+                status_code=HTTP_413_CONTENT_TOO_LARGE,
+                detail=f'{payload_name} too large: {size_mb:.1f}MB exceeds limit of {max_size_mb}MB',
+            )
+
 def handle_api_error(operation: str | None = None) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """
     Decorator to handle API route errors consistently.
@@ -134,10 +222,15 @@ def handle_api_error(operation: str | None = None) -> Callable[[Callable[P, T]],
             except HTTPException:
                 # Re-raise HTTPException to preserve status codes (4xx, etc.)
                 raise
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             except Exception as e:
                 logger.error(f'Error {op_name}: {e!s}')
                 logger.error(traceback.format_exc())
-                raise HTTPException(status_code=500, detail=str(e)) from e
+                raise HTTPException(
+                    status_code=500,
+                    detail=f'Internal server error while {op_name}',
+                ) from e
 
         @functools.wraps(func)
         def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -145,10 +238,15 @@ def handle_api_error(operation: str | None = None) -> Callable[[Callable[P, T]],
                 return func(*args, **kwargs)
             except HTTPException:
                 raise
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             except Exception as e:
                 logger.error(f'Error {op_name}: {e!s}')
                 logger.error(traceback.format_exc())
-                raise HTTPException(status_code=500, detail=str(e)) from e
+                raise HTTPException(
+                    status_code=500,
+                    detail=f'Internal server error while {op_name}',
+                ) from e
 
         if asyncio.iscoroutinefunction(func):
             return cast(Callable[P, T], async_wrapper)
@@ -175,23 +273,29 @@ def check_env_file():
     return True
 
 
-# Get whitelist paths from global_args, only once during initialization
-whitelist_paths = global_args.whitelist_paths.split(',')
+def _build_whitelist_patterns() -> list[tuple[str, bool]]:
+    """Build path whitelist patterns from env without triggering CLI arg parsing."""
+    whitelist_paths = str(get_env_value('WHITELIST_PATHS', '/health,/api/*')).split(',')
+    patterns: list[tuple[str, bool]] = []
 
-# Pre-compile path matching patterns
-whitelist_patterns: list[tuple[str, bool]] = []
-for path in whitelist_paths:
-    path = path.strip()
-    if path:
+    for path in whitelist_paths:
+        normalized = path.strip()
+        if not normalized:
+            continue
+
         # If path ends with /*, match all paths with that prefix
-        if path.endswith('/*'):
-            prefix = path[:-2]
-            whitelist_patterns.append((prefix, True))  # (prefix, is_prefix_match)
+        if normalized.endswith('/*'):
+            prefix = normalized[:-2]
+            patterns.append((prefix, True))  # (prefix, is_prefix_match)
         else:
-            whitelist_patterns.append((path, False))  # (exact_path, is_prefix_match)
+            patterns.append((normalized, False))  # (exact_path, is_prefix_match)
 
-# Global authentication configuration
-auth_configured = bool(auth_handler.accounts)
+    return patterns
+
+
+def _is_auth_configured() -> bool:
+    """Determine whether account-based auth is configured."""
+    return bool(auth_handler.accounts)
 
 
 def get_combined_auth_dependency(api_key: str | None = None):
@@ -205,8 +309,8 @@ def get_combined_auth_dependency(api_key: str | None = None):
     Returns:
         Callable: A dependency function that implements the authentication logic
     """
-    # Use global whitelist_patterns and auth_configured variables
-    # whitelist_patterns and auth_configured are already initialized at module level
+    whitelist_patterns = _build_whitelist_patterns()
+    auth_configured = _is_auth_configured()
 
     # Only calculate api_key_configured as it depends on the function parameter
     api_key_configured = bool(api_key)

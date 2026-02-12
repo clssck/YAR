@@ -40,11 +40,14 @@ interface AuthState {
     coreVersion?: string | null,
     apiVersion?: string | null,
     webuiTitle?: string | null,
-    webuiDescription?: string | null
+    webuiDescription?: string | null,
   ) => void
   logout: () => void
   setVersion: (coreVersion: string | null, apiVersion: string | null) => void
-  setCustomTitle: (webuiTitle: string | null, webuiDescription: string | null) => void
+  setCustomTitle: (
+    webuiTitle: string | null,
+    webuiDescription: string | null,
+  ) => void
 }
 
 const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
@@ -63,7 +66,9 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
     if (health.status === 'healthy') {
       // Update version information if health check returns it
       if (health.core_version || health.api_version) {
-        useAuthStore.getState().setVersion(health.core_version || null, health.api_version || null)
+        useAuthStore
+          .getState()
+          .setVersion(health.core_version || null, health.api_version || null)
       }
 
       // Update custom title information if health check returns it
@@ -72,15 +77,21 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
           .getState()
           .setCustomTitle(
             'webui_title' in health ? (health.webui_title ?? null) : null,
-            'webui_description' in health ? (health.webui_description ?? null) : null
+            'webui_description' in health
+              ? (health.webui_description ?? null)
+              : null,
           )
       }
 
       // Extract and store backend max graph nodes limit
       if (health.configuration?.max_graph_nodes) {
-        const maxNodes = Number.parseInt(health.configuration.max_graph_nodes, 10)
+        const maxNodes = Number.parseInt(
+          health.configuration.max_graph_nodes,
+          10,
+        )
         if (!Number.isNaN(maxNodes) && maxNodes > 0) {
-          const currentBackendMaxNodes = useSettingsStore.getState().backendMaxGraphNodes
+          const currentBackendMaxNodes =
+            useSettingsStore.getState().backendMaxGraphNodes
 
           // Only update if the backend limit has actually changed
           if (currentBackendMaxNodes !== maxNodes) {
@@ -136,13 +147,20 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
   },
 
   resetHealthCheckTimer: () => {
-    const { healthCheckIntervalId, healthCheckFunction, healthCheckIntervalValue } = get()
+    const {
+      healthCheckIntervalId,
+      healthCheckFunction,
+      healthCheckIntervalValue,
+    } = get()
     if (healthCheckIntervalId) {
       clearInterval(healthCheckIntervalId)
     }
     if (healthCheckFunction) {
       healthCheckFunction() // run health check immediately
-      const newIntervalId = setInterval(healthCheckFunction, healthCheckIntervalValue)
+      const newIntervalId = setInterval(
+        healthCheckFunction,
+        healthCheckIntervalValue,
+      )
       set({ healthCheckIntervalId: newIntervalId })
     }
   },
@@ -247,7 +265,7 @@ export const useAuthStore = create<AuthState>((set) => {
       coreVersion = null,
       apiVersion = null,
       webuiTitle = null,
-      webuiDescription = null
+      webuiDescription = null,
     ) => {
       localStorage.setItem('YAR-API-TOKEN', token)
 

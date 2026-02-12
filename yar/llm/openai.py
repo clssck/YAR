@@ -3,14 +3,9 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-import pipmaster as pm
 import tiktoken
 
 from yar.utils import VERBOSE_DEBUG, verbose_debug
-
-# install specific modules
-if not pm.is_installed('openai'):
-    pm.install('openai')
 
 import base64
 from typing import cast
@@ -174,6 +169,71 @@ def create_openai_async_client(
             merged_configs['timeout'] = timeout
 
         return AsyncOpenAI(**merged_configs)
+
+
+# Cache for detected embedding dimensions: (model, base_url) -> dimension
+_EMBEDDING_DIM_CACHE: dict[tuple[str, str | None], int] = {}
+
+
+async def detect_embedding_dim(
+    model: str = 'text-embedding-3-small',
+    base_url: str | None = None,
+    api_key: str | None = None,
+    use_azure: bool = False,
+    azure_deployment: str | None = None,
+    api_version: str | None = None,
+) -> int:
+    """Auto-detect embedding dimension by making a test API call.
+
+    Makes a single embedding request with a test string and returns the
+    dimension of the resulting vector. Results are cached per model/endpoint.
+
+    Args:
+        model: The embedding model to test
+        base_url: Optional custom API endpoint
+        api_key: Optional API key (defaults to env var)
+        use_azure: Whether to use Azure OpenAI
+        azure_deployment: Azure deployment name
+        api_version: Azure API version
+
+    Returns:
+        The detected embedding dimension (e.g., 1536, 768, etc.)
+
+    Example:
+        >>> dim = await detect_embedding_dim('text-embedding-3-small')
+        >>> print(f"Model produces {dim}-dimensional vectors")
+    """
+    cache_key = (model, base_url)
+    if cache_key in _EMBEDDING_DIM_CACHE:
+        return _EMBEDDING_DIM_CACHE[cache_key]
+
+    client = create_openai_async_client(
+        api_key=api_key,
+        base_url=base_url,
+        use_azure=use_azure,
+        azure_deployment=azure_deployment,
+        api_version=api_version,
+    )
+
+    async with client:
+        api_model = azure_deployment if use_azure and azure_deployment else model
+        response = await client.embeddings.create(
+            model=api_model,
+            input=['dimension test'],
+            encoding_format='base64',
+        )
+
+        # Decode the base64 embedding and get its dimension
+        embedding_b64 = response.data[0].embedding
+        if isinstance(embedding_b64, list):
+            dim = len(embedding_b64)
+        else:
+            embedding_array = np.frombuffer(base64.b64decode(embedding_b64), dtype=np.float32)
+            dim = len(embedding_array)
+
+        _EMBEDDING_DIM_CACHE[cache_key] = dim
+        logger.info(f'Auto-detected embedding dimension: {model} -> {dim}D')
+        return dim
 
 
 @retry(
@@ -672,7 +732,7 @@ async def nvidia_openai_complete(
     return result
 
 
-@wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192, model_name='text-embedding-3-small')
+@wrap_embedding_func_with_attrs(max_token_size=8192, model_name='text-embedding-3-small')  # embedding_dim from EMBEDDING_DIM env
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -884,8 +944,7 @@ async def azure_openai_complete(
 
 
 @wrap_embedding_func_with_attrs(
-    embedding_dim=1536,
-    max_token_size=8192,
+    max_token_size=8192,  # embedding_dim from EMBEDDING_DIM env or auto-detect
     model_name='azure-text-embedding-3-large',
 )
 async def azure_openai_embed(

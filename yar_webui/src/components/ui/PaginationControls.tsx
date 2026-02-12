@@ -9,7 +9,13 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import Button from './Button'
 import Input from './Input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './Select'
 
 export type PaginationControlsProps = {
   currentPage: number
@@ -73,7 +79,7 @@ export default function PaginationControls({
         handlePageInputSubmit()
       }
     },
-    [handlePageInputSubmit]
+    [handlePageInputSubmit],
   )
 
   // Handle page size change
@@ -84,7 +90,7 @@ export default function PaginationControls({
         onPageSizeChange(newPageSize)
       }
     },
-    [onPageSizeChange]
+    [onPageSizeChange],
   )
 
   // Navigation handlers

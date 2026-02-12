@@ -1,9 +1,17 @@
-import { FileUp, FolderOpen, type LucideIcon, MessageSquare, Network, Search } from 'lucide-react'
+import {
+  FileUp,
+  FolderOpen,
+  type LucideIcon,
+  MessageSquare,
+  Network,
+  Search,
+} from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { Card, CardDescription, CardTitle } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
 
-export interface EmptyStateProps extends React.ComponentPropsWithoutRef<typeof Card> {
+export interface EmptyStateProps
+  extends React.ComponentPropsWithoutRef<typeof Card> {
   /** Main title */
   title: string
   /** Description text */
@@ -70,23 +78,30 @@ export default function EmptyState({
       className={cn(
         'flex w-full h-full flex-col items-center justify-center bg-transparent border-none shadow-none',
         styles.container,
-        className
+        className,
       )}
       {...props}
     >
       <div
         className={cn(
           'shrink-0 rounded-2xl bg-gradient-to-br from-muted/80 to-muted/40 ring-1 ring-border/50',
-          styles.iconContainer
+          styles.iconContainer,
         )}
       >
-        <Icon className={cn('text-muted-foreground/70', styles.icon)} aria-hidden="true" />
+        <Icon
+          className={cn('text-muted-foreground/70', styles.icon)}
+          aria-hidden="true"
+        />
       </div>
 
       <div className="flex flex-col items-center gap-2 text-center max-w-sm">
-        <CardTitle className={cn('font-semibold', styles.title)}>{title}</CardTitle>
+        <CardTitle className={cn('font-semibold', styles.title)}>
+          {title}
+        </CardTitle>
         {description && (
-          <CardDescription className={cn('text-muted-foreground/80', styles.description)}>
+          <CardDescription
+            className={cn('text-muted-foreground/80', styles.description)}
+          >
             {description}
           </CardDescription>
         )}
@@ -95,7 +110,10 @@ export default function EmptyState({
       {(action || secondaryAction) && (
         <div className="flex flex-col items-center gap-2 mt-2">
           {action && (
-            <Button variant={action.variant ?? 'default'} onClick={action.onClick}>
+            <Button
+              variant={action.variant ?? 'default'}
+              onClick={action.onClick}
+            >
               {action.label}
             </Button>
           )}
@@ -149,7 +167,9 @@ export function EmptyGraph({
       icon={Network}
       title="No graph data"
       description="Process documents to generate the knowledge graph"
-      action={onLoadData ? { label: 'Load Graph', onClick: onLoadData } : undefined}
+      action={
+        onLoadData ? { label: 'Load Graph', onClick: onLoadData } : undefined
+      }
       className={className}
     />
   )
@@ -188,7 +208,11 @@ export function EmptyChat({
       icon={MessageSquare}
       title="Start a conversation"
       description="Ask questions about your knowledge base"
-      action={onStartQuery ? { label: 'Ask a Question', onClick: onStartQuery } : undefined}
+      action={
+        onStartQuery
+          ? { label: 'Ask a Question', onClick: onStartQuery }
+          : undefined
+      }
       className={className}
     />
   )

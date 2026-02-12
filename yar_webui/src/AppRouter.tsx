@@ -1,7 +1,12 @@
 import '@/lib/extensions' // Import all global extensions
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Route, HashRouter as Router, Routes, useNavigate } from 'react-router-dom'
+import {
+  Route,
+  HashRouter as Router,
+  Routes,
+  useNavigate,
+} from 'react-router-dom'
 import { Toaster } from 'sonner'
 import ThemeProvider from '@/components/ThemeProvider'
 import ComponentDemo from '@/features/ComponentDemo'
@@ -93,7 +98,12 @@ const AppRouter = () => {
       <ThemeProvider>
         <Router>
           <AppContent />
-          <Toaster position="bottom-center" theme="system" closeButton richColors />
+          <Toaster
+            position="bottom-center"
+            theme="system"
+            closeButton
+            richColors
+          />
         </Router>
       </ThemeProvider>
     </QueryClientProvider>

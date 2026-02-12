@@ -10,7 +10,10 @@ import { describe, expect, test } from 'bun:test'
 
 // Helper function to generate unique IDs with browser compatibility
 const generateUniqueId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
     return crypto.randomUUID()
   }
   return `id-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
@@ -22,7 +25,8 @@ const detectLatexCompleteness = (content: string): boolean => {
   const hasUnclosedBlock = blockLatexMatches.length % 2 !== 0
 
   const contentWithoutBlocks = content.replace(/\$\$[\s\S]*?\$\$/g, '')
-  const inlineLatexMatches = contentWithoutBlocks.match(/(?<!\$)\$(?!\$)/g) || []
+  const inlineLatexMatches =
+    contentWithoutBlocks.match(/(?<!\$)\$(?!\$)/g) || []
   const hasUnclosedInline = inlineLatexMatches.length % 2 !== 0
 
   return !hasUnclosedBlock && !hasUnclosedInline
@@ -39,7 +43,10 @@ const parseCOTContent = (content: string) => {
   let startIndex = content.indexOf(thinkStartTag)
   while (startIndex !== -1) {
     startMatches.push(startIndex)
-    startIndex = content.indexOf(thinkStartTag, startIndex + thinkStartTag.length)
+    startIndex = content.indexOf(
+      thinkStartTag,
+      startIndex + thinkStartTag.length,
+    )
   }
 
   let endIndex = content.indexOf(thinkEndTag)
@@ -64,7 +71,9 @@ const parseCOTContent = (content: string) => {
         thinkingContent = content
           .substring(lastStartIndex + thinkStartTag.length, lastEndIndex)
           .trim()
-        displayContent = content.substring(lastEndIndex + thinkEndTag.length).trim()
+        displayContent = content
+          .substring(lastEndIndex + thinkEndTag.length)
+          .trim()
       }
     } else if (isThinking) {
       const lastStartIndex = startMatches[startMatches.length - 1]
@@ -77,7 +86,8 @@ const parseCOTContent = (content: string) => {
     isThinking,
     thinkingContent,
     displayContent,
-    hasValidThinkBlock: hasThinkStart && hasThinkEnd && startMatches.length === endMatches.length,
+    hasValidThinkBlock:
+      hasThinkStart && hasThinkEnd && startMatches.length === endMatches.length,
   }
 }
 
@@ -85,7 +95,8 @@ const parseCOTContent = (content: string) => {
 const deduplicateReferencesSection = (text: string): string => {
   if (!text) return text
 
-  const refsPattern = /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  const refsPattern =
+    /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
 
   return text.replace(refsPattern, (_match, header, refsBlock) => {
     const refLinePattern = /[-*]\s*\[(\d+)\]\s*([^\n]+)/
@@ -115,7 +126,8 @@ const deduplicateReferencesSection = (text: string): string => {
 // Strip the References section from the response
 const stripReferencesSection = (text: string): string => {
   if (!text) return text
-  const refsPattern = /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  const refsPattern =
+    /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
   return text.replace(refsPattern, '').trim()
 }
 
@@ -151,11 +163,17 @@ const renumberReferencesSequential = (text: string): string => {
   let result = text
 
   for (const oldNum of refMapping.keys()) {
-    result = result.replace(new RegExp(`\\[${oldNum}\\]`, 'g'), `${placeholder}${oldNum}\x00`)
+    result = result.replace(
+      new RegExp(`\\[${oldNum}\\]`, 'g'),
+      `${placeholder}${oldNum}\x00`,
+    )
   }
 
   for (const [oldNum, newNum] of refMapping.entries()) {
-    result = result.replace(new RegExp(`${placeholder}${oldNum}\x00`, 'g'), `[${newNum}]`)
+    result = result.replace(
+      new RegExp(`${placeholder}${oldNum}\x00`, 'g'),
+      `[${newNum}]`,
+    )
   }
 
   return result
@@ -194,19 +212,27 @@ describe('RetrievalTesting Utility Functions', () => {
     })
 
     test('returns true for complete inline LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $E = mc^2$ is famous')).toBe(true)
+      expect(detectLatexCompleteness('Formula: $E = mc^2$ is famous')).toBe(
+        true,
+      )
     })
 
     test('returns true for complete block LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $$E = mc^2$$ is displayed')).toBe(true)
+      expect(
+        detectLatexCompleteness('Formula: $$E = mc^2$$ is displayed'),
+      ).toBe(true)
     })
 
     test('returns false for unclosed inline LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $E = mc^2 is incomplete')).toBe(false)
+      expect(detectLatexCompleteness('Formula: $E = mc^2 is incomplete')).toBe(
+        false,
+      )
     })
 
     test('returns false for unclosed block LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $$E = mc^2 is incomplete')).toBe(false)
+      expect(detectLatexCompleteness('Formula: $$E = mc^2 is incomplete')).toBe(
+        false,
+      )
     })
 
     test('returns true for multiple complete inline formulas', () => {
@@ -256,7 +282,7 @@ describe('RetrievalTesting Utility Functions', () => {
 
     test('handles multiple think blocks', () => {
       const result = parseCOTContent(
-        '<think>First thought</think>Middle<think>Second thought</think>Final'
+        '<think>First thought</think>Middle<think>Second thought</think>Final',
       )
       expect(result.hasValidThinkBlock).toBe(true)
       expect(result.thinkingContent).toBe('Second thought')

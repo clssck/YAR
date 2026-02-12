@@ -182,7 +182,7 @@ interface ResolveNodeColorResult {
 
 export const resolveNodeColor = (
   nodeType: string | undefined,
-  currentMap: Map<string, string> | undefined
+  currentMap: Map<string, string> | undefined,
 ): ResolveNodeColorResult => {
   const typeColorMap = currentMap ?? new Map<string, string>()
   const normalizedType = nodeType ? nodeType.toLowerCase() : 'unknown'
@@ -209,10 +209,14 @@ export const resolveNodeColor = (
   }
 
   const usedExtendedColors = new Set(
-    Array.from(typeColorMap.values()).filter((color) => !PREDEFINED_COLOR_SET.has(color))
+    Array.from(typeColorMap.values()).filter(
+      (color) => !PREDEFINED_COLOR_SET.has(color),
+    ),
   )
 
-  const unusedColor = EXTENDED_COLORS.find((color) => !usedExtendedColors.has(color))
+  const unusedColor = EXTENDED_COLORS.find(
+    (color) => !usedExtendedColors.has(color),
+  )
   const color = unusedColor || DEFAULT_NODE_COLOR
 
   const newMap = new Map(typeColorMap)

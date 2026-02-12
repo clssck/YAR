@@ -3,7 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { cancelPipeline, getPipelineStatus, type PipelineStatusResponse } from '@/api/yar'
+import {
+  cancelPipeline,
+  getPipelineStatus,
+  type PipelineStatusResponse,
+} from '@/api/yar'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
@@ -21,7 +25,10 @@ interface PipelineStatusDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-export default function PipelineStatusDialog({ open, onOpenChange }: PipelineStatusDialogProps) {
+export default function PipelineStatusDialog({
+  open,
+  onOpenChange,
+}: PipelineStatusDialogProps) {
   const { t } = useTranslation()
   const [status, setStatus] = useState<PipelineStatusResponse | null>(null)
   const [position, setPosition] = useState<DialogPosition>('center')
@@ -53,7 +60,9 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
     if (!container) return
 
     const isAtBottom =
-      Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 1
+      Math.abs(
+        container.scrollHeight - container.scrollTop - container.clientHeight,
+      ) < 1
 
     if (isAtBottom) {
       setIsUserScrolled(false)
@@ -72,7 +81,9 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
         setStatus(data)
       } catch (err) {
         toast.error(
-          t('documentPanel.pipelineStatus.errors.fetchFailed', { error: errorMessage(err) })
+          t('documentPanel.pipelineStatus.errors.fetchFailed', {
+            error: errorMessage(err),
+          }),
         )
       }
     }
@@ -93,7 +104,11 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
         toast.info(t('documentPanel.pipelineStatus.cancelNotBusy'))
       }
     } catch (err) {
-      toast.error(t('documentPanel.pipelineStatus.cancelFailed', { error: errorMessage(err) }))
+      toast.error(
+        t('documentPanel.pipelineStatus.cancelFailed', {
+          error: errorMessage(err),
+        }),
+      )
     }
   }
 
@@ -107,7 +122,7 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
           'sm:max-w-[800px] transition-all duration-200 fixed',
           position === 'left' && '!left-[25%] !translate-x-[-50%] !mx-4',
           position === 'center' && '!left-1/2 !-translate-x-1/2',
-          position === 'right' && '!left-[75%] !translate-x-[-50%] !mx-4'
+          position === 'right' && '!left-[75%] !translate-x-[-50%] !mx-4',
         )}
       >
         <DialogDescription className="sr-only">
@@ -116,7 +131,9 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
             : t('documentPanel.pipelineStatus.noActiveJob')}
         </DialogDescription>
         <DialogHeader className="flex flex-row items-center">
-          <DialogTitle className="flex-1">{t('documentPanel.pipelineStatus.title')}</DialogTitle>
+          <DialogTitle className="flex-1">
+            {t('documentPanel.pipelineStatus.title')}
+          </DialogTitle>
 
           {/* Position control buttons */}
           <div className="flex items-center gap-2 mr-8">
@@ -126,7 +143,7 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
               className={cn(
                 'h-6 w-6',
                 position === 'left' &&
-                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600'
+                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600',
               )}
               onClick={() => setPosition('left')}
             >
@@ -138,7 +155,7 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
               className={cn(
                 'h-6 w-6',
                 position === 'center' &&
-                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600'
+                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600',
               )}
               onClick={() => setPosition('center')}
             >
@@ -150,7 +167,7 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
               className={cn(
                 'h-6 w-6',
                 position === 'right' &&
-                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600'
+                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600',
               )}
               onClick={() => setPosition('right')}
             >
@@ -166,7 +183,9 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
             {/* Left side: Status indicators */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.busy')}:</div>
+                <div className="text-sm font-medium">
+                  {t('documentPanel.pipelineStatus.busy')}:
+                </div>
                 <div
                   className={`h-2 w-2 rounded-full ${status?.busy ? 'bg-green-500' : 'bg-gray-300'}`}
                 />
@@ -211,7 +230,8 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
           {/* Job Information */}
           <div className="rounded-md border p-3 space-y-2">
             <div>
-              {t('documentPanel.pipelineStatus.jobName')}: {status?.job_name || '-'}
+              {t('documentPanel.pipelineStatus.jobName')}:{' '}
+              {status?.job_name || '-'}
             </div>
             <div className="flex justify-between">
               <span>
@@ -265,13 +285,18 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
       <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>{t('documentPanel.pipelineStatus.cancelConfirmTitle')}</DialogTitle>
+            <DialogTitle>
+              {t('documentPanel.pipelineStatus.cancelConfirmTitle')}
+            </DialogTitle>
             <DialogDescription>
               {t('documentPanel.pipelineStatus.cancelConfirmDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-3 mt-4">
-            <Button variant="outline" onClick={() => setShowCancelConfirm(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowCancelConfirm(false)}
+            >
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleConfirmCancel}>

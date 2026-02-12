@@ -5,7 +5,13 @@ import { useGraphStore } from '@/stores/graph'
 /**
  * Component that highlights a node and centers the camera on it.
  */
-const FocusOnNode = ({ node, move }: { node: string | null; move?: boolean }) => {
+const FocusOnNode = ({
+  node,
+  move,
+}: {
+  node: string | null
+  move?: boolean
+}) => {
   const sigma = useSigma()
   const { gotoNode } = useCamera()
 

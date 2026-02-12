@@ -1,4 +1,9 @@
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
 import { cn } from '@/lib/utils'
 
 type TextSize = 'xs' | 'sm' | 'base' | 'lg' | 'xl'
@@ -45,14 +50,17 @@ const Text = ({
     size && sizeClasses[size],
     weight && weightClasses[weight],
     className,
-    onClick !== undefined ? 'cursor-pointer' : undefined
+    onClick !== undefined ? 'cursor-pointer' : undefined,
   )
 
   // Use button for clickable elements, span for non-clickable
   const TextElement = onClick ? (
     <button
       type="button"
-      className={cn(combinedClassName, 'bg-transparent border-none p-0 text-left')}
+      className={cn(
+        combinedClassName,
+        'bg-transparent border-none p-0 text-left',
+      )}
       onClick={onClick}
     >
       {content}

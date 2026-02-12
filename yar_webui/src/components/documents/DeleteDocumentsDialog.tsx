@@ -58,10 +58,18 @@ export default function DeleteDocumentsDialog({
 
     setIsDeleting(true)
     try {
-      const result = await deleteDocuments(selectedDocIds, deleteFile, deleteLLMCache)
+      const result = await deleteDocuments(
+        selectedDocIds,
+        deleteFile,
+        deleteLLMCache,
+      )
 
       if (result.status === 'deletion_started') {
-        toast.success(t('documentPanel.deleteDocuments.success', { count: selectedDocIds.length }))
+        toast.success(
+          t('documentPanel.deleteDocuments.success', {
+            count: selectedDocIds.length,
+          }),
+        )
       } else if (result.status === 'busy') {
         toast.error(t('documentPanel.deleteDocuments.busy'))
         setIsDeleting(false)
@@ -71,7 +79,11 @@ export default function DeleteDocumentsDialog({
         setIsDeleting(false)
         return
       } else {
-        toast.error(t('documentPanel.deleteDocuments.failed', { message: result.message }))
+        toast.error(
+          t('documentPanel.deleteDocuments.failed', {
+            message: result.message,
+          }),
+        )
         setIsDeleting(false)
         return
       }
@@ -84,11 +96,20 @@ export default function DeleteDocumentsDialog({
       // Close dialog after successful operation
       setOpen(false)
     } catch (err) {
-      toast.error(t('documentPanel.deleteDocuments.error', { error: errorMessage(err) }))
+      toast.error(
+        t('documentPanel.deleteDocuments.error', { error: errorMessage(err) }),
+      )
     } finally {
       setIsDeleting(false)
     }
-  }, [isDeleting, selectedDocIds, deleteFile, deleteLLMCache, t, onDocumentsDeleted])
+  }, [
+    isDeleting,
+    selectedDocIds,
+    deleteFile,
+    deleteLLMCache,
+    t,
+    onDocumentsDeleted,
+  ])
 
   const visibleDocs = selectedDocIds.slice(0, MAX_VISIBLE_DOCS)
   const remainingCount = selectedDocIds.length - MAX_VISIBLE_DOCS
@@ -99,20 +120,27 @@ export default function DeleteDocumentsDialog({
         <Button
           variant="destructive"
           side="bottom"
-          tooltip={t('documentPanel.deleteDocuments.tooltip', { count: selectedDocIds.length })}
+          tooltip={t('documentPanel.deleteDocuments.tooltip', {
+            count: selectedDocIds.length,
+          })}
           size="sm"
         >
           <TrashIcon /> {t('documentPanel.deleteDocuments.button')}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md" onCloseAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive font-bold">
             <AlertTriangleIcon className="h-5 w-5" />
             {t('documentPanel.deleteDocuments.title')}
           </DialogTitle>
           <DialogDescription className="pt-2">
-            {t('documentPanel.deleteDocuments.description', { count: selectedDocIds.length })}
+            {t('documentPanel.deleteDocuments.description', {
+              count: selectedDocIds.length,
+            })}
           </DialogDescription>
         </DialogHeader>
 
@@ -132,7 +160,7 @@ export default function DeleteDocumentsDialog({
               <div className="text-sm text-muted-foreground mt-1">
                 {t(
                   'documentPanel.deleteDocuments.pleaseWait',
-                  'Please wait, this may take a moment'
+                  'Please wait, this may take a moment',
                 )}
               </div>
             </div>
@@ -149,7 +177,10 @@ export default function DeleteDocumentsDialog({
             {/* Document list preview */}
             <div className="my-2">
               <div className="text-sm font-medium text-muted-foreground mb-2">
-                {t('documentPanel.deleteDocuments.documentsToDelete', 'Documents to delete:')}
+                {t(
+                  'documentPanel.deleteDocuments.documentsToDelete',
+                  'Documents to delete:',
+                )}
               </div>
               <div className="bg-muted/50 rounded-md p-2 max-h-[150px] overflow-y-auto">
                 {visibleDocs.map((docId) => (
@@ -205,7 +236,10 @@ export default function DeleteDocumentsDialog({
                   disabled={isDeleting}
                   className="h-4 w-4 rounded border-input focus:ring-2 focus:ring-ring"
                 />
-                <Label htmlFor="delete-llm-cache" className="text-sm cursor-pointer">
+                <Label
+                  htmlFor="delete-llm-cache"
+                  className="text-sm cursor-pointer"
+                >
                   {t('documentPanel.deleteDocuments.deleteLLMCacheOption')}
                 </Label>
               </div>
@@ -214,7 +248,11 @@ export default function DeleteDocumentsDialog({
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={isDeleting}>
+          <Button
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={isDeleting}
+          >
             {t('common.cancel')}
           </Button>
           <Button

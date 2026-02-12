@@ -114,12 +114,19 @@ export function useIsBelowBreakpoint(breakpoint: Breakpoint): boolean {
  * ```
  */
 export function useResponsiveValue<T>(
-  values: Partial<Record<BreakpointOrBelow, T>>
+  values: Partial<Record<BreakpointOrBelow, T>>,
 ): T | undefined {
   const breakpoint = useBreakpoint()
 
   // Find the value for current breakpoint or the largest smaller breakpoint
-  const breakpointOrder: BreakpointOrBelow[] = ['xs', 'sm', 'md', 'lg', 'xl', '2xl']
+  const breakpointOrder: BreakpointOrBelow[] = [
+    'xs',
+    'sm',
+    'md',
+    'lg',
+    'xl',
+    '2xl',
+  ]
   const currentIndex = breakpointOrder.indexOf(breakpoint)
 
   // Look for value at current or lower breakpoints
@@ -150,9 +157,12 @@ export function useResponsive() {
     breakpoint,
     isMobile: breakpoint === 'xs' || breakpoint === 'sm',
     isTablet: breakpoint === 'md',
-    isDesktop: breakpoint === 'lg' || breakpoint === 'xl' || breakpoint === '2xl',
-    isSmallScreen: breakpoint === 'xs' || breakpoint === 'sm' || breakpoint === 'md',
-    isLargeScreen: breakpoint === 'lg' || breakpoint === 'xl' || breakpoint === '2xl',
+    isDesktop:
+      breakpoint === 'lg' || breakpoint === 'xl' || breakpoint === '2xl',
+    isSmallScreen:
+      breakpoint === 'xs' || breakpoint === 'sm' || breakpoint === 'md',
+    isLargeScreen:
+      breakpoint === 'lg' || breakpoint === 'xl' || breakpoint === '2xl',
   }
 }
 

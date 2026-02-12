@@ -13,7 +13,10 @@ import pytest
 
 from yar.validators import (
     PG_MAX_IDENTIFIER_LENGTH,
+    validate_doc_id,
     validate_numeric_config,
+    validate_s3_key,
+    validate_s3_prefix,
     validate_sql_identifier,
     validate_workspace_name,
 )
@@ -283,3 +286,70 @@ class TestConstants:
         """Test PG_MAX_IDENTIFIER_LENGTH constant."""
         assert PG_MAX_IDENTIFIER_LENGTH == 63
         assert isinstance(PG_MAX_IDENTIFIER_LENGTH, int)
+
+
+class TestS3PathValidation:
+    """Tests for S3 key/prefix validation helpers."""
+
+    def test_validate_s3_key_accepts_normal_key(self):
+        assert validate_s3_key('staging/default/doc_123/file.pdf') == 'staging/default/doc_123/file.pdf'
+
+    def test_validate_s3_key_rejects_relative_segments(self):
+        with pytest.raises(ValueError):
+            validate_s3_key('staging/default/../secrets.txt')
+
+    def test_validate_s3_key_rejects_backslash(self):
+        with pytest.raises(ValueError):
+            validate_s3_key(r'staging\default\doc.txt')
+
+    def test_validate_s3_key_rejects_leading_slash(self):
+        with pytest.raises(ValueError):
+            validate_s3_key('/staging/default/doc.txt')
+
+    def test_validate_s3_prefix_allows_empty(self):
+        assert validate_s3_prefix('', allow_empty=True) == ''
+
+    def test_validate_s3_prefix_normalizes_trailing_slash(self):
+        assert validate_s3_prefix('staging/default', allow_empty=False) == 'staging/default/'
+
+    def test_validate_s3_prefix_rejects_double_slash(self):
+        with pytest.raises(ValueError):
+            validate_s3_prefix('staging//default', allow_empty=False)
+
+
+class TestDocIdValidation:
+    """Tests for document ID validation helper."""
+
+    def test_validate_doc_id_accepts_common_formats(self):
+        assert validate_doc_id('doc_abc123') == 'doc_abc123'
+        assert validate_doc_id('doc-abc123') == 'doc-abc123'
+        assert validate_doc_id('DOC_ABC-123') == 'DOC_ABC-123'
+
+    def test_validate_doc_id_strips_whitespace(self):
+        assert validate_doc_id('  doc_abc123  ') == 'doc_abc123'
+
+    def test_validate_doc_id_rejects_empty(self):
+        with pytest.raises(ValueError):
+            validate_doc_id('')
+        with pytest.raises(ValueError):
+            validate_doc_id('   ')
+
+    def test_validate_doc_id_rejects_relative_segments(self):
+        with pytest.raises(ValueError):
+            validate_doc_id('..')
+        with pytest.raises(ValueError):
+            validate_doc_id('.')
+
+    def test_validate_doc_id_rejects_path_separators(self):
+        with pytest.raises(ValueError):
+            validate_doc_id('doc/abc')
+        with pytest.raises(ValueError):
+            validate_doc_id(r'doc\abc')
+
+    def test_validate_doc_id_rejects_unicode(self):
+        with pytest.raises(ValueError):
+            validate_doc_id('dóc_123')
+
+    def test_validate_doc_id_rejects_overly_long_values(self):
+        with pytest.raises(ValueError):
+            validate_doc_id('d' * 129)

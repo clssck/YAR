@@ -108,7 +108,10 @@ export default function PDFViewer({ url }: PDFViewerProps) {
         entries.forEach((entry) => {
           if (entry.intersectionRatio > maxVisibility) {
             maxVisibility = entry.intersectionRatio
-            const pageNum = parseInt(entry.target.getAttribute('data-page') || '1', 10)
+            const pageNum = parseInt(
+              entry.target.getAttribute('data-page') || '1',
+              10,
+            )
             mostVisiblePage = pageNum
           }
         })
@@ -121,7 +124,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       {
         root: containerRef.current,
         threshold: [0, 0.25, 0.5, 0.75, 1],
-      }
+      },
     )
 
     pageRefs.current.forEach((ref) => {
@@ -149,7 +152,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       setCurrentPage(targetPage)
       setInputValue(String(targetPage))
     },
-    [numPages]
+    [numPages],
   )
 
   const zoomIn = useCallback(() => {
@@ -267,7 +270,8 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       }
 
       // Only handle if viewer is focused or in fullscreen
-      if (!viewerRef.current?.contains(document.activeElement) && !isFullscreen) return
+      if (!viewerRef.current?.contains(document.activeElement) && !isFullscreen)
+        return
 
       switch (e.key) {
         case 'ArrowLeft':
@@ -350,7 +354,9 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       try {
         const page = await pdf.getPage(i)
         const content = await page.getTextContent()
-        const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ')
+        const text = content.items
+          .map((item) => ('str' in item ? item.str : ''))
+          .join(' ')
         textMap.set(i, text)
       } catch {
         // Skip pages that fail to extract
@@ -397,11 +403,14 @@ export default function PDFViewer({ url }: PDFViewerProps) {
         })
         .join('')
     },
-    [searchQuery]
+    [searchQuery],
   )
 
   return (
-    <div ref={viewerRef} className={cn('flex flex-col h-full', isFullscreen && 'bg-background')}>
+    <div
+      ref={viewerRef}
+      className={cn('flex flex-col h-full', isFullscreen && 'bg-background')}
+    >
       {/* Search bar */}
       {showSearch && (
         <div className="flex items-center gap-2 p-2 border-b bg-background flex-shrink-0">
@@ -439,7 +448,9 @@ export default function PDFViewer({ url }: PDFViewerProps) {
               </Button>
             </>
           ) : searchQuery.trim() ? (
-            <span className="text-sm text-muted-foreground whitespace-nowrap">No matches</span>
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+              No matches
+            </span>
           ) : null}
           <Button
             size="icon"
@@ -459,7 +470,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
         className={cn(
           'flex-1 overflow-auto bg-muted/30',
           'scrollbar-thin scrollbar-track-transparent',
-          'scrollbar-thumb-transparent hover:scrollbar-thumb-muted-foreground/40'
+          'scrollbar-thumb-transparent hover:scrollbar-thumb-muted-foreground/40',
         )}
       >
         {loading && (
@@ -497,7 +508,9 @@ export default function PDFViewer({ url }: PDFViewerProps) {
                   renderTextLayer
                   renderAnnotationLayer
                   onLoadSuccess={i === 0 ? handlePageLoadSuccess : undefined}
-                  customTextRenderer={searchQuery.trim() ? customTextRenderer : undefined}
+                  customTextRenderer={
+                    searchQuery.trim() ? customTextRenderer : undefined
+                  }
                   loading={
                     <div className="flex items-center justify-center p-8">
                       <Loader2Icon className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -582,7 +595,9 @@ export default function PDFViewer({ url }: PDFViewerProps) {
           >
             <MinusIcon className="h-4 w-4" />
           </Button>
-          <span className="text-sm w-12 text-center">{Math.round(scale * 100)}%</span>
+          <span className="text-sm w-12 text-center">
+            {Math.round(scale * 100)}%
+          </span>
           <Button
             size="icon"
             variant="ghost"

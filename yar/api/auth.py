@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
-from .config import global_args
+from .config import get_env_value
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each yar instance
@@ -22,12 +22,12 @@ class TokenPayload(BaseModel):
 
 class AuthHandler:
     def __init__(self):
-        self.secret = global_args.token_secret
-        self.algorithm = global_args.jwt_algorithm
-        self.expire_hours = global_args.token_expire_hours
-        self.guest_expire_hours = global_args.guest_token_expire_hours
+        self.secret = get_env_value('TOKEN_SECRET', 'yar-jwt-default-secret')
+        self.algorithm = get_env_value('JWT_ALGORITHM', 'HS256')
+        self.expire_hours = get_env_value('TOKEN_EXPIRE_HOURS', 48, int)
+        self.guest_expire_hours = get_env_value('GUEST_TOKEN_EXPIRE_HOURS', 24, int)
         self.accounts = {}
-        auth_accounts = global_args.auth_accounts
+        auth_accounts = get_env_value('AUTH_ACCOUNTS', '')
         if auth_accounts:
             for account in auth_accounts.split(','):
                 username, password = account.split(':', 1)

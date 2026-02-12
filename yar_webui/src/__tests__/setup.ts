@@ -43,4 +43,5 @@ class IntersectionObserverMock {
   unobserve() {}
   disconnect() {}
 }
-window.IntersectionObserver = IntersectionObserverMock as unknown as typeof IntersectionObserver
+window.IntersectionObserver =
+  IntersectionObserverMock as unknown as typeof IntersectionObserver

@@ -29,6 +29,7 @@ from yar.base import (
     DocStatus,
     StoragesStatus,
 )
+from yar.constants import DEFAULT_MAX_EXTRACT_INPUT_TOKENS
 from yar.entity_resolution import EntityResolutionConfig
 from yar.yar import YAR
 
@@ -538,6 +539,27 @@ class TestYARQueryParameters:
         assert rag.chunk_top_k == 50
         assert rag.max_entity_tokens == 10000
 
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    def test_max_extract_input_tokens_custom_value(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Test custom max_extract_input_tokens value is stored in YAR config."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            max_extract_input_tokens=4096,
+        )
+
+        assert rag.max_extract_input_tokens == 4096
+        assert rag.max_extract_input_tokens != DEFAULT_MAX_EXTRACT_INPUT_TOKENS
+
 
 class TestYARChunkingConfiguration:
     """Tests for text chunking configuration."""
@@ -879,6 +901,113 @@ class TestYARPublicMethods:
         assert result.doc_id == 'nonexistent_doc'
         assert result.status == 'not_found'
         assert result.status_code == 404
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_apipeline_enqueue_documents_creates_duplicate_records(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Duplicate enqueue attempts should create trackable failed records."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+        )
+
+        rag.doc_status.filter_keys = AsyncMock(return_value=set())
+        rag.doc_status.get_by_id = AsyncMock(
+            return_value={
+                'status': DocStatus.PROCESSED,
+                'track_id': 'orig_track_123',
+            }
+        )
+        rag.doc_status.upsert = AsyncMock()
+        rag.full_docs.upsert = AsyncMock()
+        rag.full_docs.index_done_callback = AsyncMock()
+
+        track_id = await rag.apipeline_enqueue_documents(
+            input=['duplicate-content'],
+            file_paths=['dup.txt'],
+            track_id='enqueue_track_abc',
+        )
+
+        assert track_id == 'enqueue_track_abc'
+        rag.doc_status.upsert.assert_called_once()
+        rag.full_docs.upsert.assert_not_called()
+        rag.full_docs.index_done_callback.assert_not_called()
+
+        upsert_payload = rag.doc_status.upsert.call_args[0][0]
+        assert len(upsert_payload) == 1
+        duplicate_record = next(iter(upsert_payload.values()))
+        assert duplicate_record['status'] == DocStatus.FAILED
+        assert duplicate_record['track_id'] == 'enqueue_track_abc'
+        assert duplicate_record['metadata']['is_duplicate'] is True
+        assert duplicate_record['metadata']['original_track_id'] == 'orig_track_123'
+        assert duplicate_record['metadata']['original_doc_id'].startswith('doc-')
+
+    @patch('yar.yar.get_storage_keyed_lock')
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_apipeline_enqueue_documents_uses_keyed_lock_for_doc_ids(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        mock_get_storage_keyed_lock,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Enqueue path should use a keyed lock around duplicate filtering/upsert."""
+
+        class _DummyAsyncLock:
+            def __init__(self):
+                self.entered = False
+                self.exited = False
+
+            async def __aenter__(self):
+                self.entered = True
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                self.exited = True
+                return False
+
+        dummy_lock = _DummyAsyncLock()
+        mock_get_storage_keyed_lock.return_value = dummy_lock
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+        )
+
+        rag.doc_status.filter_keys = AsyncMock(return_value=set())
+        rag.doc_status.get_by_id = AsyncMock(return_value={'status': DocStatus.PROCESSED, 'track_id': 'orig_track'})
+        rag.doc_status.upsert = AsyncMock()
+        rag.full_docs.upsert = AsyncMock()
+        rag.full_docs.index_done_callback = AsyncMock()
+
+        await rag.apipeline_enqueue_documents(
+            input=['duplicate-content'],
+            file_paths=['dup.txt'],
+            track_id='enqueue_track_abc',
+        )
+
+        mock_get_storage_keyed_lock.assert_called_once()
+        lock_args, lock_kwargs = mock_get_storage_keyed_lock.call_args
+        assert len(lock_args[0]) == 1
+        assert lock_args[0][0].startswith('doc-')
+        assert lock_kwargs['namespace'] == f'doc_enqueue:{rag.workspace}'
+        assert lock_kwargs['enable_logging'] is False
+        assert dummy_lock.entered is True
+        assert dummy_lock.exited is True
 
 
 @pytest.mark.offline

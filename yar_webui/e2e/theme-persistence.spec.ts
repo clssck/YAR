@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Theme Persistence', () => {
   test('theme is saved to localStorage', async ({ page }) => {
@@ -8,7 +8,10 @@ test.describe('Theme Persistence', () => {
     const html = page.locator('html')
 
     // Toggle theme
-    const themeButton = page.locator('header button').filter({ has: page.locator('svg') }).last()
+    const themeButton = page
+      .locator('header button')
+      .filter({ has: page.locator('svg') })
+      .last()
     await themeButton.click()
 
     // Wait for state to settle
@@ -30,11 +33,16 @@ test.describe('Theme Persistence', () => {
     expect(storage.state.theme).toBe(isDark ? 'dark' : 'light')
   })
 
-  test('theme loads from localStorage on page load', async ({ page, context }) => {
+  test('theme loads from localStorage on page load', async ({
+    page,
+    context,
+  }) => {
     // First, set theme to dark via localStorage before visiting the page
     await context.addInitScript(() => {
       const existingStorage = localStorage.getItem('settings-storage')
-      const data = existingStorage ? JSON.parse(existingStorage) : { state: {}, version: 26 }
+      const data = existingStorage
+        ? JSON.parse(existingStorage)
+        : { state: {}, version: 26 }
       data.state.theme = 'dark'
       localStorage.setItem('settings-storage', JSON.stringify(data))
     })
@@ -51,10 +59,13 @@ test.describe('Theme Persistence', () => {
 
     // Set to dark mode
     const html = page.locator('html')
-    const themeButton = page.locator('header button').filter({ has: page.locator('svg') }).last()
+    const themeButton = page
+      .locator('header button')
+      .filter({ has: page.locator('svg') })
+      .last()
 
     // Toggle until we're in dark mode
-    let currentClass = await html.getAttribute('class')
+    const currentClass = await html.getAttribute('class')
     if (!currentClass?.includes('dark')) {
       await themeButton.click()
       await expect(html).toHaveClass(/dark/)
@@ -76,7 +87,10 @@ test.describe('Language Persistence', () => {
     await page.waitForTimeout(1000)
 
     // Interact with the page to trigger state persistence
-    const themeButton = page.locator('header button').filter({ has: page.locator('svg') }).last()
+    const themeButton = page
+      .locator('header button')
+      .filter({ has: page.locator('svg') })
+      .last()
     await themeButton.click()
     await page.waitForTimeout(500)
 

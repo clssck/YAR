@@ -22,10 +22,12 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from yar import YAR
-from yar.api.utils_api import get_combined_auth_dependency
+from yar.api.config import global_args
+from yar.api.utils_api import get_combined_auth_dependency, validate_upload_size
 from yar.kg.postgres_impl import PGDocStatusStorage, PGKVStorage
 from yar.storage.s3_client import S3Client
 from yar.utils import compute_mdhash_id, logger
+from yar.validators import validate_doc_id, validate_s3_key, validate_workspace_name
 
 
 class UploadResponse(BaseModel):
@@ -169,9 +171,12 @@ def create_upload_routes(
         _: Annotated[bool, Depends(optional_api_key)] = True,
     ) -> UploadResponse:
         """Upload a document to S3 staging."""
+        s3_key: str | None = None
         try:
-            # Read file content
-            content = await file.read()
+            workspace = validate_workspace_name(workspace)
+
+            # Read file content with size validation
+            content = await validate_upload_size(file, global_args.max_upload_size_mb)
 
             if not content:
                 raise HTTPException(status_code=400, detail='Empty file')
@@ -179,6 +184,7 @@ def create_upload_routes(
             # Generate doc_id if not provided
             if not doc_id:
                 doc_id = compute_mdhash_id(content, prefix='doc_')
+            doc_id = validate_doc_id(doc_id)
 
             # Determine content type
             final_content_type = file.content_type
@@ -212,10 +218,24 @@ def create_upload_routes(
             )
 
         except HTTPException:
+            # Cleanup S3 if upload succeeded but later processing failed
+            if s3_key:
+                try:
+                    await s3_client.delete_object(s3_key)
+                except Exception as cleanup_err:
+                    logger.warning(f'Failed to cleanup S3 object {s3_key}: {cleanup_err}')
             raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
+            # Cleanup S3 if upload succeeded but later processing failed
+            if s3_key:
+                try:
+                    await s3_client.delete_object(s3_key)
+                except Exception as cleanup_err:
+                    logger.warning(f'Failed to cleanup S3 object {s3_key}: {cleanup_err}')
             logger.error(f'Upload failed: {e}')
-            raise HTTPException(status_code=500, detail=f'Upload failed: {e}') from e
+            raise HTTPException(status_code=500, detail='Upload failed due to an internal error') from e
 
     @router.get(
         '/staged',
@@ -229,6 +249,7 @@ def create_upload_routes(
     ) -> ListStagedResponse:
         """List documents in staging."""
         try:
+            workspace = validate_workspace_name(workspace)
             objects = await s3_client.list_staging(workspace)
 
             documents = [
@@ -246,9 +267,14 @@ def create_upload_routes(
                 count=len(documents),
             )
 
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             logger.error(f'Failed to list staged documents: {e}')
-            raise HTTPException(status_code=500, detail=f'Failed to list staged documents: {e}') from e
+            raise HTTPException(
+                status_code=500,
+                detail='Failed to list staged documents due to an internal error',
+            ) from e
 
     @router.get(
         '/presigned-url',
@@ -263,6 +289,7 @@ def create_upload_routes(
     ) -> PresignedUrlResponse:
         """Get presigned URL for a document."""
         try:
+            s3_key = validate_s3_key(s3_key)
             # Verify object exists
             if not await s3_client.object_exists(s3_key):
                 raise HTTPException(status_code=404, detail='Object not found')
@@ -277,9 +304,14 @@ def create_upload_routes(
 
         except HTTPException:
             raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             logger.error(f'Failed to generate presigned URL: {e}')
-            raise HTTPException(status_code=500, detail=f'Failed to generate presigned URL: {e}') from e
+            raise HTTPException(
+                status_code=500,
+                detail='Failed to generate presigned URL due to an internal error',
+            ) from e
 
     @router.delete(
         '/staged/{doc_id}',
@@ -293,6 +325,8 @@ def create_upload_routes(
     ) -> dict[str, str]:
         """Delete a staged document."""
         try:
+            workspace = validate_workspace_name(workspace)
+            doc_id = validate_doc_id(doc_id)
             # List objects with this doc_id prefix
             prefix = f'staging/{workspace}/{doc_id}/'
             objects = await s3_client.list_staging(workspace)
@@ -314,9 +348,14 @@ def create_upload_routes(
 
         except HTTPException:
             raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             logger.error(f'Failed to delete staged document: {e}')
-            raise HTTPException(status_code=500, detail=f'Failed to delete staged document: {e}') from e
+            raise HTTPException(
+                status_code=500,
+                detail='Failed to delete staged document due to an internal error',
+            ) from e
 
     @router.post(
         '/process',
@@ -341,7 +380,7 @@ def create_upload_routes(
     ) -> ProcessS3Response:
         """Process a staged document through the RAG pipeline."""
         try:
-            s3_key = request.s3_key
+            s3_key = validate_s3_key(request.s3_key)
 
             # Verify object exists
             if not await s3_client.object_exists(s3_key):
@@ -356,9 +395,18 @@ def create_upload_routes(
             # Extract doc_id from s3_key if not provided
             # s3_key format: staging/{workspace}/{doc_id}/{filename}
             doc_id = request.doc_id
-            if not doc_id:
+            if doc_id:
+                doc_id = validate_doc_id(doc_id)
+            else:
                 parts = s3_key.split('/')
-                doc_id = parts[2] if len(parts) >= 3 else compute_mdhash_id(content_bytes, prefix='doc_')
+                if len(parts) >= 3:
+                    try:
+                        doc_id = validate_doc_id(parts[2])
+                    except ValueError:
+                        # Fallback for legacy keys that used looser doc_id formats.
+                        doc_id = compute_mdhash_id(content_bytes, prefix='doc_')
+                else:
+                    doc_id = compute_mdhash_id(content_bytes, prefix='doc_')
 
             # Determine content type and decode appropriately
             content_type = metadata.get('content_type', 'application/octet-stream')
@@ -436,11 +484,13 @@ def create_upload_routes(
 
         except HTTPException:
             raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
             logger.error(f'Failed to process S3 document: {e}')
             raise HTTPException(
                 status_code=500,
-                detail=f'Failed to process S3 document: {e}',
+                detail='Failed to process S3 document due to an internal error',
             ) from e
 
     return router

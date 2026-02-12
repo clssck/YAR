@@ -58,14 +58,17 @@ export default function CollapsibleSection({
           'flex w-full items-center justify-between py-2.5 px-1 text-sm font-medium',
           'text-foreground/90 hover:text-foreground transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm',
-          headerClassName
+          headerClassName,
         )}
         aria-expanded={isOpen}
       >
         <span className="flex items-center gap-2">
           {title}
           {badge !== undefined && (
-            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+            <Badge
+              variant="secondary"
+              className="px-1.5 py-0 text-[10px] font-normal"
+            >
               {badge}
             </Badge>
           )}
@@ -73,14 +76,14 @@ export default function CollapsibleSection({
         <ChevronDown
           className={cn(
             'h-4 w-4 text-muted-foreground transition-transform duration-200',
-            isOpen && 'rotate-180'
+            isOpen && 'rotate-180',
           )}
         />
       </button>
       <div
         className={cn(
           'grid transition-[grid-template-rows] duration-200 ease-out',
-          isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
         )}
       >
         <div className="overflow-hidden">

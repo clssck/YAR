@@ -61,14 +61,18 @@ mock.module('@/utils/remarkFootnotes', () => ({
 
 // Mock CitationMarker
 mock.module('@/components/retrieval/CitationMarker', () => ({
-  CitationMarker: ({ marker }: { marker: string }) => <span data-testid="citation">{marker}</span>,
+  CitationMarker: ({ marker }: { marker: string }) => (
+    <span data-testid="citation">{marker}</span>
+  ),
 }))
 
 // Import after mocks are set up
 const { ChatMessage } = await import('@/components/retrieval/ChatMessage')
 
 // Helper to create test messages
-function createMessage(overrides: Partial<MessageWithError> = {}): MessageWithError {
+function createMessage(
+  overrides: Partial<MessageWithError> = {},
+): MessageWithError {
   return {
     id: 'test-message-1',
     role: 'assistant',
@@ -178,7 +182,9 @@ describe('ChatMessage Component', () => {
         isError: true,
       })
 
-      const { container } = render(<ChatMessage message={message} onRetry={onRetry} />)
+      const { container } = render(
+        <ChatMessage message={message} onRetry={onRetry} />,
+      )
 
       expect(container).toBeDefined()
     })
@@ -230,7 +236,9 @@ describe('ChatMessage Component', () => {
     test('renders with isTabActive true', () => {
       const message = createMessage()
 
-      const { container } = render(<ChatMessage message={message} isTabActive={true} />)
+      const { container } = render(
+        <ChatMessage message={message} isTabActive={true} />,
+      )
 
       expect(container).toBeDefined()
     })
@@ -238,7 +246,9 @@ describe('ChatMessage Component', () => {
     test('renders with isTabActive false', () => {
       const message = createMessage()
 
-      const { container } = render(<ChatMessage message={message} isTabActive={false} />)
+      const { container } = render(
+        <ChatMessage message={message} isTabActive={false} />,
+      )
 
       expect(container).toBeDefined()
     })

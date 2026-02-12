@@ -39,7 +39,7 @@ const OnboardingHints = () => {
       title: t('graphPanel.onboarding.searchTitle', 'Search Nodes'),
       description: t(
         'graphPanel.onboarding.searchDesc',
-        'Use Cmd+K (or Ctrl+K) to quickly search and focus on any node in the graph.'
+        'Use Cmd+K (or Ctrl+K) to quickly search and focus on any node in the graph.',
       ),
       position: 'top-left',
     },
@@ -48,7 +48,7 @@ const OnboardingHints = () => {
       title: t('graphPanel.onboarding.controlsTitle', 'Graph Controls'),
       description: t(
         'graphPanel.onboarding.controlsDesc',
-        'Use the control panel to change layouts, zoom, and toggle settings. Press +/- to zoom, 0 to reset.'
+        'Use the control panel to change layouts, zoom, and toggle settings. Press +/- to zoom, 0 to reset.',
       ),
       position: 'bottom-left',
     },
@@ -57,7 +57,7 @@ const OnboardingHints = () => {
       title: t('graphPanel.onboarding.interactionsTitle', 'Node Interactions'),
       description: t(
         'graphPanel.onboarding.interactionsDesc',
-        'Click any node to see its properties. Press P to toggle the panel, Escape to deselect.'
+        'Click any node to see its properties. Press P to toggle the panel, Escape to deselect.',
       ),
       position: 'top-right',
     },
@@ -113,7 +113,7 @@ const OnboardingHints = () => {
       className={cn(
         'absolute z-30 w-72 bg-background/95 backdrop-blur-lg rounded-lg border-2 border-primary/20 shadow-xl p-4',
         'animate-in fade-in slide-in-from-bottom-2 duration-300',
-        positionClasses[step.position]
+        positionClasses[step.position],
       )}
     >
       {/* Close button */}
@@ -133,7 +133,9 @@ const OnboardingHints = () => {
             key={step.id}
             className={cn(
               'h-1 flex-1 rounded-full transition-colors',
-              steps.indexOf(step) <= currentStep ? 'bg-primary' : 'bg-primary/20'
+              steps.indexOf(step) <= currentStep
+                ? 'bg-primary'
+                : 'bg-primary/20',
             )}
           />
         ))}
@@ -141,7 +143,9 @@ const OnboardingHints = () => {
 
       {/* Content */}
       <h4 className="font-semibold text-sm mb-1.5">{step.title}</h4>
-      <p className="text-xs text-muted-foreground mb-4 leading-relaxed">{step.description}</p>
+      <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+        {step.description}
+      </p>
 
       {/* Actions */}
       <div className="flex justify-between items-center">

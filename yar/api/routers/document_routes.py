@@ -26,7 +26,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from yar import YAR
 from yar.api.config import global_args
-from yar.api.utils_api import get_combined_auth_dependency
+from yar.api.utils_api import (
+    get_combined_auth_dependency,
+    validate_text_payload_size,
+    validate_upload_size,
+)
 from yar.base import DeletionResult, DocStatus
 from yar.constants import NS_PIPELINE_STATUS
 from yar.utils import (
@@ -36,6 +40,7 @@ from yar.utils import (
     logger,
     sanitize_text_for_encoding,
 )
+from yar.validators import validate_doc_id
 
 if TYPE_CHECKING:
     from yar.storage.s3_client import S3Client
@@ -381,9 +386,7 @@ class DeleteDocRequest(BaseModel):
 
         validated_ids = []
         for doc_id in doc_ids:
-            if not doc_id or not doc_id.strip():
-                raise ValueError('Document ID cannot be empty')
-            validated_ids.append(doc_id.strip())
+            validated_ids.append(validate_doc_id(doc_id))
 
         # Check for duplicates
         if len(validated_ids) != len(set(validated_ids)):
@@ -2480,6 +2483,7 @@ def create_document_routes(
         Raises:
             HTTPException: If the file type is not supported (400) or other errors occur (500).
         """
+        s3_original_key: str | None = None
         try:
             # S3 is mandatory - ensure client is available
             if s3_client is None:
@@ -2507,8 +2511,8 @@ def create_document_routes(
                     track_id=existing_track_id,
                 )
 
-            # Read entire file content (S3-only flow, no local filesystem)
-            file_content = await file.read()
+            # Read entire file content with size validation (S3-only flow, no local filesystem)
+            file_content = await validate_upload_size(file, global_args.max_upload_size_mb)
 
             # Generate stable doc_id from content hash (S3 is mandatory)
             s3_doc_id = compute_mdhash_id(file_content, prefix='doc_')
@@ -2560,10 +2564,24 @@ def create_document_routes(
                 track_id=track_id,
             )
 
+        except HTTPException:
+            # Cleanup S3 if upload succeeded but later processing failed
+            if s3_original_key and s3_client:
+                try:
+                    await s3_client.delete_object(s3_original_key)
+                except Exception as cleanup_err:
+                    logger.warning(f'Failed to cleanup S3 object {s3_original_key}: {cleanup_err}')
+            raise
         except Exception as e:
+            # Cleanup S3 if upload succeeded but later processing failed
+            if s3_original_key and s3_client:
+                try:
+                    await s3_client.delete_object(s3_original_key)
+                except Exception as cleanup_err:
+                    logger.warning(f'Failed to cleanup S3 object {s3_original_key}: {cleanup_err}')
             logger.error(f'Error /documents/upload: {file.filename}: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post('/text', response_model=InsertResponse, dependencies=[Depends(combined_auth)])
     async def insert_text(request: InsertTextRequest, background_tasks: BackgroundTasks):
@@ -2584,6 +2602,8 @@ def create_document_routes(
             HTTPException: If an error occurs during text processing (500).
         """
         try:
+            validate_text_payload_size([request.text], global_args.max_upload_size_mb)
+
             # Check if file_source already exists in doc_status storage
             if request.file_source and request.file_source.strip() and request.file_source != 'unknown_source':
                 existing_doc_data = await rag.doc_status.get_doc_by_file_path(request.file_source)
@@ -2628,10 +2648,12 @@ def create_document_routes(
                 message='Text successfully received. Processing will continue in background.',
                 track_id=track_id,
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f'Error /documents/text: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/texts',
@@ -2660,6 +2682,8 @@ def create_document_routes(
             HTTPException: If an error occurs during text processing (500).
         """
         try:
+            validate_text_payload_size(request.texts, global_args.max_upload_size_mb)
+
             # Check if any file_sources already exist in doc_status storage
             if request.file_sources:
                 for file_source in request.file_sources:
@@ -2707,10 +2731,12 @@ def create_document_routes(
                 message='Texts successfully received. Processing will continue in background.',
                 track_id=track_id,
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f'Error /documents/texts: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.delete('', response_model=ClearDocumentsResponse, dependencies=[Depends(combined_auth)])
     async def clear_documents():
@@ -2880,7 +2906,7 @@ def create_document_routes(
             logger.error(traceback.format_exc())
             if 'history_messages' in pipeline_status:
                 pipeline_status['history_messages'].append(error_msg)
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
         finally:
             # Reset busy status after completion
             async with pipeline_status_lock:
@@ -2980,7 +3006,7 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error getting pipeline status: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     class DeleteDocByIdResponse(BaseModel):
         """Response model for single document deletion operation."""
@@ -3064,7 +3090,7 @@ def create_document_routes(
             error_msg = f'Error initiating document deletion for {delete_request.doc_ids}: {e!s}'
             logger.error(error_msg)
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=error_msg) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/clear_cache',
@@ -3098,7 +3124,7 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error clearing cache: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.delete(
         '/delete_entity',
@@ -3123,7 +3149,8 @@ def create_document_routes(
             if result.status == 'not_found':
                 raise HTTPException(status_code=404, detail=result.message)
             if result.status == 'fail':
-                raise HTTPException(status_code=500, detail=result.message)
+                logger.error(f"Failed to delete entity '{request.entity_name}': {result.message}")
+                raise HTTPException(status_code=500, detail='Internal server error')
             # Set doc_id to empty string since this is an entity operation, not document
             result.doc_id = ''
             return result
@@ -3133,7 +3160,7 @@ def create_document_routes(
             error_msg = f"Error deleting entity '{request.entity_name}': {e!s}"
             logger.error(error_msg)
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=error_msg) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.delete(
         '/delete_relation',
@@ -3161,7 +3188,11 @@ def create_document_routes(
             if result.status == 'not_found':
                 raise HTTPException(status_code=404, detail=result.message)
             if result.status == 'fail':
-                raise HTTPException(status_code=500, detail=result.message)
+                logger.error(
+                    f"Failed to delete relation '{request.source_entity}' -> '{request.target_entity}': "
+                    f'{result.message}'
+                )
+                raise HTTPException(status_code=500, detail='Internal server error')
             # Set doc_id to empty string since this is a relation operation, not document
             result.doc_id = ''
             return result
@@ -3171,7 +3202,7 @@ def create_document_routes(
             error_msg = f"Error deleting relation from '{request.source_entity}' to '{request.target_entity}': {e!s}"
             logger.error(error_msg)
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=error_msg) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.get(
         '/track_status/{track_id}',
@@ -3246,7 +3277,7 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error getting track status for {track_id}: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/paginated',
@@ -3332,7 +3363,7 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error getting paginated documents: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.get(
         '/status_counts',
@@ -3359,7 +3390,7 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error getting document status counts: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/reprocess_failed',
@@ -3405,7 +3436,7 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error initiating reprocessing of failed documents: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/cancel_pipeline',
@@ -3464,6 +3495,6 @@ def create_document_routes(
         except Exception as e:
             logger.error(f'Error requesting pipeline cancellation: {e!s}')
             logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     return router

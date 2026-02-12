@@ -3,7 +3,10 @@ import { describe, expect, mock, test } from 'bun:test'
 import { render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef } from 'react'
-import Button, { type ButtonVariantType, buttonVariants } from '@/components/ui/Button'
+import Button, {
+  type ButtonVariantType,
+  buttonVariants,
+} from '@/components/ui/Button'
 
 describe('Button Component', () => {
   describe('Rendering', () => {
@@ -46,12 +49,14 @@ describe('Button Component', () => {
     })
 
     test('applies variant classes correctly', () => {
-      const { container: defaultContainer } = render(<Button variant="default">Test</Button>)
+      const { container: defaultContainer } = render(
+        <Button variant="default">Test</Button>,
+      )
       const defaultButton = defaultContainer.querySelector('button')
       expect(defaultButton?.className).toContain('bg-primary')
 
       const { container: destructiveContainer } = render(
-        <Button variant="destructive">Test</Button>
+        <Button variant="destructive">Test</Button>,
       )
       const destructiveButton = destructiveContainer.querySelector('button')
       expect(destructiveButton?.className).toContain('bg-destructive')
@@ -79,7 +84,12 @@ describe('Button Component', () => {
   })
 
   describe('Sizes', () => {
-    const sizes: Array<'default' | 'sm' | 'lg' | 'icon'> = ['default', 'sm', 'lg', 'icon']
+    const sizes: Array<'default' | 'sm' | 'lg' | 'icon'> = [
+      'default',
+      'sm',
+      'lg',
+      'icon',
+    ]
 
     sizes.forEach((size) => {
       test(`renders with ${size} size`, () => {
@@ -121,7 +131,9 @@ describe('Button Component', () => {
     test('calls onClick handler when clicked', async () => {
       const user = await userEvent.setup()
       const handleClick = mock()
-      const { container } = render(<Button onClick={handleClick}>Click me</Button>)
+      const { container } = render(
+        <Button onClick={handleClick}>Click me</Button>,
+      )
 
       const button = container.querySelector('button')
       expect(button).toBeDefined()
@@ -134,7 +146,9 @@ describe('Button Component', () => {
     test('calls onClick handler multiple times on multiple clicks', async () => {
       const user = await userEvent.setup()
       const handleClick = mock()
-      const { container } = render(<Button onClick={handleClick}>Click me</Button>)
+      const { container } = render(
+        <Button onClick={handleClick}>Click me</Button>,
+      )
 
       const button = container.querySelector('button')
       expect(button).toBeDefined()
@@ -166,7 +180,7 @@ describe('Button Component', () => {
       const { container } = render(
         <Button disabled onClick={handleClick}>
           Disabled
-        </Button>
+        </Button>,
       )
 
       const button = container.querySelector('button')
@@ -191,7 +205,9 @@ describe('Button Component', () => {
     })
 
     test('renders button with tooltip when tooltip prop is provided', () => {
-      const { container } = render(<Button tooltip="This is a tooltip">With Tooltip</Button>)
+      const { container } = render(
+        <Button tooltip="This is a tooltip">With Tooltip</Button>,
+      )
       const button = container.querySelector('button')
       expect(button).toBeDefined()
     })
@@ -200,28 +216,28 @@ describe('Button Component', () => {
       const { container, rerender } = render(
         <Button tooltip="Tooltip" side="top">
           Button
-        </Button>
+        </Button>,
       )
       expect(container.querySelector('button')).toBeDefined()
 
       rerender(
         <Button tooltip="Tooltip" side="bottom">
           Button
-        </Button>
+        </Button>,
       )
       expect(container.querySelector('button')).toBeDefined()
 
       rerender(
         <Button tooltip="Tooltip" side="left">
           Button
-        </Button>
+        </Button>,
       )
       expect(container.querySelector('button')).toBeDefined()
 
       rerender(
         <Button tooltip="Tooltip" side="right">
           Button
-        </Button>
+        </Button>,
       )
       expect(container.querySelector('button')).toBeDefined()
     })
@@ -245,7 +261,7 @@ describe('Button Component', () => {
         <>
           <span id="help-text">This button submits the form</span>
           <Button aria-describedby="help-text">Submit</Button>
-        </>
+        </>,
       )
       const button = container.querySelector('button')
       expect(button?.getAttribute('aria-describedby')).toBe('help-text')
@@ -255,7 +271,7 @@ describe('Button Component', () => {
       const { container } = render(
         <Button aria-disabled="true" disabled>
           Disabled
-        </Button>
+        </Button>,
       )
       const button = container.querySelector('button')
       expect(button?.hasAttribute('disabled')).toBe(true)
@@ -265,7 +281,7 @@ describe('Button Component', () => {
       const { container } = render(
         <Button aria-pressed="false" role="button">
           Toggle
-        </Button>
+        </Button>,
       )
       const button = container.querySelector('button')
       expect(button?.getAttribute('aria-pressed')).toBe('false')
@@ -285,7 +301,9 @@ describe('Button Component', () => {
     })
 
     test('supports title attribute for tooltip fallback', () => {
-      const { container } = render(<Button title="Button tooltip">Button</Button>)
+      const { container } = render(
+        <Button title="Button tooltip">Button</Button>,
+      )
       const button = container.querySelector('button')
       expect(button?.getAttribute('title')).toBe('Button tooltip')
     })
@@ -293,7 +311,9 @@ describe('Button Component', () => {
 
   describe('HTML Attributes', () => {
     test('forwards standard HTML button attributes', () => {
-      const { container } = render(<Button data-testid="custom-button">Button</Button>)
+      const { container } = render(
+        <Button data-testid="custom-button">Button</Button>,
+      )
       const button = container.querySelector('[data-testid="custom-button"]')
       expect(button).toBeDefined()
     })
@@ -311,7 +331,9 @@ describe('Button Component', () => {
     })
 
     test('supports className prop', () => {
-      const { container } = render(<Button className="custom-class">Test</Button>)
+      const { container } = render(
+        <Button className="custom-class">Test</Button>,
+      )
       const button = container.querySelector('button')
       expect(button?.className).toContain('custom-class')
     })
@@ -347,7 +369,7 @@ describe('Button Component', () => {
       const { container } = render(
         <Button variant="destructive" size="lg" disabled>
           Delete
-        </Button>
+        </Button>,
       )
       const button = container.querySelector('button')
       expect(button?.className).toContain('bg-destructive')
@@ -358,9 +380,14 @@ describe('Button Component', () => {
 
     test('renders with variant, size, tooltip, and aria-label', async () => {
       const { container } = render(
-        <Button variant="default" size="sm" tooltip="Save changes" aria-label="Save button">
+        <Button
+          variant="default"
+          size="sm"
+          tooltip="Save changes"
+          aria-label="Save button"
+        >
           Save
-        </Button>
+        </Button>,
       )
       const button = container.querySelector('button')
       expect(button?.getAttribute('aria-label')).toBe('Save button')
@@ -375,7 +402,7 @@ describe('Button Component', () => {
             <title>Icon</title>
           </svg>
           Text
-        </Button>
+        </Button>,
       )
       const button = container.querySelector('button')
       expect(button?.className).toContain('[&_svg]:pointer-events-none')
@@ -419,7 +446,7 @@ describe('Button Component', () => {
       const { container } = render(
         <Button asChild>
           <a href="/test">Link Button</a>
-        </Button>
+        </Button>,
       )
       const link = container.querySelector('a')
       expect(link).toBeDefined()
@@ -428,7 +455,9 @@ describe('Button Component', () => {
     })
 
     test('renders as button by default when asChild is false', () => {
-      const { container } = render(<Button asChild={false}>Regular Button</Button>)
+      const { container } = render(
+        <Button asChild={false}>Regular Button</Button>,
+      )
       const button = container.querySelector('button')
       expect(button).toBeDefined()
       expect(button?.tagName.toLowerCase()).toBe('button')

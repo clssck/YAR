@@ -13,6 +13,6 @@ if (rootElement) {
   createRoot(rootElement).render(
     <StrictMode>
       <AppRouter />
-    </StrictMode>
+    </StrictMode>,
   )
 }

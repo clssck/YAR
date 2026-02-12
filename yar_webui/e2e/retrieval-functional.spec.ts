@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Query Settings - Functional Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -11,7 +11,7 @@ test.describe('Query Settings - Functional Tests', () => {
   test('top_k input accepts and retains values', async ({ page }) => {
     const topKInput = page.locator('#top_k')
 
-    if (await topKInput.count() > 0) {
+    if ((await topKInput.count()) > 0) {
       await topKInput.fill('50')
       await expect(topKInput).toHaveValue('50')
 
@@ -24,7 +24,7 @@ test.describe('Query Settings - Functional Tests', () => {
   test('chunk_top_k input accepts and retains values', async ({ page }) => {
     const chunkTopKInput = page.locator('#chunk_top_k')
 
-    if (await chunkTopKInput.count() > 0) {
+    if ((await chunkTopKInput.count()) > 0) {
       await chunkTopKInput.fill('25')
       await expect(chunkTopKInput).toHaveValue('25')
     }
@@ -55,7 +55,9 @@ test.describe('Query Settings - Functional Tests', () => {
 
   test('enable rerank checkbox can be toggled', async ({ page }) => {
     // Expand the "Advanced" section first
-    const advancedSection = page.locator('button').filter({ hasText: /Advanced/i })
+    const advancedSection = page
+      .locator('button')
+      .filter({ hasText: /Advanced/i })
     await advancedSection.click()
 
     const rerankCheckbox = page.locator('#enable_rerank')
@@ -98,11 +100,14 @@ test.describe('Query Settings - Functional Tests', () => {
 
   test('user prompt textarea accepts text input', async ({ page }) => {
     // Find user prompt input area
-    const userPromptInput = page.locator('textarea').filter({ hasText: '' }).first()
+    const userPromptInput = page
+      .locator('textarea')
+      .filter({ hasText: '' })
+      .first()
       .or(page.locator('[placeholder*="prompt"]'))
       .or(page.locator('#user_prompt'))
 
-    if (await userPromptInput.count() > 0) {
+    if ((await userPromptInput.count()) > 0) {
       await userPromptInput.fill('Custom instruction for the response')
       const value = await userPromptInput.inputValue()
       expect(value).toContain('Custom instruction')
@@ -243,7 +248,7 @@ test.describe('Settings Persistence - Functional Tests', () => {
 
     // Change top_k if available
     const topKInput = page.locator('#top_k')
-    if (await topKInput.count() > 0) {
+    if ((await topKInput.count()) > 0) {
       await topKInput.fill('75')
     }
 
@@ -267,7 +272,10 @@ test.describe('Settings Persistence - Functional Tests', () => {
 
     // Switch to Documents tab
     await page.getByRole('tab', { name: /Documents/i }).click()
-    await expect(page.getByRole('tab', { name: /Documents/i })).toHaveAttribute('data-state', 'active')
+    await expect(page.getByRole('tab', { name: /Documents/i })).toHaveAttribute(
+      'data-state',
+      'active',
+    )
 
     // Switch to Knowledge Graph tab
     await page.getByRole('tab', { name: /Knowledge Graph/i }).click()
@@ -322,7 +330,7 @@ test.describe('Token Limit Inputs - Functional Tests', () => {
   test('max entity tokens input accepts values', async ({ page }) => {
     const input = page.locator('#max_entity_tokens')
 
-    if (await input.count() > 0) {
+    if ((await input.count()) > 0) {
       await input.fill('8000')
       await expect(input).toHaveValue('8000')
     }
@@ -331,7 +339,7 @@ test.describe('Token Limit Inputs - Functional Tests', () => {
   test('max relation tokens input accepts values', async ({ page }) => {
     const input = page.locator('#max_relation_tokens')
 
-    if (await input.count() > 0) {
+    if ((await input.count()) > 0) {
       await input.fill('10000')
       await expect(input).toHaveValue('10000')
     }
@@ -340,7 +348,7 @@ test.describe('Token Limit Inputs - Functional Tests', () => {
   test('max total tokens input accepts values', async ({ page }) => {
     const input = page.locator('#max_total_tokens')
 
-    if (await input.count() > 0) {
+    if ((await input.count()) > 0) {
       await input.fill('40000')
       await expect(input).toHaveValue('40000')
     }

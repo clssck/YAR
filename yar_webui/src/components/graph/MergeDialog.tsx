@@ -37,7 +37,9 @@ const MergeDialog = ({
     <Dialog open={mergeDialogOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('graphPanel.propertiesView.mergeDialog.title')}</DialogTitle>
+          <DialogTitle>
+            {t('graphPanel.propertiesView.mergeDialog.title')}
+          </DialogTitle>
           <DialogDescription>
             {t('graphPanel.propertiesView.mergeDialog.description', {
               source: mergeDialogInfo?.sourceEntity ?? '',
@@ -50,7 +52,11 @@ const MergeDialog = ({
         </p>
         <DialogFooter className="mt-4 flex-col gap-2 sm:flex-row sm:justify-end">
           {currentQueryLabel !== mergeDialogInfo?.sourceEntity && (
-            <Button type="button" variant="outline" onClick={() => onRefresh(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onRefresh(false)}
+            >
               {t('graphPanel.propertiesView.mergeDialog.keepCurrentStart')}
             </Button>
           )}

@@ -39,7 +39,9 @@ export default function AppSettings({ className }: AppSettingsProps) {
       size="icon"
       className={cn('h-9 w-9', className)}
       onClick={handleThemeToggle}
-      tooltip={effectiveTheme === 'dark' ? t('settings.light') : t('settings.dark')}
+      tooltip={
+        effectiveTheme === 'dark' ? t('settings.light') : t('settings.dark')
+      }
     >
       {effectiveTheme === 'dark' ? (
         <MoonIcon className="h-5 w-5" />

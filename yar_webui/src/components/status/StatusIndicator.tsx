@@ -22,7 +22,12 @@ const StatusIndicator = ({ className }: { className?: string }) => {
   }, [])
 
   return (
-    <div className={cn('flex items-center gap-2 opacity-80 select-none', className)}>
+    <div
+      className={cn(
+        'flex items-center gap-2 opacity-80 select-none',
+        className,
+      )}
+    >
       <button
         type="button"
         className="flex cursor-pointer items-center gap-2 bg-transparent border-none p-0"
@@ -35,7 +40,7 @@ const StatusIndicator = ({ className }: { className?: string }) => {
             health ? 'bg-green-500' : 'bg-red-500',
             animate && 'scale-125',
             animate && health && 'shadow-[0_0_12px_rgba(34,197,94,0.4)]',
-            animate && !health && 'shadow-[0_0_12px_rgba(239,68,68,0.4)]'
+            animate && !health && 'shadow-[0_0_12px_rgba(239,68,68,0.4)]',
           )}
         />
         <span className="text-muted-foreground text-xs">
@@ -45,7 +50,11 @@ const StatusIndicator = ({ className }: { className?: string }) => {
         </span>
       </button>
 
-      <StatusDialog open={dialogOpen} onOpenChange={setDialogOpen} status={status} />
+      <StatusDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        status={status}
+      />
     </div>
   )
 }

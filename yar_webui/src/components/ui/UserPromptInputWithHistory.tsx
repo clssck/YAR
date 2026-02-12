@@ -34,7 +34,10 @@ export default function UserPromptInputWithHistory({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false)
         setSelectedIndex(-1)
       }
@@ -61,7 +64,9 @@ export default function UserPromptInputWithHistory({
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
-          setSelectedIndex((prev) => (prev < history.length - 1 ? prev + 1 : prev))
+          setSelectedIndex((prev) =>
+            prev < history.length - 1 ? prev + 1 : prev,
+          )
           break
         case 'ArrowUp':
           e.preventDefault()
@@ -86,7 +91,7 @@ export default function UserPromptInputWithHistory({
           break
       }
     },
-    [isOpen, selectedIndex, history, onSelectFromHistory]
+    [isOpen, selectedIndex, history, onSelectFromHistory],
   )
 
   const handleInputClick = () => {
@@ -134,7 +139,7 @@ export default function UserPromptInputWithHistory({
         setSelectedIndex((prev) => prev - 1)
       }
     },
-    [onDeleteFromHistory, history.length, selectedIndex]
+    [onDeleteFromHistory, history.length, selectedIndex],
   )
 
   return (
@@ -155,7 +160,11 @@ export default function UserPromptInputWithHistory({
           onClick={handleInputClick}
           placeholder={placeholder}
           autoComplete="off"
-          className={cn(isHovered && history.length > 0 ? 'pr-5' : 'pr-2', 'w-full', className)}
+          className={cn(
+            isHovered && history.length > 0 ? 'pr-5' : 'pr-2',
+            'w-full',
+            className,
+          )}
         />
         {isHovered && history.length > 0 && (
           <button
@@ -167,7 +176,7 @@ export default function UserPromptInputWithHistory({
             <ChevronDown
               className={cn(
                 'h-3 w-3 transition-transform duration-200 text-gray-500',
-                isOpen && 'rotate-180'
+                isOpen && 'rotate-180',
               )}
             />
           </button>
@@ -184,7 +193,7 @@ export default function UserPromptInputWithHistory({
                 'flex items-center justify-between pl-3 pr-1 py-2 text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors',
                 'border-b border-gray-100 dark:border-gray-600 last:border-b-0',
                 'focus-within:bg-gray-100 dark:focus-within:bg-gray-700',
-                selectedIndex === index && 'bg-gray-100 dark:bg-gray-700'
+                selectedIndex === index && 'bg-gray-100 dark:bg-gray-700',
               )}
             >
               <button

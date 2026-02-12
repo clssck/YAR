@@ -13,10 +13,17 @@ import EmptyState, {
   EmptySearchResults,
 } from '@/components/ui/EmptyState'
 import LastUpdated from '@/components/ui/LastUpdated'
-import LoadingState, { PulsingDot, Skeleton, SkeletonText } from '@/components/ui/LoadingState'
+import LoadingState, {
+  PulsingDot,
+  Skeleton,
+  SkeletonText,
+} from '@/components/ui/LoadingState'
 import StatusBadge, { DocumentStatusBadge } from '@/components/ui/StatusBadge'
 import { useResponsive } from '@/hooks/useBreakpoint'
-import { formatShortcut, useKeyboardShortcuts } from '@/hooks/useKeyboardShortcut'
+import {
+  formatShortcut,
+  useKeyboardShortcuts,
+} from '@/hooks/useKeyboardShortcut'
 
 export default function ComponentDemo() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(true)
@@ -30,7 +37,10 @@ export default function ComponentDemo() {
     {
       key: 't',
       modifiers: { meta: true },
-      callback: () => toast('Keyboard shortcut triggered!', { description: '⌘T was pressed' }),
+      callback: () =>
+        toast('Keyboard shortcut triggered!', {
+          description: '⌘T was pressed',
+        }),
       description: 'Test shortcut',
     },
   ])
@@ -44,12 +54,17 @@ export default function ComponentDemo() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-8 max-w-4xl" data-testid="component-demo">
+    <div
+      className="container mx-auto p-6 space-y-8 max-w-4xl"
+      data-testid="component-demo"
+    >
       <header className="space-y-2">
         <h1 className="text-3xl font-bold">Component Demo</h1>
         <p className="text-muted-foreground">
           Visual showcase of foundation UI components. Current breakpoint:{' '}
-          <code className="bg-muted px-1.5 py-0.5 rounded text-sm">{breakpoint}</code>
+          <code className="bg-muted px-1.5 py-0.5 rounded text-sm">
+            {breakpoint}
+          </code>
           {isMobile && ' (Mobile)'}
           {isTablet && ' (Tablet)'}
           {isDesktop && ' (Desktop)'}
@@ -71,7 +86,9 @@ export default function ComponentDemo() {
             <StatusBadge label="Processing" status="processing" />
           </div>
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Document Status Presets:</p>
+            <p className="text-sm text-muted-foreground">
+              Document Status Presets:
+            </p>
             <div className="flex flex-wrap gap-2">
               <DocumentStatusBadge.Processed />
               <DocumentStatusBadge.Processing />
@@ -102,7 +119,9 @@ export default function ComponentDemo() {
         </CardHeader>
         <CardContent className="space-y-2">
           <CollapsibleSection title="Basic Section" defaultOpen={true}>
-            <p className="text-sm text-muted-foreground">This section is open by default.</p>
+            <p className="text-sm text-muted-foreground">
+              This section is open by default.
+            </p>
           </CollapsibleSection>
 
           <CollapsibleSection title="With Badge Count" badge={5}>
@@ -112,7 +131,9 @@ export default function ComponentDemo() {
           </CollapsibleSection>
 
           <CollapsibleSection title="With String Badge" badge="new">
-            <p className="text-sm text-muted-foreground">Badge can also be a string.</p>
+            <p className="text-sm text-muted-foreground">
+              Badge can also be a string.
+            </p>
           </CollapsibleSection>
 
           <CollapsibleSection
@@ -121,7 +142,8 @@ export default function ComponentDemo() {
             onOpenChange={setCollapsibleOpen}
           >
             <p className="text-sm text-muted-foreground">
-              This section is controlled. Current state: {collapsibleOpen ? 'Open' : 'Closed'}
+              This section is controlled. Current state:{' '}
+              {collapsibleOpen ? 'Open' : 'Closed'}
             </p>
             <Button
               variant="outline"
@@ -134,7 +156,9 @@ export default function ComponentDemo() {
           </CollapsibleSection>
 
           <CollapsibleSection title="Starts Closed" defaultOpen={false}>
-            <p className="text-sm text-muted-foreground">This section starts closed.</p>
+            <p className="text-sm text-muted-foreground">
+              This section starts closed.
+            </p>
           </CollapsibleSection>
         </CardContent>
       </Card>
@@ -152,7 +176,10 @@ export default function ComponentDemo() {
 
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">With Progress:</p>
-            <LoadingState message="Uploading files..." progress={loadingProgress} />
+            <LoadingState
+              message="Uploading files..."
+              progress={loadingProgress}
+            />
             <input
               type="range"
               min="0"
@@ -191,7 +218,9 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">SkeletonText (3 lines):</p>
+            <p className="text-sm text-muted-foreground">
+              SkeletonText (3 lines):
+            </p>
             <SkeletonText lines={3} />
           </div>
 
@@ -212,7 +241,9 @@ export default function ComponentDemo() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">With Refresh Button:</p>
+            <p className="text-sm text-muted-foreground">
+              With Refresh Button:
+            </p>
             <LastUpdated
               timestamp={lastUpdate}
               onRefresh={handleRefresh}
@@ -226,8 +257,13 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Without Refresh Button:</p>
-            <LastUpdated timestamp={Date.now() - 60000} showRefreshButton={false} />
+            <p className="text-sm text-muted-foreground">
+              Without Refresh Button:
+            </p>
+            <LastUpdated
+              timestamp={Date.now() - 60000}
+              showRefreshButton={false}
+            />
           </div>
 
           <div className="space-y-2">
@@ -256,7 +292,9 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Preset: EmptyDocuments</p>
+            <p className="text-sm text-muted-foreground">
+              Preset: EmptyDocuments
+            </p>
             <div className="border rounded-lg">
               <EmptyDocuments onUpload={() => toast('Upload clicked!')} />
             </div>
@@ -270,9 +308,14 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Preset: EmptySearchResults</p>
+            <p className="text-sm text-muted-foreground">
+              Preset: EmptySearchResults
+            </p>
             <div className="border rounded-lg">
-              <EmptySearchResults query="test query" onClear={() => toast('Search cleared!')} />
+              <EmptySearchResults
+                query="test query"
+                onClear={() => toast('Search cleared!')}
+              />
             </div>
           </div>
         </CardContent>
@@ -292,7 +335,9 @@ export default function ComponentDemo() {
             to trigger a toast notification.
           </p>
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">formatShortcut examples:</p>
+            <p className="text-sm text-muted-foreground">
+              formatShortcut examples:
+            </p>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div>
                 <code className="bg-muted px-1.5 py-0.5 rounded">
@@ -307,7 +352,9 @@ export default function ComponentDemo() {
                 <span className="ml-2 text-muted-foreground">Save All</span>
               </div>
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">{formatShortcut('Escape')}</code>
+                <code className="bg-muted px-1.5 py-0.5 rounded">
+                  {formatShortcut('Escape')}
+                </code>
                 <span className="ml-2 text-muted-foreground">Close</span>
               </div>
               <div>
@@ -330,19 +377,27 @@ export default function ComponentDemo() {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-muted-foreground">breakpoint:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">{breakpoint}</code>
+              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
+                {breakpoint}
+              </code>
             </div>
             <div>
               <span className="text-muted-foreground">isMobile:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">{String(isMobile)}</code>
+              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
+                {String(isMobile)}
+              </code>
             </div>
             <div>
               <span className="text-muted-foreground">isTablet:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">{String(isTablet)}</code>
+              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
+                {String(isTablet)}
+              </code>
             </div>
             <div>
               <span className="text-muted-foreground">isDesktop:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">{String(isDesktop)}</code>
+              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
+                {String(isDesktop)}
+              </code>
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-4">

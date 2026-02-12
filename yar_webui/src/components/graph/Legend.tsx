@@ -19,11 +19,15 @@ const Legend: React.FC<LegendProps> = ({ className }) => {
   return (
     <Card className={`p-2 max-w-xs ${className}`}>
       {/* Shapes section */}
-      <h3 className="text-sm font-medium mb-2">{t('graphPanel.legend.shapes')}</h3>
+      <h3 className="text-sm font-medium mb-2">
+        {t('graphPanel.legend.shapes')}
+      </h3>
       <div className="flex flex-col gap-1 mb-3">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded-full border border-slate-400 bg-sky-400" />
-          <span className="text-xs">{t('graphPanel.legend.connectedNode')}</span>
+          <span className="text-xs">
+            {t('graphPanel.legend.connectedNode')}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded-full border-[3px] border-gray-700 bg-sky-400" />
@@ -32,14 +36,22 @@ const Legend: React.FC<LegendProps> = ({ className }) => {
       </div>
 
       {/* Colors section */}
-      <h3 className="text-sm font-medium mb-2">{t('graphPanel.legend.colors')}</h3>
+      <h3 className="text-sm font-medium mb-2">
+        {t('graphPanel.legend.colors')}
+      </h3>
       <ScrollArea className="max-h-64">
         <div className="flex flex-col gap-1">
           {Array.from(typeColorMap.entries()).map(([type, color]) => (
             <div key={type} className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: color }} />
+              <div
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: color }}
+              />
               <span className="text-xs truncate" title={type}>
-                {t(`graphPanel.nodeTypes.${type.toLowerCase().replace(/\s+/g, '')}`, type)}
+                {t(
+                  `graphPanel.nodeTypes.${type.toLowerCase().replace(/\s+/g, '')}`,
+                  type,
+                )}
               </span>
             </div>
           ))}

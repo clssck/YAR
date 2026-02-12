@@ -18,11 +18,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client as S3ClientType
 
-import pipmaster as pm
-
-if not pm.is_installed('aioboto3'):
-    pm.install('aioboto3')
-
 import aioboto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
@@ -35,6 +30,12 @@ from tenacity import (
 )
 
 from yar.utils import logger
+from yar.validators import (
+    validate_doc_id,
+    validate_s3_key,
+    validate_s3_prefix,
+    validate_workspace_name,
+)
 
 # Constants with environment variable support
 S3_ENDPOINT_URL = os.getenv('S3_ENDPOINT_URL', '')
@@ -199,18 +200,23 @@ class S3Client:
 
     def _make_staging_key(self, workspace: str, doc_id: str, filename: str) -> str:
         """Generate S3 key for staging area."""
+        workspace = validate_workspace_name(workspace)
+        doc_id = validate_doc_id(doc_id)
         safe_filename = filename.replace('/', '_').replace('\\', '_')
-        return f'staging/{workspace}/{doc_id}/{safe_filename}'
+        return validate_s3_key(f'staging/{workspace}/{doc_id}/{safe_filename}')
 
     def _make_archive_key(self, workspace: str, doc_id: str, filename: str) -> str:
         """Generate S3 key for document storage."""
+        workspace = validate_workspace_name(workspace)
+        doc_id = validate_doc_id(doc_id)
         safe_filename = filename.replace('/', '_').replace('\\', '_')
-        return f'{workspace}/{doc_id}/{safe_filename}'
+        return validate_s3_key(f'{workspace}/{doc_id}/{safe_filename}')
 
     def _staging_to_archive_key(self, staging_key: str) -> str:
         """Convert staging key to archive key."""
+        staging_key = validate_s3_key(staging_key)
         if staging_key.startswith('staging/'):
-            return 'archive/' + staging_key[8:]
+            return validate_s3_key('archive/' + staging_key[8:])
         return staging_key
 
     @s3_retry
@@ -273,6 +279,8 @@ class S3Client:
         Returns:
             Tuple of (content_bytes, metadata_dict)
         """
+        s3_key = validate_s3_key(s3_key)
+
         async with self._get_client() as client:
             response = await client.get_object(
                 Bucket=self.config.bucket_name,
@@ -295,6 +303,10 @@ class S3Client:
         Returns:
             New S3 key in archive/
         """
+        staging_key = validate_s3_key(staging_key)
+        if not staging_key.startswith('staging/'):
+            raise ValueError('staging_key must start with "staging/"')
+
         archive_key = self._staging_to_archive_key(staging_key)
 
         async with self._get_client() as client:
@@ -326,6 +338,7 @@ class S3Client:
     @s3_retry
     async def delete_object(self, s3_key: str):
         """Delete an object."""
+        s3_key = validate_s3_key(s3_key)
         async with self._get_client() as client:
             await client.delete_object(
                 Bucket=self.config.bucket_name,
@@ -341,7 +354,8 @@ class S3Client:
         Returns:
             List of dicts with key, size, last_modified
         """
-        prefix = f'staging/{workspace}/'
+        workspace = validate_workspace_name(workspace)
+        prefix = validate_s3_prefix(f'staging/{workspace}/', allow_empty=False)
         objects = []
 
         async with self._get_client() as client:
@@ -370,6 +384,7 @@ class S3Client:
         Returns:
             Presigned URL string
         """
+        s3_key = validate_s3_key(s3_key)
         expiry = expiry or self.config.presigned_url_expiry
 
         async with self._get_client() as client:
@@ -384,6 +399,7 @@ class S3Client:
     @s3_retry
     async def object_exists(self, s3_key: str) -> bool:
         """Check if an object exists."""
+        s3_key = validate_s3_key(s3_key)
         async with self._get_client() as client:
             try:
                 await client.head_object(
@@ -398,6 +414,7 @@ class S3Client:
 
     def get_s3_url(self, s3_key: str) -> str:
         """Get the S3 URL for an object (not presigned, for reference)."""
+        s3_key = validate_s3_key(s3_key)
         return f's3://{self.config.bucket_name}/{s3_key}'
 
     @s3_retry
@@ -419,6 +436,7 @@ class S3Client:
                 - folders: List of common prefixes (virtual folders)
                 - objects: List of dicts with key, size, last_modified, content_type
         """
+        prefix = validate_s3_prefix(prefix, allow_empty=True)
         folders: list[str] = []
         objects: list[dict[str, Any]] = []
 
@@ -477,6 +495,8 @@ class S3Client:
         Returns:
             The S3 key where the object was uploaded
         """
+        key = validate_s3_key(key)
+
         async with self._get_client() as client:
             await client.put_object(
                 Bucket=self.config.bucket_name,

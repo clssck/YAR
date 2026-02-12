@@ -53,7 +53,7 @@ const LoginPage = () => {
             status.core_version,
             status.api_version,
             status.webui_title || null,
-            status.webui_description || null
+            status.webui_description || null,
           )
           if (status.message) {
             toast.info(status.message)
@@ -118,7 +118,7 @@ const LoginPage = () => {
         response.core_version,
         response.api_version,
         response.webui_title || null,
-        response.webui_description || null
+        response.webui_description || null,
       )
 
       // Set session flag for version check
@@ -130,7 +130,10 @@ const LoginPage = () => {
         // Show authentication disabled notification
         toast.info(
           response.message ||
-            t('login.authDisabled', 'Authentication is disabled. Using guest access.')
+            t(
+              'login.authDisabled',
+              'Authentication is disabled. Using guest access.',
+            ),
         )
       } else {
         toast.success(t('login.successMessage'))
@@ -165,14 +168,19 @@ const LoginPage = () => {
             </div>
             <div className="text-center space-y-2">
               <h1 className="text-3xl font-bold tracking-tight">YAR</h1>
-              <p className="text-muted-foreground text-sm">{t('login.description')}</p>
+              <p className="text-muted-foreground text-sm">
+                {t('login.description')}
+              </p>
             </div>
           </div>
         </CardHeader>
         <CardContent className="px-8 pb-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="flex items-center gap-4">
-              <label htmlFor="username-input" className="text-sm font-medium w-16 shrink-0">
+              <label
+                htmlFor="username-input"
+                className="text-sm font-medium w-16 shrink-0"
+              >
                 {t('login.username')}
               </label>
               <Input
@@ -185,7 +193,10 @@ const LoginPage = () => {
               />
             </div>
             <div className="flex items-center gap-4">
-              <label htmlFor="password-input" className="text-sm font-medium w-16 shrink-0">
+              <label
+                htmlFor="password-input"
+                className="text-sm font-medium w-16 shrink-0"
+              >
                 {t('login.password')}
               </label>
               <Input

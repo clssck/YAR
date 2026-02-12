@@ -33,7 +33,9 @@ interface ClearDocumentsDialogProps {
   onDocumentsCleared?: () => Promise<void>
 }
 
-export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocumentsDialogProps) {
+export default function ClearDocumentsDialog({
+  onDocumentsCleared,
+}: ClearDocumentsDialogProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [confirmText, setConfirmText] = useState('')
@@ -88,7 +90,9 @@ export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocume
       const result = await clearDocuments()
 
       if (result.status !== 'success') {
-        toast.error(t('documentPanel.clearDocuments.failed', { message: result.message }))
+        toast.error(
+          t('documentPanel.clearDocuments.failed', { message: result.message }),
+        )
         setConfirmText('')
         return
       }
@@ -101,7 +105,9 @@ export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocume
           toast.success(t('documentPanel.clearDocuments.cacheCleared'))
         } catch (cacheErr) {
           toast.error(
-            t('documentPanel.clearDocuments.cacheClearFailed', { error: errorMessage(cacheErr) })
+            t('documentPanel.clearDocuments.cacheClearFailed', {
+              error: errorMessage(cacheErr),
+            }),
           )
         }
       }
@@ -114,7 +120,9 @@ export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocume
       // Close dialog after all operations succeed
       setOpen(false)
     } catch (err) {
-      toast.error(t('documentPanel.clearDocuments.error', { error: errorMessage(err) }))
+      toast.error(
+        t('documentPanel.clearDocuments.error', { error: errorMessage(err) }),
+      )
       setConfirmText('')
     } finally {
       // Clear timeout timer
@@ -138,7 +146,10 @@ export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocume
           <EraserIcon /> {t('documentPanel.clearDocuments.button')}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl" onCloseAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent
+        className="sm:max-w-xl"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-red-500 dark:text-red-400 font-bold">
             <AlertTriangleIcon className="h-5 w-5" />
@@ -162,7 +173,9 @@ export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocume
             <Input
               id="confirm-text"
               value={confirmText}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmText(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setConfirmText(e.target.value)
+              }
               placeholder={t('documentPanel.clearDocuments.confirmPlaceholder')}
               className="w-full"
               disabled={isClearing}
@@ -178,14 +191,21 @@ export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocume
               }
               disabled={isClearing}
             />
-            <Label htmlFor="clear-cache" className="text-sm font-medium cursor-pointer">
+            <Label
+              htmlFor="clear-cache"
+              className="text-sm font-medium cursor-pointer"
+            >
               {t('documentPanel.clearDocuments.clearCache')}
             </Label>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={isClearing}>
+          <Button
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={isClearing}
+          >
             {t('common.cancel')}
           </Button>
           <Button

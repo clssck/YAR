@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import time
 from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -81,6 +83,70 @@ from yar.utils import (
 # allows to use different .env file for each yar instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / '.env', override=False)
+
+
+def _resolve_max_file_paths(global_config: dict[str, Any]) -> int:
+    """Resolve max_file_paths with safe int parsing and non-negative clamp."""
+
+    raw_max_paths = global_config.get('max_file_paths', DEFAULT_MAX_FILE_PATHS)
+    try:
+        max_file_paths = int(raw_max_paths)
+    except (TypeError, ValueError):
+        logger.warning(
+            'Invalid max_file_paths=%r; falling back to default=%d',
+            raw_max_paths,
+            DEFAULT_MAX_FILE_PATHS,
+        )
+        max_file_paths = DEFAULT_MAX_FILE_PATHS
+    return max(0, max_file_paths)
+
+
+def _truncate_extract_input_content(content: str, global_config: dict[str, Any], chunk_key: str) -> str:
+    """Apply extraction input token guard to avoid oversized extraction prompts."""
+
+    raw_limit = global_config.get('max_extract_input_tokens', os.getenv('MAX_EXTRACT_INPUT_TOKENS', '20480'))
+    try:
+        max_extract_input_tokens = int(raw_limit)
+    except (TypeError, ValueError):
+        logger.warning(
+            'Invalid max_extract_input_tokens=%r; falling back to 20480',
+            raw_limit,
+        )
+        max_extract_input_tokens = 20480
+
+    if max_extract_input_tokens <= 0 or not content:
+        return content
+
+    tokenizer = global_config.get('tokenizer')
+    if tokenizer is None or not hasattr(tokenizer, 'encode'):
+        return content
+
+    try:
+        token_ids = tokenizer.encode(content)
+    except Exception as exc:
+        logger.warning(f'{chunk_key}: failed to tokenize extraction input for truncation: {exc}')
+        return content
+
+    if len(token_ids) <= max_extract_input_tokens:
+        return content
+
+    if hasattr(tokenizer, 'decode'):
+        try:
+            truncated_content = tokenizer.decode(token_ids[:max_extract_input_tokens])
+        except Exception as exc:
+            logger.warning(f'{chunk_key}: tokenizer decode failed for extraction truncation: {exc}')
+            ratio = max_extract_input_tokens / len(token_ids)
+            truncated_chars = max(1, int(len(content) * ratio))
+            truncated_content = content[:truncated_chars]
+    else:
+        ratio = max_extract_input_tokens / len(token_ids)
+        truncated_chars = max(1, int(len(content) * ratio))
+        truncated_content = content[:truncated_chars]
+
+    logger.info(
+        f'{chunk_key}: extraction input truncated from {len(token_ids)} to {max_extract_input_tokens} tokens'
+    )
+    return truncated_content
 
 
 def _truncate_entity_identifier(identifier: str, limit: int, chunk_key: str, identifier_role: str) -> str:
@@ -1377,7 +1443,7 @@ async def _rebuild_single_entity(
                 seen_paths.add(file_path)
 
     # Apply MAX_FILE_PATHS limit
-    max_file_paths = int(global_config.get('max_file_paths', 0))
+    max_file_paths = _resolve_max_file_paths(global_config)
     file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
     limit_method = str(global_config.get('source_ids_limit_method', ''))
 
@@ -1519,7 +1585,7 @@ async def _rebuild_single_relationship(
                 seen_paths.add(file_path)
 
     # Apply count limit
-    max_file_paths = int(global_config.get('max_file_paths', 0))
+    max_file_paths = _resolve_max_file_paths(global_config)
     file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
     limit_method = str(global_config.get('source_ids_limit_method', ''))
 
@@ -1829,7 +1895,7 @@ async def _merge_nodes_then_upsert(
     seen_paths = set()
     has_placeholder = False  # Indicating file_path has been truncated before
 
-    max_file_paths = global_config.get('max_file_paths', DEFAULT_MAX_FILE_PATHS)
+    max_file_paths = _resolve_max_file_paths(global_config)
     file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
 
     # Collect from already_file_paths, excluding placeholder
@@ -1849,7 +1915,7 @@ async def _merge_nodes_then_upsert(
             seen_paths.add(file_path_item)
 
     # Apply count limit
-    if len(file_paths_list) > max_file_paths:
+    if max_file_paths > 0 and len(file_paths_list) > max_file_paths:
         limit_method = global_config.get('source_ids_limit_method', SOURCE_IDS_LIMIT_METHOD_KEEP)
         file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
         # Add + sign to indicate actual file count is higher
@@ -2108,7 +2174,7 @@ async def _merge_edges_then_upsert(
     seen_paths = set()
     has_placeholder = False  # Track if already_file_paths contains placeholder
 
-    max_file_paths = global_config.get('max_file_paths', DEFAULT_MAX_FILE_PATHS)
+    max_file_paths = _resolve_max_file_paths(global_config)
     file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
 
     # Collect from already_file_paths, excluding placeholder
@@ -2129,8 +2195,6 @@ async def _merge_edges_then_upsert(
             seen_paths.add(file_path_item)
 
     # Apply count limit
-    max_file_paths = int(global_config.get('max_file_paths', 0))
-
     if max_file_paths > 0 and len(file_paths_list) > max_file_paths:
         limit_method = global_config.get('source_ids_limit_method', SOURCE_IDS_LIMIT_METHOD_KEEP)
         file_path_placeholder = global_config.get('file_path_more_placeholder', DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
@@ -2952,7 +3016,7 @@ async def extract_entities(
         nonlocal processed_chunks
         chunk_key = chunk_key_dp[0]
         chunk_dp = chunk_key_dp[1]
-        content = chunk_dp.get('content', '')
+        content = _truncate_extract_input_content(chunk_dp.get('content', ''), global_config, chunk_key)
         # Get file path from chunk data or use default
         file_path = chunk_dp.get('file_path', 'unknown_source')
 
@@ -3029,18 +3093,18 @@ async def extract_entities(
                     # New entity from gleaning stage
                     maybe_nodes[entity_name] = list(glean_entities)
 
-            for edge_key, edge_list in glean_edges.items():
+            for edge_key, glean_edge_list in glean_edges.items():
                 if edge_key in maybe_edges:
                     # Compare description lengths and keep the better one
                     original_desc_len = len(maybe_edges[edge_key][0].get('description', '') or '')
-                    glean_desc_len = len(edge_list[0].get('description', '') or '')
+                    glean_desc_len = len(glean_edge_list[0].get('description', '') or '')
 
                     if glean_desc_len > original_desc_len:
-                        maybe_edges[edge_key] = list(edge_list)
+                        maybe_edges[edge_key] = list(glean_edge_list)
                     # Otherwise keep original version
                 else:
                     # New edge from gleaning stage
-                    maybe_edges[edge_key] = list(edge_list)
+                    maybe_edges[edge_key] = list(glean_edge_list)
 
         # Batch update chunk's llm_cache_list with all collected cache keys
         if cache_keys_collector and text_chunks_storage:
@@ -3124,6 +3188,118 @@ async def extract_entities(
     return chunk_results
 
 
+_LOCAL_GENERIC_KEYWORD_TOKENS = {
+    'analysis',
+    'approach',
+    'background',
+    'company',
+    'companies',
+    'concept',
+    'concepts',
+    'development',
+    'general',
+    'industry',
+    'information',
+    'market',
+    'method',
+    'methods',
+    'overview',
+    'planning',
+    'process',
+    'profile',
+    'research',
+    'strategy',
+    'summary',
+    'technical',
+    'technology',
+    'technologies',
+    'topic',
+    'topics',
+    'work',
+    'working',
+}
+
+
+def _is_generic_local_keyword(term: str) -> bool:
+    """Return True when a keyword is too generic for local entity retrieval."""
+    tokens = re.findall(r'[a-z0-9]+', term.casefold())
+    informative_tokens = [token for token in tokens if len(token) >= 3]
+    if not informative_tokens:
+        return True
+    return all(token in _LOCAL_GENERIC_KEYWORD_TOKENS for token in informative_tokens)
+
+
+def _enrich_local_keywords(
+    hl_keywords: list[str],
+    ll_keywords: list[str],
+    mode: str,
+    query: str = '',
+    user_supplied_ll: bool = False,
+) -> list[str]:
+    """Keep local-mode keywords focused to avoid cross-domain context bleed.
+
+    Behavior:
+    - Preserve explicit user-provided low-level keywords (deduplicated/trimmed).
+    - For auto-generated low-level keywords, keep only focused non-generic terms.
+    - If low-level keywords are empty, promote one focused high-level keyword.
+    - If all high-level keywords are generic, fall back to the original query text.
+    """
+    normalized_ll: set[str] = set()
+    cleaned_ll: list[str] = []
+    for kw in ll_keywords:
+        clean_kw = kw.strip()
+        if not clean_kw:
+            continue
+        lowered = clean_kw.casefold()
+        if lowered in normalized_ll:
+            continue
+        normalized_ll.add(lowered)
+        cleaned_ll.append(clean_kw)
+
+    if mode != 'local':
+        return cleaned_ll
+
+    if cleaned_ll:
+        if user_supplied_ll:
+            return cleaned_ll
+
+        focused_ll = [kw for kw in cleaned_ll if not _is_generic_local_keyword(kw)]
+        if focused_ll:
+            # Keep the most specific low-level signal to minimize cross-domain bleed.
+            return [focused_ll[0]]
+
+    seen_hl: set[str] = set()
+    focused_hl: list[str] = []
+    for kw in hl_keywords:
+        clean_kw = kw.strip()
+        if not clean_kw:
+            continue
+        lowered = clean_kw.casefold()
+        if lowered in seen_hl:
+            continue
+        seen_hl.add(lowered)
+        if _is_generic_local_keyword(clean_kw):
+            continue
+        focused_hl.append(clean_kw)
+        break
+
+    if focused_hl:
+        logger.info('[kg_query] Promoted focused high-level keyword to low-level for local mode')
+        return focused_hl
+
+    fallback_query = query.strip()
+    if fallback_query:
+        logger.info('[kg_query] Falling back to original query for local low-level keyword')
+        return [fallback_query]
+
+    # Final fallback when query text is unavailable.
+    for kw in hl_keywords:
+        clean_kw = kw.strip()
+        if clean_kw:
+            return [clean_kw]
+    return []
+
+
 async def kg_query(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -3176,6 +3352,13 @@ async def kg_query(
         use_model_func = partial(use_model_func, _priority=5)
 
     hl_keywords, ll_keywords = await get_keywords_from_query(query, query_param, global_config, hashing_kv)
+    ll_keywords = _enrich_local_keywords(
+        hl_keywords,
+        ll_keywords,
+        query_param.mode,
+        query=query,
+        user_supplied_ll=bool(query_param.ll_keywords),
+    )
 
     logger.debug(f'High-level keywords: {hl_keywords}')
     logger.debug(f'Low-level  keywords: {ll_keywords}')
@@ -4302,6 +4485,55 @@ async def _build_query_context(
     return QueryContextResult(context=context, raw_data=raw_data)
 
 
+def _split_keyword_terms(query: str) -> list[str]:
+    """Split comma-delimited keyword strings into unique search terms."""
+    terms = split_string_by_multi_markers(query, [',', ';', '\n'])
+    cleaned_terms: list[str] = []
+    seen: set[str] = set()
+
+    for term in terms:
+        clean_term = term.strip()
+        if not clean_term:
+            continue
+        lowered = clean_term.casefold()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        cleaned_terms.append(clean_term)
+
+    if cleaned_terms:
+        return cleaned_terms
+
+    fallback_term = query.strip()
+    return [fallback_term] if fallback_term else []
+
+
+async def _query_entity_candidates(
+    term: str,
+    entities_vdb: BaseVectorStorage,
+    query_param: QueryParam,
+) -> list[dict[str, Any]]:
+    """Query entity candidates for a single term.
+
+    Uses hybrid entity search when supported by the storage backend (vector + trigram),
+    otherwise falls back to vector-only search.
+    """
+    hybrid_search = getattr(entities_vdb, 'hybrid_entity_search', None)
+    if callable(hybrid_search):
+        try:
+            hybrid_results = await hybrid_search(term, top_k=query_param.top_k)
+            if hybrid_results:
+                return hybrid_results
+        except Exception as e:
+            logger.debug(f'Hybrid entity search failed for "{term}": {e}')
+
+    try:
+        return await entities_vdb.query(term, top_k=query_param.top_k)
+    except Exception as e:
+        logger.error(f'Entity vector search failed for term "{term[:50]}...": {e}')
+        return []
+
+
 async def _get_node_data(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -4311,11 +4543,39 @@ async def _get_node_data(
     # get similar entities
     logger.info(f'Query nodes: {query} (top_k:{query_param.top_k}, cosine:{entities_vdb.cosine_better_than_threshold})')
 
-    try:
-        results = await entities_vdb.query(query, top_k=query_param.top_k)
-    except Exception as e:
-        logger.error(f'Entity vector search failed for query "{query[:50]}...": {e}')
+    search_terms = _split_keyword_terms(query)
+    if not search_terms:
         return [], []
+
+    results: list[dict[str, Any]] = []
+    seen_entities: set[str] = set()
+
+    # Query each term independently to preserve specific entity matches
+    # when keywords are comma-joined (e.g., "IBM, Google, Microsoft, IonQ").
+    for term in search_terms:
+        term_results = await _query_entity_candidates(term, entities_vdb, query_param)
+        for result in term_results:
+            entity_name = result.get('entity_name')
+            if not entity_name or entity_name in seen_entities:
+                continue
+            seen_entities.add(entity_name)
+            results.append(result)
+            if len(results) >= query_param.top_k:
+                break
+        if len(results) >= query_param.top_k:
+            break
+
+    # If keyword-split search misses, retry with the full query string once.
+    if not results and len(search_terms) > 1:
+        full_query_results = await _query_entity_candidates(query, entities_vdb, query_param)
+        for result in full_query_results:
+            entity_name = result.get('entity_name')
+            if not entity_name or entity_name in seen_entities:
+                continue
+            seen_entities.add(entity_name)
+            results.append(result)
+            if len(results) >= query_param.top_k:
+                break
 
     if not len(results):
         return [], []

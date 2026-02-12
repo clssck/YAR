@@ -329,6 +329,9 @@ def parse_args() -> argparse.Namespace:
     args.entity_resolution_min_confidence = get_env_value('ENTITY_RESOLUTION_MIN_CONFIDENCE', 0.85, float)
     args.entity_resolution_auto_apply = get_env_value('ENTITY_RESOLUTION_AUTO_APPLY', True, bool)
 
+    # File upload size limit (in MB, 0 = disabled)
+    args.max_upload_size_mb = get_env_value('MAX_UPLOAD_SIZE_MB', 50, int, special_none=True)
+
     return args
 
 

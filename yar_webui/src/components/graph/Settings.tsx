@@ -5,7 +5,11 @@ import Button from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
 import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import Input from '@/components/ui/Input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/Popover'
 import useRandomGraph from '@/hooks/useRandomGraph'
 import { controlButtonVariant } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
@@ -84,7 +88,7 @@ const LabeledNumberInput = ({
         setCurrentValue(newValue)
       }
     },
-    [currentValue, min, max]
+    [currentValue, min, max],
   )
 
   const onBlur = useCallback(() => {
@@ -152,14 +156,16 @@ export default function Settings() {
   const showNodeLabel = useSettingsStore.use.showNodeLabel()
   const enableEdgeEvents = useSettingsStore.use.enableEdgeEvents()
   const enableNodeDrag = useSettingsStore.use.enableNodeDrag()
-  const enableHideUnselectedEdges = useSettingsStore.use.enableHideUnselectedEdges()
+  const enableHideUnselectedEdges =
+    useSettingsStore.use.enableHideUnselectedEdges()
   const showEdgeLabel = useSettingsStore.use.showEdgeLabel()
   const minEdgeSize = useSettingsStore.use.minEdgeSize()
   const maxEdgeSize = useSettingsStore.use.maxEdgeSize()
   const graphQueryMaxDepth = useSettingsStore.use.graphQueryMaxDepth()
   const graphMaxNodes = useSettingsStore.use.graphMaxNodes()
   const backendMaxGraphNodes = useSettingsStore.use.backendMaxGraphNodes()
-  const graphLayoutMaxIterations = useSettingsStore.use.graphLayoutMaxIterations()
+  const graphLayoutMaxIterations =
+    useSettingsStore.use.graphLayoutMaxIterations()
   const graphMinDegree = useSettingsStore.use.graphMinDegree()
   const graphIncludeOrphans = useSettingsStore.use.graphIncludeOrphans()
   const graphExpandDepth = useSettingsStore.use.graphExpandDepth()
@@ -170,47 +176,65 @@ export default function Settings() {
   const { randomGraph } = useRandomGraph()
 
   const setEnableNodeDrag = useCallback(
-    () => useSettingsStore.setState((pre) => ({ enableNodeDrag: !pre.enableNodeDrag })),
-    []
+    () =>
+      useSettingsStore.setState((pre) => ({
+        enableNodeDrag: !pre.enableNodeDrag,
+      })),
+    [],
   )
   const setEnableEdgeEvents = useCallback(
-    () => useSettingsStore.setState((pre) => ({ enableEdgeEvents: !pre.enableEdgeEvents })),
-    []
+    () =>
+      useSettingsStore.setState((pre) => ({
+        enableEdgeEvents: !pre.enableEdgeEvents,
+      })),
+    [],
   )
   const setEnableHideUnselectedEdges = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
         enableHideUnselectedEdges: !pre.enableHideUnselectedEdges,
       })),
-    []
+    [],
   )
   const setShowEdgeLabel = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
         showEdgeLabel: !pre.showEdgeLabel,
       })),
-    []
+    [],
   )
 
   //
   const setShowPropertyPanel = useCallback(
-    () => useSettingsStore.setState((pre) => ({ showPropertyPanel: !pre.showPropertyPanel })),
-    []
+    () =>
+      useSettingsStore.setState((pre) => ({
+        showPropertyPanel: !pre.showPropertyPanel,
+      })),
+    [],
   )
 
   const setShowNodeSearchBar = useCallback(
-    () => useSettingsStore.setState((pre) => ({ showNodeSearchBar: !pre.showNodeSearchBar })),
-    []
+    () =>
+      useSettingsStore.setState((pre) => ({
+        showNodeSearchBar: !pre.showNodeSearchBar,
+      })),
+    [],
   )
 
   const setShowNodeLabel = useCallback(
-    () => useSettingsStore.setState((pre) => ({ showNodeLabel: !pre.showNodeLabel })),
-    []
+    () =>
+      useSettingsStore.setState((pre) => ({
+        showNodeLabel: !pre.showNodeLabel,
+      })),
+    [],
   )
 
   const setEnableHealthCheck = useCallback(
-    () => useSettingsStore.setState((pre) => ({ enableHealthCheck: !pre.enableHealthCheck })),
-    []
+    () =>
+      useSettingsStore.setState((pre) => ({
+        enableHealthCheck: !pre.enableHealthCheck,
+      })),
+    [],
   )
 
   const setGraphQueryMaxDepth = useCallback((depth: number) => {
@@ -229,7 +253,7 @@ export default function Settings() {
       if (nodes < 1 || nodes > maxLimit) return
       useSettingsStore.getState().setGraphMaxNodes(nodes, true)
     },
-    [backendMaxGraphNodes]
+    [backendMaxGraphNodes],
   )
 
   const setGraphLayoutMaxIterations = useCallback((iterations: number) => {
@@ -243,7 +267,9 @@ export default function Settings() {
   }, [])
 
   const setGraphIncludeOrphans = useCallback(() => {
-    useSettingsStore.getState().setGraphIncludeOrphans(!graphIncludeOrphans, true)
+    useSettingsStore
+      .getState()
+      .setGraphIncludeOrphans(!graphIncludeOrphans, true)
   }, [graphIncludeOrphans])
 
   const setGraphExpandDepth = useCallback((depth: number) => {
@@ -311,7 +337,10 @@ export default function Settings() {
 
           {/* Interaction Section */}
           <CollapsibleSection
-            title={t('graphPanel.sideBar.settings.sections.interaction', 'Interaction')}
+            title={t(
+              'graphPanel.sideBar.settings.sections.interaction',
+              'Interaction',
+            )}
             defaultOpen={false}
             className="border-b-0"
             contentClassName="space-y-2"
@@ -335,7 +364,10 @@ export default function Settings() {
 
           {/* Edge Sizing Section */}
           <CollapsibleSection
-            title={t('graphPanel.sideBar.settings.sections.edges', 'Edge Sizing')}
+            title={t(
+              'graphPanel.sideBar.settings.sections.edges',
+              'Edge Sizing',
+            )}
             defaultOpen={false}
             className="border-b-0"
             contentClassName="space-y-2"
@@ -354,7 +386,11 @@ export default function Settings() {
                   value={minEdgeSize}
                   onChange={(e) => {
                     const newValue = Number(e.target.value)
-                    if (!Number.isNaN(newValue) && newValue >= 1 && newValue <= maxEdgeSize) {
+                    if (
+                      !Number.isNaN(newValue) &&
+                      newValue >= 1 &&
+                      newValue <= maxEdgeSize
+                    ) {
                       useSettingsStore.setState({ minEdgeSize: newValue })
                     }
                   }}
@@ -387,7 +423,12 @@ export default function Settings() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
-                    onClick={() => useSettingsStore.setState({ minEdgeSize: 1, maxEdgeSize: 5 })}
+                    onClick={() =>
+                      useSettingsStore.setState({
+                        minEdgeSize: 1,
+                        maxEdgeSize: 5,
+                      })
+                    }
                     type="button"
                     title={t('graphPanel.sideBar.settings.resetToDefault')}
                   >
@@ -432,7 +473,10 @@ export default function Settings() {
 
           {/* Filtering Section */}
           <CollapsibleSection
-            title={t('graphPanel.sideBar.settings.sections.filtering', 'Filtering')}
+            title={t(
+              'graphPanel.sideBar.settings.sections.filtering',
+              'Filtering',
+            )}
             defaultOpen={false}
             className="border-b-0"
             contentClassName="space-y-3"
@@ -494,7 +538,12 @@ export default function Settings() {
 
           {/* Close button */}
           <div className="pt-2 border-t border-border/50">
-            <Button onClick={saveSettings} variant="outline" size="sm" className="w-full">
+            <Button
+              onClick={saveSettings}
+              variant="outline"
+              size="sm"
+              className="w-full"
+            >
               {t('graphPanel.sideBar.settings.save')}
             </Button>
           </div>

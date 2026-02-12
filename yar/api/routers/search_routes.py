@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from yar.api.utils_api import get_combined_auth_dependency, handle_api_error
 from yar.kg.postgres_impl import PostgreSQLDB
+from yar.validators import validate_workspace_name
 
 
 class SearchResult(BaseModel):
@@ -126,6 +127,7 @@ def create_search_routes(
         _: Annotated[bool, Depends(optional_api_key)] = True,
     ) -> SearchResponse:
         """Perform BM25 full-text search on chunks."""
+        workspace = validate_workspace_name(workspace)
         db = get_db()
         results = await db.full_text_search(
             query=q,

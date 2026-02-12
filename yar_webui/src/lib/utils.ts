@@ -27,7 +27,7 @@ export function errorMessage(error: unknown) {
  */
 export function throttle<T extends (...args: never[]) => unknown>(
   fn: T,
-  delay: number
+  delay: number,
 ): (...args: Parameters<T>) => void {
   let lastCall = 0
   let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -59,7 +59,9 @@ type WithSelectors<S> = S extends { getState: () => infer T }
   ? S & { use: { [K in keyof T]: () => T[K] } }
   : never
 
-export const createSelectors = <S extends UseBoundStore<StoreApi<object>>>(_store: S) => {
+export const createSelectors = <S extends UseBoundStore<StoreApi<object>>>(
+  _store: S,
+) => {
   type State = ReturnType<S['getState']>
   const store = _store as WithSelectors<typeof _store>
   store.use = {} as { [K in keyof State]: () => State[K] }

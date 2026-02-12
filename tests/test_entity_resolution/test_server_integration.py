@@ -300,3 +300,50 @@ class TestConfigPropagation:
         assert reconstructed.enabled is True
         assert reconstructed.min_confidence == 0.9
         assert reconstructed.batch_size == 30
+
+
+class TestServerRuntimeRegressions:
+    """Regression tests for live issues found during API probing."""
+
+    def test_health_verbose_uses_safe_rerank_fallbacks(self):
+        """Health verbose path must not assume rerank args are always present."""
+        server_file = (
+            Path(__file__).parent.parent.parent
+            / 'yar'
+            / 'api'
+            / 'yar_server.py'
+        )
+        source = server_file.read_text()
+
+        assert "getattr(args, 'rerank_binding'" in source
+        assert "'RERANK_BINDING'" in source
+        assert "'rerank_binding_host'" in source
+
+    def test_validation_handler_json_encodes_request_errors(self):
+        """Validation handler must JSON-encode errors to avoid serialization 500s."""
+        server_file = (
+            Path(__file__).parent.parent.parent
+            / 'yar'
+            / 'api'
+            / 'yar_server.py'
+        )
+        source = server_file.read_text()
+
+        assert 'from fastapi.encoders import jsonable_encoder' in source
+        assert "jsonable_encoder(exc.errors())" in source
+
+    def test_text_payload_limit_paths_preserve_http_exceptions(self):
+        """Oversized text payloads should return 413, not be swallowed into 500."""
+        routes_file = (
+            Path(__file__).parent.parent.parent
+            / 'yar'
+            / 'api'
+            / 'routers'
+            / 'document_routes.py'
+        )
+        source = routes_file.read_text()
+
+        assert 'validate_text_payload_size([request.text], global_args.max_upload_size_mb)' in source
+        assert 'validate_text_payload_size(request.texts, global_args.max_upload_size_mb)' in source
+        # Two handlers (insert_text / insert_texts) should preserve raised HTTPException.
+        assert source.count('except HTTPException:') >= 2

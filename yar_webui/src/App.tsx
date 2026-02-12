@@ -78,7 +78,9 @@ function App() {
           if (result) {
             const healthStatus = useBackendState.getState().status
             if (healthStatus?.configuration) {
-              useSettingsStore.getState().setStorageConfig(healthStatus.configuration)
+              useSettingsStore
+                .getState()
+                .setStorageConfig(healthStatus.configuration)
             }
           }
         }
@@ -140,7 +142,7 @@ function App() {
             status.core_version,
             status.api_version,
             status.webui_title || null,
-            status.webui_description || null
+            status.webui_description || null,
           )
         } else if (
           token &&
@@ -150,7 +152,9 @@ function App() {
             status.webui_description)
         ) {
           // Otherwise use the old token (if it exists)
-          const isGuestMode = status.auth_mode === 'disabled' || useAuthStore.getState().isGuestMode
+          const isGuestMode =
+            status.auth_mode === 'disabled' ||
+            useAuthStore.getState().isGuestMode
           useAuthStore
             .getState()
             .login(
@@ -159,7 +163,7 @@ function App() {
               status.core_version,
               status.api_version,
               status.webui_title || null,
-              status.webui_description || null
+              status.webui_description || null,
             )
         }
 
@@ -188,14 +192,17 @@ function App() {
             | 'retrieval'
             | 'api'
             | 'table-explorer'
-            | 'storage'
+            | 'storage',
         ),
-    []
+    [],
   )
 
   useEffect(() => {
     if (message) {
-      if (message.includes(InvalidApiKeyError) || message.includes(RequireApiKeError)) {
+      if (
+        message.includes(InvalidApiKeyError) ||
+        message.includes(RequireApiKeError)
+      ) {
         setApiKeyAlertOpen(true)
       }
     }
@@ -212,7 +219,9 @@ function App() {
               <div className="min-w-[200px] w-auto flex items-center">
                 <a href={webuiPrefix} className="flex items-center gap-2">
                   <ZapIcon className="size-4 text-plum" aria-hidden="true" />
-                  <span className="font-bold md:inline-block">{SiteInfo.name}</span>
+                  <span className="font-bold md:inline-block">
+                    {SiteInfo.name}
+                  </span>
                 </a>
               </div>
 
@@ -251,7 +260,11 @@ function App() {
                   value="knowledge-graph"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.graph')} />}>
+                  <Suspense
+                    fallback={
+                      <TabLoadingSkeleton label={t('app.loading.graph')} />
+                    }
+                  >
                     <GraphViewer />
                   </Suspense>
                 </TabsContent>
@@ -265,7 +278,11 @@ function App() {
                   value="api"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.api')} />}>
+                  <Suspense
+                    fallback={
+                      <TabLoadingSkeleton label={t('app.loading.api')} />
+                    }
+                  >
                     <ApiSite />
                   </Suspense>
                 </TabsContent>
@@ -273,7 +290,11 @@ function App() {
                   value="table-explorer"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.tables')} />}>
+                  <Suspense
+                    fallback={
+                      <TabLoadingSkeleton label={t('app.loading.tables')} />
+                    }
+                  >
                     <TableExplorer />
                   </Suspense>
                 </TabsContent>
@@ -281,13 +302,20 @@ function App() {
                   value="storage"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.storage')} />}>
+                  <Suspense
+                    fallback={
+                      <TabLoadingSkeleton label={t('app.loading.storage')} />
+                    }
+                  >
                     <S3Browser />
                   </Suspense>
                 </TabsContent>
               </div>
             </Tabs>
-            <ApiKeyAlert open={apiKeyAlertOpen} onOpenChange={handleApiKeyAlertOpenChange} />
+            <ApiKeyAlert
+              open={apiKeyAlertOpen}
+              onOpenChange={handleApiKeyAlertOpenChange}
+            />
           </main>
         )}
       </TabVisibilityProvider>

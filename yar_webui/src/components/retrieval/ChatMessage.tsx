@@ -6,12 +6,21 @@ import {
   RefreshCwIcon,
 } from 'lucide-react'
 import mermaid from 'mermaid'
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  memo,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism'
-import rehypeRaw from 'rehype-raw'
+import {
+  oneDark,
+  oneLight,
+} from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import rehypeReact from 'rehype-react'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -34,6 +43,66 @@ interface KaTeXOptions {
 // Type for rehype-katex plugin - use unified Plugin type for dynamic import compatibility
 // The actual type from rehype-katex is complex and varies by version
 type RehypeKatexPlugin = import('unified').Plugin
+
+const BLOCKED_SVG_TAGS = new Set([
+  'script',
+  'foreignobject',
+  'iframe',
+  'object',
+  'embed',
+  'audio',
+  'video',
+])
+
+const isDangerousUrl = (value: string): boolean =>
+  /^javascript:/i.test(value.trim()) || /^data:text\/html/i.test(value.trim())
+
+function sanitizeMermaidSvg(svgContent: string): SVGElement {
+  const parser = new DOMParser()
+  const parsed = parser.parseFromString(svgContent, 'image/svg+xml')
+  const root = parsed.documentElement
+
+  if (!root || root.tagName.toLowerCase() !== 'svg') {
+    throw new Error('Invalid Mermaid SVG output')
+  }
+
+  const walker = parsed.createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
+  const elements: Element[] = []
+  let current = walker.currentNode as Element | null
+  if (current) {
+    elements.push(current)
+  }
+  while (walker.nextNode()) {
+    elements.push(walker.currentNode as Element)
+  }
+
+  for (const element of elements) {
+    const tagName = element.tagName.toLowerCase()
+    if (BLOCKED_SVG_TAGS.has(tagName)) {
+      element.remove()
+      continue
+    }
+
+    const attrs = Array.from(element.attributes)
+    for (const attr of attrs) {
+      const name = attr.name.toLowerCase()
+      const value = attr.value
+      if (name.startsWith('on')) {
+        element.removeAttribute(attr.name)
+        continue
+      }
+      if ((name === 'href' || name === 'xlink:href') && isDangerousUrl(value)) {
+        element.removeAttribute(attr.name)
+        continue
+      }
+      if (name === 'style' && /url\s*\(\s*javascript:/i.test(value)) {
+        element.removeAttribute(attr.name)
+      }
+    }
+  }
+
+  return root as unknown as SVGElement
+}
 
 // Props interface for code components in ReactMarkdown
 // Using ExtraProps pattern from react-markdown for compatibility
@@ -97,7 +166,9 @@ function TextWithCitations({
     const refIds = match[1].split(',').map((id) => id.trim())
 
     // Find matching marker data for confidence
-    const markerData = citationsMetadata.markers?.find((m) => m.marker === markerText)
+    const markerData = citationsMetadata.markers?.find(
+      (m) => m.marker === markerText,
+    )
     const confidence = markerData?.confidence ?? 0.5
 
     // Add the citation marker component
@@ -108,7 +179,7 @@ function TextWithCitations({
         referenceIds={refIds}
         confidence={confidence}
         sources={citationsMetadata.sources || []}
-      />
+      />,
     )
 
     lastIndex = match.index + match[0].length
@@ -226,9 +297,13 @@ export const ChatMessage = ({
       // Custom text renderer that handles citation markers [n]
       // Transforms plain text [1], [2], [1,2] into interactive CitationMarker components
       text: ({ children }: { children?: ReactNode }) => (
-        <TextWithCitations citationsMetadata={citationsMetadata}>{children}</TextWithCitations>
+        <TextWithCitations citationsMetadata={citationsMetadata}>
+          {children}
+        </TextWithCitations>
       ),
-      p: ({ children }: { children?: ReactNode }) => <div className="my-2">{children}</div>,
+      p: ({ children }: { children?: ReactNode }) => (
+        <div className="my-2">{children}</div>
+      ),
       h1: ({ children }: { children?: ReactNode }) => (
         <h1 className="text-xl font-bold mt-4 mb-2">{children}</h1>
       ),
@@ -270,7 +345,7 @@ export const ChatMessage = ({
                 ref.file_path === fileName ||
                 ref.document_title === fileName ||
                 ref.file_path?.includes(fileName) ||
-                fileName.includes(ref.file_path || '')
+                fileName.includes(ref.file_path || ''),
             )
 
             if (matchingRef?.presigned_url) {
@@ -293,7 +368,7 @@ export const ChatMessage = ({
         return <li className="my-1">{children}</li>
       },
     }),
-    [message.mermaidRendered, message.role, citationsMetadata, references]
+    [message.mermaidRendered, message.role, citationsMetadata, references],
   )
 
   const thinkingMarkdownComponents = useMemo(
@@ -306,7 +381,7 @@ export const ChatMessage = ({
         />
       ),
     }),
-    [message.mermaidRendered, message.role]
+    [message.mermaidRendered, message.role],
   )
 
   // Determine if we're in a streaming state (content is being received)
@@ -320,7 +395,8 @@ export const ChatMessage = ({
     if (!message.isError) return null
     if (message.errorType) return message.errorType
     const content = (message.content || '').toLowerCase()
-    if (content.includes('timeout') || content.includes('timed out')) return 'timeout'
+    if (content.includes('timeout') || content.includes('timed out'))
+      return 'timeout'
     if (
       content.includes('401') ||
       content.includes('403') ||
@@ -335,7 +411,11 @@ export const ChatMessage = ({
       content.includes('server')
     )
       return 'server'
-    if (content.includes('network') || content.includes('fetch') || content.includes('connection'))
+    if (
+      content.includes('network') ||
+      content.includes('fetch') ||
+      content.includes('connection')
+    )
       return 'network'
     return 'unknown'
   }, [message.isError, message.errorType, message.content])
@@ -363,7 +443,7 @@ export const ChatMessage = ({
             ? 'w-[95%] bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400'
             : 'w-[95%] bg-muted',
         // Reserve minimum height during streaming to prevent layout jumps
-        isStreaming && 'min-h-[60px]'
+        isStreaming && 'min-h-[60px]',
       )}
     >
       {/* Error Header - shown for error messages */}
@@ -387,101 +467,124 @@ export const ChatMessage = ({
       )}
 
       {/* Thinking Pill - collapsible bubble UI */}
-      {message.role === 'assistant' && (isThinking || thinkingTime !== null) && (
-        <div className={cn('mb-3', !isTabActive && 'opacity-50')}>
-          {/* Pill Header - always visible */}
-          <button
-            type="button"
-            onClick={() => {
-              if (finalThinkingContent && finalThinkingContent.trim() !== '') {
-                setIsThinkingExpanded(!isThinkingExpanded)
-              }
-            }}
-            className={cn(
-              'inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
-              'border shadow-sm select-none',
-              isThinking
-                ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-300'
-                : 'bg-slate-100 border-slate-200 text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300',
-              finalThinkingContent?.trim() && 'cursor-pointer hover:shadow-md'
-            )}
-          >
-            {isThinking ? (
-              <>
-                {isTabActive && <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />}
-                <span>{t('retrievePanel.chatMessage.thinking')}</span>
-              </>
-            ) : (
-              typeof thinkingTime === 'number' && (
-                <>
-                  <BrainIcon className="w-3.5 h-3.5" />
-                  <span>{t('retrievePanel.chatMessage.thinkingTime', { time: thinkingTime })}</span>
-                </>
-              )
-            )}
-            {finalThinkingContent && finalThinkingContent.trim() !== '' && (
-              <ChevronDownIcon
-                className={cn(
-                  'w-3.5 h-3.5 transition-transform',
-                  isThinkingExpanded && 'rotate-180'
-                )}
-              />
-            )}
-          </button>
-
-          {/* Expandable Content */}
-          {isThinkingExpanded && finalThinkingContent && finalThinkingContent.trim() !== '' && (
-            <div
+      {message.role === 'assistant' &&
+        (isThinking || thinkingTime !== null) && (
+          <div className={cn('mb-3', !isTabActive && 'opacity-50')}>
+            {/* Pill Header - always visible */}
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  finalThinkingContent &&
+                  finalThinkingContent.trim() !== ''
+                ) {
+                  setIsThinkingExpanded(!isThinkingExpanded)
+                }
+              }}
               className={cn(
-                'mt-2 ml-2 p-3 rounded-lg text-sm',
-                'bg-slate-50 border border-slate-200 dark:bg-slate-900 dark:border-slate-700',
-                'max-h-[400px] overflow-y-auto',
-                'prose dark:prose-invert max-w-none break-words prose-p:my-1 prose-headings:my-2',
-                '[&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0]',
-                '[&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0]',
-                '[&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800',
-                'text-foreground'
+                'inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                'border shadow-sm select-none',
+                isThinking
+                  ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-300'
+                  : 'bg-slate-100 border-slate-200 text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300',
+                finalThinkingContent?.trim() &&
+                  'cursor-pointer hover:shadow-md',
               )}
             >
-              {isThinking && (
-                <div className="mb-2 text-xs text-amber-600 dark:text-amber-400 italic">
-                  {t('retrievePanel.chatMessage.thinkingInProgress', 'Thinking in progress...')}
+              {isThinking ? (
+                <>
+                  {isTabActive && (
+                    <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                  )}
+                  <span>{t('retrievePanel.chatMessage.thinking')}</span>
+                </>
+              ) : (
+                typeof thinkingTime === 'number' && (
+                  <>
+                    <BrainIcon className="w-3.5 h-3.5" />
+                    <span>
+                      {t('retrievePanel.chatMessage.thinkingTime', {
+                        time: thinkingTime,
+                      })}
+                    </span>
+                  </>
+                )
+              )}
+              {finalThinkingContent && finalThinkingContent.trim() !== '' && (
+                <ChevronDownIcon
+                  className={cn(
+                    'w-3.5 h-3.5 transition-transform',
+                    isThinkingExpanded && 'rotate-180',
+                  )}
+                />
+              )}
+            </button>
+
+            {/* Expandable Content */}
+            {isThinkingExpanded &&
+              finalThinkingContent &&
+              finalThinkingContent.trim() !== '' && (
+                <div
+                  className={cn(
+                    'mt-2 ml-2 p-3 rounded-lg text-sm',
+                    'bg-slate-50 border border-slate-200 dark:bg-slate-900 dark:border-slate-700',
+                    'max-h-[400px] overflow-y-auto',
+                    'prose dark:prose-invert max-w-none break-words prose-p:my-1 prose-headings:my-2',
+                    '[&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0]',
+                    '[&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0]',
+                    '[&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800',
+                    'text-foreground',
+                  )}
+                >
+                  {isThinking && (
+                    <div className="mb-2 text-xs text-amber-600 dark:text-amber-400 italic">
+                      {t(
+                        'retrievePanel.chatMessage.thinkingInProgress',
+                        'Thinking in progress...',
+                      )}
+                    </div>
+                  )}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkFootnotes, remarkMath]}
+                    rehypePlugins={[
+                      ...(katexPlugin && (message.latexRendered ?? true)
+                        ? [
+                            [
+                              katexPlugin,
+                              {
+                                errorColor:
+                                  theme === 'dark' ? '#ef4444' : '#dc2626',
+                                throwOnError: false,
+                                displayMode: false,
+                                strict: false,
+                                trust: false,
+                                errorCallback: (
+                                  error: string,
+                                  latex: string,
+                                ) => {
+                                  if (process.env.NODE_ENV === 'development') {
+                                    console.warn(
+                                      'KaTeX error in thinking:',
+                                      error,
+                                      latex,
+                                    )
+                                  }
+                                },
+                              } satisfies KaTeXOptions,
+                            ] as [RehypeKatexPlugin, KaTeXOptions],
+                          ]
+                        : []),
+                      rehypeReact,
+                    ]}
+                    skipHtml={true}
+                    components={thinkingMarkdownComponents}
+                  >
+                    {finalThinkingContent}
+                  </ReactMarkdown>
                 </div>
               )}
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkFootnotes, remarkMath]}
-                rehypePlugins={[
-                  rehypeRaw,
-                  ...(katexPlugin && (message.latexRendered ?? true)
-                    ? [
-                        [
-                          katexPlugin,
-                          {
-                            errorColor: theme === 'dark' ? '#ef4444' : '#dc2626',
-                            throwOnError: false,
-                            displayMode: false,
-                            strict: false,
-                            trust: true,
-                            errorCallback: (error: string, latex: string) => {
-                              if (process.env.NODE_ENV === 'development') {
-                                console.warn('KaTeX error in thinking:', error, latex)
-                              }
-                            },
-                          } satisfies KaTeXOptions,
-                        ] as [RehypeKatexPlugin, KaTeXOptions],
-                      ]
-                    : []),
-                  rehypeReact,
-                ]}
-                skipHtml={false}
-                components={thinkingMarkdownComponents}
-              >
-                {finalThinkingContent}
-              </ReactMarkdown>
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
       {/* Main content display */}
       {finalDisplayContent && (
         <div
@@ -496,16 +599,17 @@ export const ChatMessage = ({
             '[&_.footnotes]:mt-8 [&_.footnotes]:pt-4 [&_.footnotes]:border-t [&_.footnotes_ol]:text-sm [&_.footnotes_li]:my-1',
             // Smooth content appearance animation
             'animate-in fade-in-0 duration-200',
-            message.role === 'user' ? 'text-primary-foreground' : 'text-foreground',
+            message.role === 'user'
+              ? 'text-primary-foreground'
+              : 'text-foreground',
             message.role === 'user'
               ? '[&_.footnotes]:border-primary-foreground/30 [&_a[href^="#fn"]]:text-primary-foreground [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary-foreground [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline'
-              : '[&_.footnotes]:border-border [&_a[href^="#fn"]]:text-primary [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline'
+              : '[&_.footnotes]:border-border [&_a[href^="#fn"]]:text-primary [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline',
           )}
         >
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkFootnotes, remarkMath]}
             rehypePlugins={[
-              rehypeRaw,
               ...(katexPlugin && (message.latexRendered ?? true)
                 ? [
                     [
@@ -515,7 +619,7 @@ export const ChatMessage = ({
                         throwOnError: false,
                         displayMode: false,
                         strict: false,
-                        trust: true,
+                        trust: false,
                         // Add silent error handling to avoid console noise
                         errorCallback: (error: string, latex: string) => {
                           // Only show detailed errors in development environment
@@ -524,7 +628,7 @@ export const ChatMessage = ({
                               'KaTeX rendering error in main content:',
                               error,
                               'for LaTeX:',
-                              latex
+                              latex,
                             )
                           }
                         },
@@ -534,7 +638,7 @@ export const ChatMessage = ({
                 : []),
               rehypeReact,
             ]}
-            skipHtml={false}
+            skipHtml={true}
             components={mainMarkdownComponents}
           >
             {finalDisplayContent}
@@ -548,7 +652,10 @@ export const ChatMessage = ({
           <span>
             {isThinking
               ? t('retrievePanel.chatMessage.streamingThinking', 'Thinking...')
-              : t('retrievePanel.chatMessage.streamingGenerating', 'Generating...')}
+              : t(
+                  'retrievePanel.chatMessage.streamingGenerating',
+                  'Generating...',
+                )}
           </span>
           {message.content && message.content.length > 0 && (
             <span className="opacity-70">
@@ -573,7 +680,10 @@ interface CodeHighlightProps {
 }
 
 // Check if it is a large JSON
-const isLargeJson = (language: string | undefined, content: string | undefined): boolean => {
+const isLargeJson = (
+  language: string | undefined,
+  content: string | undefined,
+): boolean => {
   if (!content || language !== 'json') return false
   return content.length > 5000 // JSON larger than 5KB is considered large JSON
 }
@@ -603,7 +713,12 @@ const CodeHighlight = memo(
     useEffect(() => {
       // Effect should run when renderAsDiagram becomes true or hasRendered changes.
       // The actual rendering logic inside checks language and hasRendered state.
-      if (renderAsDiagram && !hasRendered && language === 'mermaid' && mermaidRef.current) {
+      if (
+        renderAsDiagram &&
+        !hasRendered &&
+        language === 'mermaid' &&
+        mermaidRef.current
+      ) {
         const container = mermaidRef.current // Capture ref value
 
         // Clear previous timer if dependencies change before timeout (e.g., renderAsDiagram flips quickly)
@@ -622,13 +737,48 @@ const CodeHighlight = memo(
             mermaid.initialize({
               startOnLoad: false,
               theme: theme === 'dark' ? 'dark' : 'default',
-              securityLevel: 'loose',
+              securityLevel: 'strict',
               suppressErrorRendering: true,
             })
 
-            // Show loading indicator
-            container.innerHTML =
-              '<div class="flex justify-center items-center p-4"><svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>'
+            // Show loading indicator using DOM APIs to avoid unsafe HTML insertion
+            const loadingWrapper = document.createElement('div')
+            loadingWrapper.className = 'flex justify-center items-center p-4'
+            const spinner = document.createElementNS(
+              'http://www.w3.org/2000/svg',
+              'svg',
+            )
+            spinner.setAttribute(
+              'class',
+              'animate-spin h-5 w-5 text-primary',
+            )
+            spinner.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+            spinner.setAttribute('fill', 'none')
+            spinner.setAttribute('viewBox', '0 0 24 24')
+            const circle = document.createElementNS(
+              'http://www.w3.org/2000/svg',
+              'circle',
+            )
+            circle.setAttribute('class', 'opacity-25')
+            circle.setAttribute('cx', '12')
+            circle.setAttribute('cy', '12')
+            circle.setAttribute('r', '10')
+            circle.setAttribute('stroke', 'currentColor')
+            circle.setAttribute('stroke-width', '4')
+            const path = document.createElementNS(
+              'http://www.w3.org/2000/svg',
+              'path',
+            )
+            path.setAttribute('class', 'opacity-75')
+            path.setAttribute('fill', 'currentColor')
+            path.setAttribute(
+              'd',
+              'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z',
+            )
+            spinner.appendChild(circle)
+            spinner.appendChild(path)
+            loadingWrapper.appendChild(spinner)
+            container.replaceChildren(loadingWrapper)
 
             // Preprocess mermaid content
             const rawContent = String(children).replace(/\n$/, '').trim()
@@ -672,15 +822,22 @@ const CodeHighlight = memo(
               .then(({ svg, bindFunctions }) => {
                 // Check ref and hasRendered state again inside async callback
                 if (mermaidRef.current === container && !hasRendered) {
-                  container.innerHTML = svg
+                  const sanitizedSvg = sanitizeMermaidSvg(svg)
+                  container.replaceChildren()
+                  container.appendChild(
+                    document.importNode(sanitizedSvg, true),
+                  )
                   setHasRendered(true) // Mark as rendered successfully
                   if (bindFunctions) {
                     try {
                       bindFunctions(container)
                     } catch (bindError) {
                       console.error('Mermaid bindFunctions error:', bindError)
-                      container.innerHTML +=
-                        '<p class="text-orange-500 text-xs">Diagram interactions might be limited.</p>'
+                      const warning = document.createElement('p')
+                      warning.className = 'text-orange-500 text-xs'
+                      warning.textContent =
+                        'Diagram interactions might be limited.'
+                      container.appendChild(warning)
                     }
                   }
                 } else if (mermaidRef.current !== container) {
@@ -688,27 +845,32 @@ const CodeHighlight = memo(
                 }
               })
               .catch((error) => {
-                console.error('Mermaid rendering promise error (debounced):', error)
+                console.error(
+                  'Mermaid rendering promise error (debounced):',
+                  error,
+                )
                 console.error('Failed content (debounced):', processedContent)
                 if (mermaidRef.current === container) {
-                  const errorMessage = error instanceof Error ? error.message : String(error)
+                  const errorMessage =
+                    error instanceof Error ? error.message : String(error)
                   const errorPre = document.createElement('pre')
-                  errorPre.className = 'text-red-500 text-xs whitespace-pre-wrap break-words'
+                  errorPre.className =
+                    'text-red-500 text-xs whitespace-pre-wrap break-words'
                   errorPre.textContent = `Mermaid diagram error: ${errorMessage}\n\nContent:\n${processedContent}`
-                  container.innerHTML = ''
-                  container.appendChild(errorPre)
+                  container.replaceChildren(errorPre)
                 }
               })
           } catch (error) {
             console.error('Mermaid synchronous error (debounced):', error)
             console.error('Failed content (debounced):', String(children))
             if (mermaidRef.current === container) {
-              const errorMessage = error instanceof Error ? error.message : String(error)
+              const errorMessage =
+                error instanceof Error ? error.message : String(error)
               const errorPre = document.createElement('pre')
-              errorPre.className = 'text-red-500 text-xs whitespace-pre-wrap break-words'
+              errorPre.className =
+                'text-red-500 text-xs whitespace-pre-wrap break-words'
               errorPre.textContent = `Mermaid diagram setup error: ${errorMessage}`
-              container.innerHTML = ''
-              container.appendChild(errorPre)
+              container.replaceChildren(errorPre)
             }
           }
         }, 300) // Debounce delay
@@ -752,7 +914,12 @@ const CodeHighlight = memo(
     // If it's a mermaid language block and the message is complete, render as diagram
     if (language === 'mermaid') {
       // Container for Mermaid diagram
-      return <div className="mermaid-diagram-container my-4 overflow-x-auto" ref={mermaidRef}></div>
+      return (
+        <div
+          className="mermaid-diagram-container my-4 overflow-x-auto"
+          ref={mermaidRef}
+        ></div>
+      )
     }
 
     // ReactMarkdown determines inline vs block based on markdown syntax
@@ -792,14 +959,14 @@ const CodeHighlight = memo(
         className={cn(
           className,
           'mx-1 rounded-sm px-1 py-0.5 font-mono text-sm',
-          getInlineCodeStyles()
+          getInlineCodeStyles(),
         )}
         {...props}
       >
         {children}
       </code>
     )
-  }
+  },
 )
 
 // Assign display name for React DevTools

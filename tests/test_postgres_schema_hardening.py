@@ -409,5 +409,72 @@ class TestNumericConfigValidation:
         assert validate_numeric_config("1.5e-2", "param") == 0.015
 
 
+class TestPostgresConfigHardening:
+    """Tests for PostgreSQL config parsing hardening."""
+
+    def test_enable_vector_false_disables_vector_index_type(self, monkeypatch):
+        """POSTGRES_ENABLE_VECTOR=false should disable vector index creation config."""
+        from yar.kg.postgres_impl import ClientManager
+
+        monkeypatch.setenv("POSTGRES_ENABLE_VECTOR", "false")
+        monkeypatch.setenv("POSTGRES_VECTOR_INDEX_TYPE", "HNSW")
+
+        cfg = ClientManager.get_config()
+
+        assert cfg["enable_vector"] is False
+        assert cfg["vector_index_type"] is None
+
+    def test_retry_config_uses_ha_friendly_defaults_and_bounds(self, monkeypatch):
+        """Retry parsing should enforce upper bounds and max(backoff, backoff_max)."""
+        from yar.kg.postgres_impl import ClientManager
+
+        monkeypatch.setenv("POSTGRES_CONNECTION_RETRIES", "999")
+        monkeypatch.setenv("POSTGRES_CONNECTION_RETRY_BACKOFF", "999")
+        monkeypatch.setenv("POSTGRES_CONNECTION_RETRY_BACKOFF_MAX", "1")
+
+        cfg = ClientManager.get_config()
+
+        assert cfg["connection_retry_attempts"] == 30
+        assert cfg["connection_retry_backoff"] == 30.0
+        # backoff_max must never be lower than backoff
+        assert cfg["connection_retry_backoff_max"] == 30.0
+
+    def test_postgres_db_disables_vector_index_when_enable_vector_is_false(self):
+        """PostgreSQLDB should force vector_index_type=None when vectors are disabled."""
+        from yar.kg.postgres_impl import PostgreSQLDB
+
+        db = PostgreSQLDB(
+            {
+                "host": "localhost",
+                "port": 5432,
+                "user": "postgres",
+                "password": "postgres",
+                "database": "postgres",
+                "workspace": "default",
+                "max_connections": 10,
+                "min_connections": 1,
+                "enable_vector": False,
+                "vector_index_type": "HNSW",
+                "hnsw_m": 16,
+                "hnsw_ef": 64,
+                "hnsw_ef_search": 200,
+                "ivfflat_lists": 100,
+                "vchordrq_build_options": "",
+                "vchordrq_probes": "",
+                "vchordrq_epsilon": 1.9,
+                "server_settings": None,
+                "statement_cache_size": "500",
+                "connection_retry_attempts": 3,
+                "connection_retry_backoff": 0.5,
+                "connection_retry_backoff_max": 5.0,
+                "pool_close_timeout": 5.0,
+                "command_timeout": 60.0,
+            }
+        )
+
+        assert db.enable_vector is False
+        assert db.vector_index_type is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

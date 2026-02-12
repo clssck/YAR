@@ -24,7 +24,10 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
   }
 
   // Strategy 1: Modern Clipboard API (preferred)
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+  if (
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
     try {
       await navigator.clipboard.writeText(text)
       return {
@@ -159,7 +162,8 @@ async function copyWithManualSelection(text: string): Promise<CopyResult> {
       resolve({
         success: false,
         method: 'manual-select',
-        error: error instanceof Error ? error.message : 'Manual selection failed',
+        error:
+          error instanceof Error ? error.message : 'Manual selection failed',
       })
     } finally {
       // Clean up after a short delay to allow copy operation
@@ -177,7 +181,8 @@ async function copyWithManualSelection(text: string): Promise<CopyResult> {
  */
 export function isClipboardSupported(): boolean {
   return !!(
-    (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') ||
+    (navigator.clipboard &&
+      typeof navigator.clipboard.writeText === 'function') ||
     typeof document !== 'undefined'
   )
 }
@@ -190,7 +195,10 @@ export function getBestClipboardMethod():
   | 'execCommand'
   | 'manual-select'
   | 'none' {
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+  if (
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
     return 'clipboard-api'
   }
 

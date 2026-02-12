@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 
-export type ShortcutCategory = 'global' | 'documents' | 'graph' | 'retrieval' | 'navigation'
+export type ShortcutCategory =
+  | 'global'
+  | 'documents'
+  | 'graph'
+  | 'retrieval'
+  | 'navigation'
 
 export type RegisteredShortcut = {
   id: string
@@ -57,7 +62,8 @@ export const useShortcutStore = create<ShortcutStore>((set, get) => ({
 export function formatShortcutDisplay(
   key: string,
   modifiers?: RegisteredShortcut['modifiers'],
-  useMacSymbols = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
+  useMacSymbols = typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.userAgent),
 ): string {
   const parts: string[] = []
 

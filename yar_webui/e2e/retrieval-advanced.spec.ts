@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Retrieval Input Validation', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,7 +12,9 @@ test.describe('Retrieval Input Validation', () => {
     await input.press('Enter')
 
     // Should show error toast or message about invalid mode
-    await expect(page.getByText(/Invalid query mode|Only supports/i)).toBeVisible({ timeout: 3000 })
+    await expect(
+      page.getByText(/Invalid query mode|Only supports/i),
+    ).toBeVisible({ timeout: 3000 })
   })
 
   test('clears input after successful submit attempt', async ({ page }) => {
@@ -44,7 +46,9 @@ test.describe('Retrieval Input Validation', () => {
     expect(value).toContain('\n')
   })
 
-  test('send button is always enabled (validation on submit)', async ({ page }) => {
+  test('send button is always enabled (validation on submit)', async ({
+    page,
+  }) => {
     // Note: The app validates on submit, not via disabled state
     const sendButton = page.getByRole('button', { name: /Send/i })
 
@@ -78,7 +82,10 @@ test.describe('Mode Selector Behavior', () => {
 
     // Switch to Documents tab
     await page.getByRole('tab', { name: /Documents/i }).click()
-    await expect(page.getByRole('tab', { name: /Documents/i })).toHaveAttribute('data-state', 'active')
+    await expect(page.getByRole('tab', { name: /Documents/i })).toHaveAttribute(
+      'data-state',
+      'active',
+    )
 
     // Switch back to Retrieval
     await page.getByRole('tab', { name: /Retrieval/i }).click()
@@ -92,9 +99,18 @@ test.describe('Mode Selector Behavior', () => {
     await modeSelect.click()
 
     // All modes should be visible
-    const expectedModes = ['Naive', 'Local', 'Global', 'Hybrid', 'Mix', 'Bypass']
+    const expectedModes = [
+      'Naive',
+      'Local',
+      'Global',
+      'Hybrid',
+      'Mix',
+      'Bypass',
+    ]
     for (const mode of expectedModes) {
-      await expect(page.getByRole('option', { name: new RegExp(mode, 'i') })).toBeVisible()
+      await expect(
+        page.getByRole('option', { name: new RegExp(mode, 'i') }),
+      ).toBeVisible()
     }
   })
 })
@@ -115,7 +131,7 @@ test.describe('Query Settings Interactions', () => {
     // Look for top_k input
     const topKInput = page.locator('input[type="number"]').first()
 
-    if (await topKInput.count() > 0) {
+    if ((await topKInput.count()) > 0) {
       await topKInput.fill('50')
       await expect(topKInput).toHaveValue('50')
     }

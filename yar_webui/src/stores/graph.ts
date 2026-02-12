@@ -63,7 +63,9 @@ export class RawGraph {
   }
 
   getEdge = (edgeId: string, dynamicId = true) => {
-    const edgeIndex = dynamicId ? this.edgeDynamicIdMap[edgeId] : this.edgeIdMap[edgeId]
+    const edgeIndex = dynamicId
+      ? this.edgeDynamicIdMap[edgeId]
+      : this.edgeIdMap[edgeId]
     if (edgeIndex !== undefined) {
       return this.edges[edgeIndex]
     }
@@ -146,7 +148,7 @@ interface GraphState {
     nodeId: string,
     entityId: string,
     propertyName: string,
-    newValue: string
+    newValue: string,
   ) => Promise<void>
   updateEdgeAndSelect: (
     edgeId: string,
@@ -154,7 +156,7 @@ interface GraphState {
     sourceId: string,
     targetId: string,
     propertyName: string,
-    newValue: string
+    newValue: string,
   ) => Promise<void>
 }
 
@@ -182,7 +184,8 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
   searchEngine: null,
 
   setGraphIsEmpty: (isEmpty: boolean) => set({ graphIsEmpty: isEmpty }),
-  setLastSuccessfulQueryLabel: (label: string) => set({ lastSuccessfulQueryLabel: label }),
+  setLastSuccessfulQueryLabel: (label: string) =>
+    set({ lastSuccessfulQueryLabel: label }),
 
   setIsFetching: (isFetching: boolean) => set({ isFetching }),
   setSelectedNode: (nodeId: string | null, moveToSelectedNode?: boolean) =>
@@ -221,9 +224,11 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
     set({ sigmaGraph })
   },
 
-  setMoveToSelectedNode: (moveToSelectedNode?: boolean) => set({ moveToSelectedNode }),
+  setMoveToSelectedNode: (moveToSelectedNode?: boolean) =>
+    set({ moveToSelectedNode }),
 
-  setSigmaInstance: (instance: Sigma | null) => set({ sigmaInstance: instance }),
+  setSigmaInstance: (instance: Sigma | null) =>
+    set({ sigmaInstance: instance }),
 
   setTypeColorMap: (typeColorMap: Map<string, string>) => set({ typeColorMap }),
 
@@ -231,8 +236,10 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
   resetSearchEngine: () => set({ searchEngine: null }),
 
   // Methods to set global flags
-  setGraphDataFetchAttempted: (attempted: boolean) => set({ graphDataFetchAttempted: attempted }),
-  setLabelsFetchAttempted: (attempted: boolean) => set({ labelsFetchAttempted: attempted }),
+  setGraphDataFetchAttempted: (attempted: boolean) =>
+    set({ graphDataFetchAttempted: attempted }),
+  setLabelsFetchAttempted: (attempted: boolean) =>
+    set({ labelsFetchAttempted: attempted }),
 
   // Node operation state
   nodeToExpand: null,
@@ -252,7 +259,7 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
     nodeId: string,
     entityId: string,
     propertyName: string,
-    newValue: string
+    newValue: string,
   ) => {
     // Get current state
     const state = get()
@@ -280,13 +287,14 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
 
           // Get original edge dynamic ID for later reference
           const originalEdgeDynamicId = edge
-          const edgeIndexInRawGraph = rawGraph.edgeDynamicIdMap[originalEdgeDynamicId]
+          const edgeIndexInRawGraph =
+            rawGraph.edgeDynamicIdMap[originalEdgeDynamicId]
 
           // Create new edge with updated node reference
           const newEdgeId = sigmaGraph.addEdge(
             isOutgoing ? newValue : otherNode,
             isOutgoing ? otherNode : newValue,
-            attributes
+            attributes,
           )
 
           // Track edges that need updating in the raw graph
@@ -346,7 +354,10 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
             sigmaGraph.setNodeAttribute(String(nodeId), 'label', newValue)
           }
           if (propertyName === 'entity_type') {
-            const { color, map, updated } = resolveNodeColor(newValue, state.typeColorMap)
+            const { color, map, updated } = resolveNodeColor(
+              newValue,
+              state.typeColorMap,
+            )
             const resolvedColor = color || DEFAULT_NODE_COLOR
             nodeRef.color = resolvedColor
             sigmaGraph.setNodeAttribute(String(nodeId), 'color', resolvedColor)
@@ -371,7 +382,7 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
     sourceId: string,
     targetId: string,
     propertyName: string,
-    newValue: string
+    newValue: string,
   ) => {
     // Get current state
     const state = get()
@@ -397,7 +408,10 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
       // Update selected edge in store to ensure UI reflects changes
       set({ selectedEdge: dynamicId })
     } catch (error) {
-      console.error(`Error updating edge ${sourceId}->${targetId} in graph:`, error)
+      console.error(
+        `Error updating edge ${sourceId}->${targetId} in graph:`,
+        error,
+      )
       throw new Error('Failed to update edge in graph')
     }
   },

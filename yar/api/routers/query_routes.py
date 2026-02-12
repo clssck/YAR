@@ -303,7 +303,10 @@ class QueryRequest(BaseModel):
     @field_validator('query', mode='after')
     @classmethod
     def query_strip_after(cls, query: str) -> str:
-        return query.strip()
+        stripped_query = query.strip()
+        if len(stripped_query) < 3:
+            raise ValueError('Query text must be at least 3 non-whitespace characters.')
+        return stripped_query
 
     @field_validator('conversation_history', mode='after')
     @classmethod
@@ -527,6 +530,9 @@ def create_query_routes(
         top_k: Default top_k for retrieval
         s3_client: Optional S3Client for generating presigned URLs in citation responses
     """
+    # Use a fresh router per factory call so route handlers don't leak state
+    # when multiple app instances are created (tests, multi-tenant deployments).
+    router = APIRouter(tags=['query'])
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.post(
@@ -800,7 +806,7 @@ def create_query_routes(
                 return QueryResponse(response=response_content, references=None)
         except Exception as e:
             logger.error(f'Error processing query: {e!s}', exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/query/stream',
@@ -1133,7 +1139,7 @@ def create_query_routes(
             )
         except Exception as e:
             logger.error(f'Error processing streaming query: {e!s}', exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/query/data',
@@ -1537,6 +1543,6 @@ def create_query_routes(
                 )
         except Exception as e:
             logger.error(f'Error processing data query: {e!s}', exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     return router

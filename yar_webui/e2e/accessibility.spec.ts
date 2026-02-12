@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Accessibility', () => {
   test.beforeEach(async ({ page }) => {
@@ -26,7 +26,9 @@ test.describe('Accessibility', () => {
 
   test('buttons have accessible names', async ({ page }) => {
     // Theme toggle button (has tooltip as accessible name)
-    const themeButton = page.locator('header button').filter({ has: page.locator('svg.lucide-sun, svg.lucide-moon') })
+    const themeButton = page
+      .locator('header button')
+      .filter({ has: page.locator('svg.lucide-sun, svg.lucide-moon') })
     await expect(themeButton).toBeVisible()
 
     // Keyboard shortcuts button (has title attribute)
@@ -103,7 +105,10 @@ test.describe('Color Contrast', () => {
 
     // If in dark mode, toggle to light
     if (isDark) {
-      const themeButton = page.locator('header button').filter({ has: page.locator('svg') }).last()
+      const themeButton = page
+        .locator('header button')
+        .filter({ has: page.locator('svg') })
+        .last()
       await themeButton.click()
       await expect(html).not.toHaveClass(/dark/)
     }
@@ -123,7 +128,10 @@ test.describe('Color Contrast', () => {
 
     // If in light mode, toggle to dark
     if (!isDark) {
-      const themeButton = page.locator('header button').filter({ has: page.locator('svg') }).last()
+      const themeButton = page
+        .locator('header button')
+        .filter({ has: page.locator('svg') })
+        .last()
       await themeButton.click()
       await expect(html).toHaveClass(/dark/)
     }

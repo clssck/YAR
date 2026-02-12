@@ -61,14 +61,18 @@ function formatDate(isoDate: string): string {
 // Extract display name from full key or folder path
 function getDisplayName(keyOrPath: string, prefix: string): string {
   // Remove prefix to get relative path
-  const relative = keyOrPath.startsWith(prefix) ? keyOrPath.slice(prefix.length) : keyOrPath
+  const relative = keyOrPath.startsWith(prefix)
+    ? keyOrPath.slice(prefix.length)
+    : keyOrPath
   // For folders, remove trailing slash
   return relative.endsWith('/') ? relative.slice(0, -1) : relative
 }
 
 // Parse prefix into breadcrumb segments
 function parseBreadcrumbs(prefix: string): { name: string; path: string }[] {
-  const segments: { name: string; path: string }[] = [{ name: 'Root', path: '' }]
+  const segments: { name: string; path: string }[] = [
+    { name: 'Root', path: '' },
+  ]
   if (!prefix) return segments
 
   const parts = prefix.split('/').filter(Boolean)
@@ -115,7 +119,11 @@ export default function S3Browser() {
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => s3Upload(prefix, file),
     onSuccess: (data) => {
-      toast.success(t('storagePanel.uploadSuccess', { name: getDisplayName(data.key, prefix) }))
+      toast.success(
+        t('storagePanel.uploadSuccess', {
+          name: getDisplayName(data.key, prefix),
+        }),
+      )
       queryClient.invalidateQueries({ queryKey: ['s3', 'list', prefix] })
     },
     onError: (err: Error) => {
@@ -127,7 +135,11 @@ export default function S3Browser() {
   const deleteMutation = useMutation({
     mutationFn: async (key: string) => s3Delete(key),
     onSuccess: (data) => {
-      toast.success(t('storagePanel.deleteSuccess', { name: getDisplayName(data.key, prefix) }))
+      toast.success(
+        t('storagePanel.deleteSuccess', {
+          name: getDisplayName(data.key, prefix),
+        }),
+      )
       queryClient.invalidateQueries({ queryKey: ['s3', 'list', prefix] })
       setDeleteTarget(null)
     },
@@ -153,11 +165,11 @@ export default function S3Browser() {
         toast.error(
           t('storagePanel.downloadFailed', {
             error: err instanceof Error ? err.message : 'Unknown error',
-          })
+          }),
         )
       }
     },
-    [t]
+    [t],
   )
 
   // Handle file upload
@@ -175,7 +187,7 @@ export default function S3Browser() {
       // Reset input so the same file can be uploaded again
       event.target.value = ''
     },
-    [uploadMutation]
+    [uploadMutation],
   )
 
   // Handle view click
@@ -184,10 +196,13 @@ export default function S3Browser() {
   }, [])
 
   // Handle folder info click
-  const handleFolderInfo = useCallback((folder: string, e: React.MouseEvent) => {
-    e.stopPropagation() // Prevent navigation
-    setViewFolder(folder)
-  }, [])
+  const handleFolderInfo = useCallback(
+    (folder: string, e: React.MouseEvent) => {
+      e.stopPropagation() // Prevent navigation
+      setViewFolder(folder)
+    },
+    [],
+  )
 
   // Handle delete click
   const handleDelete = useCallback((key: string) => {
@@ -213,7 +228,9 @@ export default function S3Browser() {
   if (!storageConfig?.enable_s3) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-        <p>{t('storagePanel.notConfigured') || 'S3 Storage is not configured'}</p>
+        <p>
+          {t('storagePanel.notConfigured') || 'S3 Storage is not configured'}
+        </p>
       </div>
     )
   }
@@ -223,7 +240,9 @@ export default function S3Browser() {
       <Card className="flex-1 overflow-hidden flex flex-col">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-medium">{t('storagePanel.title')}</CardTitle>
+            <CardTitle className="text-lg font-medium">
+              {t('storagePanel.title')}
+            </CardTitle>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -235,7 +254,9 @@ export default function S3Browser() {
                 {t('storagePanel.actions.upload')}
               </Button>
               <Button variant="outline" size="icon" onClick={() => refetch()}>
-                <RefreshCwIcon className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                <RefreshCwIcon
+                  className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`}
+                />
               </Button>
             </div>
           </div>
@@ -279,7 +300,12 @@ export default function S3Browser() {
               <p className="text-sm text-muted-foreground">
                 {error instanceof Error ? error.message : 'Unknown error'}
               </p>
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                className="mt-2"
+              >
                 {t('storagePanel.actions.retry')}
               </Button>
             </div>
@@ -292,9 +318,15 @@ export default function S3Browser() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[50%]">{t('storagePanel.table.name')}</TableHead>
-                  <TableHead className="w-[15%]">{t('storagePanel.table.size')}</TableHead>
-                  <TableHead className="w-[20%]">{t('storagePanel.table.modified')}</TableHead>
+                  <TableHead className="w-[50%]">
+                    {t('storagePanel.table.name')}
+                  </TableHead>
+                  <TableHead className="w-[15%]">
+                    {t('storagePanel.table.size')}
+                  </TableHead>
+                  <TableHead className="w-[20%]">
+                    {t('storagePanel.table.modified')}
+                  </TableHead>
                   <TableHead className="w-[15%] text-right">
                     {t('storagePanel.table.actions')}
                   </TableHead>
@@ -340,7 +372,9 @@ export default function S3Browser() {
                         onClick={() => handleView(obj)}
                       >
                         <FileIcon className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                        <span className="truncate">{getDisplayName(obj.key, prefix)}</span>
+                        <span className="truncate">
+                          {getDisplayName(obj.key, prefix)}
+                        </span>
                       </button>
                     </TableCell>
                     <TableCell>{formatBytes(obj.size)}</TableCell>
@@ -395,13 +429,23 @@ export default function S3Browser() {
       </Card>
 
       {/* Hidden file input */}
-      <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       {/* Delete confirmation dialog */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && cancelDelete()}>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && cancelDelete()}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('storagePanel.confirmDelete.title')}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t('storagePanel.confirmDelete.title')}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {t('storagePanel.confirmDelete.description', {
                 name: deleteTarget ? getDisplayName(deleteTarget, prefix) : '',
@@ -409,7 +453,9 @@ export default function S3Browser() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={cancelDelete}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={cancelDelete}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

@@ -1,11 +1,18 @@
 // import { MiniMap } from '@react-sigma/minimap'
 import { SigmaContainer, useRegisterEvents, useSigma } from '@react-sigma/core'
-import { createEdgeCurveProgram, EdgeCurvedArrowProgram } from '@sigma/edge-curve'
+import {
+  createEdgeCurveProgram,
+  EdgeCurvedArrowProgram,
+} from '@sigma/edge-curve'
 import { createNodeBorderProgram, NodeBorderProgram } from '@sigma/node-border'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Sigma } from 'sigma'
-import { EdgeArrowProgram, NodeCircleProgram, NodePointProgram } from 'sigma/rendering'
+import {
+  EdgeArrowProgram,
+  NodeCircleProgram,
+  NodePointProgram,
+} from 'sigma/rendering'
 import type { Settings as SigmaSettings } from 'sigma/settings'
 import FocusOnNode from '@/components/graph/FocusOnNode'
 import FullScreenControl from '@/components/graph/FullScreenControl'
@@ -84,7 +91,10 @@ const FocusSync = () => {
   const focusedNode = useGraphStore.use.focusedNode()
   const moveToSelectedNode = useGraphStore.use.moveToSelectedNode()
 
-  const autoFocusedNode = useMemo(() => focusedNode ?? selectedNode, [focusedNode, selectedNode])
+  const autoFocusedNode = useMemo(
+    () => focusedNode ?? selectedNode,
+    [focusedNode, selectedNode],
+  )
 
   return <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
 }
@@ -233,7 +243,7 @@ const GraphViewer = () => {
             'bg-background/60 absolute backdrop-blur-lg border-2 rounded-xl',
             isCompact
               ? 'bottom-2 left-1/2 -translate-x-1/2 flex flex-row items-center gap-0.5 p-1'
-              : 'bottom-2 left-2 flex flex-col p-1'
+              : 'bottom-2 left-2 flex flex-col p-1',
           )}
         >
           {/* Layout group */}
@@ -292,15 +302,19 @@ const GraphViewer = () => {
           <div
             className={cn(
               'absolute z-0 bg-background/60 backdrop-blur-lg rounded-lg px-2 py-1 text-xs text-muted-foreground border',
-              isCompact ? 'top-2 right-2' : 'bottom-2 right-2 px-3 py-1.5'
+              isCompact ? 'top-2 right-2' : 'bottom-2 right-2 px-3 py-1.5',
             )}
           >
             <span className="font-medium">{nodeCount.toLocaleString()}</span>
             <span className={cn('mx-1', isCompact && 'hidden sm:inline')}>
               {t('graphPanel.stats.nodes', 'nodes')}
             </span>
-            {!isCompact && <span className="text-muted-foreground/50 mx-1">|</span>}
-            {isCompact && <span className="text-muted-foreground/50 mx-0.5">/</span>}
+            {!isCompact && (
+              <span className="text-muted-foreground/50 mx-1">|</span>
+            )}
+            {isCompact && (
+              <span className="text-muted-foreground/50 mx-0.5">/</span>
+            )}
             <span className="font-medium">{edgeCount.toLocaleString()}</span>
             <span className={cn('mx-1', isCompact && 'hidden sm:inline')}>
               {t('graphPanel.stats.edges', 'edges')}

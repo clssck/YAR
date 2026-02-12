@@ -5,11 +5,20 @@ import type { PropertyValue } from '@/api/yar'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Text from '@/components/ui/Text'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/Tooltip'
 import { useResponsive } from '@/hooks/useBreakpoint'
 import useYarGraph from '@/hooks/useYarGraph'
 import { cn } from '@/lib/utils'
-import { type RawEdgeType, type RawNodeType, useGraphStore } from '@/stores/graph'
+import {
+  type RawEdgeType,
+  type RawNodeType,
+  useGraphStore,
+} from '@/stores/graph'
 import EditablePropertyRow from './EditablePropertyRow'
 
 // Type-safe helpers to extract values from PropertyValue union type
@@ -42,7 +51,9 @@ const PropertiesView = () => {
   void graphDataVersion
 
   const { isMobile } = useResponsive()
-  const [currentElement, setCurrentElement] = useState<NodeType | EdgeType | null>(null)
+  const [currentElement, setCurrentElement] = useState<
+    NodeType | EdgeType | null
+  >(null)
   const [currentType, setCurrentType] = useState<'node' | 'edge' | null>(null)
 
   // Close handler to deselect current element
@@ -96,7 +107,7 @@ const PropertiesView = () => {
     'bg-background/90 rounded-lg border-2 p-3 text-xs backdrop-blur-lg shadow-lg',
     isMobile
       ? 'fixed bottom-0 left-0 right-0 max-h-[50vh] rounded-b-none border-b-0 animate-in slide-in-from-bottom duration-200'
-      : 'max-w-sm'
+      : 'max-w-sm',
   )
 
   return (
@@ -110,7 +121,9 @@ const PropertiesView = () => {
       >
         <X className="h-4 w-4 text-muted-foreground" />
       </button>
-      <div className={cn(isMobile && 'overflow-y-auto max-h-[calc(50vh-2rem)]')}>
+      <div
+        className={cn(isMobile && 'overflow-y-auto max-h-[calc(50vh-2rem)]')}
+      >
         {currentType === 'node' ? (
           <NodePropertiesView node={currentElement as NodeType} />
         ) : (
@@ -165,7 +178,9 @@ const refineNodeProperties = (node: RawNodeType): NodeType => {
             relationships.push({
               type: 'Neighbour',
               id: neighbourId,
-              label: asString(neighbour.properties.entity_id) || neighbour.labels.join(', '),
+              label:
+                asString(neighbour.properties.entity_id) ||
+                neighbour.labels.join(', '),
             })
           }
         }
@@ -189,7 +204,12 @@ const refineEdgeProperties = (edge: RawEdgeType): EdgeType => {
   if (state.sigmaGraph && state.rawGraph) {
     try {
       if (!state.sigmaGraph.hasEdge(edge.dynamicId)) {
-        console.warn('Edge not found in sigmaGraph:', edge.id, 'dynamicId:', edge.dynamicId)
+        console.warn(
+          'Edge not found in sigmaGraph:',
+          edge.id,
+          'dynamicId:',
+          edge.dynamicId,
+        )
         return {
           ...edge,
           sourceNode: undefined,
@@ -291,7 +311,10 @@ const PropertyRow = ({
         sourceId={sourceId}
         targetId={targetId}
         isEditable={true}
-        tooltip={tooltip || (typeof value === 'string' ? value : JSON.stringify(value, null, 2))}
+        tooltip={
+          tooltip ||
+          (typeof value === 'string' ? value : JSON.stringify(value, null, 2))
+        }
       />
     )
   }
@@ -301,7 +324,9 @@ const PropertyRow = ({
     <div className="flex items-center gap-2">
       <span className="text-primary/60 tracking-wide whitespace-nowrap">
         {getPropertyNameTranslation(name)}
-        {name === 'source_id' && truncate && <sup className="text-red-500">†</sup>}
+        {name === 'source_id' && truncate && (
+          <sup className="text-red-500">†</sup>
+        )}
       </span>
       :
       <Text
@@ -358,7 +383,10 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
 
       {/* Node Info Section */}
       <div className="bg-blue-50/50 dark:bg-blue-950/30 rounded-md p-2 border border-blue-100 dark:border-blue-900/50">
-        <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
+        <PropertyRow
+          name={t('graphPanel.propertiesView.node.id')}
+          value={String(node.id)}
+        />
         <PropertyRow
           name={t('graphPanel.propertiesView.node.labels')}
           value={node.labels.join(', ')}
@@ -378,7 +406,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
               text={String(node.degree)}
               tooltip={t(
                 'graphPanel.propertiesView.node.degreeTooltip',
-                'Visible connections in this graph'
+                'Visible connections in this graph',
               )}
               side="left"
             />
@@ -398,7 +426,10 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
                     {t(
                       'graphPanel.propertiesView.node.hiddenConnectionsTooltip',
                       'This node has {{count}} additional connections in the database that are not currently visible. Click "Load connections" below to expand.',
-                      { count: asNumber(node.properties.db_degree) - node.degree }
+                      {
+                        count:
+                          asNumber(node.properties.db_degree) - node.degree,
+                      },
                     )}
                   </TooltipContent>
                 </Tooltip>
@@ -418,7 +449,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
           tooltip={t(
             'graphPanel.propertiesView.node.loadConnectionsTooltip',
             'Fetch and display {{count}} hidden connections from the database',
-            { count: asNumber(node.properties.db_degree) - node.degree }
+            { count: asNumber(node.properties.db_degree) - node.degree },
           )}
         >
           <Link className="h-4 w-4 mr-2" />
@@ -437,7 +468,12 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
           {Object.keys(node.properties)
             .sort()
             .map((name) => {
-              if (name === 'created_at' || name === 'truncate' || name === 'db_degree') return null // Hide internal properties
+              if (
+                name === 'created_at' ||
+                name === 'truncate' ||
+                name === 'db_degree'
+              )
+                return null // Hide internal properties
               return (
                 <PropertyRow
                   key={name}
@@ -447,7 +483,9 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
                   entityId={asString(node.properties.entity_id)}
                   entityType="node"
                   isEditable={
-                    name === 'description' || name === 'entity_id' || name === 'entity_type'
+                    name === 'description' ||
+                    name === 'entity_id' ||
+                    name === 'entity_type'
                   }
                   truncate={asString(node.properties.truncate)}
                 />
@@ -493,20 +531,30 @@ const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
 
       {/* Edge Info Section */}
       <div className="bg-purple-50/50 dark:bg-purple-950/30 rounded-md p-2 border border-purple-100 dark:border-purple-900/50">
-        <PropertyRow name={t('graphPanel.propertiesView.edge.id')} value={edge.id} />
+        <PropertyRow
+          name={t('graphPanel.propertiesView.edge.id')}
+          value={edge.id}
+        />
         {edge.type && (
-          <PropertyRow name={t('graphPanel.propertiesView.edge.type')} value={edge.type} />
+          <PropertyRow
+            name={t('graphPanel.propertiesView.edge.type')}
+            value={edge.type}
+          />
         )}
         <PropertyRow
           name={t('graphPanel.propertiesView.edge.source')}
-          value={edge.sourceNode ? edge.sourceNode.labels.join(', ') : edge.source}
+          value={
+            edge.sourceNode ? edge.sourceNode.labels.join(', ') : edge.source
+          }
           onClick={() => {
             useGraphStore.getState().setSelectedNode(edge.source, true)
           }}
         />
         <PropertyRow
           name={t('graphPanel.propertiesView.edge.target')}
-          value={edge.targetNode ? edge.targetNode.labels.join(', ') : edge.target}
+          value={
+            edge.targetNode ? edge.targetNode.labels.join(', ') : edge.target
+          }
           onClick={() => {
             useGraphStore.getState().setSelectedNode(edge.target, true)
           }}
@@ -531,8 +579,14 @@ const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
                   edgeId={String(edge.id)}
                   dynamicId={String(edge.dynamicId)}
                   entityType="edge"
-                  sourceId={asString(edge.sourceNode?.properties.entity_id) || edge.source}
-                  targetId={asString(edge.targetNode?.properties.entity_id) || edge.target}
+                  sourceId={
+                    asString(edge.sourceNode?.properties.entity_id) ||
+                    edge.source
+                  }
+                  targetId={
+                    asString(edge.targetNode?.properties.entity_id) ||
+                    edge.target
+                  }
                   isEditable={name === 'description' || name === 'keywords'}
                   truncate={asString(edge.properties.truncate)}
                 />

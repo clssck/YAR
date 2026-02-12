@@ -11,7 +11,13 @@ import { render } from '@testing-library/react'
 
 // Mock Sigma and related packages - these are WebGL-based and can't run in jsdom
 mock.module('@react-sigma/core', () => ({
-  SigmaContainer: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+  SigmaContainer: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode
+    className?: string
+  }) => (
     <div data-testid="sigma-container" className={className}>
       {children}
     </div>
@@ -217,7 +223,10 @@ const createSigmaSettings = (isDarkTheme: boolean): SigmaSettings => ({
 })
 
 // Compact mode calculation
-const calculateCompactMode = (isMobile: boolean, isTablet: boolean): boolean => {
+const calculateCompactMode = (
+  isMobile: boolean,
+  isTablet: boolean,
+): boolean => {
   return isMobile || isTablet
 }
 
@@ -943,7 +952,9 @@ describe('GraphViewer Component Rendering', () => {
       mockGraphState.isFetching = false
       const { container } = render(<GraphViewer />)
       // Check that there's no overlay covering the sigma container
-      const sigmaContainer = container.querySelector('[data-testid="sigma-container"]')
+      const sigmaContainer = container.querySelector(
+        '[data-testid="sigma-container"]',
+      )
       expect(sigmaContainer).toBeDefined()
     })
   })

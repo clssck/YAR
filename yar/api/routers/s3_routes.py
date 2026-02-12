@@ -25,9 +25,15 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from yar.api.utils_api import get_combined_auth_dependency, handle_api_error
+from yar.api.config import global_args
+from yar.api.utils_api import (
+    get_combined_auth_dependency,
+    handle_api_error,
+    validate_upload_size,
+)
 from yar.storage.s3_client import S3Client
 from yar.utils import logger
+from yar.validators import validate_s3_key, validate_s3_prefix
 
 
 class S3ObjectInfo(BaseModel):
@@ -132,7 +138,8 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
         Returns:
             S3ListResponse with folders (common prefixes) and objects at this level
         """
-        result = await s3_client.list_objects(prefix=prefix, delimiter='/')
+        safe_prefix = validate_s3_prefix(prefix, allow_empty=True)
+        result = await s3_client.list_objects(prefix=safe_prefix, delimiter='/')
 
         # Convert to response model
         objects = [
@@ -175,18 +182,20 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
         Returns:
             S3DownloadResponse with presigned URL
         """
+        safe_key = validate_s3_key(key)
+
         # Check if object exists first
-        exists = await s3_client.object_exists(key)
+        exists = await s3_client.object_exists(safe_key)
         if not exists:
             raise HTTPException(
                 status_code=404,
-                detail=f'Object not found: {key}',
+                detail=f'Object not found: {safe_key}',
             )
 
-        url = await s3_client.get_presigned_url(key, expiry=expiry)
+        url = await s3_client.get_presigned_url(safe_key, expiry=expiry)
 
         return S3DownloadResponse(
-            key=key,
+            key=safe_key,
             url=url,
             expiry_seconds=expiry,
         )
@@ -210,8 +219,10 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
         Returns:
             S3UploadResponse with the key where file was uploaded
         """
-        # Read file content
-        content = await file.read()
+        safe_prefix = validate_s3_prefix(prefix, allow_empty=True)
+
+        # Read file content with upload size guard
+        content = await validate_upload_size(file, global_args.max_upload_size_mb)
         if not content:
             raise HTTPException(
                 status_code=400,
@@ -223,7 +234,8 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
         safe_filename = filename.replace('/', '_').replace('\\', '_')
 
         # Construct key
-        key = f'{prefix}{safe_filename}' if prefix else safe_filename
+        key = f'{safe_prefix}{safe_filename}' if safe_prefix else safe_filename
+        key = validate_s3_key(key)
 
         # Detect content type
         content_type = file.content_type
@@ -272,9 +284,7 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
         Returns:
             S3FolderStatsResponse with folder statistics
         """
-        # Ensure prefix ends with / for folder semantics
-        if prefix and not prefix.endswith('/'):
-            prefix = f'{prefix}/'
+        prefix = validate_s3_prefix(prefix, allow_empty=False)
 
         # Get immediate children (folders and objects at this level)
         immediate = await s3_client.list_objects(prefix=prefix, delimiter='/')
@@ -343,18 +353,19 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
         Returns:
             S3DeleteResponse confirming deletion
         """
+        safe_key = validate_s3_key(key)
         try:
-            await s3_client.delete_object(key)
+            await s3_client.delete_object(safe_key)
         except FileNotFoundError as e:
             raise HTTPException(
                 status_code=404,
-                detail=f'Object not found: {key}',
+                detail=f'Object not found: {safe_key}',
             ) from e
 
-        logger.info(f'Deleted S3 object: {key}')
+        logger.info(f'Deleted S3 object: {safe_key}')
 
         return S3DeleteResponse(
-            key=key,
+            key=safe_key,
             status='deleted',
         )
 

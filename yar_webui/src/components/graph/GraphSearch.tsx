@@ -7,7 +7,10 @@ import MiniSearch from 'minisearch'
 import { type FC, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AsyncSearch } from '@/components/ui/AsyncSearch'
-import { formatShortcut, useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
+import {
+  formatShortcut,
+  useKeyboardShortcut,
+} from '@/hooks/useKeyboardShortcut'
 import { searchResultLimit } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
 
@@ -224,11 +227,13 @@ export const GraphSearchInput = ({
             {
               type: 'message',
               id: messageId,
-              message: t('graphPanel.search.message', { count: result.length - searchResultLimit }),
+              message: t('graphPanel.search.message', {
+                count: result.length - searchResultLimit,
+              }),
             },
           ]
     },
-    [graph, searchEngine, onFocus, t]
+    [graph, searchEngine, onFocus, t],
   )
 
   // Build placeholder with keyboard shortcut hint
@@ -250,7 +255,8 @@ export const GraphSearchInput = ({
           if (id !== messageId) onChange(id ? { id, type: 'nodes' } : null)
         }}
         onFocus={(id) => {
-          if (id !== messageId && onFocus) onFocus(id ? { id, type: 'nodes' } : null)
+          if (id !== messageId && onFocus)
+            onFocus(id ? { id, type: 'nodes' } : null)
         }}
         ariaLabel={t('graphPanel.search.placeholder')}
         placeholder={placeholderWithShortcut}
@@ -267,7 +273,9 @@ export const GraphSearchInput = ({
 /**
  * Component that display the search.
  */
-const GraphSearch: FC<GraphSearchInputProps & GraphSearchContextProviderProps> = ({ ...props }) => {
+const GraphSearch: FC<
+  GraphSearchInputProps & GraphSearchContextProviderProps
+> = ({ ...props }) => {
   return <GraphSearchInput {...props} />
 }
 

@@ -1,14 +1,27 @@
-import { ChevronDown, CopyIcon, DownloadIcon, EraserIcon, SendIcon } from 'lucide-react'
+import {
+  ChevronDown,
+  CopyIcon,
+  DownloadIcon,
+  EraserIcon,
+  SendIcon,
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CitationsMetadata, QueryMode, StreamReference } from '@/api/yar'
 import { queryText, queryTextStream } from '@/api/yar'
-import { ChatMessage, type MessageWithError } from '@/components/retrieval/ChatMessage'
+import {
+  ChatMessage,
+  type MessageWithError,
+} from '@/components/retrieval/ChatMessage'
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/Popover'
 import Textarea from '@/components/ui/Textarea'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
@@ -19,7 +32,10 @@ import { copyToClipboard } from '@/utils/clipboard'
 // Helper function to generate unique IDs with browser compatibility
 const generateUniqueId = () => {
   // Use crypto.randomUUID() if available
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
     return crypto.randomUUID()
   }
   // Fallback to timestamp + random string for browsers without crypto.randomUUID
@@ -35,7 +51,8 @@ const detectLatexCompleteness = (content: string): boolean => {
   // Check for unclosed inline LaTeX formulas ($...$, but not $$)
   // Remove all block formulas first to avoid interference
   const contentWithoutBlocks = content.replace(/\$\$[\s\S]*?\$\$/g, '')
-  const inlineLatexMatches = contentWithoutBlocks.match(/(?<!\$)\$(?!\$)/g) || []
+  const inlineLatexMatches =
+    contentWithoutBlocks.match(/(?<!\$)\$(?!\$)/g) || []
   const hasUnclosedInline = inlineLatexMatches.length % 2 !== 0
 
   // LaTeX is complete if there are no unclosed formulas
@@ -54,7 +71,10 @@ const parseCOTContent = (content: string) => {
   let startIndex = content.indexOf(thinkStartTag)
   while (startIndex !== -1) {
     startMatches.push(startIndex)
-    startIndex = content.indexOf(thinkStartTag, startIndex + thinkStartTag.length)
+    startIndex = content.indexOf(
+      thinkStartTag,
+      startIndex + thinkStartTag.length,
+    )
   }
 
   let endIndex = content.indexOf(thinkEndTag)
@@ -83,7 +103,9 @@ const parseCOTContent = (content: string) => {
           .trim()
 
         // Remove all thinking blocks, keep only the final display content
-        displayContent = content.substring(lastEndIndex + thinkEndTag.length).trim()
+        displayContent = content
+          .substring(lastEndIndex + thinkEndTag.length)
+          .trim()
       }
     } else if (isThinking) {
       // Currently thinking: extract current thinking content
@@ -97,7 +119,8 @@ const parseCOTContent = (content: string) => {
     isThinking,
     thinkingContent,
     displayContent,
-    hasValidThinkBlock: hasThinkStart && hasThinkEnd && startMatches.length === endMatches.length,
+    hasValidThinkBlock:
+      hasThinkStart && hasThinkEnd && startMatches.length === endMatches.length,
   }
 }
 
@@ -112,7 +135,8 @@ const deduplicateReferencesSection = (text: string): string => {
   if (!text) return text
 
   // Match References section (### References or ## References)
-  const refsPattern = /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  const refsPattern =
+    /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
 
   return text.replace(refsPattern, (_match, header, refsBlock) => {
     const refLinePattern = /[-*]\s*\[(\d+)\]\s*([^\n]+)/
@@ -145,7 +169,8 @@ const deduplicateReferencesSection = (text: string): string => {
 const stripReferencesSection = (text: string): string => {
   if (!text) return text
   // Match References section and everything after it
-  const refsPattern = /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  const refsPattern =
+    /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
   return text.replace(refsPattern, '').trim()
 }
 
@@ -193,12 +218,18 @@ const renumberReferencesSequential = (text: string): string => {
 
   // First pass: replace all [n] with placeholder tokens
   for (const oldNum of refMapping.keys()) {
-    result = result.replace(new RegExp(`\\[${oldNum}\\]`, 'g'), `${placeholder}${oldNum}\x00`)
+    result = result.replace(
+      new RegExp(`\\[${oldNum}\\]`, 'g'),
+      `${placeholder}${oldNum}\x00`,
+    )
   }
 
   // Second pass: replace placeholder tokens with new sequential numbers
   for (const [oldNum, newNum] of refMapping.entries()) {
-    result = result.replace(new RegExp(`${placeholder}${oldNum}\x00`, 'g'), `[${newNum}]`)
+    result = result.replace(
+      new RegExp(`${placeholder}${oldNum}\x00`, 'g'),
+      `[${newNum}]`,
+    )
   }
 
   return result
@@ -211,14 +242,26 @@ const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
     labelKey: 'retrievePanel.mode.hybrid',
     descKey: 'retrievePanel.mode.hybridDesc',
   },
-  { value: 'mix', labelKey: 'retrievePanel.mode.mix', descKey: 'retrievePanel.mode.mixDesc' },
-  { value: 'local', labelKey: 'retrievePanel.mode.local', descKey: 'retrievePanel.mode.localDesc' },
+  {
+    value: 'mix',
+    labelKey: 'retrievePanel.mode.mix',
+    descKey: 'retrievePanel.mode.mixDesc',
+  },
+  {
+    value: 'local',
+    labelKey: 'retrievePanel.mode.local',
+    descKey: 'retrievePanel.mode.localDesc',
+  },
   {
     value: 'global',
     labelKey: 'retrievePanel.mode.global',
     descKey: 'retrievePanel.mode.globalDesc',
   },
-  { value: 'naive', labelKey: 'retrievePanel.mode.naive', descKey: 'retrievePanel.mode.naiveDesc' },
+  {
+    value: 'naive',
+    labelKey: 'retrievePanel.mode.naive',
+    descKey: 'retrievePanel.mode.naiveDesc',
+  },
   {
     value: 'bypass',
     labelKey: 'retrievePanel.mode.bypass',
@@ -280,7 +323,7 @@ export default function RetrievalTesting() {
       setInputValue(e.target.value)
       if (inputError) setInputError('')
     },
-    [inputError]
+    [inputError],
   )
 
   // Unified height adjustment function for textarea
@@ -310,7 +353,14 @@ export default function RetrievalTesting() {
       if (!inputValue.trim() || isLoading) return
 
       // Parse query mode prefix (legacy support - prefix overrides selector)
-      const allowedModes: QueryMode[] = ['naive', 'local', 'global', 'hybrid', 'mix', 'bypass']
+      const allowedModes: QueryMode[] = [
+        'naive',
+        'local',
+        'global',
+        'hybrid',
+        'mix',
+        'bypass',
+      ]
       const prefixMatch = inputValue.match(/^\/(\w+)\s+([\s\S]+)/)
       let effectiveMode: QueryMode | undefined = modeOverride ?? undefined
       let actualQuery = inputValue
@@ -328,7 +378,7 @@ export default function RetrievalTesting() {
           setInputError(
             t('retrievePanel.retrieval.queryModeError', {
               modes: 'naive, local, global, hybrid, mix, bypass',
-            })
+            }),
           )
           return
         }
@@ -398,7 +448,10 @@ export default function RetrievalTesting() {
         assistantMessage.content += chunk
 
         // Start thinking timer on first sight of think tag
-        if (assistantMessage.content.includes('<think>') && !thinkingStartTime.current) {
+        if (
+          assistantMessage.content.includes('<think>') &&
+          !thinkingStartTime.current
+        ) {
           thinkingStartTime.current = Date.now()
         }
 
@@ -412,7 +465,9 @@ export default function RetrievalTesting() {
         if (cotResult.hasValidThinkBlock && !thinkingProcessed.current) {
           if (thinkingStartTime.current && !assistantMessage.thinkingTime) {
             const duration = (Date.now() - thinkingStartTime.current) / 1000
-            assistantMessage.thinkingTime = Number.parseFloat(duration.toFixed(2))
+            assistantMessage.thinkingTime = Number.parseFloat(
+              duration.toFixed(2),
+            )
           }
           thinkingProcessed.current = true
         }
@@ -424,12 +479,15 @@ export default function RetrievalTesting() {
           assistantMessage.displayContent = ''
         } else {
           // Deduplicate LLM-generated References section and renumber to sequential
-          const rawContent = cotResult.displayContent || assistantMessage.content
+          const rawContent =
+            cotResult.displayContent || assistantMessage.content
           let processedContent = renumberReferencesSequential(
-            deduplicateReferencesSection(rawContent)
+            deduplicateReferencesSection(rawContent),
           )
           // Strip References section if user has disabled it
-          const showRefs = useSettingsStore.getState().querySettings.show_references_section ?? true
+          const showRefs =
+            useSettingsStore.getState().querySettings.show_references_section ??
+            true
           if (!showRefs) {
             processedContent = stripReferencesSection(processedContent)
           }
@@ -440,7 +498,9 @@ export default function RetrievalTesting() {
         // Simple heuristic: look for ```mermaid ... ```
         const mermaidBlockRegex = /```mermaid\s+([\s\S]+?)```/g
         let mermaidRendered = false
-        let match: RegExpExecArray | null = mermaidBlockRegex.exec(assistantMessage.content)
+        let match: RegExpExecArray | null = mermaidBlockRegex.exec(
+          assistantMessage.content,
+        )
         while (match !== null) {
           // If the block is not too short, consider it complete
           if (match[1] && match[1].trim().length > 10) {
@@ -519,13 +579,18 @@ export default function RetrievalTesting() {
               let citationsApplied = false
               return (metadata: CitationsMetadata) => {
                 // Guard against multiple invocations
-                if (citationsApplied || !metadata.markers || metadata.markers.length === 0) return
+                if (
+                  citationsApplied ||
+                  !metadata.markers ||
+                  metadata.markers.length === 0
+                )
+                  return
                 citationsApplied = true
 
                 // Insert markers into the accumulated response using position data
                 // Sort by position descending so we can insert from end to start (preserves positions)
                 const sortedMarkers = [...metadata.markers].sort(
-                  (a, b) => b.insert_position - a.insert_position
+                  (a, b) => b.insert_position - a.insert_position,
                 )
 
                 let annotatedContent = assistantMessage.content
@@ -556,8 +621,8 @@ export default function RetrievalTesting() {
                           citationsProcessed: true,
                           citationsMetadata: metadata, // Store for HoverCard rendering
                         }
-                      : msg
-                  )
+                      : msg,
+                  ),
                 )
                 // Also update the local reference for final cleanup operations
                 assistantMessage.content = finalContent
@@ -575,10 +640,10 @@ export default function RetrievalTesting() {
                         ...msg,
                         references: references,
                       }
-                    : msg
-                )
+                    : msg,
+                ),
               )
-            }
+            },
           )
           if (errorMessage) {
             if (assistantMessage.content) {
@@ -592,7 +657,10 @@ export default function RetrievalTesting() {
         }
       } catch (err) {
         // Handle error
-        updateAssistantMessage(`${t('retrievePanel.retrieval.error')}\n${errorMessage(err)}`, true)
+        updateAssistantMessage(
+          `${t('retrievePanel.retrieval.error')}\n${errorMessage(err)}`,
+          true,
+        )
       } finally {
         // Clear loading and add messages to state
         setIsLoading(false)
@@ -613,18 +681,24 @@ export default function RetrievalTesting() {
             !assistantMessage.thinkingTime
           ) {
             const duration = (Date.now() - thinkingStartTime.current) / 1000
-            assistantMessage.thinkingTime = Number.parseFloat(duration.toFixed(2))
+            assistantMessage.thinkingTime = Number.parseFloat(
+              duration.toFixed(2),
+            )
           }
 
           // Ensure display content is correctly set based on final parsing
           // BUT skip if citations were processed (they already set displayContent)
-          if (!assistantMessage.citationsProcessed && finalCotResult.displayContent !== undefined) {
+          if (
+            !assistantMessage.citationsProcessed &&
+            finalCotResult.displayContent !== undefined
+          ) {
             let processedContent = renumberReferencesSequential(
-              deduplicateReferencesSection(finalCotResult.displayContent)
+              deduplicateReferencesSection(finalCotResult.displayContent),
             )
             // Strip References section if user has disabled it
             const showRefs =
-              useSettingsStore.getState().querySettings.show_references_section ?? true
+              useSettingsStore.getState().querySettings
+                .show_references_section ?? true
             if (!showRefs) {
               processedContent = stripReferencesSection(processedContent)
             }
@@ -643,13 +717,17 @@ export default function RetrievalTesting() {
         try {
           useSettingsStore
             .getState()
-            .setRetrievalHistory([...prevMessages, userMessage, assistantMessage])
+            .setRetrievalHistory([
+              ...prevMessages,
+              userMessage,
+              assistantMessage,
+            ])
         } catch (error) {
           console.error('Error saving retrieval history:', error)
         }
       }
     },
-    [inputValue, isLoading, messages, modeOverride, t, scrollToBottom]
+    [inputValue, isLoading, messages, modeOverride, t, scrollToBottom],
   )
 
   const handleKeyDown = useCallback(
@@ -680,7 +758,7 @@ export default function RetrievalTesting() {
         handleSubmit(e as unknown as React.FormEvent)
       }
     },
-    [inputValue, handleSubmit, adjustTextareaHeight]
+    [inputValue, handleSubmit, adjustTextareaHeight],
   )
 
   const handlePaste = useCallback(
@@ -698,7 +776,8 @@ export default function RetrievalTesting() {
         const end = target.selectionEnd || 0
 
         // Build new value
-        const newValue = inputValue.slice(0, start) + pastedText + inputValue.slice(end)
+        const newValue =
+          inputValue.slice(0, start) + pastedText + inputValue.slice(end)
 
         // Update state (this will trigger component switch to Textarea)
         setInputValue(newValue)
@@ -707,13 +786,16 @@ export default function RetrievalTesting() {
         setTimeout(() => {
           if (inputRef.current?.setSelectionRange) {
             const newCursorPosition = start + pastedText.length
-            inputRef.current.setSelectionRange(newCursorPosition, newCursorPosition)
+            inputRef.current.setSelectionRange(
+              newCursorPosition,
+              newCursorPosition,
+            )
           }
         }, 0)
       }
       // If no newlines, let default paste behavior continue
     },
-    [inputValue]
+    [inputValue],
   )
 
   // Effect to handle component switching and maintain focus
@@ -735,7 +817,11 @@ export default function RetrievalTesting() {
 
   // Effect to adjust textarea height when switching to multi-line mode
   useEffect(() => {
-    if (hasMultipleLines && inputRef.current && inputRef.current.tagName === 'TEXTAREA') {
+    if (
+      hasMultipleLines &&
+      inputRef.current &&
+      inputRef.current.tagName === 'TEXTAREA'
+    ) {
       adjustTextareaHeight(inputRef.current as HTMLTextAreaElement)
     }
   }, [hasMultipleLines, adjustTextareaHeight])
@@ -789,12 +875,18 @@ export default function RetrievalTesting() {
       const container = messagesContainerRef.current
       if (container) {
         const isAtBottom =
-          container.scrollHeight - container.scrollTop - container.clientHeight < 20
+          container.scrollHeight -
+            container.scrollTop -
+            container.clientHeight <
+          20
 
         // If at bottom, enable auto-scroll, otherwise disable it
         if (isAtBottom) {
           shouldFollowScrollRef.current = true
-        } else if (!isFormInteractionRef.current && !isReceivingResponseRef.current) {
+        } else if (
+          !isFormInteractionRef.current &&
+          !isReceivingResponseRef.current
+        ) {
           shouldFollowScrollRef.current = false
         }
       }
@@ -854,7 +946,9 @@ export default function RetrievalTesting() {
   const exportHistory = useCallback(
     (format: 'json' | 'markdown') => {
       if (messages.length === 0) {
-        toast.error(t('retrievePanel.retrieval.exportEmpty', 'No messages to export'))
+        toast.error(
+          t('retrievePanel.retrieval.exportEmpty', 'No messages to export'),
+        )
         return
       }
 
@@ -871,14 +965,16 @@ export default function RetrievalTesting() {
             isError: m.isError,
           })),
           null,
-          2
+          2,
         )
         filename = `yar-chat-${timestamp}.json`
       } else {
         // Markdown format
         content = messages
           .map((m) => {
-            const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : ''
+            const time = m.timestamp
+              ? new Date(m.timestamp).toLocaleTimeString()
+              : ''
             const prefix = m.role === 'user' ? '**You**' : '**Assistant**'
             const timeStr = time ? ` (${time})` : ''
             return `### ${prefix}${timeStr}\n\n${m.content}\n`
@@ -897,10 +993,12 @@ export default function RetrievalTesting() {
       URL.revokeObjectURL(url)
 
       toast.success(
-        t('retrievePanel.retrieval.exported', 'Chat exported as {{format}}', { format })
+        t('retrievePanel.retrieval.exported', 'Chat exported as {{format}}', {
+          format,
+        }),
       )
     },
-    [messages, t]
+    [messages, t],
   )
 
   // ==================== KEYBOARD SHORTCUTS ====================
@@ -925,13 +1023,21 @@ export default function RetrievalTesting() {
     callback: useCallback(async () => {
       if (!isRetrievalTabActive) return
       // Find the last assistant message
-      const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant')
+      const lastAssistantMessage = [...messages]
+        .reverse()
+        .find((m) => m.role === 'assistant')
       if (lastAssistantMessage) {
-        const content = lastAssistantMessage.displayContent || lastAssistantMessage.content
+        const content =
+          lastAssistantMessage.displayContent || lastAssistantMessage.content
         if (content) {
           const result = await copyToClipboard(content)
           if (result.success) {
-            toast.success(t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard'))
+            toast.success(
+              t(
+                'retrievePanel.chatMessage.copySuccess',
+                'Content copied to clipboard',
+              ),
+            )
           }
         }
       }
@@ -953,12 +1059,16 @@ export default function RetrievalTesting() {
       } else {
         // Assistant messages: prefer processed display content, fallback to original content
         const finalDisplayContent =
-          message.displayContent !== undefined ? message.displayContent : message.content || ''
+          message.displayContent !== undefined
+            ? message.displayContent
+            : message.content || ''
         contentToCopy = finalDisplayContent
       }
 
       if (!contentToCopy.trim()) {
-        toast.error(t('retrievePanel.chatMessage.copyEmpty', 'No content to copy'))
+        toast.error(
+          t('retrievePanel.chatMessage.copyEmpty', 'No content to copy'),
+        )
         return
       }
 
@@ -970,49 +1080,69 @@ export default function RetrievalTesting() {
           const methodMessages: Record<string, string> = {
             'clipboard-api': t(
               'retrievePanel.chatMessage.copySuccess',
-              'Content copied to clipboard'
+              'Content copied to clipboard',
             ),
             execCommand: t(
               'retrievePanel.chatMessage.copySuccessLegacy',
-              'Content copied (legacy method)'
+              'Content copied (legacy method)',
             ),
             'manual-select': t(
               'retrievePanel.chatMessage.copySuccessManual',
-              'Content copied (manual method)'
+              'Content copied (manual method)',
             ),
-            fallback: t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard'),
+            fallback: t(
+              'retrievePanel.chatMessage.copySuccess',
+              'Content copied to clipboard',
+            ),
           }
 
           toast.success(
             methodMessages[result.method] ||
-              t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard')
+              t(
+                'retrievePanel.chatMessage.copySuccess',
+                'Content copied to clipboard',
+              ),
           )
         } else {
           // Show error with fallback instructions
           if (result.method === 'fallback') {
             toast.error(
-              result.error || t('retrievePanel.chatMessage.copyFailed', 'Failed to copy content'),
+              result.error ||
+                t(
+                  'retrievePanel.chatMessage.copyFailed',
+                  'Failed to copy content',
+                ),
               {
                 description: t(
                   'retrievePanel.chatMessage.copyManualInstruction',
-                  'Please select and copy the text manually'
+                  'Please select and copy the text manually',
                 ),
-              }
+              },
             )
           } else {
-            toast.error(t('retrievePanel.chatMessage.copyFailed', 'Failed to copy content'), {
-              description: result.error,
-            })
+            toast.error(
+              t(
+                'retrievePanel.chatMessage.copyFailed',
+                'Failed to copy content',
+              ),
+              {
+                description: result.error,
+              },
+            )
           }
         }
       } catch (err) {
         console.error('Clipboard operation failed:', err)
-        toast.error(t('retrievePanel.chatMessage.copyError', 'Copy operation failed'), {
-          description: err instanceof Error ? err.message : 'Unknown error occurred',
-        })
+        toast.error(
+          t('retrievePanel.chatMessage.copyError', 'Copy operation failed'),
+          {
+            description:
+              err instanceof Error ? err.message : 'Unknown error occurred',
+          },
+        )
       }
     },
-    [t]
+    [t],
   )
 
   return (
@@ -1060,7 +1190,10 @@ export default function RetrievalTesting() {
                           <CopyIcon className="size-4" />
                         </Button>
                       )}
-                      <ChatMessage message={message} isTabActive={isRetrievalTabActive} />
+                      <ChatMessage
+                        message={message}
+                        isTabActive={isRetrievalTabActive}
+                      />
                       {message.role === 'assistant' && (
                         <Button
                           onClick={() => handleCopyMessage(message)}
@@ -1124,7 +1257,10 @@ export default function RetrievalTesting() {
                   onClick={() => exportHistory('markdown')}
                   className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors"
                 >
-                  {t('retrievePanel.retrieval.exportMarkdown', 'Markdown (.md)')}
+                  {t(
+                    'retrievePanel.retrieval.exportMarkdown',
+                    'Markdown (.md)',
+                  )}
                 </button>
                 <button
                   type="button"
@@ -1145,16 +1281,16 @@ export default function RetrievalTesting() {
                   size="sm"
                   className={cn(
                     'gap-1 min-w-[90px]',
-                    modeOverride && 'bg-primary/90 hover:bg-primary'
+                    modeOverride && 'bg-primary/90 hover:bg-primary',
                   )}
                   disabled={isLoading}
                 >
                   <span className="text-xs font-medium">
                     {modeOverride
                       ? t(
-                          QUERY_MODES.find((m) => m.value === modeOverride)?.labelKey ||
-                            'retrievePanel.mode.hybrid',
-                          modeOverride
+                          QUERY_MODES.find((m) => m.value === modeOverride)
+                            ?.labelKey || 'retrievePanel.mode.hybrid',
+                          modeOverride,
                         )
                       : t('retrievePanel.mode.default', 'Default')}
                   </span>
@@ -1172,12 +1308,19 @@ export default function RetrievalTesting() {
                     }}
                     className={cn(
                       'w-full text-left px-3 py-2 rounded-md text-sm transition-colors',
-                      modeOverride === null ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
+                      modeOverride === null
+                        ? 'bg-primary/10 text-primary'
+                        : 'hover:bg-muted',
                     )}
                   >
-                    <div className="font-medium">{t('retrievePanel.mode.default', 'Default')}</div>
+                    <div className="font-medium">
+                      {t('retrievePanel.mode.default', 'Default')}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      {t('retrievePanel.mode.defaultDesc', 'Use mode from settings panel')}
+                      {t(
+                        'retrievePanel.mode.defaultDesc',
+                        'Use mode from settings panel',
+                      )}
                     </div>
                   </button>
 
@@ -1196,11 +1339,15 @@ export default function RetrievalTesting() {
                         'w-full text-left px-3 py-2 rounded-md text-sm transition-colors',
                         modeOverride === mode.value
                           ? 'bg-primary/10 text-primary'
-                          : 'hover:bg-muted'
+                          : 'hover:bg-muted',
                       )}
                     >
-                      <div className="font-medium">{t(mode.labelKey, mode.value)}</div>
-                      <div className="text-xs text-muted-foreground">{t(mode.descKey, '')}</div>
+                      <div className="font-medium">
+                        {t(mode.labelKey, mode.value)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {t(mode.descKey, '')}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -1259,7 +1406,12 @@ export default function RetrievalTesting() {
                 </div>
               )}
             </div>
-            <Button type="submit" variant="default" disabled={isLoading} size="sm">
+            <Button
+              type="submit"
+              variant="default"
+              disabled={isLoading}
+              size="sm"
+            >
               <SendIcon />
               {t('retrievePanel.retrieval.send')}
             </Button>

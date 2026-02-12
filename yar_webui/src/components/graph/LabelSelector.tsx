@@ -11,7 +11,11 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/Command'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/Popover'
 import { useDebounce } from '@/hooks/useDebounce'
 import { controlButtonVariant, searchLabelsDefaultLimit } from '@/lib/constants'
 import { cn } from '@/lib/utils'
@@ -35,7 +39,11 @@ const RECENT_LABELS_LIMIT = 5
  * 3. No dependency cascades - selection doesn't trigger refetch
  * 4. Limited rendered items per section
  */
-const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps) => {
+const LabelSelector = ({
+  value,
+  onChange,
+  disabled = false,
+}: LabelSelectorProps) => {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -85,7 +93,10 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
     const performSearch = async () => {
       setIsSearching(true)
       try {
-        const results = await searchLabels(debouncedSearchTerm.trim(), searchLabelsDefaultLimit)
+        const results = await searchLabels(
+          debouncedSearchTerm.trim(),
+          searchLabelsDefaultLimit,
+        )
         if (!cancelled) {
           setSearchResults(results.filter((l) => l !== '*'))
         }
@@ -121,7 +132,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
       setOpen(false)
       setSearchTerm('')
     },
-    [onChange]
+    [onChange],
   )
 
   // Clear search when dropdown closes
@@ -211,13 +222,20 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
           <CommandList>
             {/* Always show wildcard at top */}
             <CommandGroup>
-              <CommandItem value="" onSelect={() => handleSelect('*')} className="cursor-pointer">
+              <CommandItem
+                value=""
+                onSelect={() => handleSelect('*')}
+                className="cursor-pointer"
+              >
                 <span className="font-mono">*</span>
                 <span className="ml-2 text-xs text-muted-foreground">
                   {t('graphPanel.graphLabels.allLabels')}
                 </span>
                 <Check
-                  className={cn('ml-auto h-4 w-4', value === '*' ? 'opacity-100' : 'opacity-0')}
+                  className={cn(
+                    'ml-auto h-4 w-4',
+                    value === '*' ? 'opacity-100' : 'opacity-0',
+                  )}
                 />
               </CommandItem>
             </CommandGroup>
@@ -225,7 +243,9 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
             {/* Search results */}
             {showSearchResults &&
               (displayedLabels.search.length > 0 ? (
-                <CommandGroup heading={t('graphPanel.graphLabels.searchResults')}>
+                <CommandGroup
+                  heading={t('graphPanel.graphLabels.searchResults')}
+                >
                   {displayedLabels.search.map((label) => (
                     <CommandItem
                       key={label}
@@ -237,14 +257,18 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
                       <Check
                         className={cn(
                           'ml-auto h-4 w-4 shrink-0',
-                          value === label ? 'opacity-100' : 'opacity-0'
+                          value === label ? 'opacity-100' : 'opacity-0',
                         )}
                       />
                     </CommandItem>
                   ))}
                 </CommandGroup>
               ) : (
-                !isSearching && <CommandEmpty>{t('graphPanel.graphLabels.noResults')}</CommandEmpty>
+                !isSearching && (
+                  <CommandEmpty>
+                    {t('graphPanel.graphLabels.noResults')}
+                  </CommandEmpty>
+                )
               ))}
 
             {/* Recent + Popular when not searching */}
@@ -263,7 +287,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
                         <Check
                           className={cn(
                             'ml-auto h-4 w-4 shrink-0',
-                            value === label ? 'opacity-100' : 'opacity-0'
+                            value === label ? 'opacity-100' : 'opacity-0',
                           )}
                         />
                       </CommandItem>
@@ -291,7 +315,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
                           <Check
                             className={cn(
                               'ml-auto h-4 w-4 shrink-0',
-                              value === label ? 'opacity-100' : 'opacity-0'
+                              value === label ? 'opacity-100' : 'opacity-0',
                             )}
                           />
                         </CommandItem>

@@ -34,13 +34,19 @@ describe('formatShortcut', () => {
   })
 
   test('formats key with all modifiers (Mac)', () => {
-    expect(formatShortcut('k', { ctrl: true, alt: true, shift: true, meta: true }, true)).toBe(
-      '⌃⌥⇧⌘K'
-    )
+    expect(
+      formatShortcut(
+        'k',
+        { ctrl: true, alt: true, shift: true, meta: true },
+        true,
+      ),
+    ).toBe('⌃⌥⇧⌘K')
   })
 
   test('formats key with multiple modifiers (non-Mac)', () => {
-    expect(formatShortcut('k', { ctrl: true, shift: true }, false)).toBe('Ctrl+Shift+K')
+    expect(formatShortcut('k', { ctrl: true, shift: true }, false)).toBe(
+      'Ctrl+Shift+K',
+    )
   })
 
   test('preserves special key names', () => {

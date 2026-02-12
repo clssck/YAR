@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,7 +8,9 @@ test.describe('Navigation', () => {
   test('renders main navigation tabs', async ({ page }) => {
     // Check that main navigation tabs are visible
     await expect(page.getByRole('tab', { name: /Documents/i })).toBeVisible()
-    await expect(page.getByRole('tab', { name: /Knowledge Graph/i })).toBeVisible()
+    await expect(
+      page.getByRole('tab', { name: /Knowledge Graph/i }),
+    ).toBeVisible()
     await expect(page.getByRole('tab', { name: /Retrieval/i })).toBeVisible()
     await expect(page.getByRole('tab', { name: /API/i })).toBeVisible()
   })
@@ -41,7 +43,9 @@ test.describe('Navigation', () => {
 
   test('theme toggle button is accessible', async ({ page }) => {
     // Theme toggle button (shows sun/moon icon with Light/Dark tooltip) should be in the header
-    const themeButton = page.locator('header button').filter({ has: page.locator('svg.lucide-sun, svg.lucide-moon') })
+    const themeButton = page
+      .locator('header button')
+      .filter({ has: page.locator('svg.lucide-sun, svg.lucide-moon') })
     await expect(themeButton).toBeVisible()
   })
 

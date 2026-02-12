@@ -58,7 +58,10 @@ export function useUndoableAction() {
       }
 
       // Track this action
-      const actionState = { cleanup: undefined as (() => void) | undefined, executed: false }
+      const actionState = {
+        cleanup: undefined as (() => void) | undefined,
+        executed: false,
+      }
       pendingActionRef.current = actionState
 
       // Execute the action
@@ -70,7 +73,8 @@ export function useUndoableAction() {
         actionState.executed = true
       } catch (error) {
         toast.error('Action failed', {
-          description: error instanceof Error ? error.message : 'An error occurred',
+          description:
+            error instanceof Error ? error.message : 'An error occurred',
         })
         return
       }
@@ -89,7 +93,10 @@ export function useUndoableAction() {
                   toast.success('Action undone')
                 } catch (error) {
                   toast.error('Failed to undo', {
-                    description: error instanceof Error ? error.message : 'An error occurred',
+                    description:
+                      error instanceof Error
+                        ? error.message
+                        : 'An error occurred',
                   })
                 }
               },
@@ -97,7 +104,7 @@ export function useUndoableAction() {
           : undefined,
       })
     },
-    []
+    [],
   )
 
   return { executeWithUndo }
@@ -162,7 +169,7 @@ export function useInlineConfirmation() {
         })
       })
     },
-    []
+    [],
   )
 
   return { confirm }
@@ -186,7 +193,10 @@ export function useInlineConfirmation() {
  * deleteAction.cancel()
  * ```
  */
-export function createDelayedAction(action: () => void | Promise<void>, delayMs: number) {
+export function createDelayedAction(
+  action: () => void | Promise<void>,
+  delayMs: number,
+) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   let executed = false
 
@@ -245,7 +255,11 @@ export type ProgressToastConfig = {
  * progress.success('Upload complete!')
  * ```
  */
-export function createProgressToast({ message, description, options }: ProgressToastConfig) {
+export function createProgressToast({
+  message,
+  description,
+  options,
+}: ProgressToastConfig) {
   const toastId = toast.loading(message, {
     description,
     ...options,
@@ -253,7 +267,13 @@ export function createProgressToast({ message, description, options }: ProgressT
 
   return {
     /** Update the toast message and description */
-    update: ({ message, description }: { message?: string; description?: string }) => {
+    update: ({
+      message,
+      description,
+    }: {
+      message?: string
+      description?: string
+    }) => {
       toast.loading(message, {
         id: toastId,
         description,

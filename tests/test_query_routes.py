@@ -8,112 +8,15 @@ This module tests the three main query endpoints:
 Uses httpx AsyncClient with FastAPI's TestClient pattern and mocked RAG instance.
 """
 
-from typing import Any
+import json
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel, Field
 
-# =============================================================================
-# Response Models (simplified for testing)
-# =============================================================================
-
-
-class ReferenceItem(BaseModel):
-    """A single reference item in query responses."""
-
-    reference_id: str = Field(description='Unique reference identifier')
-    file_path: str = Field(description='Path to the source file')
-    document_title: str | None = Field(default=None)
-    s3_key: str | None = Field(default=None)
-    presigned_url: str | None = Field(default=None)
-    content: list[str] | None = Field(default=None)
-
-
-class QueryResponse(BaseModel):
-    """Response model for /query endpoint."""
-
-    response: str = Field(description='The generated response')
-    references: list[ReferenceItem] | None = Field(default=None)
-
-
-class QueryDataResponse(BaseModel):
-    """Response model for /query/data endpoint."""
-
-    status: str = Field(description='Query execution status')
-    message: str = Field(description='Status message')
-    data: dict[str, Any] = Field(description='Query result data')
-    metadata: dict[str, Any] = Field(description='Query metadata')
-
-
-# =============================================================================
-# Test Route Factory
-# =============================================================================
-
-
-def create_test_query_routes(rag: Any, api_key: str | None = None):
-    """Create query routes for testing (simplified version without auth)."""
-    from yar.api.routers.query_routes import (
-        QueryRequest,
-        deduplicate_references_section,
-        renumber_references_sequential,
-        strip_reasoning_tags,
-    )
-
-    router = APIRouter(tags=['query'])
-    # Note: api_key parameter kept for interface compatibility but not used in tests
-
-    @router.post('/query', response_model=QueryResponse)
-    async def query_text(request: QueryRequest):
-        """Non-streaming query endpoint."""
-        try:
-            param = request.to_query_params(False)
-            param.stream = False
-
-            result = await rag.aquery_llm(request.query, param=param)
-
-            llm_response = result.get('llm_response', {})
-            data = result.get('data', {})
-            references = data.get('references', [])
-
-            response_content = llm_response.get('content', '')
-            if not response_content:
-                response_content = 'No relevant context found for the query.'
-
-            response_content = strip_reasoning_tags(response_content)
-            response_content = deduplicate_references_section(response_content)
-            response_content = renumber_references_sequential(response_content)
-
-            if request.include_references:
-                return QueryResponse(response=response_content, references=references)
-            else:
-                return QueryResponse(response=response_content, references=None)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
-
-    @router.post('/query/data', response_model=QueryDataResponse)
-    async def query_data(request: QueryRequest):
-        """Data retrieval endpoint."""
-        try:
-            param = request.to_query_params(False)
-            response = await rag.aquery_data(request.query, param=param)
-
-            if isinstance(response, dict):
-                return QueryDataResponse(**response)
-            else:
-                return QueryDataResponse(
-                    status='failure',
-                    message='Invalid response type',
-                    data={},
-                    metadata={},
-                )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
-
-    return router
-
+from yar.api.routers.query_routes import create_query_routes
 
 # =============================================================================
 # Fixtures
@@ -133,7 +36,7 @@ def mock_rag():
 def app(mock_rag):
     """Create FastAPI app with query routes."""
     app = FastAPI()
-    router = create_test_query_routes(rag=mock_rag, api_key=None)
+    router = create_query_routes(rag=mock_rag, api_key=None)
     app.include_router(router)
     return app
 
@@ -146,6 +49,18 @@ async def client(app):
         base_url='http://test',
     ) as client:
         yield client
+
+
+def _ndjson_lines(response_text: str) -> list[dict]:
+    """Parse NDJSON response into JSON objects."""
+    lines = [line.strip() for line in response_text.splitlines() if line.strip()]
+    return [json.loads(line) for line in lines]
+
+
+async def _stream_from_chunks(chunks: list[str]) -> AsyncIterator[str]:
+    """Create async iterator from chunks for streaming tests."""
+    for chunk in chunks:
+        yield chunk
 
 
 # =============================================================================
@@ -258,6 +173,24 @@ class TestQueryRequestModel:
 
         with pytest.raises(ValidationError):
             QueryRequest(query='ab')
+
+    def test_query_request_whitespace_only_rejected(self):
+        """Test that whitespace-only queries are rejected."""
+        from pydantic import ValidationError
+
+        from yar.api.routers.query_routes import QueryRequest
+
+        with pytest.raises(ValidationError):
+            QueryRequest(query='   ')
+
+    def test_query_request_trimmed_too_short_rejected(self):
+        """Test that queries becoming too short after trim are rejected."""
+        from pydantic import ValidationError
+
+        from yar.api.routers.query_routes import QueryRequest
+
+        with pytest.raises(ValidationError):
+            QueryRequest(query='  ab  ')
 
     def test_query_request_valid_modes(self):
         """Test all valid query modes."""
@@ -382,6 +315,103 @@ class TestQueryEndpoint:
         assert 'reasoning' not in data['response']
 
     @pytest.mark.asyncio
+    async def test_query_deduplicates_and_renumbers_references_section(self, client, mock_rag):
+        """Test response quality cleanup for LLM-generated references."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {
+                'content': (
+                    'Summary text.\n\n'
+                    '### References\n'
+                    '- [2] alpha.pdf\n'
+                    '- [2] alpha.pdf\n'
+                    '- [5] beta.pdf\n'
+                )
+            },
+            'data': {'references': []},
+        }
+
+        response = await client.post('/query', json={'query': 'Test query'})
+
+        assert response.status_code == 200
+        body = response.json()['response']
+        assert body.count('[1] alpha.pdf') == 1
+        assert '[2] beta.pdf' in body
+        assert '[5] beta.pdf' not in body
+
+    @pytest.mark.asyncio
+    async def test_query_include_chunk_content_groups_chunks_per_reference(self, client, mock_rag):
+        """Test include_chunk_content returns grouped chunk arrays per reference."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'content': 'Grouped response'},
+            'data': {
+                'references': [{'reference_id': '1', 'file_path': '/docs/alpha.pdf'}],
+                'chunks': [
+                    {'reference_id': '1', 'content': 'Chunk A'},
+                    {'reference_id': '1', 'content': 'Chunk B'},
+                ],
+            },
+        }
+
+        response = await client.post(
+            '/query',
+            json={
+                'query': 'Test query',
+                'include_references': True,
+                'include_chunk_content': True,
+            },
+        )
+
+        assert response.status_code == 200
+        references = response.json()['references']
+        assert references[0]['content'] == ['Chunk A', 'Chunk B']
+
+    @pytest.mark.asyncio
+    async def test_query_enriches_references_with_presigned_urls(self, mock_rag):
+        """Reference entries should include presigned URLs when s3_key is present."""
+        mock_s3 = MagicMock()
+        mock_s3.get_presigned_url = AsyncMock(
+            return_value='https://example.test/presigned/doc.pdf'
+        )
+
+        app = FastAPI()
+        app.include_router(
+            create_query_routes(
+                rag=mock_rag,
+                api_key=None,
+                s3_client=mock_s3,
+            )
+        )
+
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'content': 'Answer with sources'},
+            'data': {
+                'references': [
+                    {
+                        'reference_id': '1',
+                        'file_path': '/docs/one.pdf',
+                        's3_key': 'archive/test/one.pdf',
+                    }
+                ]
+            },
+        }
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url='http://test',
+        ) as local_client:
+            response = await local_client.post(
+                '/query',
+                json={'query': 'Test query', 'include_references': True},
+            )
+
+        assert response.status_code == 200
+        assert (
+            response.json()['references'][0]['presigned_url']
+            == 'https://example.test/presigned/doc.pdf'
+        )
+        mock_s3.get_presigned_url.assert_awaited_once_with('archive/test/one.pdf')
+
+    @pytest.mark.asyncio
     async def test_query_empty_response_fallback(self, client, mock_rag):
         """Test fallback message when LLM returns empty content."""
         mock_rag.aquery_llm.return_value = {
@@ -438,6 +468,18 @@ class TestQueryValidation:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
+    async def test_query_whitespace_only_rejected(self, client):
+        """Test that whitespace-only query is rejected."""
+        response = await client.post('/query', json={'query': '   '})
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_query_trimmed_too_short_rejected(self, client):
+        """Test that query becoming too short after trim is rejected."""
+        response = await client.post('/query', json={'query': '  ab  '})
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
     async def test_query_missing_rejected(self, client):
         """Test that missing query field is rejected."""
         response = await client.post('/query', json={})
@@ -479,7 +521,110 @@ class TestQueryErrors:
         response = await client.post('/query', json={'query': 'Test query'})
 
         assert response.status_code == 500
-        assert 'LLM service unavailable' in response.json()['detail']
+        assert response.json()['detail'] == 'Internal server error'
+
+
+# =============================================================================
+# POST /query/stream Endpoint Tests
+# =============================================================================
+
+
+@pytest.mark.offline
+class TestQueryStreamEndpoint:
+    """Tests for POST /query/stream endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_sends_references_then_filtered_chunks(self, client, mock_rag):
+        """Streaming mode should send refs first and strip reasoning tags from chunks."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {
+                'is_streaming': True,
+                'response_iterator': _stream_from_chunks(['Start ', '<think>hidden</think>', ' End']),
+            },
+            'data': {'references': [{'reference_id': '1', 'file_path': '/docs/a.pdf'}], 'chunks': []},
+        }
+
+        response = await client.post(
+            '/query/stream',
+            json={'query': 'Test query', 'stream': True, 'include_references': True},
+        )
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines[0]['references'][0]['reference_id'] == '1'
+
+        streamed_text = ''.join(item.get('response', '') for item in lines[1:])
+        assert '<think>' not in streamed_text
+        assert 'hidden' not in streamed_text
+        assert 'Start' in streamed_text
+        assert 'End' in streamed_text
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_reports_iterator_errors_in_ndjson(self, client, mock_rag):
+        """Iterator errors should be surfaced as NDJSON error objects."""
+
+        async def broken_stream():
+            yield 'partial chunk'
+            raise RuntimeError('stream exploded')
+
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'is_streaming': True, 'response_iterator': broken_stream()},
+            'data': {'references': [], 'chunks': []},
+        }
+
+        response = await client.post('/query/stream', json={'query': 'Test query', 'stream': True})
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert any(line.get('response') == 'partial chunk' for line in lines)
+        assert any('stream exploded' in line.get('error', '') for line in lines)
+
+    @pytest.mark.asyncio
+    async def test_non_stream_mode_returns_single_ndjson_object(self, client, mock_rag):
+        """Non-stream mode should return one NDJSON line with complete response."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'is_streaming': False, 'content': 'Answer text'},
+            'data': {'references': [{'reference_id': '1', 'file_path': '/docs/a.pdf'}], 'chunks': []},
+        }
+
+        response = await client.post(
+            '/query/stream',
+            json={'query': 'Test query', 'stream': False, 'include_references': False},
+        )
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert len(lines) == 1
+        assert lines[0]['response'] == 'Answer text'
+        assert 'references' not in lines[0]
+
+    @pytest.mark.asyncio
+    async def test_non_stream_mode_include_chunk_content_enriches_references(self, client, mock_rag):
+        """Chunk content should be attached to references when requested."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'is_streaming': False, 'content': 'Answer text'},
+            'data': {
+                'references': [{'reference_id': '1', 'file_path': '/docs/a.pdf'}],
+                'chunks': [
+                    {'reference_id': '1', 'content': 'Chunk 1'},
+                    {'reference_id': '1', 'content': 'Chunk 2'},
+                ],
+            },
+        }
+
+        response = await client.post(
+            '/query/stream',
+            json={
+                'query': 'Test query',
+                'stream': False,
+                'include_references': True,
+                'include_chunk_content': True,
+            },
+        )
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines[0]['references'][0]['content'] == ['Chunk 1', 'Chunk 2']
 
 
 # =============================================================================
@@ -613,6 +758,12 @@ class TestQueryDataValidation:
         response = await client.post('/query/data', json={'query': 'ab'})
         assert response.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_query_data_whitespace_only_rejected(self, client):
+        """Test that whitespace-only query is rejected."""
+        response = await client.post('/query/data', json={'query': '   '})
+        assert response.status_code == 422
+
 
 # =============================================================================
 # POST /query/data Error Handling Tests
@@ -631,7 +782,7 @@ class TestQueryDataErrors:
         response = await client.post('/query/data', json={'query': 'Test query'})
 
         assert response.status_code == 500
-        assert 'Knowledge graph unavailable' in response.json()['detail']
+        assert response.json()['detail'] == 'Internal server error'
 
     @pytest.mark.asyncio
     async def test_query_data_invalid_response_format(self, client, mock_rag):
@@ -654,6 +805,21 @@ class TestQueryDataErrors:
 @pytest.mark.offline
 class TestQueryIntegration:
     """Integration-like tests for query routes."""
+
+    @pytest.mark.asyncio
+    async def test_query_trimmed_text_is_passed_to_rag(self, client, mock_rag):
+        """Query passed to RAG should be trimmed."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'content': 'Trimmed response'},
+            'data': {'references': []},
+        }
+
+        response = await client.post('/query', json={'query': '   Tell me more   '})
+
+        assert response.status_code == 200
+        awaited_call = mock_rag.aquery_llm.await_args
+        assert awaited_call.args[0] == 'Tell me more'
+        assert awaited_call.kwargs['param'].stream is False
 
     @pytest.mark.asyncio
     async def test_query_with_conversation_history(self, client, mock_rag):

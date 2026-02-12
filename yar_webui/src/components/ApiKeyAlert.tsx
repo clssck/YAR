@@ -18,7 +18,10 @@ interface ApiKeyAlertProps {
   onOpenChange: (open: boolean) => void
 }
 
-const ApiKeyAlert = ({ open: opened, onOpenChange: setOpened }: ApiKeyAlertProps) => {
+const ApiKeyAlert = ({
+  open: opened,
+  onOpenChange: setOpened,
+}: ApiKeyAlertProps) => {
   const { t } = useTranslation()
   const apiKey = useSettingsStore.use.apiKey()
   const [tempApiKey, setTempApiKey] = useState<string>('')
@@ -30,7 +33,10 @@ const ApiKeyAlert = ({ open: opened, onOpenChange: setOpened }: ApiKeyAlertProps
 
   useEffect(() => {
     if (message) {
-      if (message.includes(InvalidApiKeyError) || message.includes(RequireApiKeError)) {
+      if (
+        message.includes(InvalidApiKeyError) ||
+        message.includes(RequireApiKeError)
+      ) {
         setOpened(true)
       }
     }
@@ -41,16 +47,21 @@ const ApiKeyAlert = ({ open: opened, onOpenChange: setOpened }: ApiKeyAlertProps
     setOpened(false)
   }, [tempApiKey, setOpened])
 
-  const handleTempApiKeyChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setTempApiKey(e.target.value)
-  }, [])
+  const handleTempApiKeyChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setTempApiKey(e.target.value)
+    },
+    [],
+  )
 
   return (
     <AlertDialog open={opened} onOpenChange={setOpened}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t('apiKeyAlert.title')}</AlertDialogTitle>
-          <AlertDialogDescription>{t('apiKeyAlert.description')}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {t('apiKeyAlert.description')}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex flex-col gap-4">
           <form className="flex gap-2" onSubmit={(e) => e.preventDefault()}>

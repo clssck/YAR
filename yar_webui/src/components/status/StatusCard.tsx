@@ -4,7 +4,11 @@ import type { YarStatus } from '@/api/yar'
 const StatusCard = ({ status }: { status: YarStatus | null }) => {
   const { t } = useTranslation()
   if (!status) {
-    return <div className="text-foreground text-xs">{t('graphPanel.statusCard.unavailable')}</div>
+    return (
+      <div className="text-foreground text-xs">
+        {t('graphPanel.statusCard.unavailable')}
+      </div>
+    )
   }
 
   return (
@@ -19,7 +23,8 @@ const StatusCard = ({ status }: { status: YarStatus | null }) => {
           <span>{t('graphPanel.statusCard.summarySettings')}:</span>
           <span>
             {status.configuration.summary_language} / LLM summary on{' '}
-            {status.configuration.force_llm_summary_on_merge.toString()} fragments
+            {status.configuration.force_llm_summary_on_merge.toString()}{' '}
+            fragments
           </span>
           <span>{t('graphPanel.statusCard.threshold')}:</span>
           <span>
@@ -39,20 +44,24 @@ const StatusCard = ({ status }: { status: YarStatus | null }) => {
           <span>{status.configuration.llm_binding_host}</span>
           <span>{t('graphPanel.statusCard.llmModel')}:</span>
           <span>
-            {status.configuration.llm_binding}: {status.configuration.llm_model} (#
+            {status.configuration.llm_binding}: {status.configuration.llm_model}{' '}
+            (#
             {status.configuration.max_async} Async)
           </span>
         </div>
       </div>
 
       <div className="space-y-1">
-        <h4 className="font-medium">{t('graphPanel.statusCard.embeddingConfig')}</h4>
+        <h4 className="font-medium">
+          {t('graphPanel.statusCard.embeddingConfig')}
+        </h4>
         <div className="text-foreground grid grid-cols-[160px_1fr] gap-1">
           <span>{t('graphPanel.statusCard.embeddingBindingHost')}:</span>
           <span>{status.configuration.embedding_binding_host}</span>
           <span>{t('graphPanel.statusCard.embeddingModel')}:</span>
           <span>
-            {status.configuration.embedding_binding}: {status.configuration.embedding_model} (#
+            {status.configuration.embedding_binding}:{' '}
+            {status.configuration.embedding_model} (#
             {status.configuration.embedding_func_max_async} Async *{' '}
             {status.configuration.embedding_batch_num} batches)
           </span>
@@ -61,7 +70,9 @@ const StatusCard = ({ status }: { status: YarStatus | null }) => {
 
       {status.configuration.enable_rerank && (
         <div className="space-y-1">
-          <h4 className="font-medium">{t('graphPanel.statusCard.rerankerConfig')}</h4>
+          <h4 className="font-medium">
+            {t('graphPanel.statusCard.rerankerConfig')}
+          </h4>
           <div className="text-foreground grid grid-cols-[160px_1fr] gap-1">
             <span>{t('graphPanel.statusCard.rerankerBindingHost')}:</span>
             <span>{status.configuration.rerank_binding_host || '-'}</span>
@@ -75,7 +86,9 @@ const StatusCard = ({ status }: { status: YarStatus | null }) => {
       )}
 
       <div className="space-y-1">
-        <h4 className="font-medium">{t('graphPanel.statusCard.storageConfig')}</h4>
+        <h4 className="font-medium">
+          {t('graphPanel.statusCard.storageConfig')}
+        </h4>
         <div className="text-foreground grid grid-cols-[160px_1fr] gap-1">
           <span>{t('graphPanel.statusCard.kvStorage')}:</span>
           <span>{status.configuration.kv_storage}</span>

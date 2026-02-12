@@ -250,6 +250,24 @@ class TestKeyGeneration:
         assert key == 'staging/default/doc123/path_to_file.pdf'
 
     @pytest.mark.offline
+    def test_make_staging_key_rejects_invalid_workspace(self, s3_config):
+        """Workspace validation should reject invalid path-like values."""
+        from yar.storage.s3_client import S3Client
+
+        client = S3Client(config=s3_config)
+        with pytest.raises(ValueError):
+            client._make_staging_key('../bad', 'doc123', 'file.pdf')
+
+    @pytest.mark.offline
+    def test_make_staging_key_rejects_invalid_doc_id(self, s3_config):
+        """Document ID validation should reject path separators."""
+        from yar.storage.s3_client import S3Client
+
+        client = S3Client(config=s3_config)
+        with pytest.raises(ValueError):
+            client._make_staging_key('default', 'bad/id', 'file.pdf')
+
+    @pytest.mark.offline
     def test_make_archive_key(self, s3_config):
         """Test archive key format (documents stored at workspace root, no archive prefix)."""
         from yar.storage.s3_client import S3Client
@@ -516,6 +534,38 @@ class TestS3ClientOperations:
             await client.initialize()
 
             assert await client.object_exists('nonexistent/key') is False
+
+            await client.finalize()
+
+    @pytest.mark.asyncio
+    async def test_upload_object_rejects_invalid_key(self, s3_config, mock_s3_session):
+        """upload_object should enforce key validation in storage layer."""
+        from yar.storage.s3_client import S3Client, S3ClientManager
+
+        mock_session, _mock_client = mock_s3_session
+
+        with patch.object(S3ClientManager, 'get_session', return_value=mock_session):
+            client = S3Client(config=s3_config)
+            await client.initialize()
+
+            with pytest.raises(ValueError):
+                await client.upload_object('../bad-key', b'data')
+
+            await client.finalize()
+
+    @pytest.mark.asyncio
+    async def test_move_to_archive_requires_staging_prefix(self, s3_config, mock_s3_session):
+        """move_to_archive should only accept keys under staging/."""
+        from yar.storage.s3_client import S3Client, S3ClientManager
+
+        mock_session, _mock_client = mock_s3_session
+
+        with patch.object(S3ClientManager, 'get_session', return_value=mock_session):
+            client = S3Client(config=s3_config)
+            await client.initialize()
+
+            with pytest.raises(ValueError):
+                await client.move_to_archive('archive/default/doc123/test.txt')
 
             await client.finalize()
 

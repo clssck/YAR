@@ -46,11 +46,17 @@ const useRandomGraph = () => {
       // Calculate visual degree from graph edges
       const visualDegree = graph.degree(node)
       // Simulate db_degree being higher than visual degree (some nodes have hidden connections)
-      const db_degree = faker.number.int({ min: visualDegree, max: visualDegree + 8 })
+      const db_degree = faker.number.int({
+        min: visualDegree,
+        max: visualDegree + 8,
+      })
 
       graph.mergeNodeAttributes(node, {
         label: faker.person.fullName(),
-        size: faker.number.int({ min: Constants.minNodeSize, max: Constants.maxNodeSize }),
+        size: faker.number.int({
+          min: Constants.minNodeSize,
+          max: Constants.maxNodeSize,
+        }),
         color: randomColor(),
         x: Math.random(),
         y: Math.random(),

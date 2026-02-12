@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon } from 'lucide-react'
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  RefreshCwIcon,
+} from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { getTableData, getTableList, getTableSchema } from '@/api/yar'
@@ -111,8 +117,17 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   }
 
   return (
-    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCopy}>
-      {copied ? <CheckIcon className="h-3 w-3 text-green-500" /> : <CopyIcon className="h-3 w-3" />}
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-6 w-6 p-0"
+      onClick={handleCopy}
+    >
+      {copied ? (
+        <CheckIcon className="h-3 w-3 text-green-500" />
+      ) : (
+        <CopyIcon className="h-3 w-3" />
+      )}
     </Button>
   )
 }
@@ -155,16 +170,22 @@ function RowDetailModal({
           {entries.map(([key, value]) => (
             <div key={key} className="border rounded-lg p-3 bg-muted/30">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-sm text-muted-foreground">{key}</span>
+                <span className="font-medium text-sm text-muted-foreground">
+                  {key}
+                </span>
                 <CopyButton text={formatValue(value)} label={key} />
               </div>
-              <div className={`text-sm ${isJsonLike(value) ? 'font-mono' : ''}`}>
+              <div
+                className={`text-sm ${isJsonLike(value) ? 'font-mono' : ''}`}
+              >
                 {isJsonLike(value) ? (
                   <pre className="whitespace-pre-wrap break-all bg-muted p-2 rounded text-xs overflow-auto max-h-[200px]">
                     {formatValue(value)}
                   </pre>
                 ) : (
-                  <div className="whitespace-pre-wrap break-all">{formatValue(value)}</div>
+                  <div className="whitespace-pre-wrap break-all">
+                    {formatValue(value)}
+                  </div>
                 )}
               </div>
             </div>
@@ -241,7 +262,10 @@ export default function TableExplorer() {
           cols.push({
             accessorKey: key,
             header: () => (
-              <div className="font-semibold text-xs truncate max-w-[150px]" title={key}>
+              <div
+                className="font-semibold text-xs truncate max-w-[150px]"
+                title={key}
+              >
                 {key}
               </div>
             ),
@@ -249,7 +273,8 @@ export default function TableExplorer() {
               const value = row.getValue(key) as CellValue
               const displayValue = truncateValue(value, 50)
               const isLong =
-                typeof value === 'object' || (typeof value === 'string' && value.length > 50)
+                typeof value === 'object' ||
+                (typeof value === 'string' && value.length > 50)
 
               return (
                 <div
@@ -273,13 +298,20 @@ export default function TableExplorer() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-medium">Table Explorer</CardTitle>
+            <CardTitle className="text-lg font-medium">
+              Table Explorer
+            </CardTitle>
             <div className="flex items-center gap-2">
-              <Select value={effectiveSelectedTable} onValueChange={handleTableChange}>
+              <Select
+                value={effectiveSelectedTable}
+                onValueChange={handleTableChange}
+              >
                 <SelectTrigger className="w-[250px]">
                   <SelectValue
                     placeholder={
-                      tableList && tableList.length > 0 ? 'Select a table' : 'No tables available'
+                      tableList && tableList.length > 0
+                        ? 'Select a table'
+                        : 'No tables available'
                     }
                   />
                 </SelectTrigger>
@@ -327,7 +359,12 @@ export default function TableExplorer() {
               <p className="text-sm text-muted-foreground">
                 {error instanceof Error ? error.message : 'Unknown error'}
               </p>
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                className="mt-2"
+              >
                 Retry
               </Button>
             </div>
@@ -346,8 +383,9 @@ export default function TableExplorer() {
           <div className="text-sm text-muted-foreground">
             {tableData?.total ? (
               <>
-                Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, tableData.total)}{' '}
-                of {tableData.total} rows
+                Showing {(page - 1) * pageSize + 1} to{' '}
+                {Math.min(page * pageSize, tableData.total)} of{' '}
+                {tableData.total} rows
               </>
             ) : (
               'No results'
@@ -379,7 +417,11 @@ export default function TableExplorer() {
         </div>
       </Card>
 
-      <RowDetailModal row={selectedRow} open={modalOpen} onOpenChange={setModalOpen} />
+      <RowDetailModal
+        row={selectedRow}
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+      />
     </div>
   )
 }

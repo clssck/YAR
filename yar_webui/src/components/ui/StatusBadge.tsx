@@ -15,12 +15,16 @@ const statusBadgeVariants = cva(
   {
     variants: {
       status: {
-        success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-        warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+        success:
+          'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
+        warning:
+          'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
         error: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
         info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-        pending: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-        processing: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+        pending:
+          'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+        processing:
+          'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
       },
       size: {
         sm: 'text-[10px] px-2 py-0.5',
@@ -32,7 +36,7 @@ const statusBadgeVariants = cva(
       status: 'info',
       size: 'default',
     },
-  }
+  },
 )
 
 const statusIcons: Record<string, LucideIcon> = {
@@ -81,7 +85,10 @@ export default function StatusBadge({
       {...props}
     >
       {showIcon && Icon && (
-        <Icon className={cn('h-3 w-3 shrink-0', isAnimated && 'animate-spin')} aria-hidden="true" />
+        <Icon
+          className={cn('h-3 w-3 shrink-0', isAnimated && 'animate-spin')}
+          aria-hidden="true"
+        />
       )}
       <span>{label}</span>
     </output>

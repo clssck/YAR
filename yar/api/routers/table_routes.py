@@ -11,6 +11,7 @@ from yar.api.utils_api import (
     handle_api_error,
 )
 from yar.kg.postgres_impl import TABLES
+from yar.validators import validate_workspace_name
 
 
 def sanitize_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -79,6 +80,7 @@ def create_table_routes(rag: YAR, api_key: str | None = None) -> APIRouter:
         req_workspace = get_workspace_from_request(request)
         # Priority: query param > header > rag default > "default"
         target_workspace = workspace or req_workspace or rag.workspace or 'default'
+        target_workspace = validate_workspace_name(target_workspace)
 
         # Access the database connection from an initialized storage
         # full_docs is a KV storage that has the db connection when using PostgreSQL

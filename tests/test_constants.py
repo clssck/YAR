@@ -38,6 +38,7 @@ from yar.constants import (
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_MAX_ASYNC,
     DEFAULT_MAX_ENTITY_TOKENS,
+    DEFAULT_MAX_EXTRACT_INPUT_TOKENS,
     DEFAULT_MAX_FILE_PATHS,
     DEFAULT_MAX_GLEANING,
     DEFAULT_MAX_GRAPH_NODES,
@@ -158,6 +159,12 @@ class TestExtractionSettings:
         assert DEFAULT_SUMMARY_CONTEXT_SIZE == 12000
         assert isinstance(DEFAULT_SUMMARY_CONTEXT_SIZE, int)
         assert DEFAULT_SUMMARY_CONTEXT_SIZE > 0
+
+    def test_default_max_extract_input_tokens(self):
+        """Test DEFAULT_MAX_EXTRACT_INPUT_TOKENS is a positive integer."""
+        assert DEFAULT_MAX_EXTRACT_INPUT_TOKENS == 20480
+        assert isinstance(DEFAULT_MAX_EXTRACT_INPUT_TOKENS, int)
+        assert DEFAULT_MAX_EXTRACT_INPUT_TOKENS > 0
 
     def test_default_entity_types_is_list(self):
         """Test DEFAULT_ENTITY_TYPES is a list of strings."""

@@ -45,6 +45,7 @@ from yar.constants import (
     DEFAULT_LLM_TIMEOUT,
     DEFAULT_MAX_ASYNC,
     DEFAULT_MAX_ENTITY_TOKENS,
+    DEFAULT_MAX_EXTRACT_INPUT_TOKENS,
     DEFAULT_MAX_FILE_PATHS,
     DEFAULT_MAX_GLEANING,
     DEFAULT_MAX_GRAPH_NODES,
@@ -77,6 +78,7 @@ from yar.kg.shared_storage import (
     get_default_workspace,
     get_namespace_data,
     get_namespace_lock,
+    get_storage_keyed_lock,
     set_default_workspace,
 )
 from yar.namespace import NameSpace
@@ -192,6 +194,15 @@ class YAR:
 
     entity_extract_max_gleaning: int = field(default=get_env_value('MAX_GLEANING', DEFAULT_MAX_GLEANING, int))
     """Maximum number of entity extraction attempts for ambiguous content."""
+
+    max_extract_input_tokens: int = field(
+        default=get_env_value(
+            'MAX_EXTRACT_INPUT_TOKENS',
+            DEFAULT_MAX_EXTRACT_INPUT_TOKENS,
+            int,
+        )
+    )
+    """Maximum tokens allowed for entity extraction input context."""
 
     force_llm_summary_on_merge: int = field(
         default=get_env_value('FORCE_LLM_SUMMARY_ON_MERGE', DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE, int)
@@ -1195,45 +1206,87 @@ class YAR:
             for id_, content_data in contents.items()
         }
 
-        # 3. Filter out already processed documents
-        # Get docs ids
+        # 3. Filter out already processed documents.
+        # Guard this section with a keyed lock so duplicate detection remains
+        # deterministic when concurrent requests enqueue identical content.
         all_new_doc_ids = set(new_docs.keys())
-        # Exclude IDs of documents that are already enqueued
-        unique_new_doc_ids = await self.doc_status.filter_keys(all_new_doc_ids)
+        lock_keys = sorted(all_new_doc_ids)
+        lock_namespace = f'doc_enqueue:{self.workspace}'
 
-        # Log ignored document IDs (documents that were filtered out because they already exist)
-        ignored_ids = list(all_new_doc_ids - unique_new_doc_ids)
-        if ignored_ids:
-            for doc_id in ignored_ids:
-                file_path = new_docs.get(doc_id, {}).get('file_path', 'unknown_source')
-                logger.warning(f'Ignoring document ID (already exists): {doc_id} ({file_path})')
-            if len(ignored_ids) > 3:
-                logger.warning(f'Total Ignoring {len(ignored_ids)} document IDs that already exist in storage')
+        async with get_storage_keyed_lock(lock_keys, namespace=lock_namespace, enable_logging=False):
+            # Exclude IDs of documents that are already enqueued
+            unique_new_doc_ids = await self.doc_status.filter_keys(all_new_doc_ids)
 
-        # Filter new_docs to only include documents with unique IDs
-        new_docs = {doc_id: new_docs[doc_id] for doc_id in unique_new_doc_ids if doc_id in new_docs}
+            # Handle duplicate documents by creating trackable duplicate records.
+            # This makes async duplicate detection visible in track_status APIs.
+            ignored_ids = list(all_new_doc_ids - unique_new_doc_ids)
+            if ignored_ids:
+                duplicate_docs: dict[str, Any] = {}
+                for doc_id in ignored_ids:
+                    file_path = new_docs.get(doc_id, {}).get('file_path', 'unknown_source')
+                    logger.warning(f'Duplicate document detected: {doc_id} ({file_path})')
 
-        if not new_docs:
-            logger.warning('No new unique documents were found.')
-            return track_id
+                    existing_doc = await self.doc_status.get_by_id(doc_id)
+                    if isinstance(existing_doc, dict):
+                        existing_status = existing_doc.get('status', 'unknown')
+                        existing_track_id = existing_doc.get('track_id') or ''
+                    elif existing_doc is not None:
+                        existing_status = getattr(existing_doc, 'status', 'unknown')
+                        existing_track_id = getattr(existing_doc, 'track_id', '') or ''
+                    else:
+                        existing_status = 'unknown'
+                        existing_track_id = ''
 
-        # 4. Store document content in full_docs and status in doc_status
-        #    Store full document content separately
-        full_docs_data = {
-            doc_id: {
-                'content': contents[doc_id]['content'],
-                'file_path': contents[doc_id]['file_path'],
-                'meta': metadata,  # Store document metadata (chunking_preset, etc.)
+                    if hasattr(existing_status, 'value'):
+                        existing_status = existing_status.value
+
+                    duplicate_record_id = compute_mdhash_id(f'{doc_id}-{track_id}', prefix='dup-')
+                    duplicate_docs[duplicate_record_id] = {
+                        'status': DocStatus.FAILED,
+                        'content_summary': f'[DUPLICATE] Original document: {doc_id}',
+                        'content_length': new_docs.get(doc_id, {}).get('content_length', 0),
+                        'created_at': datetime.now(timezone.utc).isoformat(),
+                        'updated_at': datetime.now(timezone.utc).isoformat(),
+                        'file_path': file_path,
+                        'track_id': track_id,
+                        'error_msg': f'Content already exists. Original doc_id: {doc_id}, Status: {existing_status}',
+                        'metadata': {
+                            'is_duplicate': True,
+                            'original_doc_id': doc_id,
+                            'original_track_id': existing_track_id,
+                        },
+                    }
+
+                if duplicate_docs:
+                    await self.doc_status.upsert(duplicate_docs)
+                    logger.info(
+                        f'Created {len(duplicate_docs)} duplicate document records with track_id: {track_id}'
+                    )
+
+            # Filter new_docs to only include documents with unique IDs
+            new_docs = {doc_id: new_docs[doc_id] for doc_id in unique_new_doc_ids if doc_id in new_docs}
+
+            if not new_docs:
+                logger.warning('No new unique documents were found.')
+                return track_id
+
+            # 4. Store document content in full_docs and status in doc_status
+            #    Store full document content separately
+            full_docs_data = {
+                doc_id: {
+                    'content': contents[doc_id]['content'],
+                    'file_path': contents[doc_id]['file_path'],
+                    'meta': metadata,  # Store document metadata (chunking_preset, etc.)
+                }
+                for doc_id in new_docs
             }
-            for doc_id in new_docs
-        }
-        await self.full_docs.upsert(full_docs_data)
-        # Persist data to disk immediately
-        await self.full_docs.index_done_callback()
+            await self.full_docs.upsert(full_docs_data)
+            # Persist data to disk immediately
+            await self.full_docs.index_done_callback()
 
-        # Store document status (without content)
-        await self.doc_status.upsert(new_docs)
-        logger.debug(f'Stored {len(new_docs)} new unique documents')
+            # Store document status (without content)
+            await self.doc_status.upsert(new_docs)
+            logger.debug(f'Stored {len(new_docs)} new unique documents')
 
         return track_id
 

@@ -18,7 +18,7 @@ import unicodedata
 import uuid
 import weakref
 from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from hashlib import md5
@@ -423,18 +423,27 @@ class EmbeddingFunc:
             func=partial(decorated_embed.func, embed_model="model", host="http://localhost:8080")
 
     Args:
-        embedding_dim: Expected dimension of the embeddings (for dimension checking and workspace data isolation in vector DB)
+        embedding_dim: Expected dimension of embeddings. If None, auto-detects on first call.
+            Can also read from EMBEDDING_DIM environment variable.
         func: The actual embedding function to wrap
         max_token_size: Enable embedding token limit checking for description summarization (set embedding_token_limit in YAR)
-        send_dimensions: Whether to inject embedding_dim argument to underlying function
+        send_dimensions: Whether to inject embedding_dim argument to underlying function.
+            Can also read from EMBEDDING_SEND_DIM environment variable.
         model_name: Model name for implementing workspace data isolation in vector DB
+
+    Auto-Detection:
+        When embedding_dim is None and EMBEDDING_DIM env var is not set, the wrapper
+        will make a test API call on first use to detect the actual dimension.
+        This removes the need for manual configuration when using new models.
     """
 
-    embedding_dim: int
-    func: Callable
+    embedding_dim: int | None = None  # None = auto-detect from API
+    func: Callable = field(default=lambda x: x)  # Placeholder, must be provided
     max_token_size: int | None = None
-    send_dimensions: bool = False
+    send_dimensions: bool | None = None  # None = read from EMBEDDING_SEND_DIM env
     model_name: str | None = None  # Model name for workspace data isolation in vector DB
+    _detected_dim: int | None = field(default=None, init=False, repr=False)
+    _detection_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     def __post_init__(self):
         """Unwrap nested EmbeddingFunc to prevent double wrapping issues.
@@ -463,21 +472,80 @@ class EmbeddingFunc:
                 'Consider using .func to access the unwrapped function directly.'
             )
 
+    def _get_effective_send_dimensions(self) -> bool:
+        """Get effective send_dimensions value (explicit > env > False)."""
+        if self.send_dimensions is not None:
+            return self.send_dimensions
+        return os.getenv('EMBEDDING_SEND_DIM', '').lower() == 'true'
+
+    async def _get_effective_embedding_dim(self, result: np.ndarray | None = None) -> int:
+        """Get effective embedding dimension with auto-detection support.
+
+        Priority:
+        - If result provided: detect from result (auto-detect mode)
+        - If explicit dimension set: use it
+        - If cached detection exists: use it
+        - If env var set: use it
+        - Fallback: 1536 (OpenAI default)
+
+        Args:
+            result: Optional embedding result to detect dimension from
+
+        Returns:
+            The embedding dimension to use
+        """
+        # 1. Detect from result if provided (highest priority for auto-detection)
+        if result is not None and result.size > 0:
+            if result.ndim == 2:
+                detected = result.shape[1]
+            else:
+                # Assume first call, result is flat array for single or multiple texts
+                # We need to guess - if we got texts as first arg, use that count
+                detected = result.shape[0] if result.ndim == 1 else result.size
+                # For 2+ texts, result.shape would be (n, dim) so this branch is for 1 text
+                if result.ndim == 1:
+                    detected = len(result)
+
+            if self._detected_dim is None:
+                self._detected_dim = detected
+                logger.info(f'Auto-detected embedding dimension from result: {detected}D')
+            return detected
+
+        # 2. Already detected from previous call
+        if self._detected_dim is not None:
+            return self._detected_dim
+
+        # 3. Explicit dimension set on instance
+        if self.embedding_dim is not None:
+            return self.embedding_dim
+
+        # 4. Environment variable
+        env_dim = os.getenv('EMBEDDING_DIM')
+        if env_dim:
+            try:
+                return int(env_dim)
+            except ValueError:
+                pass
+
+        # 5. Fallback default (OpenAI text-embedding-3-small)
+        return 1536
+
     async def __call__(self, *args, **kwargs) -> np.ndarray:
-        # Only inject embedding_dim when send_dimensions is True
-        if self.send_dimensions:
+        # Get effective send_dimensions
+        effective_send_dim = self._get_effective_send_dimensions()
+
+        # Inject embedding_dim if send_dimensions is enabled
+        if effective_send_dim:
+            effective_dim = await self._get_effective_embedding_dim()
             # Check if user provided embedding_dim parameter
             if 'embedding_dim' in kwargs:
                 user_provided_dim = kwargs['embedding_dim']
-                # If user's value differs from class attribute, output warning
-                if user_provided_dim is not None and user_provided_dim != self.embedding_dim:
+                if user_provided_dim is not None and user_provided_dim != effective_dim:
                     logger.warning(
                         f'Ignoring user-provided embedding_dim={user_provided_dim}, '
-                        f'using declared embedding_dim={self.embedding_dim} from decorator'
+                        f'using effective embedding_dim={effective_dim}'
                     )
-
-            # Inject embedding_dim from decorator
-            kwargs['embedding_dim'] = self.embedding_dim
+            kwargs['embedding_dim'] = effective_dim
 
         # Check if underlying function supports max_token_size and inject if not provided
         if self.max_token_size is not None and 'max_token_size' not in kwargs:
@@ -488,9 +556,11 @@ class EmbeddingFunc:
         # Call the actual embedding function
         result = await self.func(*args, **kwargs)
 
+        # Auto-detect dimension from result if not yet known
+        expected_dim = await self._get_effective_embedding_dim(result)
+
         # Validate embedding dimensions using total element count
-        total_elements = result.size  # Total number of elements in the numpy array
-        expected_dim = self.embedding_dim
+        total_elements = result.size
 
         # Check if total elements can be evenly divided by embedding_dim
         if total_elements % expected_dim != 0:
@@ -1066,10 +1136,45 @@ def wrap_embedding_func_with_attrs(**kwargs):
             return await openai_embed.func(texts, ...)  # ✅ Correct
             # return await openai_embed(texts, ...)     # ❌ Wrong - double decoration!
         ```
+
+    Environment Variable Override:
+        When embedding_dim or send_dimensions are not explicitly provided in the decorator,
+        the values are read from environment variables at decoration time:
+        - EMBEDDING_DIM: Override the default embedding dimension
+        - EMBEDDING_SEND_DIM: Override the default send_dimensions (true/false)
+
+        Example:
+            # With EMBEDDING_DIM=1532 and EMBEDDING_SEND_DIM=true in .env:
+            @wrap_embedding_func_with_attrs()  # Uses 1532 dim, send_dimensions=True
+            async def my_embed(texts, embedding_dim=None): ...
+
+            # Explicit values override environment:
+            @wrap_embedding_func_with_attrs(embedding_dim=768)  # Uses 768, ignores env
+            async def my_embed(texts, embedding_dim=None): ...
     """
+    # Read from environment if not explicitly provided
+    env_embedding_dim = os.getenv('EMBEDDING_DIM')
+    env_send_dim = os.getenv('EMBEDDING_SEND_DIM', '').lower() == 'true'
+
+    # Use environment values as defaults, then override with explicit kwargs
+    final_kwargs = dict(kwargs)
+
+    # embedding_dim: prefer explicit > env > fallback default (1536 for OpenAI compatibility)
+    if 'embedding_dim' not in final_kwargs:
+        if env_embedding_dim:
+            try:
+                final_kwargs['embedding_dim'] = int(env_embedding_dim)
+            except ValueError:
+                final_kwargs['embedding_dim'] = 1536  # Fallback if env is invalid
+        else:
+            final_kwargs['embedding_dim'] = 1536  # Default for text-embedding-3-small
+
+    # send_dimensions: prefer explicit > env > False
+    if 'send_dimensions' not in final_kwargs and env_send_dim:
+        final_kwargs['send_dimensions'] = True
 
     def final_decro(func) -> EmbeddingFunc:
-        new_func = EmbeddingFunc(**kwargs, func=func)
+        new_func = EmbeddingFunc(**final_kwargs, func=func)
         return new_func
 
     return final_decro

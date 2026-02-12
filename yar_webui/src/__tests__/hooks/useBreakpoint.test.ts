@@ -280,8 +280,9 @@ describe('useIsAboveBreakpoint', () => {
     })
 
     const { result, rerender } = renderHook(
-      ({ breakpoint }: { breakpoint: Breakpoint }) => useIsAboveBreakpoint(breakpoint),
-      { initialProps: { breakpoint: 'md' as Breakpoint } }
+      ({ breakpoint }: { breakpoint: Breakpoint }) =>
+        useIsAboveBreakpoint(breakpoint),
+      { initialProps: { breakpoint: 'md' as Breakpoint } },
     )
 
     expect(result.current).toBe(true)
@@ -373,7 +374,7 @@ describe('useResponsiveValue', () => {
         sm: 2,
         md: 3,
         lg: 4,
-      })
+      }),
     )
 
     expect(result.current).toBe(4)
@@ -391,7 +392,7 @@ describe('useResponsiveValue', () => {
         xs: 1,
         sm: 2,
         md: 3,
-      })
+      }),
     )
 
     expect(result.current).toBe(3)
@@ -408,7 +409,7 @@ describe('useResponsiveValue', () => {
       useResponsiveValue({
         xs: 'mobile',
         md: 'tablet',
-      })
+      }),
     )
 
     expect(result.current).toBe('mobile')
@@ -425,7 +426,7 @@ describe('useResponsiveValue', () => {
       useResponsiveValue({
         md: 'tablet',
         lg: 'desktop',
-      })
+      }),
     )
 
     expect(result.current).toBeUndefined()
@@ -443,7 +444,7 @@ describe('useResponsiveValue', () => {
         xs: 'mobile',
         md: 'tablet',
         lg: 'desktop',
-      })
+      }),
     )
 
     expect(result.current).toBe('mobile')
@@ -471,7 +472,7 @@ describe('useResponsiveValue', () => {
       useResponsiveValue({
         xs: { cols: 1 },
         lg: { cols: 4 },
-      })
+      }),
     )
 
     expect(result.current).toEqual({ cols: 4 })
@@ -716,7 +717,9 @@ describe('useMediaQuery', () => {
   })
 
   test('updates when media query matches', () => {
-    const { result } = renderHook(() => useMediaQuery('(prefers-reduced-motion: reduce)'))
+    const { result } = renderHook(() =>
+      useMediaQuery('(prefers-reduced-motion: reduce)'),
+    )
 
     expect(typeof result.current).toBe('boolean')
   })

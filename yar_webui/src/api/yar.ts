@@ -112,7 +112,13 @@ export type YarDocumentsScanProgress = {
  * - "mix": Integrates knowledge graph and vector retrieval.
  * - "bypass": Bypasses knowledge retrieval and directly uses the LLM.
  */
-export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass'
+export type QueryMode =
+  | 'naive'
+  | 'local'
+  | 'global'
+  | 'hybrid'
+  | 'mix'
+  | 'bypass'
 
 /**
  * Citation marker with position data for frontend insertion
@@ -242,7 +248,12 @@ export type DeleteDocResponse = {
   doc_id: string
 }
 
-export type DocStatus = 'pending' | 'processing' | 'preprocessed' | 'processed' | 'failed'
+export type DocStatus =
+  | 'pending'
+  | 'processing'
+  | 'preprocessed'
+  | 'processed'
+  | 'failed'
 
 export type DocStatusResponse = {
   id: string
@@ -379,12 +390,12 @@ axiosInstance.interceptors.response.use(
       }
       throw new Error(
         `${error.response.status} ${error.response.statusText}\n${JSON.stringify(
-          error.response.data
-        )}\n${error.config?.url}`
+          error.response.data,
+        )}\n${error.config?.url}`,
       )
     }
     throw error
-  }
+  },
 )
 
 // API methods
@@ -393,10 +404,10 @@ export const queryGraphs = async (
   maxDepth: number,
   maxNodes: number,
   minDegree = 0,
-  includeOrphans = false
+  includeOrphans = false,
 ): Promise<YarGraphType> => {
   const response = await axiosInstance.get(
-    `/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}&min_degree=${minDegree}&include_orphans=${includeOrphans}`
+    `/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}&min_degree=${minDegree}&include_orphans=${includeOrphans}`,
   )
   return response.data
 }
@@ -407,23 +418,27 @@ export const getGraphLabels = async (): Promise<string[]> => {
 }
 
 export const getPopularLabels = async (
-  limit: number = popularLabelsDefaultLimit
+  limit: number = popularLabelsDefaultLimit,
 ): Promise<string[]> => {
-  const response = await axiosInstance.get(`/graph/label/popular?limit=${limit}`)
+  const response = await axiosInstance.get(
+    `/graph/label/popular?limit=${limit}`,
+  )
   return response.data
 }
 
 export const searchLabels = async (
   query: string,
-  limit: number = searchLabelsDefaultLimit
+  limit: number = searchLabelsDefaultLimit,
 ): Promise<string[]> => {
   const response = await axiosInstance.get(
-    `/graph/label/search?q=${encodeURIComponent(query)}&limit=${limit}`
+    `/graph/label/search?q=${encodeURIComponent(query)}&limit=${limit}`,
   )
   return response.data
 }
 
-export const checkHealth = async (): Promise<YarStatus | { status: 'error'; message: string }> => {
+export const checkHealth = async (): Promise<
+  YarStatus | { status: 'error'; message: string }
+> => {
   try {
     const response = await axiosInstance.get('/health')
     return response.data
@@ -440,17 +455,21 @@ export const scanNewDocuments = async (): Promise<ScanResponse> => {
   return response.data
 }
 
-export const reprocessFailedDocuments = async (): Promise<ReprocessFailedResponse> => {
-  const response = await axiosInstance.post('/documents/reprocess_failed')
-  return response.data
-}
+export const reprocessFailedDocuments =
+  async (): Promise<ReprocessFailedResponse> => {
+    const response = await axiosInstance.post('/documents/reprocess_failed')
+    return response.data
+  }
 
-export const getDocumentsScanProgress = async (): Promise<YarDocumentsScanProgress> => {
-  const response = await axiosInstance.get('/documents/scan-progress')
-  return response.data
-}
+export const getDocumentsScanProgress =
+  async (): Promise<YarDocumentsScanProgress> => {
+    const response = await axiosInstance.get('/documents/scan-progress')
+    return response.data
+  }
 
-export const queryText = async (request: QueryRequest): Promise<QueryResponse> => {
+export const queryText = async (
+  request: QueryRequest,
+): Promise<QueryResponse> => {
   const response = await axiosInstance.post('/query', request)
   return response.data
 }
@@ -472,7 +491,7 @@ export const queryTextStream = async (
   onChunk: (chunk: string) => void,
   onError?: (error: string) => void,
   onCitations?: (metadata: CitationsMetadata) => void,
-  onReferences?: (references: StreamReference[]) => void
+  onReferences?: (references: StreamReference[]) => void,
 ) => {
   const apiKey = useSettingsStore.getState().apiKey
   const token = localStorage.getItem('YAR-API-TOKEN')
@@ -516,7 +535,7 @@ export const queryTextStream = async (
       // Format error message similar to axios interceptor for consistency
       const url = `${backendBaseUrl}/query/stream`
       throw new Error(
-        `${response.status} ${response.statusText}\n${JSON.stringify({ error: errorBody })}\n${url}`
+        `${response.status} ${response.statusText}\n${JSON.stringify({ error: errorBody })}\n${url}`,
       )
     }
 
@@ -604,7 +623,8 @@ export const queryTextStream = async (
 
       switch (statusCode) {
         case 403:
-          userMessage = 'You do not have permission to access this resource (403 Forbidden)'
+          userMessage =
+            'You do not have permission to access this resource (403 Forbidden)'
           console.error('Permission denied for stream request:', message)
           break
         case 404:
@@ -612,7 +632,8 @@ export const queryTextStream = async (
           console.error('Resource not found for stream request:', message)
           break
         case 429:
-          userMessage = 'Too many requests, please try again later (429 Too Many Requests)'
+          userMessage =
+            'Too many requests, please try again later (429 Too Many Requests)'
           console.error('Rate limited for stream request:', message)
           break
         case 500:
@@ -623,7 +644,11 @@ export const queryTextStream = async (
           console.error('Server error for stream request:', message)
           break
         default:
-          console.error('Stream request failed with status code:', statusCode, message)
+          console.error(
+            'Stream request failed with status code:',
+            statusCode,
+            message,
+          )
       }
 
       if (onError) {
@@ -640,7 +665,9 @@ export const queryTextStream = async (
     ) {
       console.error('Network error for stream request:', message)
       if (onError) {
-        onError('Network connection error, please check your internet connection')
+        onError(
+          'Network connection error, please check your internet connection',
+        )
       }
       return
     }
@@ -669,7 +696,9 @@ export const insertText = async (text: string): Promise<DocActionResponse> => {
   return response.data
 }
 
-export const insertTexts = async (texts: string[]): Promise<DocActionResponse> => {
+export const insertTexts = async (
+  texts: string[],
+): Promise<DocActionResponse> => {
   const response = await axiosInstance.post('/documents/texts', { texts })
   return response.data
 }
@@ -679,7 +708,7 @@ export type ChunkingPreset = 'semantic' | 'recursive' | ''
 export const uploadDocument = async (
   file: File,
   onUploadProgress?: (percentCompleted: number) => void,
-  chunkingPreset?: ChunkingPreset
+  chunkingPreset?: ChunkingPreset,
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
@@ -696,7 +725,7 @@ export const uploadDocument = async (
       onUploadProgress !== undefined
         ? (progressEvent) => {
             const percentCompleted = Math.round(
-              (progressEvent.loaded * 100) / (progressEvent.total ?? 1)
+              (progressEvent.loaded * 100) / (progressEvent.total ?? 1),
             )
             onUploadProgress(percentCompleted)
           }
@@ -708,7 +737,7 @@ export const uploadDocument = async (
 export const batchUploadDocuments = async (
   files: File[],
   onUploadProgress?: (fileName: string, percentCompleted: number) => void,
-  chunkingPreset?: ChunkingPreset
+  chunkingPreset?: ChunkingPreset,
 ): Promise<DocActionResponse[]> => {
   return await Promise.all(
     files.map(async (file) => {
@@ -717,9 +746,9 @@ export const batchUploadDocuments = async (
         (percentCompleted) => {
           onUploadProgress?.(file.name, percentCompleted)
         },
-        chunkingPreset
+        chunkingPreset,
       )
-    })
+    }),
   )
 }
 
@@ -739,10 +768,14 @@ export const clearCache = async (): Promise<{
 export const deleteDocuments = async (
   docIds: string[],
   deleteFile = false,
-  deleteLLMCache = false
+  deleteLLMCache = false,
 ): Promise<DeleteDocResponse> => {
   const response = await axiosInstance.delete('/documents/delete_document', {
-    data: { doc_ids: docIds, delete_file: deleteFile, delete_llm_cache: deleteLLMCache },
+    data: {
+      doc_ids: docIds,
+      delete_file: deleteFile,
+      delete_llm_cache: deleteLLMCache,
+    },
   })
   return response.data
 }
@@ -760,7 +793,9 @@ export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
     // Check if response is HTML (which indicates a redirect or wrong endpoint)
     const contentType = response.headers['content-type'] || ''
     if (contentType.includes('text/html')) {
-      console.warn('Received HTML response instead of JSON for auth-status endpoint')
+      console.warn(
+        'Received HTML response instead of JSON for auth-status endpoint',
+      )
       return {
         auth_configured: true,
         auth_mode: 'enabled',
@@ -776,7 +811,10 @@ export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
     ) {
       // For unconfigured auth, ensure we have an access token
       if (!response.data.auth_configured) {
-        if (response.data.access_token && typeof response.data.access_token === 'string') {
+        if (
+          response.data.access_token &&
+          typeof response.data.access_token === 'string'
+        ) {
           return response.data
         } else {
           console.warn('Auth not configured but no valid access token provided')
@@ -818,7 +856,10 @@ export const cancelPipeline = async (): Promise<{
   return response.data
 }
 
-export const loginToServer = async (username: string, password: string): Promise<LoginResponse> => {
+export const loginToServer = async (
+  username: string,
+  password: string,
+): Promise<LoginResponse> => {
   const formData = new FormData()
   formData.append('username', username)
   formData.append('password', password)
@@ -844,7 +885,7 @@ export const updateEntity = async (
   entityName: string,
   updatedData: Record<string, PropertyValue>,
   allowRename = false,
-  allowMerge = false
+  allowMerge = false,
 ): Promise<EntityUpdateResponse> => {
   const response = await axiosInstance.post('/graph/entity/edit', {
     entity_name: entityName,
@@ -865,7 +906,7 @@ export const updateEntity = async (
 export const updateRelation = async (
   sourceEntity: string,
   targetEntity: string,
-  updatedData: Record<string, PropertyValue>
+  updatedData: Record<string, PropertyValue>,
 ): Promise<DocActionResponse> => {
   const response = await axiosInstance.post('/graph/relation/edit', {
     source_id: sourceEntity,
@@ -924,7 +965,7 @@ export const connectOrphanEntities = async (
   maxCandidates = 3,
   similarityThreshold?: number,
   confidenceThreshold?: number,
-  crossConnect?: boolean
+  crossConnect?: boolean,
 ): Promise<OrphanConnectionResponse> => {
   const response = await axiosInstance.post('/graph/orphans/connect', {
     max_candidates: maxCandidates,
@@ -939,10 +980,11 @@ export const connectOrphanEntities = async (
  * Get the current status of the orphan connection background pipeline
  * @returns Promise with current pipeline status
  */
-export const getOrphanConnectionStatus = async (): Promise<OrphanConnectionStatus> => {
-  const response = await axiosInstance.get('/graph/orphans/status')
-  return response.data
-}
+export const getOrphanConnectionStatus =
+  async (): Promise<OrphanConnectionStatus> => {
+    const response = await axiosInstance.get('/graph/orphans/status')
+    return response.data
+  }
 
 /**
  * Start orphan connection as a background job
@@ -955,7 +997,7 @@ export const getOrphanConnectionStatus = async (): Promise<OrphanConnectionStatu
  */
 export const startOrphanConnection = async (
   maxCandidates = 3,
-  maxDegree = 0
+  maxDegree = 0,
 ): Promise<{ status: string }> => {
   const response = await axiosInstance.post('/graph/orphans/start', null, {
     params: { max_candidates: maxCandidates, max_degree: maxDegree },
@@ -977,10 +1019,12 @@ export const cancelOrphanConnection = async (): Promise<{ status: string }> => {
  * @param entityName The entity name to check
  * @returns Promise with boolean indicating if the entity exists
  */
-export const checkEntityNameExists = async (entityName: string): Promise<boolean> => {
+export const checkEntityNameExists = async (
+  entityName: string,
+): Promise<boolean> => {
   try {
     const response = await axiosInstance.get(
-      `/graph/entity/exists?name=${encodeURIComponent(entityName)}`
+      `/graph/entity/exists?name=${encodeURIComponent(entityName)}`,
     )
     return response.data.exists
   } catch (error) {
@@ -994,8 +1038,12 @@ export const checkEntityNameExists = async (entityName: string): Promise<boolean
  * @param trackId The tracking ID returned from upload, text, or texts endpoints
  * @returns Promise with the track status response containing documents and summary
  */
-export const getTrackStatus = async (trackId: string): Promise<TrackStatusResponse> => {
-  const response = await axiosInstance.get(`/documents/track_status/${encodeURIComponent(trackId)}`)
+export const getTrackStatus = async (
+  trackId: string,
+): Promise<TrackStatusResponse> => {
+  const response = await axiosInstance.get(
+    `/documents/track_status/${encodeURIComponent(trackId)}`,
+  )
   return response.data
 }
 
@@ -1005,7 +1053,7 @@ export const getTrackStatus = async (trackId: string): Promise<TrackStatusRespon
  * @returns Promise with paginated documents response
  */
 export const getDocumentsPaginated = async (
-  request: DocumentsRequest
+  request: DocumentsRequest,
 ): Promise<PaginatedDocsResponse> => {
   const response = await axiosInstance.post('/documents/paginated', request)
   return response.data
@@ -1015,10 +1063,11 @@ export const getDocumentsPaginated = async (
  * Get counts of documents by status
  * @returns Promise with status counts response
  */
-export const getDocumentStatusCounts = async (): Promise<StatusCountsResponse> => {
-  const response = await axiosInstance.get('/documents/status_counts')
-  return response.data
-}
+export const getDocumentStatusCounts =
+  async (): Promise<StatusCountsResponse> => {
+    const response = await axiosInstance.get('/documents/status_counts')
+    return response.data
+  }
 
 export type TableSchema = {
   ddl: string
@@ -1166,7 +1215,9 @@ export const getTableList = async (): Promise<string[]> => {
   return response.data
 }
 
-export const getTableSchema = async (tableName: string): Promise<TableSchema> => {
+export const getTableSchema = async (
+  tableName: string,
+): Promise<TableSchema> => {
   if (!tableName || typeof tableName !== 'string') {
     throw new Error('Invalid table name')
   }
@@ -1174,16 +1225,20 @@ export const getTableSchema = async (tableName: string): Promise<TableSchema> =>
     throw new Error('Invalid table name: contains forbidden characters')
   }
   if (import.meta.env.DEV) {
-    return { ddl: mockSchemas[tableName] || `-- Schema not available for ${tableName}` }
+    return {
+      ddl: mockSchemas[tableName] || `-- Schema not available for ${tableName}`,
+    }
   }
-  const response = await axiosInstance.get(`/tables/${encodeURIComponent(tableName)}/schema`)
+  const response = await axiosInstance.get(
+    `/tables/${encodeURIComponent(tableName)}/schema`,
+  )
   return response.data
 }
 
 export const getTableData = async (
   tableName: string,
   page: number,
-  pageSize: number
+  pageSize: number,
 ): Promise<TableDataResponse> => {
   if (!tableName || typeof tableName !== 'string') {
     throw new Error('Invalid table name')
@@ -1198,7 +1253,9 @@ export const getTableData = async (
     pageSize < 1 ||
     pageSize > 1000
   ) {
-    throw new Error('Page must be >= 1 and page size must be between 1 and 1000')
+    throw new Error(
+      'Page must be >= 1 and page size must be between 1 and 1000',
+    )
   }
 
   if (import.meta.env.DEV) {
@@ -1214,9 +1271,12 @@ export const getTableData = async (
       total_pages: Math.ceil(data.length / pageSize),
     }
   }
-  const response = await axiosInstance.get(`/tables/${encodeURIComponent(tableName)}/data`, {
-    params: { page, page_size: pageSize },
-  })
+  const response = await axiosInstance.get(
+    `/tables/${encodeURIComponent(tableName)}/data`,
+    {
+      params: { page, page_size: pageSize },
+    },
+  )
   return response.data
 }
 
@@ -1282,10 +1342,16 @@ export const s3List = async (prefix = ''): Promise<S3ListResponse> => {
  * @param expiry - URL expiry time in seconds (default: 3600)
  * @returns Presigned download URL
  */
-export const s3Download = async (key: string, expiry = 3600): Promise<S3DownloadResponse> => {
-  const response = await axiosInstance.get(`/s3/download/${encodeURIComponent(key)}`, {
-    params: { expiry },
-  })
+export const s3Download = async (
+  key: string,
+  expiry = 3600,
+): Promise<S3DownloadResponse> => {
+  const response = await axiosInstance.get(
+    `/s3/download/${encodeURIComponent(key)}`,
+    {
+      params: { expiry },
+    },
+  )
   return response.data
 }
 
@@ -1295,7 +1361,10 @@ export const s3Download = async (key: string, expiry = 3600): Promise<S3Download
  * @param file - File to upload
  * @returns Upload result with key and presigned URL
  */
-export const s3Upload = async (prefix: string, file: File): Promise<S3UploadResponse> => {
+export const s3Upload = async (
+  prefix: string,
+  file: File,
+): Promise<S3UploadResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('prefix', prefix)
@@ -1313,7 +1382,9 @@ export const s3Upload = async (prefix: string, file: File): Promise<S3UploadResp
  * @returns Deletion confirmation
  */
 export const s3Delete = async (key: string): Promise<S3DeleteResponse> => {
-  const response = await axiosInstance.delete(`/s3/object/${encodeURIComponent(key)}`)
+  const response = await axiosInstance.delete(
+    `/s3/object/${encodeURIComponent(key)}`,
+  )
   return response.data
 }
 
@@ -1325,10 +1396,13 @@ export const s3Delete = async (key: string): Promise<S3DeleteResponse> => {
  */
 export const s3FolderStats = async (
   prefix: string,
-  previewLimit = 10
+  previewLimit = 10,
 ): Promise<S3FolderStatsResponse> => {
-  const response = await axiosInstance.get(`/s3/folder-stats/${encodeURIComponent(prefix)}`, {
-    params: { preview_limit: previewLimit },
-  })
+  const response = await axiosInstance.get(
+    `/s3/folder-stats/${encodeURIComponent(prefix)}`,
+    {
+      params: { preview_limit: previewLimit },
+    },
+  )
   return response.data
 }

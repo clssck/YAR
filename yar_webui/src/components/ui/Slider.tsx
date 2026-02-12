@@ -6,7 +6,10 @@ import { forwardRef } from 'react'
 import { cn } from '@/lib/utils'
 
 export interface SliderProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> {
+  extends Omit<
+    React.InputHTMLAttributes<HTMLInputElement>,
+    'type' | 'onChange'
+  > {
   /** Current value */
   value?: number
   /** Called when value changes */
@@ -40,7 +43,7 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
       disabled,
       ...props
     },
-    ref
+    ref,
   ) => {
     // Calculate percentage for gradient fill
     const percentage = ((value - min) / (max - min)) * 100
@@ -51,7 +54,11 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
         {(labels?.min || labels?.max || showValue) && (
           <div className="flex justify-between items-center mb-1 text-[10px] text-muted-foreground">
             <span>{labels?.min || ''}</span>
-            {showValue && <span className="font-medium text-foreground">{formatValue(value)}</span>}
+            {showValue && (
+              <span className="font-medium text-foreground">
+                {formatValue(value)}
+              </span>
+            )}
             <span>{labels?.max || ''}</span>
           </div>
         )}
@@ -84,7 +91,7 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
             '[&::-moz-range-thumb]:bg-primary',
             '[&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-background',
             '[&::-moz-range-thumb]:transition-transform',
-            '[&::-moz-range-thumb]:hover:scale-110'
+            '[&::-moz-range-thumb]:hover:scale-110',
           )}
           style={{
             background: `linear-gradient(to right, hsl(var(--primary)) ${percentage}%, hsl(var(--muted)) ${percentage}%)`,
@@ -93,7 +100,7 @@ const Slider = forwardRef<HTMLInputElement, SliderProps>(
         />
       </div>
     )
-  }
+  },
 )
 
 Slider.displayName = 'Slider'

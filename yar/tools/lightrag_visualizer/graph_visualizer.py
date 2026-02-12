@@ -792,7 +792,7 @@ class GraphViewer:
             scaled_array.astype(np.uint8),
             'RGBA',
         )
-        img = img.transpose(method=Image.Transpose.FLIP_TOP_BOTTOM)  # type: ignore
+        img = img.transpose(method=Image.Transpose.FLIP_TOP_BOTTOM)
         img.save(filename)
 
     def render_id_map(self, mvp: glm.mat4):

@@ -1,11 +1,13 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 test.describe('Global Keyboard Shortcuts', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
   })
 
-  test('Shift+? opens keyboard shortcuts dialog via button', async ({ page }) => {
+  test('Shift+? opens keyboard shortcuts dialog via button', async ({
+    page,
+  }) => {
     // Note: Shift+? shortcut may not work consistently in Playwright
     // Test via button click instead
     const shortcutButton = page.locator('button[title="Keyboard Shortcuts"]')
@@ -47,10 +49,15 @@ test.describe('Global Keyboard Shortcuts', () => {
 
     // Focus should still be inside dialog
     const focusedElement = page.locator(':focus')
-    const isInDialog = await dialog.locator(':focus').count() > 0
+    const isInDialog = (await dialog.locator(':focus').count()) > 0
 
     // Focus should be trapped in dialog or on dialog itself
-    expect(isInDialog || await focusedElement.evaluate(el => el.closest('[role="dialog"]') !== null)).toBeTruthy()
+    expect(
+      isInDialog ||
+        (await focusedElement.evaluate(
+          (el) => el.closest('[role="dialog"]') !== null,
+        )),
+    ).toBeTruthy()
   })
 })
 
@@ -127,7 +134,10 @@ test.describe('Retrieval Panel Keyboard Shortcuts', () => {
     await page.waitForTimeout(500)
 
     // Page should still be functional
-    await expect(page.getByRole('tab', { name: /Retrieval/i })).toHaveAttribute('data-state', 'active')
+    await expect(page.getByRole('tab', { name: /Retrieval/i })).toHaveAttribute(
+      'data-state',
+      'active',
+    )
   })
 
   test('Shift+Enter adds newline without submitting', async ({ page }) => {
@@ -162,7 +172,9 @@ test.describe('Keyboard Accessibility', () => {
     await page.keyboard.press('Tab')
 
     // Focus should have moved away from documentsTab
-    const isSameFocus = await documentsTab.evaluate(el => el === document.activeElement)
+    const isSameFocus = await documentsTab.evaluate(
+      (el) => el === document.activeElement,
+    )
     // Either same focus (if at end) or moved - just verify no error
     expect(typeof isSameFocus).toBe('boolean')
   })
@@ -179,7 +191,9 @@ test.describe('Keyboard Accessibility', () => {
 
     // Should have moved focus to previous element
     const focused = page.locator(':focus')
-    const isNotShortcutButton = await focused.evaluate((el) => el.getAttribute('title') !== 'Keyboard Shortcuts')
+    const isNotShortcutButton = await focused.evaluate(
+      (el) => el.getAttribute('title') !== 'Keyboard Shortcuts',
+    )
     expect(isNotShortcutButton).toBeTruthy()
   })
 })

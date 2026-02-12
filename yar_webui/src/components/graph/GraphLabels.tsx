@@ -4,7 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { getPopularLabels } from '@/api/yar'
 import LabelSelector from '@/components/graph/LabelSelector'
 import Button from '@/components/ui/Button'
-import { controlButtonVariant, popularLabelsDefaultLimit } from '@/lib/constants'
+import {
+  controlButtonVariant,
+  popularLabelsDefaultLimit,
+} from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
@@ -14,7 +17,8 @@ const GraphLabels = () => {
   const { t } = useTranslation()
   const label = useSettingsStore.use.queryLabel()
   const setQueryLabel = useSettingsStore.use.setQueryLabel()
-  const dropdownRefreshTrigger = useSettingsStore.use.searchLabelDropdownRefreshTrigger()
+  const dropdownRefreshTrigger =
+    useSettingsStore.use.searchLabelDropdownRefreshTrigger()
   const pipelineBusy = useBackendState.use.pipelineBusy()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -29,7 +33,9 @@ const GraphLabels = () => {
 
       if (history.length === 0) {
         try {
-          const popularLabels = await getPopularLabels(popularLabelsDefaultLimit)
+          const popularLabels = await getPopularLabels(
+            popularLabelsDefaultLimit,
+          )
           await SearchHistoryManager.initializeWithDefaults(popularLabels)
         } catch (error) {
           console.error('Failed to initialize search history:', error)
@@ -60,7 +66,7 @@ const GraphLabels = () => {
       // Reset fetch flag to trigger graph update with new label
       useGraphStore.getState().setGraphDataFetchAttempted(false)
     },
-    [setQueryLabel]
+    [setQueryLabel],
   )
 
   return (
@@ -73,9 +79,15 @@ const GraphLabels = () => {
         className="mr-2"
         disabled={isRefreshing}
       >
-        <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+        <RefreshCw
+          className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+        />
       </Button>
-      <LabelSelector value={label} onChange={handleLabelChange} disabled={isRefreshing} />
+      <LabelSelector
+        value={label}
+        onChange={handleLabelChange}
+        disabled={isRefreshing}
+      />
     </div>
   )
 }

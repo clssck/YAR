@@ -9,4 +9,5 @@ const defaultContext: TabVisibilityContextType = {
 }
 
 // Create the context
-export const TabVisibilityContext = createContext<TabVisibilityContextType>(defaultContext)
+export const TabVisibilityContext =
+  createContext<TabVisibilityContextType>(defaultContext)

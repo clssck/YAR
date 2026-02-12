@@ -9,7 +9,11 @@ import { ExternalLinkIcon, FileTextIcon, LinkIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CitationSource } from '@/api/yar'
 import Badge from '@/components/ui/Badge'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/HoverCard'
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/HoverCard'
 import { cn } from '@/lib/utils'
 
 interface CitationMarkerProps {
@@ -30,7 +34,8 @@ function getConfidenceLevel(confidence: number) {
   if (confidence >= 0.8) {
     return {
       level: 'high',
-      color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+      color:
+        'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
       markerBg: 'bg-green-100/80 dark:bg-green-900/40',
       markerBorder: 'border-green-300 dark:border-green-700',
     }
@@ -38,7 +43,8 @@ function getConfidenceLevel(confidence: number) {
   if (confidence >= 0.6) {
     return {
       level: 'medium',
-      color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+      color:
+        'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
       markerBg: 'bg-yellow-100/80 dark:bg-yellow-900/40',
       markerBorder: 'border-yellow-300 dark:border-yellow-700',
     }
@@ -54,20 +60,27 @@ function getConfidenceLevel(confidence: number) {
 /**
  * Interactive citation marker with hover card showing source metadata
  */
-export function CitationMarker({ marker, referenceIds, confidence, sources }: CitationMarkerProps) {
+export function CitationMarker({
+  marker,
+  referenceIds,
+  confidence,
+  sources,
+}: CitationMarkerProps) {
   const { t } = useTranslation()
   // Find sources matching our reference IDs (deduplicated by reference_id)
   const matchingSources = sources
     .filter((s) => referenceIds.includes(s.reference_id))
     .filter(
-      (source, index, arr) => arr.findIndex((s) => s.reference_id === source.reference_id) === index
+      (source, index, arr) =>
+        arr.findIndex((s) => s.reference_id === source.reference_id) === index,
     )
 
   // Confidence styling
   const confidenceInfo = getConfidenceLevel(confidence)
   const confidenceLabel = t(
     `retrievePanel.citation.confidence.${confidenceInfo.level}`,
-    confidenceInfo.level.charAt(0).toUpperCase() + confidenceInfo.level.slice(1)
+    confidenceInfo.level.charAt(0).toUpperCase() +
+      confidenceInfo.level.slice(1),
   )
 
   return (
@@ -81,9 +94,12 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
             'mx-0.5 transition-colors',
             'focus:outline-none focus:ring-2 focus:ring-primary/20',
             confidenceInfo.markerBg,
-            confidenceInfo.markerBorder
+            confidenceInfo.markerBorder,
           )}
-          title={t('retrievePanel.citation.clickToView', 'Click to view source')}
+          title={t(
+            'retrievePanel.citation.clickToView',
+            'Click to view source',
+          )}
         >
           <LinkIcon className="w-3 h-3 opacity-70" />
           <span>{marker}</span>
@@ -105,14 +121,16 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
               {/* Section title */}
               {source.section_title && (
                 <p className="text-xs text-muted-foreground pl-6">
-                  {t('retrievePanel.citation.section', 'Section')}: {source.section_title}
+                  {t('retrievePanel.citation.section', 'Section')}:{' '}
+                  {source.section_title}
                 </p>
               )}
 
               {/* Page range */}
               {source.page_range && (
                 <p className="text-xs text-muted-foreground pl-6">
-                  {t('retrievePanel.citation.pages', 'Pages')}: {source.page_range}
+                  {t('retrievePanel.citation.pages', 'Pages')}:{' '}
+                  {source.page_range}
                 </p>
               )}
 
@@ -130,10 +148,15 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 pl-6 truncate group"
-                  title={t('retrievePanel.citation.openDocument', 'Open document in new tab')}
+                  title={t(
+                    'retrievePanel.citation.openDocument',
+                    'Open document in new tab',
+                  )}
                 >
                   <ExternalLinkIcon className="w-3 h-3 shrink-0 opacity-70 group-hover:opacity-100" />
-                  <span className="truncate underline underline-offset-2">{source.file_path}</span>
+                  <span className="truncate underline underline-offset-2">
+                    {source.file_path}
+                  </span>
                 </a>
               ) : (
                 <p
@@ -173,7 +196,11 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
 export function renderTextWithCitations(
   text: string,
   sources: CitationSource[],
-  markers: Array<{ marker: string; reference_ids: string[]; confidence: number }>
+  markers: Array<{
+    marker: string
+    reference_ids: string[]
+    confidence: number
+  }>,
 ): React.ReactNode[] {
   // Match citation patterns like [1], [2], [1,2], etc.
   const citationPattern = /\[(\d+(?:,\d+)*)\]/g
@@ -203,7 +230,7 @@ export function renderTextWithCitations(
         referenceIds={refIds}
         confidence={confidence}
         sources={sources}
-      />
+      />,
     )
 
     lastIndex = match.index + match[0].length
@@ -228,7 +255,10 @@ interface CitationSummaryProps {
   citationCount: number
 }
 
-export function CitationSummary({ sourceCount, citationCount }: CitationSummaryProps) {
+export function CitationSummary({
+  sourceCount,
+  citationCount,
+}: CitationSummaryProps) {
   const { t } = useTranslation()
 
   if (sourceCount === 0) return null
@@ -242,7 +272,8 @@ export function CitationSummary({ sourceCount, citationCount }: CitationSummaryP
         })}
         {citationCount > sourceCount && (
           <span className="ml-1 opacity-70">
-            ({citationCount} {t('retrievePanel.citation.references', 'references')})
+            ({citationCount}{' '}
+            {t('retrievePanel.citation.references', 'references')})
           </span>
         )}
       </span>

@@ -142,7 +142,10 @@ const PropertyEditDialog = ({
 
         {propertyName === 'entity_id' && (
           <div className="rounded-md border border-border bg-muted/20 p-3">
-            <label htmlFor="allow-merge" className="flex items-start gap-2 text-sm font-medium">
+            <label
+              htmlFor="allow-merge"
+              className="flex items-start gap-2 text-sm font-medium"
+            >
               <Checkbox
                 id="allow-merge"
                 checked={allowMerge}
@@ -160,7 +163,12 @@ const PropertyEditDialog = ({
         )}
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
             {t('common.cancel')}
           </Button>
           <Button type="button" onClick={handleSave} disabled={isSubmitting}>

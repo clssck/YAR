@@ -13,11 +13,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, cast
 
-import pipmaster as pm
 import uvicorn
 from ascii_colors import ASCIIColors
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import (
@@ -381,7 +381,7 @@ def create_app(args):
             )
         else:
             # For other endpoints, return the default FastAPI validation error
-            return JSONResponse(status_code=422, content={'detail': exc.errors()})
+            return JSONResponse(status_code=422, content={'detail': jsonable_encoder(exc.errors())})
 
     def get_cors_origins():
         """Get allowed origins from global_args
@@ -390,13 +390,19 @@ def create_app(args):
         origins_str = global_args.cors_origins
         if origins_str == '*':
             return ['*']
-        return [origin.strip() for origin in origins_str.split(',')]
+        origins = [origin.strip() for origin in origins_str.split(',') if origin.strip()]
+        if '*' in origins:
+            return ['*']
+        return origins or ['*']
+
+    cors_origins = get_cors_origins()
+    allow_credentials = cors_origins != ['*']
 
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,  # type: ignore[arg-type]  # starlette stub issue
-        allow_origins=get_cors_origins(),
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=allow_credentials,
         allow_methods=['*'],
         allow_headers=['*'],
     )
@@ -843,7 +849,10 @@ def create_app(args):
             }
         },
     )
-    async def get_status(request: Request):
+    async def get_status(
+        request: Request,
+        verbose: bool = Query(default=False, description='Include detailed operational status'),
+    ):
         """Get current system status including WebUI availability"""
         try:
             workspace = get_workspace_from_request(request)
@@ -867,58 +876,77 @@ def create_app(args):
             # Cleanup expired keyed locks and get status
             keyed_lock_info = await cleanup_keyed_lock()
 
-            return {
+            safe_configuration = {
+                'llm_binding': args.llm_binding,
+                'llm_model': args.llm_model,
+                'embedding_binding': args.embedding_binding,
+                'embedding_model': args.embedding_model,
+                'summary_language': args.summary_language,
+                'force_llm_summary_on_merge': args.force_llm_summary_on_merge,
+                'max_parallel_insert': args.max_parallel_insert,
+                'cosine_threshold': args.cosine_threshold,
+                'min_rerank_score': args.min_rerank_score,
+                'related_chunk_number': args.related_chunk_number,
+                'max_async': args.max_async,
+                'embedding_func_max_async': args.embedding_func_max_async,
+                'embedding_batch_num': args.embedding_batch_num,
+                'kv_storage': args.kv_storage,
+                'doc_status_storage': args.doc_status_storage,
+                'graph_storage': args.graph_storage,
+                'vector_storage': args.vector_storage,
+                'workspace': default_workspace,
+                'max_graph_nodes': args.max_graph_nodes,
+                'enable_rerank': rerank_model_func is not None,
+                'rerank_model': args.rerank_model if rerank_model_func else None,
+                'auto_connect_orphans': args.auto_connect_orphans,
+                'enable_s3': s3_client is not None,
+                # Keep shape stable for WebUI while avoiding host disclosure by default.
+                'llm_binding_host': '-',
+                'embedding_binding_host': '-',
+                'rerank_binding_host': '-',
+                'rerank_binding': '-',
+            }
+
+            response = {
                 'status': 'healthy',
                 'webui_available': webui_assets_exist,
-                'working_directory': str(args.working_dir),
-                'input_directory': str(args.input_dir),
-                'configuration': {
-                    # LLM configuration binding/host address (if applicable)/model (if applicable)
-                    'llm_binding': args.llm_binding,
-                    'llm_binding_host': args.llm_binding_host,
-                    'llm_model': args.llm_model,
-                    # embedding model configuration binding/host address (if applicable)/model (if applicable)
-                    'embedding_binding': args.embedding_binding,
-                    'embedding_binding_host': args.embedding_binding_host,
-                    'embedding_model': args.embedding_model,
-                    'summary_max_tokens': args.summary_max_tokens,
-                    'summary_context_size': args.summary_context_size,
-                    'kv_storage': args.kv_storage,
-                    'doc_status_storage': args.doc_status_storage,
-                    'graph_storage': args.graph_storage,
-                    'vector_storage': args.vector_storage,
-                    'enable_llm_cache_for_extract': args.enable_llm_cache_for_extract,
-                    'enable_llm_cache': args.enable_llm_cache,
-                    'workspace': default_workspace,
-                    'max_graph_nodes': args.max_graph_nodes,
-                    # Rerank configuration (local model)
-                    'enable_rerank': rerank_model_func is not None,
-                    'rerank_model': args.rerank_model if rerank_model_func else None,
-                    # Environment variable status (requested configuration)
-                    'summary_language': args.summary_language,
-                    'force_llm_summary_on_merge': args.force_llm_summary_on_merge,
-                    'max_parallel_insert': args.max_parallel_insert,
-                    'cosine_threshold': args.cosine_threshold,
-                    'min_rerank_score': args.min_rerank_score,
-                    'related_chunk_number': args.related_chunk_number,
-                    'max_async': args.max_async,
-                    'embedding_func_max_async': args.embedding_func_max_async,
-                    'embedding_batch_num': args.embedding_batch_num,
-                    'auto_connect_orphans': args.auto_connect_orphans,
-                    'enable_s3': s3_client is not None,
-                },
+                'working_directory': '-',
+                'input_directory': '-',
+                'configuration': safe_configuration,
                 'auth_mode': auth_mode,
                 'pipeline_busy': pipeline_busy,
-                'keyed_locks': keyed_lock_info,
                 'core_version': core_version,
                 'api_version': api_version_display,
                 'webui_title': webui_title,
                 'webui_description': webui_description,
                 'graph': graph_health,
             }
+
+            if verbose:
+                response['working_directory'] = str(args.working_dir)
+                response['input_directory'] = str(args.input_dir)
+                response['keyed_locks'] = keyed_lock_info
+                response['configuration'] = {
+                    **safe_configuration,
+                    # LLM/embedding hosts are only exposed in verbose mode.
+                    'llm_binding_host': args.llm_binding_host,
+                    'embedding_binding_host': args.embedding_binding_host,
+                    'rerank_binding': getattr(args, 'rerank_binding', os.getenv('RERANK_BINDING', '-')),
+                    'rerank_binding_host': getattr(
+                        args,
+                        'rerank_binding_host',
+                        os.getenv('RERANK_BINDING_HOST', '-'),
+                    ),
+                    'summary_max_tokens': args.summary_max_tokens,
+                    'summary_context_size': args.summary_context_size,
+                    'enable_llm_cache_for_extract': args.enable_llm_cache_for_extract,
+                    'enable_llm_cache': args.enable_llm_cache,
+                }
+
+            return response
         except Exception as e:
             logger.error(f'Error getting health status: {e!s}')
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     # Custom StaticFiles class for smart caching
     class SmartStaticFiles(StaticFiles):  # Renamed from NoCacheStaticFiles
@@ -1010,16 +1038,35 @@ def create_app(args):
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail='Asset not found')
 
-        # Serve other static files (favicon, logo)
-        @app.get('/webui/favicon.png')
-        async def serve_favicon():
-            from fastapi.responses import FileResponse
-            return FileResponse(static_dir / 'favicon.png', media_type='image/png')
+        # Serve favicon/logo at both root and /webui paths
+        from fastapi.responses import FileResponse
 
-        @app.get('/webui/logo.svg')
+        async def _serve_file(filename: str, media_type: str):
+            return FileResponse(static_dir / filename, media_type=media_type)
+
+        @app.get('/favicon.png', include_in_schema=False)
+        async def serve_favicon_root():
+            return await _serve_file('favicon.png', 'image/png')
+
+        @app.get('/webui/favicon.png', include_in_schema=False)
+        async def serve_favicon_webui():
+            return await _serve_file('favicon.png', 'image/png')
+
+        @app.get('/favicon-32.png', include_in_schema=False)
+        async def serve_favicon_32():
+            return await _serve_file('favicon-32.png', 'image/png')
+
+        @app.get('/favicon-16.png', include_in_schema=False)
+        async def serve_favicon_16():
+            return await _serve_file('favicon-16.png', 'image/png')
+
+        @app.get('/apple-touch-icon.png', include_in_schema=False)
+        async def serve_apple_touch_icon():
+            return await _serve_file('apple-touch-icon.png', 'image/png')
+
+        @app.get('/webui/logo.svg', include_in_schema=False)
         async def serve_logo():
-            from fastapi.responses import FileResponse
-            return FileResponse(static_dir / 'logo.svg', media_type='image/svg+xml')
+            return await _serve_file('logo.svg', 'image/svg+xml')
 
         # Forward all other /webui/* requests to API (catch-all, MUST be last)
         @app.api_route('/webui/{api_path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
@@ -1138,22 +1185,6 @@ def configure_logging():
     )
 
 
-def check_and_install_dependencies():
-    """Check and install required dependencies"""
-    required_packages = [
-        'uvicorn',
-        'tiktoken',
-        'fastapi',
-        # Add other required packages here
-    ]
-
-    for package in required_packages:
-        if not pm.is_installed(package):
-            print(f'Installing {package}...')
-            pm.install(package)
-            print(f'{package} installed successfully')
-
-
 def main():
     # Explicitly initialize configuration for clarity
     # (The proxy will auto-initialize anyway, but this makes intent clear)
@@ -1170,9 +1201,6 @@ def main():
     # Check .env file
     if not check_env_file():
         sys.exit(1)
-
-    # Check and install dependencies
-    check_and_install_dependencies()
 
     from multiprocessing import freeze_support
 

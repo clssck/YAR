@@ -7,8 +7,14 @@ import type {
   WorkerLayoutControlProps,
 } from '@react-sigma/layout-core'
 import { useLayoutForce, useWorkerLayoutForce } from '@react-sigma/layout-force'
-import { useLayoutForceAtlas2, useWorkerLayoutForceAtlas2 } from '@react-sigma/layout-forceatlas2'
-import { useLayoutNoverlap, useWorkerLayoutNoverlap } from '@react-sigma/layout-noverlap'
+import {
+  useLayoutForceAtlas2,
+  useWorkerLayoutForceAtlas2,
+} from '@react-sigma/layout-forceatlas2'
+import {
+  useLayoutNoverlap,
+  useWorkerLayoutNoverlap,
+} from '@react-sigma/layout-noverlap'
 import { useLayoutRandom } from '@react-sigma/layout-random'
 import { GripIcon, Loader2, PlayIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -17,8 +23,17 @@ import { animateNodes } from 'sigma/utils'
 import { toast } from 'sonner'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
-import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/Command'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/Command'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/Popover'
 import { controlButtonVariant } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
@@ -110,10 +125,17 @@ const WorkerLayoutControl = ({
       // Show completion toast with layout name
       toast.success(
         layoutName
-          ? t('graphPanel.sideBar.layoutsControl.layoutStoppedNamed', '{{name}} stopped', {
-              name: layoutName,
-            })
-          : t('graphPanel.sideBar.layoutsControl.layoutStopped', 'Layout stopped')
+          ? t(
+              'graphPanel.sideBar.layoutsControl.layoutStoppedNamed',
+              '{{name}} stopped',
+              {
+                name: layoutName,
+              },
+            )
+          : t(
+              'graphPanel.sideBar.layoutsControl.layoutStopped',
+              'Layout stopped',
+            ),
       )
 
       setIsRunning(false)
@@ -155,11 +177,18 @@ const WorkerLayoutControl = ({
           // Show completion toast with layout name
           toast.success(
             layoutName
-              ? t('graphPanel.sideBar.layoutsControl.layoutCompleteNamed', '{{name}} complete', {
-                  name: layoutName,
-                })
-              : t('graphPanel.sideBar.layoutsControl.layoutComplete', 'Layout complete'),
-            { duration: 2000 }
+              ? t(
+                  'graphPanel.sideBar.layoutsControl.layoutCompleteNamed',
+                  '{{name}} complete',
+                  {
+                    name: layoutName,
+                  },
+                )
+              : t(
+                  'graphPanel.sideBar.layoutsControl.layoutComplete',
+                  'Layout complete',
+                ),
+            { duration: 2000 },
           )
         }
       }, 3000)
@@ -176,7 +205,11 @@ const WorkerLayoutControl = ({
 
     // Auto-run if specified
     let timeout: number | null = null
-    if (autoRunFor !== undefined && autoRunFor > -1 && sigma.getGraph().order > 0) {
+    if (
+      autoRunFor !== undefined &&
+      autoRunFor > -1 &&
+      sigma.getGraph().order > 0
+    ) {
       // Initial position update
       updatePositions()
 
@@ -224,9 +257,16 @@ const WorkerLayoutControl = ({
             : t('graphPanel.sideBar.layoutsControl.startAnimation')
         }
         variant={controlButtonVariant}
-        className={cn(isRunning && 'ring-2 ring-primary ring-offset-1 ring-offset-background')}
+        className={cn(
+          isRunning &&
+            'ring-2 ring-primary ring-offset-1 ring-offset-background',
+        )}
       >
-        {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayIcon />}
+        {isRunning ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <PlayIcon />
+        )}
       </Button>
       {/* Running indicator badge */}
       {isRunning && (
@@ -336,7 +376,7 @@ const LayoutsControl = () => {
         console.error('Error running layout:', error)
       }
     },
-    [layouts, sigma]
+    [layouts, sigma],
   )
 
   return (
@@ -349,19 +389,24 @@ const LayoutsControl = () => {
             className="text-[10px] px-2 py-0.5 animate-pulse bg-primary/10 text-primary border-primary/20"
           >
             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            {t('graphPanel.sideBar.layoutsControl.running', 'Layout running...')}
+            {t(
+              'graphPanel.sideBar.layoutsControl.running',
+              'Layout running...',
+            )}
           </Badge>
         </div>
       )}
       <div>
-        {layouts[layout] && 'worker' in layouts[layout] && layouts[layout].worker && (
-          <WorkerLayoutControl
-            layout={layouts[layout].worker}
-            mainLayout={layouts[layout].layout}
-            layoutName={layout}
-            onRunningChange={setIsLayoutRunning}
-          />
-        )}
+        {layouts[layout] &&
+          'worker' in layouts[layout] &&
+          layouts[layout].worker && (
+            <WorkerLayoutControl
+              layout={layouts[layout].worker}
+              mainLayout={layouts[layout].layout}
+              layoutName={layout}
+              onRunningChange={setIsLayoutRunning}
+            />
+          )}
       </div>
       <div>
         <Popover open={opened} onOpenChange={setOpened}>
@@ -392,10 +437,15 @@ const LayoutsControl = () => {
                         runLayout(name as LayoutName)
                       }}
                       key={name}
-                      className={cn('cursor-pointer text-xs', name === layout && 'bg-accent')}
+                      className={cn(
+                        'cursor-pointer text-xs',
+                        name === layout && 'bg-accent',
+                      )}
                     >
                       {t(`graphPanel.sideBar.layoutsControl.layouts.${name}`)}
-                      {name === layout && <span className="ml-auto text-muted-foreground">✓</span>}
+                      {name === layout && (
+                        <span className="ml-auto text-muted-foreground">✓</span>
+                      )}
                     </CommandItem>
                   ))}
                 </CommandGroup>

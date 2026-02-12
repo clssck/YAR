@@ -20,7 +20,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge>
           <span>Custom Child</span>
-        </Badge>
+        </Badge>,
       )
       expect(container.textContent).toContain('Custom Child')
     })
@@ -30,7 +30,7 @@ describe('Badge', () => {
         <Badge>
           <span>Part 1</span>
           <span>Part 2</span>
-        </Badge>
+        </Badge>,
       )
       expect(container.textContent).toContain('Part 1')
       expect(container.textContent).toContain('Part 2')
@@ -55,7 +55,9 @@ describe('Badge', () => {
     })
 
     test('renders with destructive variant', () => {
-      const { container } = render(<Badge variant="destructive">Destructive</Badge>)
+      const { container } = render(
+        <Badge variant="destructive">Destructive</Badge>,
+      )
       const element = container.querySelector('div')
       const className = element?.className || ''
       expect(className).toContain('bg-destructive')
@@ -96,7 +98,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge variant="secondary" className="custom-class">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('div')
       const className = element?.className || ''
@@ -108,7 +110,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge variant="secondary" className="bg-red-500">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('div')
       const className = element?.className || ''
@@ -116,7 +118,9 @@ describe('Badge', () => {
     })
 
     test('handles multiple custom classes', () => {
-      const { container } = render(<Badge className="custom-class-1 custom-class-2">Test</Badge>)
+      const { container } = render(
+        <Badge className="custom-class-1 custom-class-2">Test</Badge>,
+      )
       const element = container.querySelector('div')
       const className = element?.className || ''
       expect(className).toContain('custom-class-1')
@@ -129,7 +133,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge data-testid="custom-badge" data-value="test">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('[data-testid="custom-badge"]')
       expect(element).toBeDefined()
@@ -152,7 +156,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge aria-label="Status badge" aria-hidden="false">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('div')
       expect(element?.getAttribute('aria-label')).toBe('Status badge')
@@ -163,7 +167,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge role="status" data-custom="value">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('div')
       expect(element?.getAttribute('role')).toBe('status')
@@ -183,23 +187,24 @@ describe('Badge', () => {
       const { container } = render(<Badge variant="secondary">Secondary</Badge>)
       const element = container.querySelector('div')
       const className = element?.className || ''
-      expect(!className.includes('shadow') || className.includes('bg-secondary')).toBe(true)
+      expect(
+        !className.includes('shadow') || className.includes('bg-secondary'),
+      ).toBe(true)
     })
 
     test('destructive variant includes shadow effect', () => {
-      const { container } = render(<Badge variant="destructive">Destructive</Badge>)
+      const { container } = render(
+        <Badge variant="destructive">Destructive</Badge>,
+      )
       const element = container.querySelector('div')
       const className = element?.className || ''
       expect(className).toContain('shadow')
     })
 
     test('all variants have focus and transition styles', () => {
-      const variants: Array<'default' | 'secondary' | 'destructive' | 'outline'> = [
-        'default',
-        'secondary',
-        'destructive',
-        'outline',
-      ]
+      const variants: Array<
+        'default' | 'secondary' | 'destructive' | 'outline'
+      > = ['default', 'secondary', 'destructive', 'outline']
 
       variants.forEach((variant) => {
         const { container } = render(<Badge variant={variant}>Test</Badge>)
@@ -260,7 +265,7 @@ describe('Badge', () => {
         <Badge>
           <span>Nested</span>
           <div>Content</div>
-        </Badge>
+        </Badge>,
       )
       expect(container.textContent).toContain('Nested')
       expect(container.textContent).toContain('Content')
@@ -272,7 +277,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge variant="secondary" className="mt-4 mb-2">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('div')
       const className = element?.className || ''
@@ -285,7 +290,7 @@ describe('Badge', () => {
       const { container } = render(
         <Badge variant="secondary" className="text-white">
           Test
-        </Badge>
+        </Badge>,
       )
       const element = container.querySelector('div')
       const className = element?.className || ''

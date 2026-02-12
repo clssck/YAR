@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { act, renderHook } from '@testing-library/react'
-import type { ConfirmationConfig, UndoableActionConfig } from '../../hooks/useConfirmation'
+import type {
+  ConfirmationConfig,
+  UndoableActionConfig,
+} from '../../hooks/useConfirmation'
 
 const toastMainMock = mock(() => 'mock-toast-id')
 const toastErrorMock = mock(() => 'error-toast-id')
@@ -55,7 +58,10 @@ describe('useUndoableAction', () => {
 
     expect(actionMock).toHaveBeenCalled()
     expect(actionMock).toHaveBeenCalledTimes(1)
-    expect(toastMainMock).toHaveBeenCalledWith('Action completed', expect.any(Object))
+    expect(toastMainMock).toHaveBeenCalledWith(
+      'Action completed',
+      expect.any(Object),
+    )
   })
 
   test('handles async action execution', async () => {
@@ -165,7 +171,7 @@ describe('useUndoableAction', () => {
       'Custom toast',
       expect.objectContaining({
         description: 'Custom description',
-      })
+      }),
     )
   })
 
@@ -184,7 +190,7 @@ describe('useUndoableAction', () => {
       'Long duration',
       expect.objectContaining({
         duration: 10000,
-      })
+      }),
     )
   })
 
@@ -202,7 +208,7 @@ describe('useUndoableAction', () => {
       'Default duration',
       expect.objectContaining({
         duration: 5000,
-      })
+      }),
     )
   })
 
@@ -224,7 +230,7 @@ describe('useUndoableAction', () => {
         action: expect.objectContaining({
           label: 'Undo',
         }),
-      })
+      }),
     )
   })
 
@@ -238,7 +244,10 @@ describe('useUndoableAction', () => {
       })
     })
 
-    const call = toastMainMock.mock.calls[0] as unknown as [string, Record<string, unknown>]
+    const call = toastMainMock.mock.calls[0] as unknown as [
+      string,
+      Record<string, unknown>,
+    ]
     expect(call[1].action).toBeUndefined()
   })
 
@@ -344,7 +353,7 @@ describe('useUndoableAction', () => {
       'With icon',
       expect.objectContaining({
         icon: 'test-icon',
-      })
+      }),
     )
   })
 })
@@ -386,7 +395,7 @@ describe('useInlineConfirmation', () => {
         cancel: expect.objectContaining({
           label: 'Cancel',
         }),
-      })
+      }),
     )
   })
 
@@ -410,7 +419,7 @@ describe('useInlineConfirmation', () => {
         cancel: expect.objectContaining({
           label: 'Keep',
         }),
-      })
+      }),
     )
   })
 
@@ -428,7 +437,7 @@ describe('useInlineConfirmation', () => {
       'Confirm action',
       expect.objectContaining({
         description: 'This action cannot be undone',
-      })
+      }),
     )
   })
 
@@ -477,7 +486,10 @@ describe('useInlineConfirmation', () => {
       title: 'Confirm?',
     })
 
-    const call = toastMainMock.mock.calls[0] as unknown as [string, { onDismiss: () => void }]
+    const call = toastMainMock.mock.calls[0] as unknown as [
+      string,
+      { onDismiss: () => void },
+    ]
     const onDismiss = call[1].onDismiss
     act(() => {
       onDismiss()
@@ -504,7 +516,7 @@ describe('useInlineConfirmation', () => {
       expect.objectContaining({
         description: 'Irreversible',
         duration: 10000,
-      })
+      }),
     )
   })
 
@@ -521,7 +533,7 @@ describe('useInlineConfirmation', () => {
       'Confirm',
       expect.objectContaining({
         duration: 10000,
-      })
+      }),
     )
   })
 
@@ -680,7 +692,10 @@ describe('createProgressToast', () => {
       message: 'Processing...',
     })
 
-    expect(toastLoadingMock).toHaveBeenCalledWith('Processing...', expect.any(Object))
+    expect(toastLoadingMock).toHaveBeenCalledWith(
+      'Processing...',
+      expect.any(Object),
+    )
   })
 
   test('includes optional description', () => {
@@ -693,7 +708,7 @@ describe('createProgressToast', () => {
       'Uploading files...',
       expect.objectContaining({
         description: '0 of 10 files',
-      })
+      }),
     )
   })
 
@@ -709,7 +724,7 @@ describe('createProgressToast', () => {
       'Processing...',
       expect.objectContaining({
         duration: 10000,
-      })
+      }),
     )
   })
 
@@ -724,7 +739,7 @@ describe('createProgressToast', () => {
       'Updated message',
       expect.objectContaining({
         id: 'loading-toast-id',
-      })
+      }),
     )
   })
 
@@ -740,7 +755,7 @@ describe('createProgressToast', () => {
       expect.objectContaining({
         id: 'loading-toast-id',
         description: '50 of 100',
-      })
+      }),
     )
   })
 
@@ -756,7 +771,7 @@ describe('createProgressToast', () => {
       expect.objectContaining({
         id: 'loading-toast-id',
         description: '1 of 10',
-      })
+      }),
     )
   })
 
@@ -831,7 +846,9 @@ describe('createProgressToast', () => {
   })
 
   test('multiple progress toasts have different ids', () => {
-    toastLoadingMock.mockReturnValueOnce('toast-1').mockReturnValueOnce('toast-2')
+    toastLoadingMock
+      .mockReturnValueOnce('toast-1')
+      .mockReturnValueOnce('toast-2')
 
     const progress1 = createProgressToast({
       message: 'Process 1...',
@@ -883,7 +900,7 @@ describe('useProgressToast', () => {
       'Uploading...',
       expect.objectContaining({
         description: '0 of 10',
-      })
+      }),
     )
   })
 
@@ -902,14 +919,16 @@ describe('useProgressToast', () => {
       'Processing...',
       expect.objectContaining({
         duration: 5000,
-      })
+      }),
     )
   })
 
   test('multiple startProgress calls are independent', () => {
     const { result } = renderHook(() => useProgressToast())
 
-    toastLoadingMock.mockReturnValueOnce('toast-1').mockReturnValueOnce('toast-2')
+    toastLoadingMock
+      .mockReturnValueOnce('toast-1')
+      .mockReturnValueOnce('toast-2')
 
     const progress1 = result.current.startProgress({
       message: 'Task 1...',
@@ -960,10 +979,13 @@ describe('Integration scenarios', () => {
     progress.success('All items deleted successfully')
 
     expect(toastLoadingMock).toHaveBeenCalled()
-    expect(toastSuccessMock).toHaveBeenCalledWith('All items deleted successfully', {
-      id: 'loading-toast-id',
-      description: undefined,
-    })
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      'All items deleted successfully',
+      {
+        id: 'loading-toast-id',
+        description: undefined,
+      },
+    )
   })
 
   test('delayed action for soft delete', async () => {

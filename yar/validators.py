@@ -21,9 +21,17 @@ PG_MAX_IDENTIFIER_LENGTH = 63
 # This prevents collision issues where 'foo-bar' and 'foo_bar' map to the same graph name
 _VALID_WORKSPACE_PATTERN = re.compile(r'^[a-zA-Z0-9_]+$')
 
+# Document ID validation: used as storage path segment and DB identifier.
+_VALID_DOC_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+_MAX_DOC_ID_LENGTH = 128
+
 # SQL identifier validation pattern: PostgreSQL identifiers must start with
 # letter or underscore, contain only alphanumeric + underscore
 _VALID_SQL_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+# S3 path hardening: reject path traversal segments and dangerous control chars.
+_S3_CONTROL_CHARS_PATTERN = re.compile(r'[\x00-\x1F\x7F]')
+_S3_SEGMENT_FORBIDDEN = {'.', '..'}
 
 
 def validate_workspace_name(workspace: str | None) -> str:
@@ -120,6 +128,37 @@ def validate_sql_identifier(identifier: str, identifier_type: str = 'identifier'
     return identifier
 
 
+def validate_doc_id(doc_id: str | None) -> str:
+    """Validate document ID used in S3 paths and API operations.
+
+    This validator is intentionally strict because doc_id may be used as an
+    S3 path segment. Restricting characters avoids traversal-like keys and
+    keeps IDs stable across storage backends.
+    """
+    if doc_id is None:
+        raise ValueError('Document ID cannot be empty')
+
+    normalized = doc_id.strip()
+    if not normalized:
+        raise ValueError('Document ID cannot be empty')
+
+    if len(normalized) > _MAX_DOC_ID_LENGTH:
+        raise ValueError(f'Document ID exceeds maximum length of {_MAX_DOC_ID_LENGTH} characters')
+
+    if normalized in _S3_SEGMENT_FORBIDDEN:
+        raise ValueError('Document ID cannot be a relative path segment')
+
+    if not _VALID_DOC_ID_PATTERN.match(normalized):
+        invalid_chars = {c for c in normalized if not (c.isascii() and (c.isalnum() or c in {'_', '-'}))}
+        raise ValueError(
+            f"Invalid document ID '{normalized}'. "
+            f'Document IDs can only contain ASCII letters, numbers, underscores, and hyphens. '
+            f'Invalid characters found: {invalid_chars}'
+        )
+
+    return normalized
+
+
 def validate_numeric_config(
     value: Any,
     param_name: str,
@@ -157,3 +196,52 @@ def validate_numeric_config(
         raise ValueError(f'Invalid {param_name}: {num} exceeds maximum {max_val}')
 
     return num
+
+
+def _validate_s3_path(path: str, path_type: str, allow_empty: bool, allow_trailing_slash: bool) -> str:
+    """Validate an S3 key/prefix with conservative safety checks.
+
+    This validator keeps compatibility with common S3 naming patterns while
+    blocking path traversal-like constructs and control characters.
+    """
+    normalized = (path or '').strip()
+    if not normalized:
+        if allow_empty:
+            return ''
+        raise ValueError(f'{path_type} cannot be empty')
+
+    if _S3_CONTROL_CHARS_PATTERN.search(normalized):
+        raise ValueError(f'{path_type} contains control characters')
+    if '\\' in normalized:
+        raise ValueError(f"{path_type} cannot contain '\\\\'")
+    if normalized.startswith('/'):
+        raise ValueError(f'{path_type} cannot start with "/"')
+    if '//' in normalized:
+        raise ValueError(f'{path_type} cannot contain "//"')
+
+    segments = normalized.split('/')
+    if allow_trailing_slash and normalized.endswith('/'):
+        segments = segments[:-1]
+
+    for segment in segments:
+        if not segment:
+            raise ValueError(f'{path_type} contains an empty path segment')
+        if segment in _S3_SEGMENT_FORBIDDEN:
+            raise ValueError(f'{path_type} cannot contain relative path segments')
+
+    if allow_trailing_slash and normalized and not normalized.endswith('/'):
+        normalized = f'{normalized}/'
+    if not allow_trailing_slash and normalized.endswith('/'):
+        raise ValueError(f'{path_type} cannot end with "/"')
+
+    return normalized
+
+
+def validate_s3_key(key: str) -> str:
+    """Validate a full S3 object key."""
+    return _validate_s3_path(key, 'S3 key', allow_empty=False, allow_trailing_slash=False)
+
+
+def validate_s3_prefix(prefix: str, *, allow_empty: bool = True) -> str:
+    """Validate an S3 prefix path and normalize to trailing slash if non-empty."""
+    return _validate_s3_path(prefix, 'S3 prefix', allow_empty=allow_empty, allow_trailing_slash=True)
