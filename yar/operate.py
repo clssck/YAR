@@ -217,6 +217,7 @@ def chunking_by_semantic(
 
     results: list[dict[str, Any]] = []
     if result.chunks:
+        search_from = 0
         for index, chunk in enumerate(result.chunks):
             # Kreuzberg returns chunks as dicts with 'content' key
             if isinstance(chunk, dict):
@@ -225,19 +226,30 @@ def chunking_by_semantic(
                 char_start = metadata.get('byte_start', metadata.get('char_start'))
                 char_end = metadata.get('byte_end', metadata.get('char_end'))
             else:
-                # Fallback for object-style chunks
+                # Kreuzberg >=4.3 returns Chunk objects with offsets in metadata.
                 chunk_content = getattr(chunk, 'content', str(chunk))
-                char_start = getattr(chunk, 'start_char', None)
-                char_end = getattr(chunk, 'end_char', None)
+                metadata = getattr(chunk, 'metadata', {}) or {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                char_start = metadata.get('byte_start', metadata.get('char_start'))
+                char_end = metadata.get('byte_end', metadata.get('char_end'))
+                if char_start is None:
+                    char_start = getattr(chunk, 'start_char', None)
+                if char_end is None:
+                    char_end = getattr(chunk, 'end_char', None)
 
             # Estimate offsets if not provided
             if char_start is None:
-                # Try to find chunk position in content; use 0 if not found
+                # Use rolling search start to keep offsets monotonic when chunks overlap.
                 search_str = chunk_content[:50] if len(chunk_content) > 50 else chunk_content
-                found_pos = content.find(search_str)
-                char_start = found_pos if found_pos >= 0 else 0
+                found_pos = content.find(search_str, search_from)
+                if found_pos < 0:
+                    found_pos = content.find(search_str)
+                char_start = found_pos if found_pos >= 0 else search_from
             if char_end is None:
                 char_end = char_start + len(chunk_content)
+
+            search_from = max(search_from, char_start + 1)
 
             # Estimate token count (~4 chars per token)
             tokens = len(chunk_content) // 4

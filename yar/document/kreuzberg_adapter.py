@@ -645,9 +645,15 @@ def _convert_result(kreuzberg_result: Any) -> ExtractionResult:
                 end_char = metadata.get('byte_end', metadata.get('char_end'))
             else:
                 chunk_content = getattr(chunk, 'content', str(chunk))
-                start_char = getattr(chunk, 'start_char', None)
-                end_char = getattr(chunk, 'end_char', None)
                 metadata = getattr(chunk, 'metadata', None)
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                start_char = metadata.get('byte_start', metadata.get('char_start'))
+                end_char = metadata.get('byte_end', metadata.get('char_end'))
+                if start_char is None:
+                    start_char = getattr(chunk, 'start_char', None)
+                if end_char is None:
+                    end_char = getattr(chunk, 'end_char', None)
 
             chunks.append(
                 TextChunk(

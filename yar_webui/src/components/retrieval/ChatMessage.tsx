@@ -68,7 +68,7 @@ function sanitizeMermaidSvg(svgContent: string): SVGElement {
 
   const walker = parsed.createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
   const elements: Element[] = []
-  let current = walker.currentNode as Element | null
+  const current = walker.currentNode as Element | null
   if (current) {
     elements.push(current)
   }
@@ -748,10 +748,7 @@ const CodeHighlight = memo(
               'http://www.w3.org/2000/svg',
               'svg',
             )
-            spinner.setAttribute(
-              'class',
-              'animate-spin h-5 w-5 text-primary',
-            )
+            spinner.setAttribute('class', 'animate-spin h-5 w-5 text-primary')
             spinner.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
             spinner.setAttribute('fill', 'none')
             spinner.setAttribute('viewBox', '0 0 24 24')
@@ -824,9 +821,7 @@ const CodeHighlight = memo(
                 if (mermaidRef.current === container && !hasRendered) {
                   const sanitizedSvg = sanitizeMermaidSvg(svg)
                   container.replaceChildren()
-                  container.appendChild(
-                    document.importNode(sanitizedSvg, true),
-                  )
+                  container.appendChild(document.importNode(sanitizedSvg, true))
                   setHasRendered(true) // Mark as rendered successfully
                   if (bindFunctions) {
                     try {

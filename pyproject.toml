@@ -27,6 +27,7 @@ dependencies = [
     "json_repair",
     "numpy>=2.0.0",
     "pandas>=2.0.0,<2.4.0",
+    "pgvector>=0.3.6,<1.0.0",
     "pipmaster",
     "pydantic",
     "pypinyin",

@@ -14,6 +14,13 @@ pytestmark = pytest.mark.offline
 from yar.document import KREUZBERG_AVAILABLE, is_kreuzberg_available
 
 
+def _chunk_content(chunk: object) -> str:
+    """Return chunk content across Kreuzberg dict/object chunk formats."""
+    if isinstance(chunk, dict):
+        return str(chunk.get('content', ''))
+    return str(getattr(chunk, 'content', ''))
+
+
 class TestKreuzbergAvailability:
     """Test the kreuzberg availability detection."""
 
@@ -743,8 +750,12 @@ class TestRealWorldFormats:
 
         assert result.content is not None
         assert len(result.content) > 100
-        # XLSX content should include table-like structure
-        assert '|' in result.content or 'Sheet' in result.content
+        # XLSX extraction may emit plain rows (no pipes) in newer Kreuzberg versions.
+        # Accept explicit table markers OR structured sheet/table metadata.
+        has_table_markers = '|' in result.content or 'Sheet' in result.content
+        has_sheet_metadata = bool((result.metadata or {}).get('sheet_names'))
+        has_extracted_tables = bool(result.tables)
+        assert has_table_markers or has_sheet_metadata or has_extracted_tables
 
         # Test chunking
         chunks = chunking_by_semantic(result.content, max_chars=1200, max_overlap=100)
@@ -4476,9 +4487,7 @@ class TestKreuzbergChunkContent:
 
         assert result.chunks is not None
         for chunk in result.chunks:
-            # Kreuzberg returns chunks as dicts
-            assert 'content' in chunk
-            assert chunk['content'] is not None
+            assert _chunk_content(chunk) != ''
 
     def test_chunk_indices_are_sequential(self, tmp_path: Path):
         """Test that chunk indices are sequential."""
@@ -4508,8 +4517,7 @@ class TestKreuzbergChunkContent:
 
         assert result.chunks is not None
         for chunk in result.chunks:
-            # Kreuzberg returns chunks as dicts
-            assert len(chunk['content']) > 0
+            assert len(_chunk_content(chunk)) > 0
 
     def test_chunks_cover_content(self, tmp_path: Path):
         """Test that chunks together cover the original content."""
@@ -4524,8 +4532,7 @@ class TestKreuzbergChunkContent:
         result = extract_file_sync(str(test_file), config=config)
 
         assert result.chunks is not None
-        # Kreuzberg returns chunks as dicts
-        all_chunk_content = ' '.join(c['content'] for c in result.chunks)
+        all_chunk_content = ' '.join(_chunk_content(c) for c in result.chunks)
 
         # Key words should appear in chunks
         for word in ['ALPHA', 'BRAVO', 'CHARLIE']:

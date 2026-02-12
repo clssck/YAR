@@ -7,9 +7,9 @@
     "honohub:force": "HONOHUB_FORCE=true bun run honohub.ts"
   },
   "dependencies": {
-    "hono": "^4.6.0"
+    "hono": "^4.11.9"
   },
   "devDependencies": {
-    "@types/bun": "^1.1.0"
+    "@types/bun": "^1.3.9"
   }
 }
