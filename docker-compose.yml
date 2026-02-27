@@ -1,11 +1,16 @@
-# YAR Work Stack - AWS Bedrock Environment
-# Usage: ./setup.sh && docker compose up -d
+# YAR Stack - Infrastructure Services
+# Usage: ./setup.sh && ./start.sh
 #
-# Services:
-#   - yar:  Main RAG API + WebUI (port 9621)
-#   - litellm:   Unified LLM/Embedding proxy (port 4000)
+# Services (always):
 #   - postgres:  PostgreSQL + pgvector + AGE (port 5432)
-#   - rustfs:    S3-compatible storage (ports 9000, 9001)
+#   - rustfs:    S3-compatible document storage (ports 9100, 9101)
+#
+# Services (work profile only):
+#   - litellm:   Unified LLM/Embedding proxy for AWS Bedrock (port 4000)
+#
+# Profiles:
+#   docker compose up -d                    # dev: postgres + rustfs only
+#   docker compose --profile work up -d     # work: + litellm proxy
 
 name: yar-stack
 
@@ -90,8 +95,10 @@ services:
 
   # ══════════════════════════════════════════════════════════════════════════════
   # LiteLLM Proxy - Unified LLM + Embedding gateway (AWS Bedrock)
+  # Only starts with: docker compose --profile work up -d
   # ══════════════════════════════════════════════════════════════════════════════
   litellm:
+    profiles: [work]
     container_name: yar-litellm
     build:
       context: ./services/litellm
@@ -111,6 +118,9 @@ services:
       - AWS_SESSION_TOKEN
       # LiteLLM config
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
+      # OpenRouter credentials for bytedance-seed routing
+      - OPENROUTER_API_BASE=${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-${LLM_BINDING_API_KEY}}
     volumes:
       # Mount EKS IRSA token for AWS Bedrock authentication
       - /var/run/secrets/eks.amazonaws.com/serviceaccount:/var/run/secrets/eks.amazonaws.com/serviceaccount:ro

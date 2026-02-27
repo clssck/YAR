@@ -25,9 +25,9 @@ YAR is an advanced Retrieval-Augmented Generation (RAG) framework designed to en
 
 ## Testing Guidelines
 - Keep pytest additions close to the code you touch (`tests/` mirrors feature folders and there are root-level `test_*.py` helpers); functions must start with `test_`.
-- Follow `tests/pytest.ini`: markers include `offline`, `integration`, `requires_db`, and `requires_api`, and the suite runs with `-m "not integration"` by default—pass `--run-integration` (or set `LIGHTRAG_RUN_INTEGRATION=true`) when external services are available.
-- Use the custom CLI toggles from `tests/conftest.py`: `--keep-artifacts`/`LIGHTRAG_KEEP_ARTIFACTS=true`, `--stress-test`/`LIGHTRAG_STRESS_TEST=true`, and `--test-workers N`/`LIGHTRAG_TEST_WORKERS` to dial up workloads or preserve temp files during investigations.
-- Export other required `LIGHTRAG_*` environment variables before running integration or storage tests so adapters can reach configured backends.
+- Follow `tests/pytest.ini`: markers include `offline`, `integration`, `requires_db`, and `requires_api`, and the suite runs with `-m "not integration"` by default—pass `--run-integration` (or set `YAR_RUN_INTEGRATION=true`) when external services are available.
+- Use the custom CLI toggles from `tests/conftest.py`: `--keep-artifacts`/`YAR_KEEP_ARTIFACTS=true`, `--stress-test`/`YAR_STRESS_TEST=true`, and `--test-workers N`/`YAR_TEST_WORKERS` to dial up workloads or preserve temp files during investigations.
+- Export other required `YAR_*` environment variables before running integration or storage tests so adapters can reach configured backends.
 - For UI updates, pair changes with Vitest specs and run `bun test`.
 
 ## Commit & Pull Request Guidelines
@@ -40,7 +40,7 @@ YAR is an advanced Retrieval-Augmented Generation (RAG) framework designed to en
 - **NEVER commit**: `.env`, `config.ini`, `*.pem`, `*.key`, credentials files
 - Copy `env.example` → `.env` and `config.ini.example` → `config.ini` for local dev
 - These files are in `.gitignore` — keep it that way
-- Configure storage backends through `LIGHTRAG_*` variables and validate them with `docker-compose` services when needed
+- Configure storage backends through `YAR_*` variables and validate them with `docker-compose` services when needed
 - Treat `yar.log*` as local artefacts; purge sensitive information before sharing logs or outputs
 - Before committing, run `git status` to ensure no secrets are staged
 

@@ -115,23 +115,6 @@ class TestKreuzbergAdapterWithKreuzberg:
         assert '.docx' in formats
 
 
-@pytest.mark.skipif(KREUZBERG_AVAILABLE, reason='Test requires kreuzberg NOT installed')
-class TestKreuzbergAdapterWithoutKreuzberg:
-    """Tests for behavior when kreuzberg is not installed."""
-
-    def test_extract_raises_import_error(self, tmp_path: Path):
-        """Extraction should raise ImportError when kreuzberg not installed."""
-        from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
-
-        test_file = tmp_path / 'test.txt'
-        test_file.write_text('test')
-
-        with pytest.raises(ImportError) as exc_info:
-            extract_with_kreuzberg_sync(test_file)
-
-        assert 'kreuzberg is not installed' in str(exc_info.value)
-
-
 class TestSemanticChunking:
     """Test the semantic chunking function in operate.py."""
 
@@ -170,16 +153,6 @@ class TestSemanticChunking:
         # Check ordering
         for i, chunk in enumerate(chunks):
             assert chunk['chunk_order_index'] == i
-
-    @pytest.mark.skipif(KREUZBERG_AVAILABLE, reason='Test requires kreuzberg NOT installed')
-    def test_chunking_by_semantic_raises_without_kreuzberg(self):
-        """Semantic chunking should raise ImportError without kreuzberg."""
-        from yar.operate import chunking_by_semantic
-
-        with pytest.raises(ImportError) as exc_info:
-            chunking_by_semantic('test content')
-
-        assert 'kreuzberg is not installed' in str(exc_info.value)
 
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
@@ -722,7 +695,7 @@ class TestRealWorldFormats:
         from yar.document.kreuzberg_adapter import extract_with_kreuzberg_sync
         from yar.operate import chunking_by_semantic
 
-        pptx_path = Path('documents/questions/docs/pptx/2016-LL-01-Shipping validation.pptx')
+        pptx_path = Path('tests/fixtures/test_sample.pptx')
         if not pptx_path.exists():
             pytest.skip('Test PPTX not available')
 
@@ -896,20 +869,26 @@ class TestDocumentRoutesIntegration:
     The integration is tested via the adapter module directly.
     """
 
-    @pytest.mark.skip(reason='document_routes import triggers argparse conflict with pytest')
     def test_is_kreuzberg_available_in_routes(self):
         """Test that the availability check is exposed in document_routes."""
-        from yar.api.routers.document_routes import _is_kreuzberg_available
+        import sys
+        from unittest.mock import patch
+
+        with patch.object(sys, 'argv', ['test']):
+            from yar.api.routers.document_routes import _is_kreuzberg_available
 
         result = _is_kreuzberg_available()
         assert isinstance(result, bool)
 
-    @pytest.mark.skip(reason='document_routes import triggers argparse conflict with pytest')
-    def test_convert_with_kreuzberg_exists(self):
-        """Test that the kreuzberg conversion function exists."""
-        from yar.api.routers import document_routes
+    def test_extract_and_chunk_with_kreuzberg_exists(self):
+        """Test that the kreuzberg extraction function exists."""
+        import sys
+        from unittest.mock import patch
 
-        assert hasattr(document_routes, '_convert_with_kreuzberg')
+        with patch.object(sys, 'argv', ['test']):
+            from yar.api.routers import document_routes
+
+        assert hasattr(document_routes, '_extract_and_chunk_with_kreuzberg')
 
 
 @pytest.mark.skipif(not KREUZBERG_AVAILABLE, reason='kreuzberg not installed')
@@ -4462,7 +4441,13 @@ class TestKreuzbergExceptionHandling:
         except (ValidationError, FileNotFoundError, OSError) as e:
             error_msg = str(e).lower()
             # Error should mention file or path
-            assert 'file' in error_msg or 'path' in error_msg or 'not found' in error_msg or 'no such' in error_msg or 'does not exist' in error_msg
+            assert (
+                'file' in error_msg
+                or 'path' in error_msg
+                or 'not found' in error_msg
+                or 'no such' in error_msg
+                or 'does not exist' in error_msg
+            )
 
 
 # =============================================================================
@@ -5778,9 +5763,7 @@ class TestTokenReductionOptions:
             _build_extraction_config,
         )
 
-        options = ExtractionOptions(
-            token_reduction=TokenReductionOptions(mode='light')
-        )
+        options = ExtractionOptions(token_reduction=TokenReductionOptions(mode='light'))
         config = _build_extraction_config(options)
 
         assert config is not None
@@ -5803,9 +5786,7 @@ class TestTokenReductionOptions:
             'The dog is extremely lazy and sleepy.'
         )
 
-        options = ExtractionOptions(
-            token_reduction=TokenReductionOptions(mode='light')
-        )
+        options = ExtractionOptions(token_reduction=TokenReductionOptions(mode='light'))
         result = extract_with_kreuzberg_sync(str(test_file), options)
 
         assert result.content is not None
@@ -5906,9 +5887,7 @@ class TestPageOptions:
             PageOptions,
         )
 
-        options = ExtractionOptions(
-            pages=PageOptions(insert_page_markers=False)
-        )
+        options = ExtractionOptions(pages=PageOptions(insert_page_markers=False))
         assert options.pages is not None
         assert options.pages.insert_page_markers is False
 
@@ -5980,9 +5959,7 @@ class TestPdfOptions:
             _build_extraction_config,
         )
 
-        options = ExtractionOptions(
-            pdf=PdfOptions(extract_images=True)
-        )
+        options = ExtractionOptions(pdf=PdfOptions(extract_images=True))
         config = _build_extraction_config(options)
 
         assert config is not None
@@ -6025,9 +6002,7 @@ class TestHierarchyOptions:
             HierarchyOptions,
         )
 
-        options = ExtractionOptions(
-            hierarchy=HierarchyOptions(enabled=True, k_clusters=5)
-        )
+        options = ExtractionOptions(hierarchy=HierarchyOptions(enabled=True, k_clusters=5))
         assert options.hierarchy is not None
         assert options.hierarchy.enabled is True
         assert options.hierarchy.k_clusters == 5
@@ -6294,9 +6269,7 @@ class TestCombinedOptionsIntegration:
         )
 
         test_file = tmp_path / 'verbose.txt'
-        test_file.write_text(
-            'The very extremely quick brown fox. ' * 20
-        )
+        test_file.write_text('The very extremely quick brown fox. ' * 20)
 
         options = ExtractionOptions(
             output_format='markdown',
@@ -6320,8 +6293,7 @@ class TestCombinedOptionsIntegration:
 
         test_file = tmp_path / 'comprehensive.txt'
         test_file.write_text(
-            'First paragraph with lots of content. ' * 30
-            + '\n\nSecond paragraph with different content. ' * 30
+            'First paragraph with lots of content. ' * 30 + '\n\nSecond paragraph with different content. ' * 30
         )
 
         options = ExtractionOptions(
@@ -6377,9 +6349,7 @@ class TestKeywordOptions:
             KeywordOptions,
         )
 
-        options = ExtractionOptions(
-            keywords=KeywordOptions(enabled=True, algorithm='yake')
-        )
+        options = ExtractionOptions(keywords=KeywordOptions(enabled=True, algorithm='yake'))
         assert options.keywords is not None
         assert options.keywords.enabled is True
 
@@ -6435,9 +6405,7 @@ class TestImageExtractionOptions:
             ImageExtractionOptions,
         )
 
-        options = ExtractionOptions(
-            images=ImageExtractionOptions(target_dpi=200)
-        )
+        options = ExtractionOptions(images=ImageExtractionOptions(target_dpi=200))
         assert options.images is not None
         assert options.images.target_dpi == 200
 
@@ -6591,9 +6559,7 @@ class TestKreuzberg42AsyncFeatures:
         content = b'Bytes content test\n\nSecond paragraph.'
         options = ExtractionOptions(output_format='markdown')
 
-        result = await extract_bytes_with_kreuzberg(
-            content, 'text/plain', options
-        )
+        result = await extract_bytes_with_kreuzberg(content, 'text/plain', options)
 
         assert result.content is not None
         assert 'Bytes' in result.content

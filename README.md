@@ -71,11 +71,11 @@ Open [http://localhost:9600](http://localhost:9600) for the Web UI.
 
 ```python
 import asyncio
-from yar import LightRAG, QueryParam
+from yar import YAR, QueryParam
 from yar.llm.openai import gpt_4o_mini_complete, openai_embed
 
 async def main():
-    rag = LightRAG(
+    rag = YAR(
         working_dir="./rag_storage",
         embedding_func=openai_embed,
         llm_model_func=gpt_4o_mini_complete,

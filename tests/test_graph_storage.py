@@ -165,29 +165,45 @@ async def initialize_graph_storage():
 async def storage():
     """Fixture to initialize graph storage for tests.
 
-    Note: These tests have a known issue when run together with pytest.
-    The PostgreSQL connection pool is tied to the event loop from the first test.
-    When pytest-asyncio creates a new event loop for subsequent tests, the pool
-    becomes unusable ("Event loop is closed" error).
-
-    Workaround: Run tests individually or use pytest-xdist with -n1.
-    Example: pytest tests/test_graph_storage.py::test_graph_basic --run-integration
-
-    Each test passes when run individually - this is a test infrastructure issue,
-    not a code issue.
+    Tears down the ClientManager singleton after each test so the next test
+    gets a fresh connection pool on the current event loop.
     """
+    from yar.kg.postgres_impl import ClientManager
+
     # Load environment from .env if available
     load_dotenv()
 
     # Reset the shared storage state to allow re-initialization
     import yar.kg.shared_storage as shared_storage
+
     shared_storage._initialized = False
     shared_storage._async_locks = {}
+
+    # Clear stale singleton from previous test's event loop
+    if ClientManager._db_instance is not None:
+        if ClientManager._db_instance.pool is not None:
+            try:
+                await ClientManager._db_instance.pool.close()
+            except Exception:
+                pass
+        ClientManager._db_instance = None
+        ClientManager._ref_count = 0
+    ClientManager._lock = asyncio.Lock()
 
     storage_instance = await initialize_graph_storage()
     if storage_instance is None:
         pytest.skip('Graph storage could not be initialized')
     yield storage_instance
+
+    # Teardown: close pool and clear singleton for next test
+    if storage_instance is not None and storage_instance.db is not None:
+        if storage_instance.db.pool is not None:
+            try:
+                await storage_instance.db.pool.close()
+            except Exception:
+                pass
+        ClientManager._db_instance = None
+        ClientManager._ref_count = 0
 
 
 @pytest.mark.integration
@@ -1011,12 +1027,8 @@ async def test_graph_dollar_sign_characters(storage):
         edge_props = await storage.get_edge(node1_id, node2_id)
         if edge_props:
             print(f'Successfully read edge: {node1_id} -> {node2_id}')
-            assert edge_props.get('relationship') == edge_data['relationship'], (
-                'Edge relationship mismatch'
-            )
-            assert edge_props.get('description') == edge_data['description'], (
-                'Edge description mismatch'
-            )
+            assert edge_props.get('relationship') == edge_data['relationship'], 'Edge relationship mismatch'
+            assert edge_props.get('description') == edge_data['description'], 'Edge description mismatch'
             print('Edge dollar sign verification successful')
         else:
             pytest.fail('Failed to read edge with dollar signs')

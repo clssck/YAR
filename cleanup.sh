@@ -19,9 +19,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║              YAR Cleanup                                    ║${NC}"
-echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}+------------------------------------------------------------------+${NC}"
+echo -e "${BLUE}|              YAR Cleanup                                      |${NC}"
+echo -e "${BLUE}+------------------------------------------------------------------+${NC}"
 echo ""
 
 # Parse args
@@ -149,7 +149,8 @@ echo ""
 echo -e "${YELLOW}🛑 [Step 1/4] Stopping containers...${NC}"
 
 if [ -f "docker-compose.yml" ]; then
-    docker compose down 2>&1 | while read -r line; do
+    # Stop all services including work profile (litellm)
+    docker compose --profile work down 2>&1 | while read -r line; do
         echo -e "  ${BLUE}▸${NC} $line"
     done
 else
@@ -238,9 +239,9 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
-echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║                    Cleanup Complete                              ║${NC}"
-echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}+------------------------------------------------------------------+${NC}"
+echo -e "${BLUE}|                    Cleanup Complete                              |${NC}"
+echo -e "${BLUE}+------------------------------------------------------------------+${NC}"
 echo ""
 
 if [ "$REMOVE_VOLUMES" = false ]; then

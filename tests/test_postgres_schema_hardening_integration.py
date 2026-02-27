@@ -23,7 +23,7 @@ import pytest_asyncio
 
 # Set defaults before importing postgres_impl
 os.environ.setdefault('POSTGRES_HOST', 'localhost')
-os.environ.setdefault('POSTGRES_PORT', '5433')
+os.environ.setdefault('POSTGRES_PORT', '5432')
 os.environ.setdefault('POSTGRES_USER', 'yar')
 os.environ.setdefault('POSTGRES_PASSWORD', 'yar_pass')
 os.environ.setdefault('POSTGRES_DATABASE', 'yar')

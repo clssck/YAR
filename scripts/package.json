@@ -1,13 +1,13 @@
 {
-  "name": "lightrag-scripts",
+  "name": "yar-scripts",
   "version": "1.0.0",
-  "description": "Utility scripts for LightRAG development",
+  "description": "Utility scripts for YAR development",
   "scripts": {
     "honohub": "bun run honohub.ts",
     "honohub:force": "HONOHUB_FORCE=true bun run honohub.ts"
   },
   "dependencies": {
-    "hono": "^4.11.9"
+    "hono": "^4.12.3"
   },
   "devDependencies": {
     "@types/bun": "^1.3.9"

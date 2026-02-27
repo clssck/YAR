@@ -22,7 +22,7 @@ import requests
 # Configuration
 BASE_URL = os.getenv('YAR_TEST_URL', 'http://localhost:9621')
 API_KEY = os.getenv('YAR_API_KEY', None)
-TIMEOUT = 60  # LLM queries can take time
+TIMEOUT = 180  # LLM queries can take time, especially with reasoning models
 
 
 def get_headers():
@@ -243,10 +243,7 @@ class TestQueryEndpoint:
         # Check for at least one inline citation [n]
         has_inline_citation = bool(re.search(r'\[\d+\]', main_text))
 
-        assert has_inline_citation, (
-            f'Short answer missing inline citation [n]. '
-            f'Response: {main_text[:200]}...'
-        )
+        assert has_inline_citation, f'Short answer missing inline citation [n]. Response: {main_text[:200]}...'
 
     def test_query_with_top_k_parameter(self):
         """Test query with custom top_k parameter."""

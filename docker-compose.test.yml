@@ -106,10 +106,10 @@ services:
 
       # Storage Configuration - Full PostgreSQL!
       # Custom postgres image has pgvector + Apache AGE
-      - LIGHTRAG_KV_STORAGE=PGKVStorage
-      - LIGHTRAG_VECTOR_STORAGE=PGVectorStorage
-      - LIGHTRAG_GRAPH_STORAGE=PGGraphStorage
-      - LIGHTRAG_DOC_STATUS_STORAGE=PGDocStatusStorage
+      - YAR_KV_STORAGE=PGKVStorage
+      - YAR_VECTOR_STORAGE=PGVectorStorage
+      - YAR_GRAPH_STORAGE=PGGraphStorage
+      - YAR_DOC_STATUS_STORAGE=PGDocStatusStorage
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5433
       - POSTGRES_USER=yar

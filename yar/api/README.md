@@ -275,7 +275,7 @@ By default, the YAR Server can be accessed without any authentication. We can co
 * API Key:
 
 ```
-LIGHTRAG_API_KEY=your-secure-api-key-here
+YAR_API_KEY=your-secure-api-key-here
 WHITELIST_PATHS=/health,/api/*
 ```
 
@@ -406,10 +406,10 @@ YAR Server offers various storage implementations, with the default being an in-
 You can select the storage implementation by configuring environment variables. For instance, prior to the initial launch of the API server, you can set the following environment variable to specify your desired storage implementation:
 
 ```
-LIGHTRAG_KV_STORAGE=PGKVStorage
-LIGHTRAG_VECTOR_STORAGE=PGVectorStorage
-LIGHTRAG_GRAPH_STORAGE=PGGraphStorage
-LIGHTRAG_DOC_STATUS_STORAGE=PGDocStatusStorage
+YAR_KV_STORAGE=PGKVStorage
+YAR_VECTOR_STORAGE=PGVectorStorage
+YAR_GRAPH_STORAGE=PGGraphStorage
+YAR_DOC_STATUS_STORAGE=PGDocStatusStorage
 ```
 
 You cannot change storage implementation selection after adding documents to YAR. Data migration from one storage implementation to another is not supported yet. For further information, please read the sample env file or config.ini file.
@@ -561,7 +561,7 @@ EMBEDDING_BINDING_HOST=http://localhost:11434
 # TOKEN_SECRET=your-key-for-YAR-API-Server-xxx
 # TOKEN_EXPIRE_HOURS=48
 
-# LIGHTRAG_API_KEY=your-secure-api-key-here-123
+# YAR_API_KEY=your-secure-api-key-here-123
 # WHITELIST_PATHS=/api/*
 # WHITELIST_PATHS=/health,/api/*
 

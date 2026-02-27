@@ -105,7 +105,7 @@ The evaluation script supports command-line arguments for easy configuration:
 | Argument | Short | Default | Description |
 |----------|-------|---------|-------------|
 | `--dataset` | `-d` | `sample_dataset.json` | Path to test dataset JSON file |
-| `--ragendpoint` | `-r` | `http://localhost:9621` or `$LIGHTRAG_API_URL` | YAR API endpoint URL |
+| `--ragendpoint` | `-r` | `http://localhost:9621` or `$YAR_API_URL` | YAR API endpoint URL |
 
 ### Usage Examples
 

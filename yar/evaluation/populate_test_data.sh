@@ -7,12 +7,12 @@
 #
 # Usage:
 #   ./yar/evaluation/populate_test_data.sh
-#   LIGHTRAG_API_URL=http://localhost:9622 ./yar/evaluation/populate_test_data.sh
+#   YAR_API_URL=http://localhost:9622 ./yar/evaluation/populate_test_data.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RAG_URL="${LIGHTRAG_API_URL:-http://localhost:9622}"
+RAG_URL="${YAR_API_URL:-http://localhost:9622}"
 
 echo "=== YAR Test Data Population ==="
 echo "RAG URL: $RAG_URL"

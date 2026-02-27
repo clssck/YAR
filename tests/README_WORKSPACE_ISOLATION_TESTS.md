@@ -75,25 +75,25 @@ pytest tests/test_workspace_isolation.py -v -s
 Enable stress testing with configurable number of workers:
 ```bash
 # Enable stress mode with default 3 workers
-LIGHTRAG_STRESS_TEST=true pytest tests/test_workspace_isolation.py -v
+YAR_STRESS_TEST=true pytest tests/test_workspace_isolation.py -v
 
 # Custom number of workers (e.g., 10)
-LIGHTRAG_STRESS_TEST=true LIGHTRAG_TEST_WORKERS=10 pytest tests/test_workspace_isolation.py -v
+YAR_STRESS_TEST=true YAR_TEST_WORKERS=10 pytest tests/test_workspace_isolation.py -v
 ```
 
 #### Keep Test Artifacts
 Preserve temporary directories for manual inspection:
 ```bash
 # Keep test artifacts (useful for debugging)
-LIGHTRAG_KEEP_ARTIFACTS=true pytest tests/test_workspace_isolation.py -v
+YAR_KEEP_ARTIFACTS=true pytest tests/test_workspace_isolation.py -v
 ```
 
 #### Combined Example
 ```bash
 # Stress test with 20 workers and keep artifacts
-LIGHTRAG_STRESS_TEST=true \
-LIGHTRAG_TEST_WORKERS=20 \
-LIGHTRAG_KEEP_ARTIFACTS=true \
+YAR_STRESS_TEST=true \
+YAR_TEST_WORKERS=20 \
+YAR_KEEP_ARTIFACTS=true \
 pytest tests/test_workspace_isolation.py::test_lock_mechanism -v -s
 ```
 
@@ -157,9 +157,9 @@ _assert_no_timeline_overlap(timeline_bad)  # Raises AssertionError
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `LIGHTRAG_STRESS_TEST` | bool | `false` | Enable stress testing mode |
-| `LIGHTRAG_TEST_WORKERS` | int | `3` | Number of parallel workers in stress mode |
-| `LIGHTRAG_KEEP_ARTIFACTS` | bool | `false` | Keep temporary test directories |
+| `YAR_STRESS_TEST` | bool | `false` | Enable stress testing mode |
+| `YAR_TEST_WORKERS` | int | `3` | Number of parallel workers in stress mode |
+| `YAR_KEEP_ARTIFACTS` | bool | `false` | Keep temporary test directories |
 
 ## Performance Benchmarks
 
@@ -170,7 +170,7 @@ _assert_no_timeline_overlap(timeline_bad)  # Raises AssertionError
 - **Total Suite**: < 15s
 
 ### Stress Test Performance
-With `LIGHTRAG_TEST_WORKERS=10`:
+With `YAR_TEST_WORKERS=10`:
 - **Test 2 (Parallel)**: ~0.05s (10 workers, all concurrent)
 - **Test 2 (Serial)**: ~0.10s (2 workers, serialized)
 
@@ -186,7 +186,7 @@ With `LIGHTRAG_TEST_WORKERS=10`:
 #### Resource Cleanup Errors
 **Symptom:** "Directory not empty" or "Cannot remove directory"
 **Cause:** Concurrent test execution or OS file locking
-**Solution:** Run tests serially (`pytest -n 1`) or use `LIGHTRAG_KEEP_ARTIFACTS=true` to inspect state
+**Solution:** Run tests serially (`pytest -n 1`) or use `YAR_KEEP_ARTIFACTS=true` to inspect state
 
 #### Lock Timeout Errors
 **Symptom:** "Lock acquisition timeout"
@@ -202,7 +202,7 @@ With `LIGHTRAG_TEST_WORKERS=10`:
 
 2. **Run single test with artifacts:**
    ```bash
-   LIGHTRAG_KEEP_ARTIFACTS=true pytest tests/test_workspace_isolation.py::test_json_kv_storage_workspace_isolation -v -s
+   YAR_KEEP_ARTIFACTS=true pytest tests/test_workspace_isolation.py::test_json_kv_storage_workspace_isolation -v -s
    ```
 
 3. **Check performance metrics:**

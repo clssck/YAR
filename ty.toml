@@ -18,7 +18,7 @@ exclude = [
     "**/yar_azure_openai_demo.py",            # example file
     "yar/evaluation/**",                      # ragas optional dep
     "tests/test_prompt_*.py",                 # heavy mocking
-    "tests/test_lightrag.py",                 # heavy AsyncMock usage
+    "tests/test_yar.py",                      # heavy AsyncMock usage
     "tests/test_operate.py",                  # heavy AsyncMock usage
     "tests/test_sync_wrapper.py",             # wrapper testing
     "tests/test_types.py",                    # pydantic model validation tests
