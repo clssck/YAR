@@ -1,35 +1,23 @@
-# LiteLLM Unified Config for mixed providers (OpenRouter LLM + Bedrock embeddings)
+# LiteLLM Unified Config for AWS Bedrock (Work Environment)
 # Provides both LLM and Embedding endpoints via single proxy
 #
 # YAR uses:
-#   - LLM_MODEL=beepboop           → bytedance-seed/seed-1.6-flash (via OpenRouter)
+#   - LLM_MODEL=beepboop           → Claude 3.5 Sonnet (extraction, queries)
 #   - EMBEDDING_MODEL=titan-embed  → Titan Embed Text v2 (1024 dims)
 
 model_list:
   # ══════════════════════════════════════════════════════════════════════════════
-  # LLM - Bytedance Seed 1.6 Flash via OpenRouter (OpenAI-compatible API)
+  # LLM - Claude 3.5 Sonnet via Bedrock
   # ══════════════════════════════════════════════════════════════════════════════
 
   - model_name: beepboop
     litellm_params:
-      model: openai/bytedance-seed/seed-1.6-flash
-      api_base: os.environ/OPENROUTER_API_BASE
-      api_key: os.environ/OPENROUTER_API_KEY
+      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+      aws_region_name: us-east-1
     model_info:
       max_tokens: 200000
       mode: chat
       supports_function_calling: true
-
-  - model_name: bytedance-seed/seed-1.6-flash
-    litellm_params:
-      model: openai/bytedance-seed/seed-1.6-flash
-      api_base: os.environ/OPENROUTER_API_BASE
-      api_key: os.environ/OPENROUTER_API_KEY
-    model_info:
-      max_tokens: 200000
-      mode: chat
-      supports_function_calling: true
-
   # ══════════════════════════════════════════════════════════════════════════════
   # Embedding - Bedrock Titan Embed Text v2
   # 1024 dimensions, 8192 token limit, ~65ms latency
