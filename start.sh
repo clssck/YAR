@@ -182,14 +182,6 @@ echo ""
 echo -e "  ${BLUE}Installing dependencies...${NC}"
 uv sync --extra api --quiet
 
-# Install packages that are dynamically loaded via pipmaster but may fail in uv
-# These are: aioboto3 (S3 client), pgvector (PostgreSQL vectors), asyncpg (PostgreSQL)
-echo -e "  ${BLUE}Installing runtime dependencies...${NC}"
-uv pip install aioboto3 pgvector asyncpg --quiet || {
-    echo -e "  ${YELLOW}Warning: Some packages may not have installed correctly${NC}"
-    echo -e "  ${YELLOW}Trying with pip directly...${NC}"
-    uv run pip install aioboto3 pgvector asyncpg --quiet || true
-}
 
 # Start YAR
 echo ""

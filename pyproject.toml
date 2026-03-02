@@ -70,6 +70,7 @@ api = [
     # API-specific dependencies
     "aiofiles",
     "ascii_colors",
+    "aioboto3>=12.0.0,<16.0.0",
     "asyncpg",
     "distro",
     "fastapi",

@@ -3748,6 +3748,7 @@ dependencies = [
 
 [package.optional-dependencies]
 api = [
+    { name = "aioboto3" },
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "ascii-colors" },
@@ -3787,6 +3788,7 @@ dev = [
     { name = "ty" },
 ]
 evaluation = [
+    { name = "aioboto3" },
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "ascii-colors" },
@@ -3827,6 +3829,7 @@ observability = [
     { name = "langfuse" },
 ]
 offline = [
+    { name = "aioboto3" },
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "ascii-colors" },
@@ -3905,6 +3908,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aioboto3", marker = "extra == 'api'", specifier = ">=12.0.0,<16.0.0" },
     { name = "aioboto3", marker = "extra == 'test'", specifier = ">=12.0.0,<16.0.0" },
     { name = "aiofiles", marker = "extra == 'api'" },
     { name = "aiohttp" },
