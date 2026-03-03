@@ -1298,11 +1298,6 @@ export type S3ListResponse = {
   objects: S3ObjectInfo[]
 }
 
-export type S3DownloadResponse = {
-  key: string
-  url: string
-  expiry_seconds: number
-}
 
 export type S3UploadResponse = {
   key: string
@@ -1336,23 +1331,45 @@ export const s3List = async (prefix = ''): Promise<S3ListResponse> => {
   return response.data
 }
 
+
+export type S3ContentRequestOptions = {
+  download?: boolean
+  signal?: AbortSignal
+}
+
 /**
- * Get a presigned download URL for an S3 object.
+ * Fetch S3 object bytes through API streaming endpoint.
  * @param key - Full S3 object key
- * @param expiry - URL expiry time in seconds (default: 3600)
- * @returns Presigned download URL
+ * @param options - Optional download mode and abort signal
+ * @returns Blob containing object bytes
  */
-export const s3Download = async (
+export const s3GetContentBlob = async (
   key: string,
-  expiry = 3600,
-): Promise<S3DownloadResponse> => {
+  options: S3ContentRequestOptions = {},
+): Promise<Blob> => {
   const response = await axiosInstance.get(
-    `/s3/download/${encodeURIComponent(key)}`,
+    `/s3/content/${encodeURIComponent(key)}`,
     {
-      params: { expiry },
+      params: options.download ? { download: true } : undefined,
+      responseType: 'blob',
+      signal: options.signal,
     },
   )
-  return response.data
+  return response.data as Blob
+}
+
+/**
+ * Fetch S3 object text through API streaming endpoint.
+ * @param key - Full S3 object key
+ * @param options - Optional download mode and abort signal
+ * @returns UTF-8 text content
+ */
+export const s3GetContentText = async (
+  key: string,
+  options: S3ContentRequestOptions = {},
+): Promise<string> => {
+  const blob = await s3GetContentBlob(key, options)
+  return blob.text()
 }
 
 /**

@@ -1810,21 +1810,19 @@ async def pipeline_process_bytes_with_s3(
                 # Process the enqueued document
                 try:
                     await rag.apipeline_process_enqueue_documents()
-                except Exception:
-                    raise
-
-                # Update database with S3 keys after processing completes
-                # Compute content_doc_id from SANITIZED extracted content (matches how YAR stores it)
-                # YAR applies sanitize_text_for_encoding() before hashing - we must do the same!
-                sanitized_content = sanitize_text_for_encoding(content)
-                content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
-                await _update_db_with_s3_keys(
-                    s3_client=s3_client,
-                    rag=rag,
-                    doc_id=content_doc_id,
-                    original_s3_key=s3_original_key,
-                    processed_s3_key=processed_s3_key,
-                )
+                finally:
+                    # Always update S3 keys, even if processing failed — the file is already in S3
+                    # Compute content_doc_id from SANITIZED extracted content (matches how YAR stores it)
+                    # YAR applies sanitize_text_for_encoding() before hashing - we must do the same!
+                    sanitized_content = sanitize_text_for_encoding(content)
+                    content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
+                    await _update_db_with_s3_keys(
+                        s3_client=s3_client,
+                        rag=rag,
+                        doc_id=content_doc_id,
+                        original_s3_key=s3_original_key,
+                        processed_s3_key=processed_s3_key,
+                    )
 
                 return processed_s3_key
 

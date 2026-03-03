@@ -13,7 +13,9 @@ Endpoints:
 
 import mimetypes
 from typing import Annotated
+from urllib.parse import quote
 
+from botocore.exceptions import ClientError
 from fastapi import (
     APIRouter,
     Depends,
@@ -23,6 +25,7 @@ from fastapi import (
     Query,
     UploadFile,
 )
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from yar.api.config import global_args
@@ -198,6 +201,58 @@ def create_s3_routes(s3_client: S3Client, api_key: str | None = None) -> APIRout
             key=safe_key,
             url=url,
             expiry_seconds=expiry,
+        )
+
+    @router.get('/content/{key:path}', dependencies=[Depends(combined_auth)])
+    @handle_api_error('streaming S3 object content')
+    async def stream_object_content(
+        key: str,
+        download: bool = Query(default=False, description='If true, force file download'),
+    ):
+        """Stream an object through the API for browser-safe preview/download."""
+        safe_key = validate_s3_key(key)
+        filename = safe_key.rsplit('/', 1)[-1] or 'download'
+        disposition_type = 'attachment' if download else 'inline'
+        content_disposition = f"{disposition_type}; filename*=UTF-8''{quote(filename)}"
+
+        content_type: str | None = None
+        try:
+            async with s3_client._get_client() as client:
+                head = await client.head_object(
+                    Bucket=s3_client.config.bucket_name,
+                    Key=safe_key,
+                )
+                content_type = head.get('ContentType')
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code in {'404', 'NoSuchKey', 'NotFound'}:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f'Object not found: {safe_key}',
+                ) from e
+            raise
+
+        if not content_type:
+            guessed_type, _ = mimetypes.guess_type(filename)
+            content_type = guessed_type or 'application/octet-stream'
+
+        async def content_stream():
+            async with s3_client._get_client() as client:
+                response = await client.get_object(
+                    Bucket=s3_client.config.bucket_name,
+                    Key=safe_key,
+                )
+                body = response['Body']
+                try:
+                    while chunk := await body.read(1024 * 1024):
+                        yield chunk
+                finally:
+                    body.close()
+
+        return StreamingResponse(
+            content_stream(),
+            media_type=content_type,
+            headers={'Content-Disposition': content_disposition},
         )
 
     @router.post('/upload', response_model=S3UploadResponse, dependencies=[Depends(combined_auth)])

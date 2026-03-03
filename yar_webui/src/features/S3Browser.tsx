@@ -15,7 +15,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { S3ObjectInfo } from '@/api/yar'
-import { s3Delete, s3Download, s3List, s3Upload } from '@/api/yar'
+import { s3Delete, s3GetContentBlob, s3List, s3Upload } from '@/api/yar'
 import FileViewer from '@/components/storage/FileViewer'
 import FolderDetails from '@/components/storage/FolderDetails'
 import {
@@ -158,9 +158,15 @@ export default function S3Browser() {
   const handleDownload = useCallback(
     async (key: string) => {
       try {
-        const response = await s3Download(key)
-        // Open presigned URL in new tab
-        window.open(response.url, '_blank')
+        const blob = await s3GetContentBlob(key, { download: true })
+        const objectUrl = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = objectUrl
+        link.download = key.split('/').pop() || 'download'
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        URL.revokeObjectURL(objectUrl)
       } catch (err) {
         toast.error(
           t('storagePanel.downloadFailed', {

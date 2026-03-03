@@ -16,7 +16,7 @@ import {
   oneLight,
 } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import remarkGfm from 'remark-gfm'
-import { s3Download } from '@/api/yar'
+import { s3GetContentBlob, s3GetContentText } from '@/api/yar'
 import Button from '@/components/ui/Button'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import {
@@ -201,6 +201,17 @@ export default function FileViewer({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const objectUrlRef = useRef<string | null>(null)
+  const releaseObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+  }, [])
+  const clearPreviewUrl = useCallback(() => {
+    releaseObjectUrl()
+    setImageUrl(null)
+  }, [releaseObjectUrl])
   // Resizable width state
   const [width, setWidth] = useState(() => {
     const saved =
@@ -268,8 +279,9 @@ export default function FileViewer({
   useEffect(() => {
     if (!open || !fileKey) {
       setContent(null)
-      setImageUrl(null)
+      clearPreviewUrl()
       setError(null)
+      setLoading(false)
       return
     }
 
@@ -278,30 +290,32 @@ export default function FileViewer({
     const fetchContent = async () => {
       setLoading(true)
       setError(null)
+      setContent(null)
+      clearPreviewUrl()
 
       try {
-        const response = await s3Download(fileKey)
-        const presignedUrl = response.url
+        if (fileType === 'unknown') {
+          return
+        }
 
-        if (fileType === 'image') {
-          setImageUrl(presignedUrl)
-        } else if (fileType === 'pdf') {
-          // For PDF, we just set the URL - user can open in new tab
-          setImageUrl(presignedUrl)
-        } else if (fileType !== 'unknown') {
-          // Fetch text content
-          const textResponse = await fetch(presignedUrl, {
+        if (fileType === 'image' || fileType === 'pdf') {
+          const blob = await s3GetContentBlob(fileKey, {
             signal: controller.signal,
           })
-          if (!textResponse.ok) {
-            throw new Error(`Failed to fetch: ${textResponse.statusText}`)
-          }
-          const text = await textResponse.text()
-          setContent(text)
-        } else {
-          // Unknown file type - just provide download link
-          setImageUrl(presignedUrl)
+          if (controller.signal.aborted) return
+
+          releaseObjectUrl()
+          const objectUrl = URL.createObjectURL(blob)
+          objectUrlRef.current = objectUrl
+          setImageUrl(objectUrl)
+          return
         }
+
+        const text = await s3GetContentText(fileKey, {
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted) return
+        setContent(text)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'Failed to load file')
@@ -314,25 +328,31 @@ export default function FileViewer({
 
     fetchContent()
     return () => controller.abort()
-  }, [open, fileKey, fileType])
+  }, [open, fileKey, fileType, clearPreviewUrl, releaseObjectUrl])
+
+  useEffect(() => {
+    return () => {
+      releaseObjectUrl()
+    }
+  }, [releaseObjectUrl])
 
   const handleDownload = useCallback(async () => {
     if (!fileKey) return
     try {
-      const response = await s3Download(fileKey)
-      const newWindow = window.open(
-        response.url,
-        '_blank',
-        'noopener,noreferrer',
-      )
-      if (newWindow) {
-        newWindow.opener = null
-      }
+      const blob = await s3GetContentBlob(fileKey, { download: true })
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = fileName || fileKey.split('/').pop() || 'download'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
     } catch (err) {
       console.error('Download failed', err)
       alert(t('storagePanel.actions.downloadFailed') ?? 'Download failed')
     }
-  }, [fileKey, t])
+  }, [fileKey, fileName, t])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -402,7 +422,7 @@ export default function FileViewer({
             </div>
           ) : fileType === 'pdf' && imageUrl ? (
             <PDFViewer url={imageUrl} />
-          ) : fileType === 'unknown' && imageUrl ? (
+          ) : fileType === 'unknown' ? (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <FileIcon className="h-16 w-16 text-muted-foreground" />
               <p className="text-muted-foreground">
