@@ -207,7 +207,6 @@ def parse_args() -> argparse.Namespace:
         help='Disable reranking (overrides --enable-rerank)',
     )
 
-
     # Add OpenAI LLM options (always available since openai is the only binding)
     OpenAILLMOptions.add_args(parser)
 
@@ -272,10 +271,9 @@ def parse_args() -> argparse.Namespace:
     args.pdf_decrypt_password = get_env_value('PDF_DECRYPT_PASSWORD', None)
 
     # OCR configuration for scanned documents and images
-    # Enables text extraction from images in PPTX, scanned PDFs, etc.
+    # OCR backend is intentionally not configurable at runtime; Kreuzberg default backend is used.
     args.enable_ocr = get_env_value('ENABLE_OCR', True, bool)
-    args.ocr_backend = get_env_value('OCR_BACKEND', 'tesseract')  # tesseract, easyocr, paddleocr
-    args.ocr_language = get_env_value('OCR_LANGUAGE', 'eng')  # Tesseract language code
+    args.ocr_language = get_env_value('OCR_LANGUAGE', 'eng')  # OCR language code for Kreuzberg default backend
 
     # Add environment variables that were previously read directly
     args.cors_origins = get_env_value('CORS_ORIGINS', '*')

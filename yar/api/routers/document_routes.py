@@ -912,7 +912,6 @@ def _extract_and_chunk_with_kreuzberg(
     chunk_overlap_token_size: int = 100,
     chunking_preset: str | None = 'semantic',
     enable_ocr: bool = True,
-    ocr_backend: str = 'tesseract',
     ocr_language: str = 'eng',
 ) -> tuple[str, list[dict[str, Any]]]:
     """One-pass document extraction and chunking using Kreuzberg (synchronous).
@@ -922,7 +921,6 @@ def _extract_and_chunk_with_kreuzberg(
 
     Args:
         enable_ocr: Enable OCR for images/scanned content (default: True)
-        ocr_backend: OCR backend - 'tesseract', 'easyocr', or 'paddleocr'
         ocr_language: Language code for OCR (e.g., 'eng' for English)
     """
     from yar.document import OcrOptions, chunks_to_yar_format, extract_and_chunk_sync
@@ -930,7 +928,7 @@ def _extract_and_chunk_with_kreuzberg(
     # Build OCR options if enabled
     ocr_options = None
     if enable_ocr:
-        ocr_options = OcrOptions(backend=ocr_backend, language=ocr_language)
+        ocr_options = OcrOptions(language=ocr_language)
 
     result = extract_and_chunk_sync(
         file_path,
@@ -951,7 +949,6 @@ def _extract_and_chunk_bytes_with_kreuzberg(
     chunk_overlap_token_size: int = 100,
     chunking_preset: str | None = 'semantic',
     enable_ocr: bool = True,
-    ocr_backend: str = 'tesseract',
     ocr_language: str = 'eng',
 ) -> tuple[str, list[dict[str, Any]], list[Any] | None]:
     """One-pass document extraction and chunking from bytes using Kreuzberg (synchronous).
@@ -963,7 +960,6 @@ def _extract_and_chunk_bytes_with_kreuzberg(
 
     Args:
         enable_ocr: Enable OCR for images/scanned content (default: True)
-        ocr_backend: OCR backend - 'tesseract', 'easyocr', or 'paddleocr'
         ocr_language: Language code for OCR (e.g., 'eng' for English)
 
     Returns:
@@ -991,7 +987,7 @@ def _extract_and_chunk_bytes_with_kreuzberg(
     # Build OCR options if enabled
     ocr_options = None
     if enable_ocr:
-        ocr_options = OcrOptions(backend=ocr_backend, language=ocr_language)
+        ocr_options = OcrOptions(language=ocr_language)
 
     options = ExtractionOptions(chunking=chunking_options, ocr=ocr_options)
 
@@ -1100,7 +1096,6 @@ async def pipeline_enqueue_file(
                         effective_overlap,
                         effective_preset,
                         getattr(global_args, 'enable_ocr', True),
-                        getattr(global_args, 'ocr_backend', 'tesseract'),
                         getattr(global_args, 'ocr_language', 'eng'),
                     )
                     logger.info(
@@ -1404,7 +1399,6 @@ async def pipeline_enqueue_file_with_s3(
                         effective_overlap,
                         effective_preset,
                         getattr(global_args, 'enable_ocr', True),
-                        getattr(global_args, 'ocr_backend', 'tesseract'),
                         getattr(global_args, 'ocr_language', 'eng'),
                     )
                     logger.info(
@@ -1686,7 +1680,6 @@ async def pipeline_process_bytes_with_s3(
                         effective_overlap,
                         effective_preset,
                         getattr(global_args, 'enable_ocr', True),
-                        getattr(global_args, 'ocr_backend', 'tesseract'),
                         getattr(global_args, 'ocr_language', 'eng'),
                     )
                     logger.info(
