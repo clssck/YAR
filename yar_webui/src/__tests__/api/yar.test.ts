@@ -109,4 +109,44 @@ describe('queryTextStream NDJSON parsing', () => {
     expect(chunks).toEqual(['Buffered answer'])
     expect(receivedReferences).toEqual([references])
   })
+
+  test('reports malformed references payload in streamed lines and skips onReferences', async () => {
+    const ndjson = `${JSON.stringify({ response: 'Chunk before bad refs', references: { invalid: true } })}\n`
+    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as typeof fetch
+
+    const chunks: string[] = []
+    const receivedReferences: StreamReference[][] = []
+    const onError = mock(() => {})
+
+    await queryTextStream(
+      { query: 'What happened?', mode: 'mix', stream: true } as QueryRequest,
+      (chunk) => chunks.push(chunk),
+      onError,
+      undefined,
+      (refs) => receivedReferences.push(refs),
+    )
+
+    expect(chunks).toEqual(['Chunk before bad refs'])
+    expect(receivedReferences).toEqual([])
+    expect(onError).toHaveBeenCalledWith(
+      'Protocol error: expected "references" to be an array',
+    )
+  })
+
+  test('routes citation_error event from final buffered object to onError', async () => {
+    const finalChunk = JSON.stringify({ citation_error: 'citation service unavailable' })
+    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as typeof fetch
+
+    const onError = mock(() => {})
+
+    await queryTextStream(
+      { query: 'Need citations', mode: 'mix', stream: true } as QueryRequest,
+      () => {},
+      onError,
+    )
+
+    expect(onError).toHaveBeenCalledWith(
+      'Citation error: citation service unavailable',
+    )
+  })
 })

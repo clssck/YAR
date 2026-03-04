@@ -529,6 +529,16 @@ class TestQueryErrors:
         assert response.json()['detail'] == 'Query failed: upstream timeout'
 
     @pytest.mark.asyncio
+    async def test_query_empty_payload_returns_500(self, client, mock_rag):
+        """Malformed empty payloads should map to HTTP 500."""
+        mock_rag.aquery_llm.return_value = {}
+
+        response = await client.post('/query', json={'query': 'Test query'})
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Query processing failed'
+
+    @pytest.mark.asyncio
     async def test_query_no_results_failure_reason_returns_200(self, client, mock_rag):
         """No-results failure reason should still return a user-facing successful response."""
         mock_rag.aquery_llm.return_value = {
@@ -646,6 +656,44 @@ class TestQueryStreamEndpoint:
         assert response.status_code == 200
         lines = _ndjson_lines(response.text)
         assert lines[0]['references'][0]['content'] == ['Chunk 1', 'Chunk 2']
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_no_results_failure_reason_is_non_error(self, client, mock_rag):
+        """Streaming requests should not emit errors for no-results failure reason."""
+        mock_rag.aquery_llm.return_value = {
+            'status': 'failure',
+            'message': 'Query returned no results',
+            'metadata': {'failure_reason': 'no_results'},
+            'llm_response': {'is_streaming': False, 'content': 'No relevant context found for the query.'},
+            'data': {},
+        }
+
+        response = await client.post('/query/stream', json={'query': 'Test query', 'stream': True})
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines
+        assert lines[0]['response'] == 'No relevant context found for the query.'
+        assert 'error' not in lines[0]
+
+    @pytest.mark.asyncio
+    async def test_non_stream_mode_no_results_failure_reason_is_non_error(self, client, mock_rag):
+        """Non-stream requests should not return HTTP errors for no-results failure reason."""
+        mock_rag.aquery_llm.return_value = {
+            'status': 'failure',
+            'message': 'Query returned no results',
+            'metadata': {'failure_reason': 'no_results'},
+            'llm_response': {'is_streaming': False, 'content': 'No relevant context found for the query.'},
+            'data': {},
+        }
+
+        response = await client.post('/query/stream', json={'query': 'Test query', 'stream': False})
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines
+        assert lines[0]['response'] == 'No relevant context found for the query.'
+        assert 'error' not in lines[0]
 
     @pytest.mark.asyncio
     async def test_streaming_mode_failure_payload_emits_ndjson_error(self, client, mock_rag):

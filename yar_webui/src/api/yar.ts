@@ -572,6 +572,13 @@ export const queryTextStream = async (
               onError(parsed.error)
             }
             if (
+              'citation_error' in parsed &&
+              typeof parsed.citation_error === 'string' &&
+              onError
+            ) {
+              onError(`Citation error: ${parsed.citation_error}`)
+            }
+            if (
               'citations_metadata' in parsed &&
               parsed.citations_metadata &&
               onCitations
@@ -579,14 +586,16 @@ export const queryTextStream = async (
               // Handle consolidated citations_metadata object
               onCitations(parsed.citations_metadata as CitationsMetadata)
             }
-            if ('references' in parsed && onReferences) {
+            if ('references' in parsed) {
               // Handle references with S3 presigned URLs
               const references = parsed.references
-              onReferences(
-                Array.isArray(references)
-                  ? (references as StreamReference[])
-                  : [],
-              )
+              if (Array.isArray(references)) {
+                if (onReferences) {
+                  onReferences(references as StreamReference[])
+                }
+              } else if (onError) {
+                onError('Protocol error: expected "references" to be an array')
+              }
             }
             // Silently ignore other events
           } catch (error) {
@@ -608,17 +617,28 @@ export const queryTextStream = async (
           onError(parsed.error)
         }
         if (
+          'citation_error' in parsed &&
+          typeof parsed.citation_error === 'string' &&
+          onError
+        ) {
+          onError(`Citation error: ${parsed.citation_error}`)
+        }
+        if (
           'citations_metadata' in parsed &&
           parsed.citations_metadata &&
           onCitations
         ) {
           onCitations(parsed.citations_metadata as CitationsMetadata)
         }
-        if ('references' in parsed && onReferences) {
+        if ('references' in parsed) {
           const references = parsed.references
-          onReferences(
-            Array.isArray(references) ? (references as StreamReference[]) : [],
-          )
+          if (Array.isArray(references)) {
+            if (onReferences) {
+              onReferences(references as StreamReference[])
+            }
+          } else if (onError) {
+            onError('Protocol error: expected "references" to be an array')
+          }
         }
       } catch (error) {
         console.error('Error parsing final chunk:', buffer, error)

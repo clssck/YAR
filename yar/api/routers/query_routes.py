@@ -120,13 +120,16 @@ def renumber_references_sequential(text: str) -> str:
     return result
 
 
-def get_query_failure_message(result: dict[str, Any] | None) -> str | None:
+def get_query_failure_message(result: Any) -> str | None:
     """Return backend failure detail from unified query result payload."""
-    if not result or result.get('status') != 'failure':
+    if not isinstance(result, dict) or not result:
+        return 'Query processing failed'
+
+    if result.get('status') != 'failure':
         return None
 
     metadata = result.get('metadata') or {}
-    if metadata.get('failure_reason') == 'no_results':
+    if isinstance(metadata, dict) and metadata.get('failure_reason') == 'no_results':
         return None
 
     message = result.get('message')
@@ -1046,9 +1049,10 @@ def create_query_routes(
 
             async def stream_generator():
                 # Extract references and LLM response from unified result
-                references: list[dict[str, Any]] = list(result.get('data', {}).get('references', []))
-                chunks: list[dict[str, Any]] = list(result.get('data', {}).get('chunks', []))
-                llm_response: dict[str, Any] = result.get('llm_response', {}) or {}
+                result_payload = result if isinstance(result, dict) else {}
+                references: list[dict[str, Any]] = list(result_payload.get('data', {}).get('references', []))
+                chunks: list[dict[str, Any]] = list(result_payload.get('data', {}).get('chunks', []))
+                llm_response: dict[str, Any] = result_payload.get('llm_response', {}) or {}
                 if failure_message:
                     yield f'{json.dumps({"error": failure_message})}\n'
                     return

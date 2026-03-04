@@ -44,7 +44,7 @@ dependencies = [
 [project.optional-dependencies]
 # Test framework and dev tool dependencies (for CI/CD and testing)
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=8.4.2,<9",
     "pytest-asyncio>=1.2.0",
     "pre-commit",
     "ruff",
@@ -106,7 +106,7 @@ offline = [
 
 test = [
     "yar[api]",
-    "pytest>=8.4.2",
+    "pytest>=8.4.2,<9",
     "pytest-asyncio>=1.2.0",
     "pre-commit",
     "ruff",
