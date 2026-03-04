@@ -207,6 +207,7 @@ export type QueryRequest = {
 
 export type QueryResponse = {
   response: string
+  references?: StreamReference[] | null
 }
 
 export type EntityUpdateResponse = {
@@ -563,17 +564,29 @@ export const queryTextStream = async (
       for (const line of lines) {
         if (line.trim()) {
           try {
-            const parsed = JSON.parse(line)
-            if (parsed.response) {
+            const parsed = JSON.parse(line) as Record<string, unknown>
+            if ('response' in parsed && typeof parsed.response === 'string') {
               onChunk(parsed.response)
-            } else if (parsed.error && onError) {
+            }
+            if ('error' in parsed && typeof parsed.error === 'string' && onError) {
               onError(parsed.error)
-            } else if (parsed.citations_metadata && onCitations) {
+            }
+            if (
+              'citations_metadata' in parsed &&
+              parsed.citations_metadata &&
+              onCitations
+            ) {
               // Handle consolidated citations_metadata object
               onCitations(parsed.citations_metadata as CitationsMetadata)
-            } else if (parsed.references && onReferences) {
+            }
+            if ('references' in parsed && onReferences) {
               // Handle references with S3 presigned URLs
-              onReferences(parsed.references as StreamReference[])
+              const references = parsed.references
+              onReferences(
+                Array.isArray(references)
+                  ? (references as StreamReference[])
+                  : [],
+              )
             }
             // Silently ignore other events
           } catch (error) {
@@ -587,13 +600,25 @@ export const queryTextStream = async (
     // Process any remaining data in the buffer after the stream ends
     if (buffer.trim()) {
       try {
-        const parsed = JSON.parse(buffer)
-        if (parsed.response) {
+        const parsed = JSON.parse(buffer) as Record<string, unknown>
+        if ('response' in parsed && typeof parsed.response === 'string') {
           onChunk(parsed.response)
-        } else if (parsed.error && onError) {
+        }
+        if ('error' in parsed && typeof parsed.error === 'string' && onError) {
           onError(parsed.error)
-        } else if (parsed.citations_metadata && onCitations) {
+        }
+        if (
+          'citations_metadata' in parsed &&
+          parsed.citations_metadata &&
+          onCitations
+        ) {
           onCitations(parsed.citations_metadata as CitationsMetadata)
+        }
+        if ('references' in parsed && onReferences) {
+          const references = parsed.references
+          onReferences(
+            Array.isArray(references) ? (references as StreamReference[]) : [],
+          )
         }
       } catch (error) {
         console.error('Error parsing final chunk:', buffer, error)

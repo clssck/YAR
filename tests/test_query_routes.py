@@ -319,13 +319,7 @@ class TestQueryEndpoint:
         """Test response quality cleanup for LLM-generated references."""
         mock_rag.aquery_llm.return_value = {
             'llm_response': {
-                'content': (
-                    'Summary text.\n\n'
-                    '### References\n'
-                    '- [2] alpha.pdf\n'
-                    '- [2] alpha.pdf\n'
-                    '- [5] beta.pdf\n'
-                )
+                'content': ('Summary text.\n\n### References\n- [2] alpha.pdf\n- [2] alpha.pdf\n- [5] beta.pdf\n')
             },
             'data': {'references': []},
         }
@@ -369,9 +363,7 @@ class TestQueryEndpoint:
     async def test_query_enriches_references_with_presigned_urls(self, mock_rag):
         """Reference entries should include presigned URLs when s3_key is present."""
         mock_s3 = MagicMock()
-        mock_s3.get_presigned_url = AsyncMock(
-            return_value='https://example.test/presigned/doc.pdf'
-        )
+        mock_s3.get_presigned_url = AsyncMock(return_value='https://example.test/presigned/doc.pdf')
 
         app = FastAPI()
         app.include_router(
@@ -405,10 +397,7 @@ class TestQueryEndpoint:
             )
 
         assert response.status_code == 200
-        assert (
-            response.json()['references'][0]['presigned_url']
-            == 'https://example.test/presigned/doc.pdf'
-        )
+        assert response.json()['references'][0]['presigned_url'] == 'https://example.test/presigned/doc.pdf'
         mock_s3.get_presigned_url.assert_awaited_once_with('archive/test/one.pdf')
 
     @pytest.mark.asyncio
@@ -523,6 +512,38 @@ class TestQueryErrors:
         assert response.status_code == 500
         assert response.json()['detail'] == 'Internal server error'
 
+    @pytest.mark.asyncio
+    async def test_query_failure_payload_returns_500(self, client, mock_rag):
+        """Failure payloads from rag.aquery_llm should map to HTTP 500."""
+        mock_rag.aquery_llm.return_value = {
+            'status': 'failure',
+            'message': 'Query failed: upstream timeout',
+            'metadata': {},
+            'llm_response': {'content': None, 'is_streaming': False},
+            'data': {},
+        }
+
+        response = await client.post('/query', json={'query': 'Test query'})
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Query failed: upstream timeout'
+
+    @pytest.mark.asyncio
+    async def test_query_no_results_failure_reason_returns_200(self, client, mock_rag):
+        """No-results failure reason should still return a user-facing successful response."""
+        mock_rag.aquery_llm.return_value = {
+            'status': 'failure',
+            'message': 'Query returned no results',
+            'metadata': {'failure_reason': 'no_results'},
+            'llm_response': {'content': 'No relevant context found for the query.', 'is_streaming': False},
+            'data': {},
+        }
+
+        response = await client.post('/query', json={'query': 'Test query'})
+
+        assert response.status_code == 200
+        assert response.json()['response'] == 'No relevant context found for the query.'
+
 
 # =============================================================================
 # POST /query/stream Endpoint Tests
@@ -625,6 +646,42 @@ class TestQueryStreamEndpoint:
         assert response.status_code == 200
         lines = _ndjson_lines(response.text)
         assert lines[0]['references'][0]['content'] == ['Chunk 1', 'Chunk 2']
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_failure_payload_emits_ndjson_error(self, client, mock_rag):
+        """Streaming requests should emit NDJSON error line for failure payloads."""
+        mock_rag.aquery_llm.return_value = {
+            'status': 'failure',
+            'message': 'Query failed: stream backend unavailable',
+            'metadata': {},
+            'llm_response': {'is_streaming': False, 'content': None},
+            'data': {},
+        }
+
+        response = await client.post('/query/stream', json={'query': 'Test query', 'stream': True})
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines == [{'error': 'Query failed: stream backend unavailable'}]
+
+    @pytest.mark.asyncio
+    async def test_non_stream_mode_failure_payload_returns_500(self, client, mock_rag):
+        """Non-stream requests should return HTTP 500 for failure payloads."""
+        mock_rag.aquery_llm.return_value = {
+            'status': 'failure',
+            'message': 'Query failed: non-stream backend unavailable',
+            'metadata': {},
+            'llm_response': {'is_streaming': False, 'content': None},
+            'data': {},
+        }
+
+        response = await client.post(
+            '/query/stream',
+            json={'query': 'Test query', 'stream': False},
+        )
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Query failed: non-stream backend unavailable'
 
 
 # =============================================================================

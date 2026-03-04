@@ -156,7 +156,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       userPromptHistory: [],
 
       querySettings: {
-        mode: 'global',
+        mode: 'mix',
         top_k: 40,
         chunk_top_k: 20,
         max_entity_tokens: 6000,
@@ -341,7 +341,7 @@ const useSettingsStoreBase = create<SettingsState>()(
           // Legacy migration - these properties will be overwritten in version < 15
           // Using type assertion for deprecated properties that existed in older versions
           state.querySettings = {
-            mode: 'global',
+            mode: 'mix',
             response_type: 'Multiple Paragraphs',
             top_k: 10,
             only_need_context: false,

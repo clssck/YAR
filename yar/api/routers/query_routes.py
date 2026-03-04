@@ -120,6 +120,22 @@ def renumber_references_sequential(text: str) -> str:
     return result
 
 
+def get_query_failure_message(result: dict[str, Any] | None) -> str | None:
+    """Return backend failure detail from unified query result payload."""
+    if not result or result.get('status') != 'failure':
+        return None
+
+    metadata = result.get('metadata') or {}
+    if metadata.get('failure_reason') == 'no_results':
+        return None
+
+    message = result.get('message')
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+
+    return 'Query processing failed'
+
+
 async def filter_reasoning_stream(response_stream):
     """Filter <think>...</think> blocks from streaming response in real-time.
 
@@ -746,6 +762,9 @@ def create_query_routes(
 
             # Unified approach: always use aquery_llm for both cases
             result = await rag.aquery_llm(request.query, param=param)
+            failure_message = get_query_failure_message(result)
+            if failure_message:
+                raise HTTPException(status_code=500, detail=failure_message)
 
             # Extract LLM response and references from unified result
             llm_response = result.get('llm_response', {})
@@ -804,6 +823,8 @@ def create_query_routes(
                 return QueryResponse(response=response_content, references=references)
             else:
                 return QueryResponse(response=response_content, references=None)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f'Error processing query: {e!s}', exc_info=True)
             raise HTTPException(status_code=500, detail='Internal server error') from e
@@ -1019,12 +1040,18 @@ def create_query_routes(
 
             # Unified approach: always use aquery_llm for all cases
             result = await rag.aquery_llm(request.query, param=param)
+            failure_message = get_query_failure_message(result)
+            if failure_message and not stream_mode:
+                raise HTTPException(status_code=500, detail=failure_message)
 
             async def stream_generator():
                 # Extract references and LLM response from unified result
                 references: list[dict[str, Any]] = list(result.get('data', {}).get('references', []))
                 chunks: list[dict[str, Any]] = list(result.get('data', {}).get('chunks', []))
                 llm_response: dict[str, Any] = result.get('llm_response', {}) or {}
+                if failure_message:
+                    yield f'{json.dumps({"error": failure_message})}\n'
+                    return
 
                 # Enrich references with chunk content if requested
                 if request.include_references and request.include_chunk_content:
@@ -1137,6 +1164,8 @@ def create_query_routes(
                     'X-Accel-Buffering': 'no',  # Ensure proper handling of streaming response when proxied by Nginx
                 },
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f'Error processing streaming query: {e!s}', exc_info=True)
             raise HTTPException(status_code=500, detail='Internal server error') from e

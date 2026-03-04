@@ -179,6 +179,34 @@ const renumberReferencesSequential = (text: string): string => {
   return result
 }
 
+type NonStreamReference = {
+  reference_id: string
+  file_path: string
+}
+
+type NonStreamQueryResponse = {
+  response: string
+  references?: NonStreamReference[] | null
+}
+
+const applyNonStreamResponse = (
+  assistantMessage: { id: string; references?: NonStreamReference[] },
+  response: NonStreamQueryResponse,
+  messages: Array<{ id: string; references?: NonStreamReference[] }>,
+) => {
+  const references = response.references ?? undefined
+  assistantMessage.references = references
+  return messages.map((msg) =>
+    msg.id === assistantMessage.id
+      ? {
+          ...msg,
+          references,
+        }
+      : msg,
+  )
+}
+
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -475,6 +503,49 @@ describe('Query Mode Types', () => {
     expect(defaultMode).toBe('mix')
   })
 })
+
+describe('Non-stream reference propagation', () => {
+  test('attaches references to assistant message and state', () => {
+    const assistantMessage = { id: 'assistant-1' }
+    const messages = [{ id: 'assistant-1' }, { id: 'assistant-2' }]
+    const references: NonStreamReference[] = [
+      { reference_id: '1', file_path: '/docs/source.pdf' },
+    ]
+
+    const updatedMessages = applyNonStreamResponse(
+      assistantMessage,
+      { response: 'Answer', references },
+      messages,
+    )
+
+    expect(assistantMessage.references).toEqual(references)
+    expect(updatedMessages[0].references).toEqual(references)
+    expect(updatedMessages[1].references).toBeUndefined()
+  })
+
+  test('clears references when response references are null', () => {
+    const assistantMessage = {
+      id: 'assistant-1',
+      references: [{ reference_id: 'existing', file_path: '/docs/old.pdf' }],
+    }
+    const messages = [
+      {
+        id: 'assistant-1',
+        references: [{ reference_id: 'existing', file_path: '/docs/old.pdf' }],
+      },
+    ]
+
+    const updatedMessages = applyNonStreamResponse(
+      assistantMessage,
+      { response: 'Answer', references: null },
+      messages,
+    )
+
+    expect(assistantMessage.references).toBeUndefined()
+    expect(updatedMessages[0].references).toBeUndefined()
+  })
+})
+
 
 // =============================================================================
 // Message Type Tests

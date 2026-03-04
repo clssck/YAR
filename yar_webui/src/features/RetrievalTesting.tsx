@@ -654,6 +654,18 @@ export default function RetrievalTesting() {
         } else {
           const response = await queryText(queryParams)
           updateAssistantMessage(response.response)
+          const references = response.references ?? undefined
+          assistantMessage.references = references
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessage.id
+                ? {
+                    ...msg,
+                    references,
+                  }
+                : msg,
+            ),
+          )
         }
       } catch (err) {
         // Handle error
