@@ -2,6 +2,7 @@
 This module contains all graph-related routes for the YAR API.
 """
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -76,7 +77,14 @@ class OrphanConnectionStatusResponse(BaseModel):
     total_orphans: int = Field(description='Total number of orphan entities found')
     processed_orphans: int = Field(description='Number of orphans processed so far')
     connections_made: int = Field(description='Number of connections created so far')
-    request_pending: bool = Field(description='Whether another request is pending')
+    pending_request: dict[str, Any] | None = Field(
+        default=None,
+        description='Queued orphan-connection request that will run after current job',
+    )
+    active_request: dict[str, Any] | None = Field(
+        default=None,
+        description='Currently executing orphan-connection request parameters',
+    )
     cancellation_requested: bool = Field(description='Whether cancellation has been requested')
     latest_message: str = Field(description='Most recent status message')
     history_messages: list[str] = Field(description='History of status messages')
@@ -733,7 +741,7 @@ def create_graph_routes(rag, api_key: str | None = None):
                 "total_orphans": 100,
                 "processed_orphans": 45,
                 "connections_made": 12,
-                "request_pending": false,
+                "pending_request": {"max_candidates": 3, "max_degree": 1, "requested_at": "..."},
                 "cancellation_requested": false,
                 "latest_message": "[10:35:22] Processing orphan 46/100...",
                 "history_messages": ["[10:30:00] Starting...", ...]
@@ -750,7 +758,8 @@ def create_graph_routes(rag, api_key: str | None = None):
             total_orphans=status.get('total_orphans', 0),
             processed_orphans=status.get('processed_orphans', 0),
             connections_made=status.get('connections_made', 0),
-            request_pending=status.get('request_pending', False),
+            pending_request=status.get('pending_request'),
+            active_request=status.get('active_request'),
             cancellation_requested=status.get('cancellation_requested', False),
             latest_message=status.get('latest_message', ''),
             history_messages=list(status.get('history_messages', []))[-1000:],
@@ -802,18 +811,42 @@ def create_graph_routes(rag, api_key: str | None = None):
             - Poll /graph/orphans/status to monitor progress
             - Use /graph/orphans/cancel to request cancellation
         """
-        from yar.kg.shared_storage import get_namespace_data
+        from yar.kg.shared_storage import get_namespace_data, get_namespace_lock
 
-        # Check if already running
         status = await get_namespace_data(NS_ORPHAN_CONNECTION_STATUS, workspace=rag.workspace)
-        if status.get('busy'):
-            return {'status': 'already_running'}
+        lock = get_namespace_lock(NS_ORPHAN_CONNECTION_STATUS, workspace=rag.workspace)
+        requested_at = datetime.now().isoformat()
+        request_payload = {
+            'max_candidates': max_candidates,
+            'max_degree': max_degree,
+            'requested_at': requested_at,
+        }
 
-        # Start background task
+        async with lock:
+            if status.get('busy'):
+                status['pending_request'] = request_payload
+                status['latest_message'] = 'Queued orphan connection request while another run is active'
+                status['history_messages'].append(status['latest_message'])
+                return {'status': 'already_running', 'queued_request': request_payload}
+
+            status['busy'] = True
+            status['active_request'] = request_payload
+            status['pending_request'] = None
+            status['cancellation_requested'] = False
+            status['job_start'] = requested_at
+            status['job_name'] = 'Queued orphan connection job'
+            status['total_orphans'] = 0
+            status['processed_orphans'] = 0
+            status['connections_made'] = 0
+            status['latest_message'] = 'Queued orphan connection background job'
+            del status['history_messages'][:]
+            status['history_messages'].append(status['latest_message'])
+
         background_tasks.add_task(
             rag.aprocess_orphan_connections_background,
             max_candidates=max_candidates,
             max_degree=max_degree,
+            preclaimed=True,
         )
 
         return {'status': 'started'}
@@ -838,7 +871,7 @@ def create_graph_routes(rag, api_key: str | None = None):
         lock = get_namespace_lock(NS_ORPHAN_CONNECTION_STATUS, workspace=rag.workspace)
 
         async with lock:
-            if not status.get('busy'):
+            if not status.get('busy') and status.get('active_request') is None:
                 return {'status': 'not_running'}
             status['cancellation_requested'] = True
 

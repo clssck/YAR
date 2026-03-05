@@ -14,6 +14,7 @@ This module tests:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import warnings
@@ -902,6 +903,281 @@ class TestYARPublicMethods:
         assert result.status == 'not_found'
         assert result.status_code == 404
 
+    @patch('yar.yar.get_namespace_lock')
+    @patch('yar.yar.get_namespace_data')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_adelete_not_found_does_not_invalidate_fts_cache(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        mock_get_namespace_data,
+        mock_get_namespace_lock,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Deletion skips invalidation when no document mutation occurs."""
+        pipeline_status = {'busy': False, 'history_messages': []}
+        pipeline_status_lock = asyncio.Lock()
+        mock_get_namespace_data.return_value = pipeline_status
+        mock_get_namespace_lock.return_value = pipeline_status_lock
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+        rag._storages_status = StoragesStatus.INITIALIZED
+        rag._insert_done = AsyncMock()
+        rag._invalidate_fts_cache = AsyncMock()
+        rag.doc_status.get_by_id = AsyncMock(return_value=None)
+
+        result = await rag.adelete_by_doc_id('missing-doc')
+
+        assert result.status == 'not_found'
+        rag._insert_done.assert_not_awaited()
+        rag._invalidate_fts_cache.assert_not_awaited()
+
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_ainsert_custom_kg_invalidates_fts_cache(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Custom KG inserts invalidate workspace-scoped FTS cache after persistence."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+
+        rag.chunks_vdb.upsert = AsyncMock()
+        rag.text_chunks.upsert = AsyncMock()
+        rag.entities_vdb.upsert = AsyncMock()
+        rag.relationships_vdb.upsert = AsyncMock()
+        rag._insert_done = AsyncMock()
+        rag._invalidate_fts_cache = AsyncMock()
+
+        await rag.ainsert_custom_kg(
+            {
+                'chunks': [
+                    {
+                        'content': 'custom content',
+                        'source_id': 'source-1',
+                        'file_path': 'custom.txt',
+                        'chunk_order_index': 0,
+                    }
+                ]
+            }
+        )
+
+        rag._insert_done.assert_awaited_once()
+        rag._invalidate_fts_cache.assert_awaited_once_with('custom KG insert')
+
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_ainsert_custom_kg_empty_payload_skips_fts_invalidation(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Empty custom KG payload should not invalidate FTS cache."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+
+        rag.entities_vdb.upsert = AsyncMock()
+        rag.relationships_vdb.upsert = AsyncMock()
+        rag._insert_done = AsyncMock()
+        rag._invalidate_fts_cache = AsyncMock()
+
+        await rag.ainsert_custom_kg({})
+
+        rag._insert_done.assert_not_awaited()
+        rag._invalidate_fts_cache.assert_not_awaited()
+
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_invalidate_fts_cache_helper_uses_workspace(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Helper delegates to workspace-scoped invalidation function."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+
+        invalidate_mock = AsyncMock(return_value=3)
+        with patch(
+            'yar.cache.fts_cache.invalidate_fts_cache_for_workspace',
+            invalidate_mock,
+        ):
+            await rag._invalidate_fts_cache('unit test')
+
+        invalidate_mock.assert_awaited_once_with('workspace-test')
+
+    @patch('yar.yar.get_namespace_lock')
+    @patch('yar.yar.get_namespace_data')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_adelete_by_doc_id_invalidates_fts_cache(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        mock_get_namespace_data,
+        mock_get_namespace_lock,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Document deletion invalidates FTS cache after successful persistence."""
+        pipeline_status = {'busy': False, 'history_messages': []}
+        pipeline_status_lock = asyncio.Lock()
+        mock_get_namespace_data.return_value = pipeline_status
+        mock_get_namespace_lock.return_value = pipeline_status_lock
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+        rag._storages_status = StoragesStatus.INITIALIZED
+        rag._insert_done = AsyncMock()
+        rag._invalidate_fts_cache = AsyncMock()
+        rag.doc_status.get_by_id = AsyncMock(
+            return_value={
+                'status': DocStatus.PROCESSED,
+                'file_path': '/tmp/doc.txt',
+                'chunks_list': [],
+            }
+        )
+        rag.full_docs.delete = AsyncMock()
+        rag.doc_status.delete = AsyncMock()
+
+        result = await rag.adelete_by_doc_id('doc-1')
+
+        assert result.status == 'success'
+        rag._insert_done.assert_awaited_once()
+        rag._invalidate_fts_cache.assert_awaited_once_with('document deletion')
+
+    @patch('yar.yar.get_namespace_lock')
+    @patch('yar.yar.get_namespace_data')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_apipeline_process_enqueue_documents_skips_invalidation_when_no_docs(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        mock_get_namespace_data,
+        mock_get_namespace_lock,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Pipeline skips invalidation when there are no documents to process."""
+        pipeline_status = {'busy': False, 'history_messages': []}
+        pipeline_status_lock = asyncio.Lock()
+        mock_get_namespace_data.return_value = pipeline_status
+        mock_get_namespace_lock.return_value = pipeline_status_lock
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+        rag._invalidate_fts_cache = AsyncMock()
+        rag.doc_status.get_docs_by_status = AsyncMock(side_effect=[{}, {}, {}])
+
+        await rag.apipeline_process_enqueue_documents()
+
+        rag._invalidate_fts_cache.assert_not_awaited()
+
+    @patch('yar.yar.merge_nodes_and_edges', new_callable=AsyncMock)
+    @patch('yar.yar.get_namespace_lock')
+    @patch('yar.yar.get_namespace_data')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_apipeline_process_enqueue_documents_invalidates_fts_cache(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        mock_get_namespace_data,
+        mock_get_namespace_lock,
+        mock_merge_nodes_and_edges,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Pipeline processing invalidates FTS cache after mutating documents."""
+        pipeline_status = {'busy': False, 'history_messages': []}
+        pipeline_status_lock = asyncio.Lock()
+        mock_get_namespace_data.return_value = pipeline_status
+        mock_get_namespace_lock.return_value = pipeline_status_lock
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+        rag._storages_status = StoragesStatus.INITIALIZED
+        rag._insert_done = AsyncMock()
+        rag._invalidate_fts_cache = AsyncMock()
+        rag._process_extract_entities = AsyncMock(return_value=[])
+        rag.chunking_func = lambda *_args, **_kwargs: [{'content': 'chunk content'}]
+
+        status_doc = DocProcessingStatus(
+            content_summary='doc',
+            content_length=12,
+            file_path='/tmp/doc.txt',
+            status=DocStatus.PENDING,
+            created_at='2024-01-01T00:00:00Z',
+            updated_at='2024-01-01T00:00:00Z',
+            track_id='track-1',
+        )
+        docs_to_process = {'doc-1': status_doc}
+        rag.doc_status.get_docs_by_status = AsyncMock(side_effect=[{}, {}, docs_to_process])
+        rag._validate_and_fix_document_consistency = AsyncMock(return_value=docs_to_process)
+        rag.full_docs.get_by_id = AsyncMock(return_value={'content': 'hello world'})
+        rag.doc_status.upsert = AsyncMock()
+        rag.chunks_vdb.upsert = AsyncMock()
+        rag.text_chunks.upsert = AsyncMock()
+
+        await rag.apipeline_process_enqueue_documents()
+
+        rag._insert_done.assert_awaited_once()
+        rag._invalidate_fts_cache.assert_awaited_once_with('document processing pipeline')
+        mock_merge_nodes_and_edges.assert_awaited_once()
+
     @patch('yar.kg.verify_storage_implementation')
     @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
@@ -1256,6 +1532,95 @@ class TestYARLLMConfiguration:
         )
 
         assert rag.llm_model_max_async == 32
+
+
+@pytest.mark.offline
+class TestYAROrphanBackgroundControl:
+    """Tests for orphan background atomic claim and queued request semantics."""
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_orphan_worker_queues_structured_request_when_already_busy(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        status = {
+            'busy': True,
+            'pending_request': None,
+            'active_request': {'max_candidates': 3, 'max_degree': 0, 'requested_at': '2024-01-01T00:00:00'},
+            'cancellation_requested': False,
+            'history_messages': [],
+        }
+        status_lock = asyncio.Lock()
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+
+        with (
+            patch('yar.kg.shared_storage.get_namespace_data', new=AsyncMock(return_value=status)),
+            patch('yar.kg.shared_storage.get_namespace_lock', return_value=status_lock),
+        ):
+            result = await rag.aprocess_orphan_connections_background(
+                max_candidates=7,
+                max_degree=2,
+            )
+
+        assert result['status'] == 'already_running'
+        assert result['queued_request']['max_candidates'] == 7
+        assert status['pending_request']['max_degree'] == 2
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_orphan_worker_preclaimed_run_honors_early_cancellation(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        status = {
+            'busy': True,
+            'pending_request': None,
+            'active_request': {'max_candidates': 3, 'max_degree': 0, 'requested_at': '2024-01-01T00:00:00'},
+            'cancellation_requested': True,
+            'history_messages': [],
+        }
+        status_lock = asyncio.Lock()
+
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            workspace='workspace-test',
+        )
+        rag._append_orphan_message = AsyncMock()
+
+        with (
+            patch('yar.kg.shared_storage.get_namespace_data', new=AsyncMock(return_value=status)),
+            patch('yar.kg.shared_storage.get_namespace_lock', return_value=status_lock),
+        ):
+            result = await rag.aprocess_orphan_connections_background(
+                max_candidates=3,
+                max_degree=0,
+                preclaimed=True,
+            )
+
+        assert result['orphans_found'] == 0
+        assert result['connections_made'] == 0
+        assert status['busy'] is False
+        assert status['active_request'] is None
+        rag._append_orphan_message.assert_any_await('Cancellation requested before processing started')
 
 
 if __name__ == '__main__':

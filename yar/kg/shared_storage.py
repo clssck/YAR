@@ -1321,7 +1321,8 @@ async def initialize_orphan_connection_status(workspace: str | None = None):
                 'total_orphans': 0,  # Total number of orphan entities found
                 'processed_orphans': 0,  # Number of orphans processed so far
                 'connections_made': 0,  # Number of connections created
-                'request_pending': False,  # Flag for pending request
+                'pending_request': None,  # Structured queued request payload
+                'active_request': None,  # Request parameters currently being processed
                 'cancellation_requested': False,  # Flag for cancellation request
                 'latest_message': '',  # Latest message from orphan connection
                 'history_messages': history_messages,  # Message history

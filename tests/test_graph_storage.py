@@ -10,9 +10,12 @@ Supported graph storage types include:
 """
 
 import asyncio
+import hashlib
 import importlib
 import os
 import sys
+import uuid
+from contextlib import suppress
 
 import numpy as np
 import pytest
@@ -33,9 +36,20 @@ from yar.kg.shared_storage import initialize_share_data
 from yar.types import KnowledgeGraph
 
 
-# Mock embedding function that returns random vectors
+# Mock embedding function that returns deterministic vectors
+def _deterministic_embedding_vector(text: str, dimensions: int = 10) -> np.ndarray:
+    digest = hashlib.sha256(text.encode('utf-8')).digest()
+    seed = int.from_bytes(digest[:8], byteorder='big', signed=False)
+    rng = np.random.default_rng(seed)
+    return rng.random(dimensions)
+
+
 async def mock_embedding_func(texts):
-    return np.random.rand(len(texts), 10)  # Return 10-dimensional random vectors
+    if not texts:
+        return np.empty((0, 10))
+
+    vectors = [_deterministic_embedding_vector(str(text), dimensions=10) for text in texts]
+    return np.vstack(vectors)
 
 
 def test_dollar_quote_function():
@@ -92,7 +106,10 @@ def check_env_file():
     return True
 
 
-async def initialize_graph_storage():
+async def initialize_graph_storage(
+    namespace: str = 'test_graph',
+    workspace: str = 'test_workspace',
+):
     """
     Initialize the corresponding graph storage instance based on environment variables.
     Returns the initialized storage instance.
@@ -147,8 +164,8 @@ async def initialize_graph_storage():
 
     try:
         storage = storage_class(
-            namespace='test_graph',
-            workspace='test_workspace',
+            namespace=namespace,
+            workspace=workspace,
             global_config=global_config,
             embedding_func=mock_embedding_func,
         )
@@ -162,7 +179,7 @@ async def initialize_graph_storage():
 
 
 @pytest.fixture
-async def storage():
+async def storage(request):
     """Fixture to initialize graph storage for tests.
 
     Tears down the ClientManager singleton after each test so the next test
@@ -182,15 +199,17 @@ async def storage():
     # Clear stale singleton from previous test's event loop
     if ClientManager._db_instance is not None:
         if ClientManager._db_instance.pool is not None:
-            try:
+            with suppress(Exception):
                 await ClientManager._db_instance.pool.close()
-            except Exception:
-                pass
         ClientManager._db_instance = None
         ClientManager._ref_count = 0
     ClientManager._lock = asyncio.Lock()
 
-    storage_instance = await initialize_graph_storage()
+    unique_suffix = uuid.uuid4().hex[:8]
+    namespace = f'test_graph_{unique_suffix}'
+    workspace = f'test_workspace_{unique_suffix}'
+
+    storage_instance = await initialize_graph_storage(namespace=namespace, workspace=workspace)
     if storage_instance is None:
         pytest.skip('Graph storage could not be initialized')
     yield storage_instance
@@ -198,10 +217,8 @@ async def storage():
     # Teardown: close pool and clear singleton for next test
     if storage_instance is not None and storage_instance.db is not None:
         if storage_instance.db.pool is not None:
-            try:
+            with suppress(Exception):
                 await storage_instance.db.pool.close()
-            except Exception:
-                pass
         ClientManager._db_instance = None
         ClientManager._ref_count = 0
 
@@ -308,7 +325,7 @@ async def test_graph_basic(storage):
 
     except Exception as e:
         ASCIIColors.red(f'An error occurred during the test: {e!s}')
-        return False
+        raise
 
 
 @pytest.mark.integration
@@ -498,7 +515,7 @@ async def test_graph_advanced(storage):
 
     except Exception as e:
         ASCIIColors.red(f'An error occurred during the test: {e!s}')
-        return False
+        raise
 
 
 @pytest.mark.integration
@@ -800,7 +817,7 @@ async def test_graph_batch_operations(storage):
 
     except Exception as e:
         ASCIIColors.red(f'An error occurred during the test: {e!s}')
-        return False
+        raise
 
 
 @pytest.mark.integration
@@ -940,7 +957,7 @@ async def test_graph_special_characters(storage):
 
     except Exception as e:
         ASCIIColors.red(f'An error occurred during the test: {e!s}')
-        return False
+        raise
 
 
 @pytest.mark.integration
@@ -1038,7 +1055,7 @@ async def test_graph_dollar_sign_characters(storage):
 
     except Exception as e:
         ASCIIColors.red(f'Dollar sign test error: {e!s}')
-        return False
+        raise
 
 
 @pytest.mark.integration
@@ -1226,7 +1243,7 @@ async def test_graph_undirected_property(storage):
 
     except Exception as e:
         ASCIIColors.red(f'An error occurred during the test: {e!s}')
-        return False
+        raise
 
 
 async def main():

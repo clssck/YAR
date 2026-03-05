@@ -1,13 +1,14 @@
 """Tests for graph_routes.py - Graph API endpoints."""
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+import importlib
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import APIRouter, HTTPException, Query
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
+import yar.api.routers.graph_routes as graph_routes_module
 from yar.api.routers.graph_routes import (
     EntityCreateRequest,
     EntityMergeRequest,
@@ -245,7 +246,8 @@ class TestOrphanConnectionStatusResponseValidation:
             total_orphans=100,
             processed_orphans=45,
             connections_made=12,
-            request_pending=False,
+            pending_request=None,
+            active_request={'max_candidates': 3, 'max_degree': 0, 'requested_at': '2024-01-15T10:30:00'},
             cancellation_requested=False,
             latest_message='Processing orphan 46/100...',
             history_messages=['Starting...', 'Processing...'],
@@ -264,175 +266,13 @@ class TestOrphanConnectionStatusResponseValidation:
             total_orphans=0,
             processed_orphans=0,
             connections_made=0,
-            request_pending=False,
+            pending_request=None,
+            active_request=None,
             cancellation_requested=False,
             latest_message='',
             history_messages=[],
         )
         assert resp.job_start is None
-
-
-# =============================================================================
-# Test Route Factory for Endpoint Tests
-# =============================================================================
-
-
-def create_test_graph_routes(rag: Any, api_key: str | None = None) -> APIRouter:
-    """Create simplified test routes that mirror graph_routes.py structure."""
-    router = APIRouter(tags=['graph'])
-
-    @router.get('/graph/label/list')
-    async def get_graph_labels():
-        return await rag.get_graph_labels()
-
-    @router.get('/graph/label/popular')
-    async def get_popular_labels(
-        limit: int = Query(300, ge=1, le=1000),
-    ):
-        return await rag.chunk_entity_relation_graph.get_popular_labels(limit)
-
-    @router.get('/graph/label/search')
-    async def search_labels(
-        q: str = Query(...),
-        limit: int = Query(50, ge=1, le=100),
-    ):
-        return await rag.chunk_entity_relation_graph.search_labels(q, limit)
-
-    @router.get('/graphs')
-    async def get_knowledge_graph(
-        label: str = Query(...),
-        max_depth: int = Query(3, ge=1),
-        max_nodes: int = Query(1000, ge=1),
-        min_degree: int = Query(0, ge=0, le=10),
-        include_orphans: bool = Query(False),
-    ):
-        return await rag.get_knowledge_graph(
-            node_label=label,
-            max_depth=max_depth,
-            max_nodes=max_nodes,
-            min_degree=min_degree,
-            include_orphans=include_orphans,
-        )
-
-    @router.get('/graph/entity/exists')
-    async def check_entity_exists(
-        name: str = Query(...),
-    ):
-        exists = await rag.chunk_entity_relation_graph.has_node(name)
-        return {'exists': exists}
-
-    @router.post('/graph/entity/edit')
-    async def update_entity(request: EntityUpdateRequest):
-        try:
-            result = await rag.aedit_entity(
-                entity_name=request.entity_name,
-                updated_data=request.updated_data,
-                allow_rename=request.allow_rename,
-                allow_merge=request.allow_merge,
-            )
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve)) from ve
-
-        operation_summary = result.get(
-            'operation_summary',
-            {
-                'merged': False,
-                'merge_status': 'not_attempted',
-                'operation_status': 'success',
-                'final_entity': request.updated_data.get('entity_name', request.entity_name),
-            },
-        )
-        entity_data = dict(result)
-        entity_data.pop('operation_summary', None)
-
-        return {
-            'status': 'success',
-            'message': 'Entity updated successfully',
-            'data': entity_data,
-            'operation_summary': operation_summary,
-        }
-
-    @router.post('/graph/relation/edit')
-    async def update_relation(request: RelationUpdateRequest):
-        try:
-            result = await rag.aedit_relation(
-                source_entity=request.source_id,
-                target_entity=request.target_id,
-                updated_data=request.updated_data,
-            )
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve)) from ve
-
-        return {
-            'status': 'success',
-            'message': 'Relation updated successfully',
-            'data': result,
-        }
-
-    @router.post('/graph/entity/create')
-    async def create_entity(request: EntityCreateRequest):
-        try:
-            result = await rag.acreate_entity(
-                entity_name=request.entity_name,
-                entity_data=request.entity_data,
-            )
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve)) from ve
-
-        return {
-            'status': 'success',
-            'message': f"Entity '{request.entity_name}' created successfully",
-            'data': result,
-        }
-
-    @router.post('/graph/relation/create')
-    async def create_relation(request: RelationCreateRequest):
-        try:
-            result = await rag.acreate_relation(
-                source_entity=request.source_entity,
-                target_entity=request.target_entity,
-                relation_data=request.relation_data,
-            )
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve)) from ve
-
-        return {
-            'status': 'success',
-            'message': f"Relation created successfully between '{request.source_entity}' and '{request.target_entity}'",
-            'data': result,
-        }
-
-    @router.post('/graph/entities/merge')
-    async def merge_entities(request: EntityMergeRequest):
-        try:
-            result = await rag.amerge_entities(
-                source_entities=request.entities_to_change,
-                target_entity=request.entity_to_change_into,
-            )
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve)) from ve
-
-        return {
-            'status': 'success',
-            'message': f"Successfully merged {len(request.entities_to_change)} entities into '{request.entity_to_change_into}'",
-            'data': result,
-        }
-
-    @router.post('/graph/orphans/connect')
-    async def connect_orphan_entities(request: OrphanConnectionRequest):
-        result = await rag.aconnect_orphan_entities(
-            max_candidates=request.max_candidates,
-            similarity_threshold=request.similarity_threshold,
-            confidence_threshold=request.confidence_threshold,
-            cross_connect=request.cross_connect,
-        )
-        return {
-            'status': 'success',
-            'message': f'Connected {result["connections_made"]} out of {result["orphans_found"]} orphan entities',
-            'data': result,
-        }
-
-    return router
 
 
 # =============================================================================
@@ -447,12 +287,8 @@ def mock_rag():
 
     # Mock chunk_entity_relation_graph methods
     rag.chunk_entity_relation_graph = MagicMock()
-    rag.chunk_entity_relation_graph.get_popular_labels = AsyncMock(
-        return_value=['Tesla', 'Elon Musk', 'SpaceX']
-    )
-    rag.chunk_entity_relation_graph.search_labels = AsyncMock(
-        return_value=['Tesla', 'Texas']
-    )
+    rag.chunk_entity_relation_graph.get_popular_labels = AsyncMock(return_value=['Tesla', 'Elon Musk', 'SpaceX'])
+    rag.chunk_entity_relation_graph.search_labels = AsyncMock(return_value=['Tesla', 'Texas'])
     rag.chunk_entity_relation_graph.has_node = AsyncMock(return_value=True)
 
     # Mock RAG methods
@@ -525,7 +361,8 @@ def test_app(mock_rag):
     from fastapi import FastAPI
 
     app = FastAPI()
-    router = create_test_graph_routes(mock_rag)
+    reloaded_graph_routes = importlib.reload(graph_routes_module)
+    router = reloaded_graph_routes.create_graph_routes(mock_rag)
     app.include_router(router)
     return app
 
@@ -537,9 +374,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_get_graph_labels(self, test_app, mock_rag):
         """Test GET /graph/label/list endpoint."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/list')
 
         assert response.status_code == 200
@@ -550,9 +385,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_get_popular_labels_default_limit(self, test_app, mock_rag):
         """Test GET /graph/label/popular with default limit."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/popular')
 
         assert response.status_code == 200
@@ -562,9 +395,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_get_popular_labels_custom_limit(self, test_app, mock_rag):
         """Test GET /graph/label/popular with custom limit."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/popular?limit=100')
 
         assert response.status_code == 200
@@ -574,9 +405,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_get_popular_labels_invalid_limit(self, test_app):
         """Test GET /graph/label/popular with invalid limit returns 422."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/popular?limit=0')
 
         assert response.status_code == 422
@@ -585,9 +414,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_search_labels(self, test_app, mock_rag):
         """Test GET /graph/label/search endpoint."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/search?q=Tes')
 
         assert response.status_code == 200
@@ -598,9 +425,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_search_labels_custom_limit(self, test_app, mock_rag):
         """Test GET /graph/label/search with custom limit."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/search?q=Tes&limit=10')
 
         assert response.status_code == 200
@@ -610,9 +435,7 @@ class TestGraphLabelEndpoints:
     @pytest.mark.offline
     async def test_search_labels_missing_query(self, test_app):
         """Test GET /graph/label/search without query returns 422."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/label/search')
 
         assert response.status_code == 422
@@ -625,9 +448,7 @@ class TestKnowledgeGraphEndpoint:
     @pytest.mark.offline
     async def test_get_knowledge_graph_basic(self, test_app, mock_rag):
         """Test GET /graphs with basic parameters."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graphs?label=Tesla')
 
         assert response.status_code == 200
@@ -646,12 +467,8 @@ class TestKnowledgeGraphEndpoint:
     @pytest.mark.offline
     async def test_get_knowledge_graph_all_params(self, test_app, mock_rag):
         """Test GET /graphs with all custom parameters."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
-            response = await client.get(
-                '/graphs?label=*&max_depth=5&max_nodes=500&min_degree=2&include_orphans=true'
-            )
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+            response = await client.get('/graphs?label=*&max_depth=5&max_nodes=500&min_degree=2&include_orphans=true')
 
         assert response.status_code == 200
         mock_rag.get_knowledge_graph.assert_called_once_with(
@@ -666,9 +483,7 @@ class TestKnowledgeGraphEndpoint:
     @pytest.mark.offline
     async def test_get_knowledge_graph_missing_label(self, test_app):
         """Test GET /graphs without label returns 422."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graphs')
 
         assert response.status_code == 422
@@ -683,9 +498,7 @@ class TestEntityExistsEndpoint:
         """Test entity exists returns true."""
         mock_rag.chunk_entity_relation_graph.has_node = AsyncMock(return_value=True)
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/entity/exists?name=Tesla')
 
         assert response.status_code == 200
@@ -697,9 +510,7 @@ class TestEntityExistsEndpoint:
         """Test entity exists returns false for non-existent entity."""
         mock_rag.chunk_entity_relation_graph.has_node = AsyncMock(return_value=False)
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/entity/exists?name=NonExistent')
 
         assert response.status_code == 200
@@ -709,9 +520,7 @@ class TestEntityExistsEndpoint:
     @pytest.mark.offline
     async def test_entity_exists_missing_name(self, test_app):
         """Test entity exists without name returns 422."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.get('/graph/entity/exists')
 
         assert response.status_code == 422
@@ -724,9 +533,7 @@ class TestEntityEditEndpoint:
     @pytest.mark.offline
     async def test_update_entity_success(self, test_app):
         """Test successful entity update."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entity/edit',
                 json={
@@ -746,9 +553,7 @@ class TestEntityEditEndpoint:
     @pytest.mark.offline
     async def test_update_entity_with_rename(self, test_app, mock_rag):
         """Test entity update with rename enabled."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entity/edit',
                 json={
@@ -773,9 +578,7 @@ class TestEntityEditEndpoint:
         """Test entity update with ValueError returns 400."""
         mock_rag.aedit_entity = AsyncMock(side_effect=ValueError('Entity not found'))
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entity/edit',
                 json={
@@ -795,9 +598,7 @@ class TestRelationEditEndpoint:
     @pytest.mark.offline
     async def test_update_relation_success(self, test_app):
         """Test successful relation update."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/relation/edit',
                 json={
@@ -818,9 +619,7 @@ class TestRelationEditEndpoint:
         """Test relation update with ValueError returns 400."""
         mock_rag.aedit_relation = AsyncMock(side_effect=ValueError('Relation not found'))
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/relation/edit',
                 json={
@@ -831,6 +630,26 @@ class TestRelationEditEndpoint:
             )
 
         assert response.status_code == 400
+        assert 'Relation not found' in response.json()['detail']
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_update_relation_unexpected_error_returns_500(self, test_app, mock_rag):
+        """Test relation update with unexpected error returns 500."""
+        mock_rag.aedit_relation = AsyncMock(side_effect=RuntimeError('unexpected failure'))
+
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+            response = await client.post(
+                '/graph/relation/edit',
+                json={
+                    'source_id': 'A',
+                    'target_id': 'B',
+                    'updated_data': {'description': 'test'},
+                },
+            )
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Internal server error while updating relation'
 
 
 class TestEntityCreateEndpoint:
@@ -840,9 +659,7 @@ class TestEntityCreateEndpoint:
     @pytest.mark.offline
     async def test_create_entity_success(self, test_app):
         """Test successful entity creation."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entity/create',
                 json={
@@ -857,7 +674,7 @@ class TestEntityCreateEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'success'
-        assert "SpaceX" in data['message']
+        assert 'SpaceX' in data['message']
 
     @pytest.mark.asyncio
     @pytest.mark.offline
@@ -865,9 +682,7 @@ class TestEntityCreateEndpoint:
         """Test creating duplicate entity returns 400."""
         mock_rag.acreate_entity = AsyncMock(side_effect=ValueError('Entity already exists'))
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entity/create',
                 json={
@@ -877,6 +692,7 @@ class TestEntityCreateEndpoint:
             )
 
         assert response.status_code == 400
+        assert 'Entity already exists' in response.json()['detail']
 
 
 class TestRelationCreateEndpoint:
@@ -886,9 +702,7 @@ class TestRelationCreateEndpoint:
     @pytest.mark.offline
     async def test_create_relation_success(self, test_app):
         """Test successful relation creation."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/relation/create',
                 json={
@@ -911,13 +725,9 @@ class TestRelationCreateEndpoint:
     @pytest.mark.offline
     async def test_create_relation_missing_entity(self, test_app, mock_rag):
         """Test creating relation with missing entity returns 400."""
-        mock_rag.acreate_relation = AsyncMock(
-            side_effect=ValueError('Source entity does not exist')
-        )
+        mock_rag.acreate_relation = AsyncMock(side_effect=ValueError('Source entity does not exist'))
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/relation/create',
                 json={
@@ -928,6 +738,7 @@ class TestRelationCreateEndpoint:
             )
 
         assert response.status_code == 400
+        assert 'Source entity does not exist' in response.json()['detail']
 
 
 class TestEntityMergeEndpoint:
@@ -937,9 +748,7 @@ class TestEntityMergeEndpoint:
     @pytest.mark.offline
     async def test_merge_entities_success(self, test_app):
         """Test successful entity merge."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entities/merge',
                 json={
@@ -958,13 +767,9 @@ class TestEntityMergeEndpoint:
     @pytest.mark.offline
     async def test_merge_entities_target_not_found(self, test_app, mock_rag):
         """Test merge with non-existent target entity returns 400."""
-        mock_rag.amerge_entities = AsyncMock(
-            side_effect=ValueError('Target entity does not exist')
-        )
+        mock_rag.amerge_entities = AsyncMock(side_effect=ValueError('Target entity does not exist'))
 
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/entities/merge',
                 json={
@@ -974,6 +779,7 @@ class TestEntityMergeEndpoint:
             )
 
         assert response.status_code == 400
+        assert 'Target entity does not exist' in response.json()['detail']
 
 
 class TestOrphanConnectionEndpoint:
@@ -983,9 +789,7 @@ class TestOrphanConnectionEndpoint:
     @pytest.mark.offline
     async def test_connect_orphans_success(self, test_app):
         """Test successful orphan connection."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post(
                 '/graph/orphans/connect',
                 json={
@@ -1005,9 +809,7 @@ class TestOrphanConnectionEndpoint:
     @pytest.mark.offline
     async def test_connect_orphans_default_params(self, test_app, mock_rag):
         """Test orphan connection with default parameters."""
-        async with AsyncClient(
-            transport=ASGITransport(app=test_app), base_url='http://test'
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
             response = await client.post('/graph/orphans/connect', json={})
 
         assert response.status_code == 200
@@ -1017,3 +819,154 @@ class TestOrphanConnectionEndpoint:
             confidence_threshold=None,
             cross_connect=None,
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_connect_orphans_malformed_result_returns_500(self, test_app, mock_rag):
+        """Test malformed orphan connection response returns 500."""
+        mock_rag.aconnect_orphan_entities = AsyncMock(return_value={'connections': []})
+
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+            response = await client.post('/graph/orphans/connect', json={})
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Internal server error while connecting orphan entities'
+
+
+class TestOrphanBackgroundControlEndpoints:
+    """Tests for /graph/orphans background control endpoints."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_orphan_status_exposes_structured_queue_state(self, test_app):
+        status = {
+            'busy': True,
+            'job_name': 'Connecting orphan entities',
+            'job_start': '2024-01-15T10:30:00',
+            'total_orphans': 4,
+            'processed_orphans': 2,
+            'connections_made': 1,
+            'pending_request': {'max_candidates': 5, 'max_degree': 1, 'requested_at': '2024-01-15T10:31:00'},
+            'active_request': {'max_candidates': 3, 'max_degree': 0, 'requested_at': '2024-01-15T10:30:00'},
+            'cancellation_requested': False,
+            'latest_message': 'running',
+            'history_messages': ['a', 'b'],
+        }
+
+        with patch(
+            'yar.kg.shared_storage.get_namespace_data',
+            new=AsyncMock(return_value=status),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+                response = await client.get('/graph/orphans/status')
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['pending_request']['max_candidates'] == 5
+        assert payload['active_request']['max_degree'] == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_orphan_start_preclaims_job_atomically(self, test_app, mock_rag):
+        status = {
+            'busy': False,
+            'job_name': '',
+            'job_start': None,
+            'total_orphans': 0,
+            'processed_orphans': 0,
+            'connections_made': 0,
+            'pending_request': None,
+            'active_request': None,
+            'cancellation_requested': False,
+            'latest_message': '',
+            'history_messages': [],
+        }
+        status_lock = asyncio.Lock()
+        mock_rag.aprocess_orphan_connections_background = AsyncMock(return_value={'status': 'ok'})
+
+        with (
+            patch('yar.kg.shared_storage.get_namespace_data', new=AsyncMock(return_value=status)),
+            patch('yar.kg.shared_storage.get_namespace_lock', return_value=status_lock),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+                response = await client.post('/graph/orphans/start?max_candidates=4&max_degree=2')
+
+        assert response.status_code == 200
+        assert response.json()['status'] == 'started'
+        assert status['busy'] is True
+        assert status['active_request']['max_candidates'] == 4
+        mock_rag.aprocess_orphan_connections_background.assert_awaited_once_with(
+            max_candidates=4,
+            max_degree=2,
+            preclaimed=True,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_orphan_start_queues_structured_request_when_busy(self, test_app, mock_rag):
+        status = {
+            'busy': True,
+            'pending_request': None,
+            'active_request': {'max_candidates': 3, 'max_degree': 0, 'requested_at': '2024-01-15T10:30:00'},
+            'history_messages': [],
+            'latest_message': '',
+        }
+        status_lock = asyncio.Lock()
+        mock_rag.aprocess_orphan_connections_background = AsyncMock()
+
+        with (
+            patch('yar.kg.shared_storage.get_namespace_data', new=AsyncMock(return_value=status)),
+            patch('yar.kg.shared_storage.get_namespace_lock', return_value=status_lock),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+                response = await client.post('/graph/orphans/start?max_candidates=5&max_degree=1')
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['status'] == 'already_running'
+        assert payload['queued_request']['max_candidates'] == 5
+        assert status['pending_request']['max_degree'] == 1
+        mock_rag.aprocess_orphan_connections_background.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_orphan_cancel_honors_preclaimed_active_request(self, test_app):
+        status = {
+            'busy': False,
+            'active_request': {'max_candidates': 3, 'max_degree': 0, 'requested_at': '2024-01-15T10:30:00'},
+            'cancellation_requested': False,
+            'history_messages': [],
+        }
+        status_lock = asyncio.Lock()
+
+        with (
+            patch('yar.kg.shared_storage.get_namespace_data', new=AsyncMock(return_value=status)),
+            patch('yar.kg.shared_storage.get_namespace_lock', return_value=status_lock),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+                response = await client.post('/graph/orphans/cancel')
+
+        assert response.status_code == 200
+        assert response.json()['status'] == 'cancellation_requested'
+        assert status['cancellation_requested'] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.offline
+    async def test_orphan_cancel_not_running_without_active_request(self, test_app):
+        status = {
+            'busy': False,
+            'active_request': None,
+            'cancellation_requested': False,
+            'history_messages': [],
+        }
+        status_lock = asyncio.Lock()
+
+        with (
+            patch('yar.kg.shared_storage.get_namespace_data', new=AsyncMock(return_value=status)),
+            patch('yar.kg.shared_storage.get_namespace_lock', return_value=status_lock),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=test_app), base_url='http://test') as client:
+                response = await client.post('/graph/orphans/cancel')
+
+        assert response.status_code == 200
+        assert response.json()['status'] == 'not_running'

@@ -1259,9 +1259,7 @@ class YAR:
 
                 if duplicate_docs:
                     await self.doc_status.upsert(duplicate_docs)
-                    logger.info(
-                        f'Created {len(duplicate_docs)} duplicate document records with track_id: {track_id}'
-                    )
+                    logger.info(f'Created {len(duplicate_docs)} duplicate document records with track_id: {track_id}')
 
             # Filter new_docs to only include documents with unique IDs
             new_docs = {doc_id: new_docs[doc_id] for doc_id in unique_new_doc_ids if doc_id in new_docs}
@@ -1537,6 +1535,7 @@ class YAR:
                 logger.info('Another process is already processing the document queue. Request queued.')
                 return
 
+        pipeline_mutated = False
         try:
             # Process documents until no more documents or requests
             while True:
@@ -1965,6 +1964,7 @@ class YAR:
                                     }
                                 )
 
+                pipeline_mutated = True
                 # Create processing tasks for all documents
                 doc_tasks = []
                 for doc_id, status_doc in to_process_docs.items():
@@ -2033,6 +2033,9 @@ class YAR:
                 pipeline_status['latest_message'] = log_message
                 pipeline_status['history_messages'].append(log_message)
 
+            if pipeline_mutated:
+                await self._invalidate_fts_cache('document processing pipeline')
+
     async def _process_extract_entities(
         self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None
     ) -> list:
@@ -2054,6 +2057,16 @@ class YAR:
                     pipeline_status['latest_message'] = error_msg
                     pipeline_status['history_messages'].append(error_msg)
             raise e
+
+    async def _invalidate_fts_cache(self, reason: str) -> None:
+        """Invalidate workspace-scoped FTS cache after document mutations."""
+        try:
+            from yar.cache.fts_cache import invalidate_fts_cache_for_workspace
+
+            invalidated = await invalidate_fts_cache_for_workspace(self.workspace)
+            logger.info(f'FTS cache invalidation after {reason}: workspace={self.workspace}, entries={invalidated}')
+        except Exception as e:
+            logger.warning(f'Failed to invalidate FTS cache after {reason}: {e}')
 
     async def _insert_done(self, pipeline_status=None, pipeline_status_lock=None) -> None:
         # All storage instances implement StorageNameSpace protocol
@@ -2097,7 +2110,7 @@ class YAR:
                 # Add timeout to prevent blocking document processing indefinitely
                 result = await asyncio.wait_for(
                     self.aconnect_orphan_entities(),
-                    timeout=60.0  # 60 second timeout for orphan connection
+                    timeout=60.0,  # 60 second timeout for orphan connection
                 )
 
                 orphan_done_log = f'Orphan connection complete: {result["connections_made"]} connections made'
@@ -2283,6 +2296,7 @@ class YAR:
         finally:
             if update_storage:
                 await self._insert_done()
+                await self._invalidate_fts_cache('custom KG insert')
 
     @sync_wrapper()
     def query(
@@ -3417,6 +3431,8 @@ class YAR:
                         ) from persistence_error
                     # If there was an original exception, log the persistence error but don't override the original error
                     # The original error result was already returned in the except block
+                if original_exception is None:
+                    await self._invalidate_fts_cache('document deletion')
             else:
                 logger.debug(f'No deletion operations were started for document {doc_id}, skipping persistence')
 
@@ -4018,268 +4034,268 @@ class YAR:
         self,
         max_candidates: int = 3,
         max_degree: int = 0,
+        preclaimed: bool = False,
     ) -> dict[str, Any]:
-        """Background job for connecting orphan/sparse entities with progress tracking.
-
-        This method runs independently from the document pipeline and provides
-        real-time progress updates via the orphan_connection_status namespace.
-
-        Args:
-            max_candidates: Maximum candidates to evaluate per entity (default: 3)
-            max_degree: Maximum connection degree to target (default: 0)
-                - 0: True orphans only (no connections)
-                - 1: Orphans + leaf nodes (single connection)
-                - 2+: Include sparsely connected nodes
-
-        Returns:
-            Dictionary containing result summary or status if already running
-        """
+        """Background job for connecting orphan/sparse entities with progress tracking."""
         from yar.kg.shared_storage import get_namespace_data, get_namespace_lock
 
         orphan_status = await get_namespace_data(NS_ORPHAN_CONNECTION_STATUS, workspace=self.workspace)
         orphan_lock = get_namespace_lock(NS_ORPHAN_CONNECTION_STATUS, workspace=self.workspace)
 
-        # Check if already running
-        async with orphan_lock:
-            if orphan_status.get('busy'):
-                orphan_status['request_pending'] = True
-                logger.info(f'[{self.workspace}] Orphan connection already running, request pending')
-                return {'status': 'already_running'}
+        def _build_request_payload(candidates: int, degree: int) -> dict[str, Any]:
+            return {
+                'max_candidates': candidates,
+                'max_degree': degree,
+                'requested_at': datetime.now().isoformat(),
+            }
 
-            # Initialize job state
-            orphan_status['busy'] = True
-            orphan_status['job_start'] = datetime.now().isoformat()
-            degree_desc = 'orphan' if max_degree == 0 else f'degree ≤ {max_degree}'
-            orphan_status['job_name'] = f'Connecting {degree_desc} entities'
-            orphan_status['cancellation_requested'] = False
-            orphan_status['total_orphans'] = 0
-            orphan_status['processed_orphans'] = 0
-            orphan_status['connections_made'] = 0
-            # Clear history messages without breaking shared list reference
-            # Use del list[:] pattern (same as document pipeline) to preserve Manager.list()
-            del orphan_status['history_messages'][:]
-
-        result: dict[str, Any] = {
-            'orphans_found': 0,
-            'connections_made': 0,
-            'connections': [],
-            'errors': [],
-        }
-
-        try:
-            await self._append_orphan_message('Starting orphan connection process...')
-
-            # Check if using PostgreSQL storage (required for this feature)
-            db = getattr(self.entities_vdb, 'db', None)
-            workspace = getattr(self.entities_vdb, 'workspace', self.workspace)
-            if db is None:
-                await self._append_orphan_message('Error: Orphan connection requires PostgreSQL vector storage')
-                result['errors'].append('Orphan connection requires PostgreSQL vector storage')
-                return result
-
-            from yar.kg.postgres_impl import SQL_TEMPLATES, VECTOR_DISTANCE_METRIC, VECTOR_DISTANCE_OP
-
-            # Step 1: Get target entities (orphans or sparse entities based on max_degree)
-            if max_degree == 0:
-                await self._append_orphan_message('Finding orphan entities (degree = 0)...')
-                orphan_sql = SQL_TEMPLATES['get_orphan_entities']
-                orphans = await db.query(orphan_sql, [workspace], multirows=True)
-            else:
-                await self._append_orphan_message(f'Finding sparse entities (degree ≤ {max_degree})...')
-                sparse_sql = SQL_TEMPLATES['get_sparse_entities']
-                orphans = await db.query(sparse_sql, [workspace, max_degree], multirows=True)
-
-            if not orphans:
-                entity_type = 'orphan' if max_degree == 0 else f'degree ≤ {max_degree}'
-                await self._append_orphan_message(f'No {entity_type} entities found')
-                return result
-
-            result['orphans_found'] = len(orphans)
-            entity_type = 'orphan' if max_degree == 0 else f'degree ≤ {max_degree}'
-            await self._append_orphan_message(f'Found {len(orphans)} {entity_type} entities')
-
-            # Update status with total count
+        async def _is_cancellation_requested() -> bool:
             async with orphan_lock:
-                orphan_status['total_orphans'] = len(orphans)
+                return bool(orphan_status.get('cancellation_requested'))
 
-            # Get thresholds from config
-            sim_threshold = self.orphan_connection_threshold
-            conf_threshold = self.orphan_confidence_threshold
-            allow_cross_connect = self.orphan_cross_connect
+        current_request = _build_request_payload(max_candidates, max_degree)
+        run_preclaimed = preclaimed
 
-            # Step 2: Process each orphan with progress tracking
-            batch_size = 10  # Process in smaller batches for more frequent updates
-            for i, orphan in enumerate(orphans):
-                # Check for cancellation
-                if orphan_status.get('cancellation_requested'):
-                    await self._append_orphan_message('Cancellation requested, stopping...')
-                    break
+        while True:
+            current_max_candidates = int(current_request.get('max_candidates', 3))
+            current_max_degree = int(current_request.get('max_degree', 0))
 
-                orphan_name = orphan.get('entity_name', '')
-                orphan_content = orphan.get('content', '')
-                orphan_vector = orphan.get('content_vector', '')
-
-                # Check for empty/missing vector - use len() to avoid numpy array boolean ambiguity
-                if orphan_vector is None or (hasattr(orphan_vector, '__len__') and len(orphan_vector) == 0):
-                    result['errors'].append(f'No vector for orphan: {orphan_name}')
-                    async with orphan_lock:
-                        orphan_status['processed_orphans'] += 1
-                    continue
-
-                # Log progress every batch_size entities
-                if i % batch_size == 0:
-                    await self._append_orphan_message(
-                        f'Processing orphan {i + 1}/{len(orphans)}: {orphan_name[:50]}...'
-                    )
-
-                # Get candidate connections
-                candidate_sql_template = (
-                    SQL_TEMPLATES['get_orphan_candidates']
-                    if allow_cross_connect
-                    else SQL_TEMPLATES['get_connected_candidates']
-                )
-
-                # Format vector for PostgreSQL - comma-separated floats (SQL adds brackets)
-                if isinstance(orphan_vector, str):
-                    # Already a string, strip brackets if present
-                    vector_str = orphan_vector.strip('[]')
-                else:
-                    # Convert numpy/list to comma-separated string
-                    vector_str = ','.join(str(float(v)) for v in orphan_vector)
-
-                # Format SQL with vector embedded inline (asyncpg can't convert strings to pgvector)
-                candidate_sql = candidate_sql_template.format(
-                    vector_str=vector_str,
-                    distance_op=VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC],
-                )
-
-                candidates = await db.query(
-                    candidate_sql,
-                    [workspace, orphan_name, sim_threshold, max_candidates],
-                    multirows=True,
-                )
-
-                if not candidates:
-                    async with orphan_lock:
-                        orphan_status['processed_orphans'] += 1
-                    continue
-
-                # Validate each candidate with LLM
-                for candidate in candidates:
-                    # Check for cancellation
-                    if orphan_status.get('cancellation_requested'):
-                        break
-
-                    candidate_name = candidate.get('entity_name', '')
-                    candidate_content = candidate.get('content', '')
-                    similarity = candidate.get('similarity', 0.0)
-
-                    # Parse entity type from content
-                    orphan_type, orphan_desc = self._parse_entity_content(orphan_content)
-                    candidate_type, candidate_desc = self._parse_entity_content(candidate_content)
-
-                    # Build validation prompt
-                    validation_prompt = PROMPTS['orphan_connection_validation'].format(
-                        orphan_name=orphan_name,
-                        orphan_type=orphan_type,
-                        orphan_description=orphan_desc,
-                        candidate_name=candidate_name,
-                        candidate_type=candidate_type,
-                        candidate_description=candidate_desc,
-                        similarity_score=f'{similarity:.3f}',
-                    )
-
-                    try:
-                        if not self.llm_model_func:
-                            logger.warning('LLM model function not initialized for orphan validation')
-                            continue
-                        llm_callable = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
-                        llm_response = await llm_callable(validation_prompt)
-
-                        import re
-
-                        json_match = re.search(r'\{[^{}]*\}', llm_response, re.DOTALL)
-                        if not json_match:
-                            continue
-
-                        validation = json.loads(json_match.group())
-                        should_connect = validation.get('should_connect', False)
-                        confidence = float(validation.get('confidence', 0.0))
-
-                        if should_connect and confidence >= conf_threshold:
-                            rel_type = validation.get('relationship_type', 'related_to')
-                            rel_keywords = validation.get('relationship_keywords', 'connection')
-                            rel_description = validation.get(
-                                'relationship_description',
-                                f'Connected via orphan resolution (confidence: {confidence:.2f})',
-                            )
-
-                            try:
-                                await self.acreate_relation(
-                                    orphan_name,
-                                    candidate_name,
-                                    {
-                                        'description': rel_description,
-                                        'keywords': rel_keywords,
-                                        'source_id': 'orphan_connection',
-                                    },
-                                )
-
-                                result['connections_made'] += 1
-                                result['connections'].append(
-                                    {
-                                        'orphan': orphan_name,
-                                        'connected_to': candidate_name,
-                                        'relationship_type': rel_type,
-                                        'keywords': rel_keywords,
-                                        'confidence': confidence,
-                                        'similarity': similarity,
-                                    }
-                                )
-
-                                # Update status
-                                async with orphan_lock:
-                                    orphan_status['connections_made'] += 1
-
-                                await self._append_orphan_message(
-                                    f'Connected: {orphan_name[:30]} -> {candidate_name[:30]} (conf: {confidence:.2f})'
-                                )
-
-                                # Only connect to first valid candidate per orphan
-                                break
-
-                            except Exception as e:
-                                result['errors'].append(
-                                    f'Failed to create relation {orphan_name} -> {candidate_name}: {e!s}'
-                                )
-
-                    except Exception as e:
-                        result['errors'].append(f'LLM validation error for {orphan_name}: {e!s}')
-
-                # Update processed count
+            if not run_preclaimed:
                 async with orphan_lock:
-                    orphan_status['processed_orphans'] += 1
+                    if orphan_status.get('busy'):
+                        orphan_status['pending_request'] = current_request
+                        logger.info(
+                            f'[{self.workspace}] Orphan connection already running, queued request: {current_request}'
+                        )
+                        return {'status': 'already_running', 'queued_request': current_request}
+                    orphan_status['busy'] = True
 
-            # Final summary
-            await self._append_orphan_message(
-                f'Completed! Connected {result["connections_made"]} out of {result["orphans_found"]} orphan entities'
-            )
-            errors = cast(list, result['errors'])
-            if errors:
-                await self._append_orphan_message(f'Encountered {len(errors)} errors during processing')
-
-        except Exception as e:
-            error_msg = f'Orphan connection failed: {e!s}'
-            cast(list, result['errors']).append(error_msg)
-            await self._append_orphan_message(f'Error: {error_msg}')
-            logger.error(f'[{self.workspace}] Orphan connection error: {e}')
-
-        finally:
-            # Reset busy state
             async with orphan_lock:
-                orphan_status['busy'] = False
-                if orphan_status.get('request_pending'):
-                    orphan_status['request_pending'] = False
-                    await self._append_orphan_message('Note: Another request was pending during processing')
+                degree_desc = 'orphan' if current_max_degree == 0 else f'degree ≤ {current_max_degree}'
+                orphan_status['active_request'] = current_request
+                orphan_status['job_start'] = datetime.now().isoformat()
+                orphan_status['job_name'] = f'Connecting {degree_desc} entities'
+                orphan_status['total_orphans'] = 0
+                orphan_status['processed_orphans'] = 0
+                orphan_status['connections_made'] = 0
+                orphan_status['pending_request'] = None
+                del orphan_status['history_messages'][:]
 
-        return result
+            result: dict[str, Any] = {
+                'orphans_found': 0,
+                'connections_made': 0,
+                'connections': [],
+                'errors': [],
+            }
+
+            try:
+                await self._append_orphan_message('Starting orphan connection process...')
+
+                if await _is_cancellation_requested():
+                    await self._append_orphan_message('Cancellation requested before processing started')
+                else:
+                    db = getattr(self.entities_vdb, 'db', None)
+                    workspace = getattr(self.entities_vdb, 'workspace', self.workspace)
+                    if db is None:
+                        await self._append_orphan_message('Error: Orphan connection requires PostgreSQL vector storage')
+                        result['errors'].append('Orphan connection requires PostgreSQL vector storage')
+                    else:
+                        from yar.kg.postgres_impl import SQL_TEMPLATES, VECTOR_DISTANCE_METRIC, VECTOR_DISTANCE_OP
+
+                        if current_max_degree == 0:
+                            await self._append_orphan_message('Finding orphan entities (degree = 0)...')
+                            orphan_sql = SQL_TEMPLATES['get_orphan_entities']
+                            orphans = await db.query(orphan_sql, [workspace], multirows=True)
+                        else:
+                            await self._append_orphan_message(
+                                f'Finding sparse entities (degree ≤ {current_max_degree})...'
+                            )
+                            sparse_sql = SQL_TEMPLATES['get_sparse_entities']
+                            orphans = await db.query(sparse_sql, [workspace, current_max_degree], multirows=True)
+
+                        if not orphans:
+                            entity_type = 'orphan' if current_max_degree == 0 else f'degree ≤ {current_max_degree}'
+                            await self._append_orphan_message(f'No {entity_type} entities found')
+                        else:
+                            result['orphans_found'] = len(orphans)
+                            entity_type = 'orphan' if current_max_degree == 0 else f'degree ≤ {current_max_degree}'
+                            await self._append_orphan_message(f'Found {len(orphans)} {entity_type} entities')
+
+                            async with orphan_lock:
+                                orphan_status['total_orphans'] = len(orphans)
+
+                            sim_threshold = self.orphan_connection_threshold
+                            conf_threshold = self.orphan_confidence_threshold
+                            allow_cross_connect = self.orphan_cross_connect
+                            batch_size = 10
+
+                            for i, orphan in enumerate(orphans):
+                                if await _is_cancellation_requested():
+                                    await self._append_orphan_message('Cancellation requested, stopping...')
+                                    break
+
+                                orphan_name = orphan.get('entity_name', '')
+                                orphan_content = orphan.get('content', '')
+                                orphan_vector = orphan.get('content_vector', '')
+
+                                if orphan_vector is None or (
+                                    hasattr(orphan_vector, '__len__') and len(orphan_vector) == 0
+                                ):
+                                    result['errors'].append(f'No vector for orphan: {orphan_name}')
+                                    async with orphan_lock:
+                                        orphan_status['processed_orphans'] += 1
+                                    continue
+
+                                if i % batch_size == 0:
+                                    await self._append_orphan_message(
+                                        f'Processing orphan {i + 1}/{len(orphans)}: {orphan_name[:50]}...'
+                                    )
+
+                                candidate_sql_template = (
+                                    SQL_TEMPLATES['get_orphan_candidates']
+                                    if allow_cross_connect
+                                    else SQL_TEMPLATES['get_connected_candidates']
+                                )
+
+                                if isinstance(orphan_vector, str):
+                                    vector_str = orphan_vector.strip('[]')
+                                else:
+                                    vector_str = ','.join(str(float(v)) for v in orphan_vector)
+
+                                candidate_sql = candidate_sql_template.format(
+                                    vector_str=vector_str,
+                                    distance_op=VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC],
+                                )
+                                candidates = await db.query(
+                                    candidate_sql,
+                                    [workspace, orphan_name, sim_threshold, current_max_candidates],
+                                    multirows=True,
+                                )
+
+                                if not candidates:
+                                    async with orphan_lock:
+                                        orphan_status['processed_orphans'] += 1
+                                    continue
+
+                                for candidate in candidates:
+                                    if await _is_cancellation_requested():
+                                        break
+
+                                    candidate_name = candidate.get('entity_name', '')
+                                    candidate_content = candidate.get('content', '')
+                                    similarity = candidate.get('similarity', 0.0)
+
+                                    orphan_type, orphan_desc = self._parse_entity_content(orphan_content)
+                                    candidate_type, candidate_desc = self._parse_entity_content(candidate_content)
+
+                                    validation_prompt = PROMPTS['orphan_connection_validation'].format(
+                                        orphan_name=orphan_name,
+                                        orphan_type=orphan_type,
+                                        orphan_description=orphan_desc,
+                                        candidate_name=candidate_name,
+                                        candidate_type=candidate_type,
+                                        candidate_description=candidate_desc,
+                                        similarity_score=f'{similarity:.3f}',
+                                    )
+
+                                    try:
+                                        if not self.llm_model_func:
+                                            logger.warning('LLM model function not initialized for orphan validation')
+                                            continue
+                                        llm_callable = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
+                                        llm_response = await llm_callable(validation_prompt)
+
+                                        import re
+
+                                        json_match = re.search(r'\{[^{}]*\}', llm_response, re.DOTALL)
+                                        if not json_match:
+                                            continue
+
+                                        validation = json.loads(json_match.group())
+                                        should_connect = validation.get('should_connect', False)
+                                        confidence = float(validation.get('confidence', 0.0))
+
+                                        if should_connect and confidence >= conf_threshold:
+                                            rel_type = validation.get('relationship_type', 'related_to')
+                                            rel_keywords = validation.get('relationship_keywords', 'connection')
+                                            rel_description = validation.get(
+                                                'relationship_description',
+                                                f'Connected via orphan resolution (confidence: {confidence:.2f})',
+                                            )
+
+                                            try:
+                                                await self.acreate_relation(
+                                                    orphan_name,
+                                                    candidate_name,
+                                                    {
+                                                        'description': rel_description,
+                                                        'keywords': rel_keywords,
+                                                        'source_id': 'orphan_connection',
+                                                    },
+                                                )
+
+                                                result['connections_made'] += 1
+                                                result['connections'].append(
+                                                    {
+                                                        'orphan': orphan_name,
+                                                        'connected_to': candidate_name,
+                                                        'relationship_type': rel_type,
+                                                        'keywords': rel_keywords,
+                                                        'confidence': confidence,
+                                                        'similarity': similarity,
+                                                    }
+                                                )
+
+                                                async with orphan_lock:
+                                                    orphan_status['connections_made'] += 1
+
+                                                await self._append_orphan_message(
+                                                    f'Connected: {orphan_name[:30]} -> {candidate_name[:30]} (conf: {confidence:.2f})'
+                                                )
+                                                break
+                                            except Exception as e:
+                                                result['errors'].append(
+                                                    f'Failed to create relation {orphan_name} -> {candidate_name}: {e!s}'
+                                                )
+                                    except Exception as e:
+                                        result['errors'].append(f'LLM validation error for {orphan_name}: {e!s}')
+
+                                async with orphan_lock:
+                                    orphan_status['processed_orphans'] += 1
+
+                            await self._append_orphan_message(
+                                f'Completed! Connected {result["connections_made"]} out of {result["orphans_found"]} orphan entities'
+                            )
+                            errors = cast(list, result['errors'])
+                            if errors:
+                                await self._append_orphan_message(f'Encountered {len(errors)} errors during processing')
+
+            except Exception as e:
+                error_msg = f'Orphan connection failed: {e!s}'
+                cast(list, result['errors']).append(error_msg)
+                await self._append_orphan_message(f'Error: {error_msg}')
+                logger.error(f'[{self.workspace}] Orphan connection error: {e}')
+
+            replay_request = None
+            async with orphan_lock:
+                orphan_status['active_request'] = None
+                pending = orphan_status.get('pending_request')
+                if isinstance(pending, dict):
+                    replay_request = dict(pending)
+                    orphan_status['pending_request'] = None
+                    orphan_status['busy'] = True
+                    orphan_status['cancellation_requested'] = False
+                else:
+                    orphan_status['busy'] = False
+
+            if replay_request is None:
+                return result
+
+            current_request = _build_request_payload(
+                int(replay_request.get('max_candidates', 3)),
+                int(replay_request.get('max_degree', 0)),
+            )
+            run_preclaimed = True
+            await self._append_orphan_message(
+                f'Replaying queued orphan request: max_candidates={current_request["max_candidates"]}, max_degree={current_request["max_degree"]}'
+            )
