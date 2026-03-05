@@ -13,6 +13,7 @@ This module tests:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -20,7 +21,9 @@ import pytest
 from yar.base import QueryParam, TextChunkSchema
 from yar.constants import DEFAULT_MAX_FILE_PATHS, DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
 from yar.operate import (
+    _build_query_context,
     _enrich_local_keywords,
+    _perform_kg_search,
     _resolve_max_file_paths,
     _split_keyword_terms,
     _truncate_entity_identifier,
@@ -41,7 +44,7 @@ class TestChunkingBySemantic:
 
     def test_basic_chunking(self):
         """Test basic semantic chunking."""
-        content = "This is a test paragraph.\n\nThis is another paragraph."
+        content = 'This is a test paragraph.\n\nThis is another paragraph.'
         result = chunking_by_semantic(content, max_chars=4800, max_overlap=400)
 
         assert isinstance(result, list)
@@ -55,7 +58,7 @@ class TestChunkingBySemantic:
 
     def test_chunking_with_preset_semantic(self):
         """Test chunking with semantic preset."""
-        content = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+        content = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.'
         result = chunking_by_semantic(content, preset='semantic')
 
         assert isinstance(result, list)
@@ -63,7 +66,7 @@ class TestChunkingBySemantic:
 
     def test_chunking_with_preset_recursive(self):
         """Test chunking with recursive preset."""
-        content = "Line one.\nLine two.\nLine three."
+        content = 'Line one.\nLine two.\nLine three.'
         result = chunking_by_semantic(content, preset='recursive')
 
         assert isinstance(result, list)
@@ -71,7 +74,7 @@ class TestChunkingBySemantic:
 
     def test_chunking_with_preset_none(self):
         """Test chunking with no preset."""
-        content = "Simple text content for testing."
+        content = 'Simple text content for testing.'
         result = chunking_by_semantic(content, preset=None)
 
         assert isinstance(result, list)
@@ -79,7 +82,7 @@ class TestChunkingBySemantic:
 
     def test_chunk_order_indices(self):
         """Test that chunk indices are sequential."""
-        content = "\n\n".join([f"Paragraph {i}" for i in range(10)])
+        content = '\n\n'.join([f'Paragraph {i}' for i in range(10)])
         result = chunking_by_semantic(content, max_chars=100, max_overlap=20)
 
         indices = [chunk['chunk_order_index'] for chunk in result]
@@ -87,7 +90,7 @@ class TestChunkingBySemantic:
 
     def test_chunk_tokens_estimation(self):
         """Test token count estimation (~4 chars per token)."""
-        content = "word " * 100  # 500 characters
+        content = 'word ' * 100  # 500 characters
         result = chunking_by_semantic(content, max_chars=200, max_overlap=50)
 
         for chunk in result:
@@ -97,7 +100,7 @@ class TestChunkingBySemantic:
 
     def test_char_offsets_valid(self):
         """Test that character offsets are valid."""
-        content = "Test content for offset validation."
+        content = 'Test content for offset validation.'
         result = chunking_by_semantic(content)
 
         for chunk in result:
@@ -107,7 +110,7 @@ class TestChunkingBySemantic:
 
     def test_empty_content_fallback(self):
         """Test fallback for empty content."""
-        content = ""
+        content = ''
         result = chunking_by_semantic(content)
 
         # Should return at least one chunk even if empty
@@ -115,14 +118,14 @@ class TestChunkingBySemantic:
 
     def test_long_content_multiple_chunks(self):
         """Test that long content creates multiple chunks."""
-        content = "Test sentence. " * 500  # ~7500 characters
+        content = 'Test sentence. ' * 500  # ~7500 characters
         result = chunking_by_semantic(content, max_chars=1000, max_overlap=100)
 
         assert len(result) > 1
 
     def test_unicode_content(self):
         """Test chunking with Unicode content."""
-        content = "Hello 世界! 🌍 Test content with émojis."
+        content = 'Hello 世界! 🌍 Test content with émojis.'
         result = chunking_by_semantic(content)
 
         assert isinstance(result, list)
@@ -144,21 +147,21 @@ class TestCreateChunker:
     def test_preset_semantic(self):
         """Test semantic preset."""
         chunker = create_chunker(preset='semantic')
-        result = chunker(None, "Test content", None, False, 100, 1200)
+        result = chunker(None, 'Test content', None, False, 100, 1200)
 
         assert isinstance(result, list)
 
     def test_preset_recursive(self):
         """Test recursive preset."""
         chunker = create_chunker(preset='recursive')
-        result = chunker(None, "Test content", None, False, 100, 1200)
+        result = chunker(None, 'Test content', None, False, 100, 1200)
 
         assert isinstance(result, list)
 
     def test_preset_none(self):
         """Test None preset."""
         chunker = create_chunker(preset=None)
-        result = chunker(None, "Test content", None, False, 100, 1200)
+        result = chunker(None, 'Test content', None, False, 100, 1200)
 
         assert isinstance(result, list)
 
@@ -169,7 +172,7 @@ class TestCreateChunker:
         # Should accept standard YAR chunking_func signature
         result = chunker(
             tokenizer=None,
-            content="Test",
+            content='Test',
             split_by_character=None,
             split_by_character_only=False,
             chunk_overlap_token_size=100,
@@ -181,7 +184,7 @@ class TestCreateChunker:
     def test_token_to_char_conversion(self):
         """Test token size to character size conversion."""
         chunker = create_chunker()
-        content = "word " * 1000
+        content = 'word ' * 1000
 
         # Small token size should create multiple chunks
         result = chunker(None, content, None, False, 50, 100)
@@ -192,8 +195,8 @@ class TestCreateChunker:
         chunker = create_chunker()
 
         # These params are ignored by Kreuzberg adapter
-        result1 = chunker(None, "Test", None, False, 100, 1200)
-        result2 = chunker(MagicMock(), "Test", "\n\n", True, 100, 1200)
+        result1 = chunker(None, 'Test', None, False, 100, 1200)
+        result2 = chunker(MagicMock(), 'Test', '\n\n', True, 100, 1200)
 
         # Results should be similar (content chunked the same way)
         assert len(result1) == len(result2)
@@ -210,27 +213,27 @@ class TestTruncateEntityIdentifier:
 
     def test_no_truncation_needed(self):
         """Test that short identifiers are not truncated."""
-        identifier = "John Smith"
-        result = _truncate_entity_identifier(identifier, limit=100, chunk_key="test", identifier_role="Entity")
+        identifier = 'John Smith'
+        result = _truncate_entity_identifier(identifier, limit=100, chunk_key='test', identifier_role='Entity')
 
         assert result == identifier
 
     def test_truncation_at_limit(self):
         """Test truncation at exact limit."""
-        identifier = "A" * 150
+        identifier = 'A' * 150
         limit = 100
-        result = _truncate_entity_identifier(identifier, limit=limit, chunk_key="test", identifier_role="Entity")
+        result = _truncate_entity_identifier(identifier, limit=limit, chunk_key='test', identifier_role='Entity')
 
         assert len(result) == limit
-        assert result == "A" * limit
+        assert result == 'A' * limit
 
     def test_truncation_with_warning(self):
         """Test that truncation logs a warning."""
 
-        identifier = "Very Long Entity Name " * 10
+        identifier = 'Very Long Entity Name ' * 10
 
         with patch('yar.operate.logger') as mock_logger:
-            result = _truncate_entity_identifier(identifier, limit=50, chunk_key="chunk-123", identifier_role="Entity")
+            result = _truncate_entity_identifier(identifier, limit=50, chunk_key='chunk-123', identifier_role='Entity')
 
             assert len(result) == 50
             # Warning should have been called
@@ -239,29 +242,29 @@ class TestTruncateEntityIdentifier:
     def test_preview_in_warning(self):
         """Test that warning includes preview of identifier."""
 
-        identifier = "EntityNameThatIsTooLong" + "X" * 100
+        identifier = 'EntityNameThatIsTooLong' + 'X' * 100
 
         with patch('yar.operate.logger') as mock_logger:
-            _truncate_entity_identifier(identifier, limit=50, chunk_key="chunk-456", identifier_role="Entity")
+            _truncate_entity_identifier(identifier, limit=50, chunk_key='chunk-456', identifier_role='Entity')
 
             # Should have logged warning with preview
             mock_logger.warning.assert_called_once()
             call_args = mock_logger.warning.call_args[0]
             # Check that first 20 chars appear in message
-            assert "EntityNameThatIsTooL" in str(call_args)
+            assert 'EntityNameThatIsTooL' in str(call_args)
 
     def test_boundary_condition_exact_limit(self):
         """Test identifier exactly at limit."""
-        identifier = "X" * 100
-        result = _truncate_entity_identifier(identifier, limit=100, chunk_key="test", identifier_role="Entity")
+        identifier = 'X' * 100
+        result = _truncate_entity_identifier(identifier, limit=100, chunk_key='test', identifier_role='Entity')
 
         assert result == identifier
         assert len(result) == 100
 
     def test_unicode_identifier_truncation(self):
         """Test truncation with Unicode characters."""
-        identifier = "日本語エンティティ名" * 20
-        result = _truncate_entity_identifier(identifier, limit=50, chunk_key="test", identifier_role="Entity")
+        identifier = '日本語エンティティ名' * 20
+        result = _truncate_entity_identifier(identifier, limit=50, chunk_key='test', identifier_role='Entity')
 
         assert len(result) == 50
 
@@ -281,8 +284,8 @@ class TestHandleEntityRelationSummary:
         from yar.operate import _handle_entity_relation_summary
 
         result, llm_used = await _handle_entity_relation_summary(
-            description_type="entity",
-            entity_or_relation_name="TestEntity",
+            description_type='entity',
+            entity_or_relation_name='TestEntity',
             description_list=[],
             seperator=GRAPH_FIELD_SEP,
             global_config={},
@@ -297,14 +300,14 @@ class TestHandleEntityRelationSummary:
         from yar.operate import _handle_entity_relation_summary
 
         result, llm_used = await _handle_entity_relation_summary(
-            description_type="entity",
-            entity_or_relation_name="TestEntity",
-            description_list=["Single description"],
+            description_type='entity',
+            entity_or_relation_name='TestEntity',
+            description_list=['Single description'],
             seperator=GRAPH_FIELD_SEP,
             global_config={},
         )
 
-        assert result == "Single description"
+        assert result == 'Single description'
         assert llm_used is False
 
     @pytest.mark.asyncio
@@ -322,10 +325,10 @@ class TestHandleEntityRelationSummary:
             'force_llm_summary_on_merge': 10,  # Higher than our count
         }
 
-        descriptions = ["Desc one", "Desc two"]
+        descriptions = ['Desc one', 'Desc two']
         result, llm_used = await _handle_entity_relation_summary(
-            description_type="entity",
-            entity_or_relation_name="TestEntity",
+            description_type='entity',
+            entity_or_relation_name='TestEntity',
             description_list=descriptions,
             seperator=GRAPH_FIELD_SEP,
             global_config=global_config,
@@ -344,9 +347,9 @@ class TestHandleEntityRelationSummary:
 
         # Mock the LLM response with proper cache structure
         async def mock_llm_with_cache(*args, **kwargs):
-            return "Summarized description", 123456
+            return 'Summarized description', 123456
 
-        mock_llm = AsyncMock(return_value=("Summarized description", {}))
+        mock_llm = AsyncMock(return_value=('Summarized description', {}))
 
         # Create a proper mock cache that returns None
         mock_cache = AsyncMock()
@@ -362,12 +365,12 @@ class TestHandleEntityRelationSummary:
             'summary_length_recommended': 100,
         }
 
-        descriptions = ["Long description " * 50, "Another long description " * 50]
+        descriptions = ['Long description ' * 50, 'Another long description ' * 50]
 
         with patch('yar.operate.use_llm_func_with_cache', new=mock_llm_with_cache):
             _result, llm_used = await _handle_entity_relation_summary(
-                description_type="entity",
-                entity_or_relation_name="TestEntity",
+                description_type='entity',
+                entity_or_relation_name='TestEntity',
                 description_list=descriptions,
                 seperator=GRAPH_FIELD_SEP,
                 global_config=global_config,
@@ -391,9 +394,9 @@ class TestSummarizeDescriptions:
 
         # Mock use_llm_func_with_cache to return proper structure
         async def mock_llm_with_cache(*args, **kwargs):
-            return "Summary", 123456
+            return 'Summary', 123456
 
-        mock_llm = AsyncMock(return_value=("Summary", {}))
+        mock_llm = AsyncMock(return_value=('Summary', {}))
 
         # Create a mock cache with proper structure
         mock_cache = Mock()
@@ -411,14 +414,14 @@ class TestSummarizeDescriptions:
 
         with patch('yar.operate.use_llm_func_with_cache', new=mock_llm_with_cache):
             result = await _summarize_descriptions(
-                description_type="entity",
-                description_name="TestEntity",
-                description_list=["Description 1", "Description 2"],
+                description_type='entity',
+                description_name='TestEntity',
+                description_list=['Description 1', 'Description 2'],
                 global_config=global_config,
                 llm_response_cache=mock_cache,
             )
 
-            assert result == "Summary"
+            assert result == 'Summary'
 
 
 # ============================================================================
@@ -472,10 +475,7 @@ class TestBatchInferEntityTypes:
         }
 
         # Create more entities than batch size
-        entities = [
-            {'entity_name': f'Entity{i}', 'entity_type': 'UNKNOWN'}
-            for i in range(25)
-        ]
+        entities = [{'entity_name': f'Entity{i}', 'entity_type': 'UNKNOWN'} for i in range(25)]
 
         mock_graph = AsyncMock()
         mock_graph.upsert_node = AsyncMock()
@@ -513,7 +513,7 @@ class TestGetKeywordsFromQuery:
         )
 
         hl, ll = await get_keywords_from_query(
-            query="test query",
+            query='test query',
             query_param=query_param,
             global_config={},
         )
@@ -535,7 +535,7 @@ class TestGetKeywordsFromQuery:
         }
 
         hl, ll = await get_keywords_from_query(
-            query="What is AI?",
+            query='What is AI?',
             query_param=query_param,
             global_config=global_config,
         )
@@ -564,12 +564,12 @@ class TestExtractKeywordsOnly:
         param = QueryParam()
 
         hl, _ll = await extract_keywords_only(
-            text="What is AI technology?",
+            text='What is AI technology?',
             param=param,
             global_config=global_config,
         )
 
-        assert "technology" in hl or "AI" in hl
+        assert 'technology' in hl or 'AI' in hl
         mock_llm.assert_called_once()
 
     @pytest.mark.asyncio
@@ -587,7 +587,7 @@ class TestExtractKeywordsOnly:
         param = QueryParam()
 
         hl, ll = await extract_keywords_only(
-            text="test query",
+            text='test query',
             param=param,
             global_config=global_config,
             hashing_kv=None,  # No cache
@@ -612,7 +612,7 @@ class TestExtractKeywordsOnly:
         param = QueryParam()
 
         hl, ll = await extract_keywords_only(
-            text="test query",
+            text='test query',
             param=param,
             global_config=global_config,
         )
@@ -635,13 +635,13 @@ class TestExtractKeywordsOnly:
         param = QueryParam(model_func=custom_llm)
 
         hl, _ll = await extract_keywords_only(
-            text="test query",
+            text='test query',
             param=param,
             global_config=global_config,
         )
 
         custom_llm.assert_called_once()
-        assert "custom" in hl
+        assert 'custom' in hl
 
     @pytest.mark.asyncio
     async def test_think_tags_removed(self):
@@ -659,12 +659,12 @@ class TestExtractKeywordsOnly:
         param = QueryParam()
 
         hl, _ll = await extract_keywords_only(
-            text="test query",
+            text='test query',
             param=param,
             global_config=global_config,
         )
 
-        assert "result" in hl
+        assert 'result' in hl
 
 
 # ============================================================================
@@ -683,7 +683,7 @@ class TestExtractEntities:
 
         # Empty chunks raises ValueError from asyncio.wait with empty task set
         # This is expected behavior - the function doesn't handle empty chunks specially
-        with pytest.raises(ValueError, match="empty"):
+        with pytest.raises(ValueError, match='empty'):
             await extract_entities(
                 chunks={},
                 global_config={
@@ -781,7 +781,7 @@ class TestExtractEntities:
         """Extraction prompts should apply max_extract_input_tokens guard."""
         from yar.operate import extract_entities
 
-        content = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        content = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
         tokenizer = Mock()
         tokenizer.encode.side_effect = lambda text: list(range(len(text)))
         tokenizer.decode.side_effect = lambda tokens: 'TRUNCATED_CONTENT'
@@ -834,7 +834,7 @@ class TestOperateEdgeCases:
 
     def test_chunking_with_null_bytes(self):
         """Test chunking with null bytes in content."""
-        content = "Normal text\x00with null\x00bytes"
+        content = 'Normal text\x00with null\x00bytes'
         try:
             result = chunking_by_semantic(content)
             assert isinstance(result, list)
@@ -844,7 +844,7 @@ class TestOperateEdgeCases:
 
     def test_chunking_very_small_limits(self):
         """Test chunking with very small character limits."""
-        content = "Test content"
+        content = 'Test content'
         result = chunking_by_semantic(content, max_chars=10, max_overlap=2)
 
         assert isinstance(result, list)
@@ -852,13 +852,13 @@ class TestOperateEdgeCases:
 
     def test_identifier_truncation_empty_string(self):
         """Test truncation with empty identifier."""
-        result = _truncate_entity_identifier("", limit=100, chunk_key="test", identifier_role="Entity")
-        assert result == ""
+        result = _truncate_entity_identifier('', limit=100, chunk_key='test', identifier_role='Entity')
+        assert result == ''
 
     def test_identifier_truncation_unicode_boundary(self):
         """Test truncation doesn't break Unicode characters."""
-        identifier = "Test日本語" * 20
-        result = _truncate_entity_identifier(identifier, limit=50, chunk_key="test", identifier_role="Entity")
+        identifier = 'Test日本語' * 20
+        result = _truncate_entity_identifier(identifier, limit=50, chunk_key='test', identifier_role='Entity')
 
         assert len(result) == 50
 
@@ -876,7 +876,7 @@ class TestOperateEdgeCases:
         param = QueryParam()
 
         hl, ll = await extract_keywords_only(
-            text="",
+            text='',
             param=param,
             global_config=global_config,
         )
@@ -902,7 +902,7 @@ class TestOperateHelpers:
             create_chunker(preset='recursive'),
         ]
 
-        content = "Test content"
+        content = 'Test content'
         for chunker in chunkers:
             result = chunker(None, content, None, False, 100, 1200)
             assert isinstance(result, list)
@@ -920,7 +920,7 @@ class TestOperateHelpers:
 
     def test_chunking_preserves_content_order(self):
         """Test that chunks preserve content order."""
-        content = "First. Second. Third. Fourth. Fifth."
+        content = 'First. Second. Third. Fourth. Fifth.'
         result = chunking_by_semantic(content, max_chars=100, max_overlap=20)
 
         # Recombine chunks
@@ -932,56 +932,468 @@ class TestOperateHelpers:
 
     def test_chunk_metadata_completeness(self):
         """Test that all required metadata fields are present."""
-        content = "Test content for metadata validation."
+        content = 'Test content for metadata validation.'
         result = chunking_by_semantic(content)
 
         required_fields = ['content', 'tokens', 'chunk_order_index', 'char_start', 'char_end']
 
         for chunk in result:
             for field in required_fields:
-                assert field in chunk, f"Missing required field: {field}"
+                assert field in chunk, f'Missing required field: {field}'
 
     def test_split_keyword_terms_deduplicates_and_trims(self):
         """Keyword term splitting should normalize comma-separated strings."""
-        terms = _split_keyword_terms(" Amazon , AWS, amazon ;  cloud platform  ")
-        assert terms == ["Amazon", "AWS", "cloud platform"]
+        terms = _split_keyword_terms(' Amazon , AWS, amazon ;  cloud platform  ')
+        assert terms == ['Amazon', 'AWS', 'cloud platform']
 
     def test_enrich_local_keywords_promotes_high_level_when_low_missing(self):
         """Local mode should promote one focused high-level keyword when low-level is empty."""
         enriched = _enrich_local_keywords(
-            hl_keywords=["quantum computing", "company research"],
+            hl_keywords=['quantum computing', 'company research'],
             ll_keywords=[],
-            mode="local",
-            query="What companies are working on quantum computing?",
+            mode='local',
+            query='What companies are working on quantum computing?',
         )
-        assert enriched == ["quantum computing"]
+        assert enriched == ['quantum computing']
 
     def test_enrich_local_keywords_keeps_existing_low_level_terms(self):
         """Local mode should keep existing low-level keywords without broadening."""
         enriched = _enrich_local_keywords(
-            hl_keywords=["technology company", "market profile", "cloud services"],
-            ll_keywords=["Amazon"],
-            mode="local",
+            hl_keywords=['technology company', 'market profile', 'cloud services'],
+            ll_keywords=['Amazon'],
+            mode='local',
             user_supplied_ll=True,
         )
-        assert enriched == ["Amazon"]
+        assert enriched == ['Amazon']
 
     def test_enrich_local_keywords_filters_auto_generated_generic_low_level_terms(self):
         """Auto-generated low-level keywords should be narrowed to focused terms."""
         enriched = _enrich_local_keywords(
-            hl_keywords=["quantum computing", "company research"],
-            ll_keywords=["quantum computing", "company research", "technology development"],
-            mode="local",
+            hl_keywords=['quantum computing', 'company research'],
+            ll_keywords=['quantum computing', 'company research', 'technology development'],
+            mode='local',
             user_supplied_ll=False,
         )
-        assert enriched == ["quantum computing"]
+        assert enriched == ['quantum computing']
 
     def test_enrich_local_keywords_falls_back_to_query_when_high_level_is_generic(self):
         """When all HL terms are generic, local mode should use the original query."""
         enriched = _enrich_local_keywords(
-            hl_keywords=["company research", "technology development"],
+            hl_keywords=['company research', 'technology development'],
             ll_keywords=[],
-            mode="local",
-            query="What is Amazon?",
+            mode='local',
+            query='What is Amazon?',
         )
-        assert enriched == ["What is Amazon?"]
+        assert enriched == ['What is Amazon?']
+
+
+@pytest.mark.offline
+class TestBuildQueryContextMixModeGuards:
+    """Regression tests for mix-mode no-KG-result guard behavior."""
+
+    @pytest.mark.asyncio
+    async def test_mix_mode_with_vector_chunks_and_empty_tracking_keeps_context_building(self):
+        """Mix mode should continue when vector chunks exist even if chunk_tracking is empty."""
+        query_param = QueryParam(mode='mix')
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        with (
+            patch(
+                'yar.operate._perform_kg_search',
+                new=AsyncMock(
+                    return_value={
+                        'final_entities': [],
+                        'final_relations': [],
+                        'vector_chunks': [{'content': 'vector-only chunk'}],
+                        'chunk_tracking': {},
+                        'query_embedding': None,
+                    }
+                ),
+            ),
+            patch(
+                'yar.operate._apply_token_truncation',
+                new=AsyncMock(
+                    return_value={
+                        'entities_context': [],
+                        'relations_context': [],
+                        'filtered_entities': [],
+                        'filtered_relations': [],
+                        'entity_id_to_original': {},
+                        'relation_id_to_original': {},
+                    }
+                ),
+            ),
+            patch(
+                'yar.operate._merge_all_chunks',
+                new=AsyncMock(return_value=[{'content': 'vector-only chunk'}]),
+            ),
+            patch(
+                'yar.operate._build_context_str',
+                new=AsyncMock(
+                    return_value=(
+                        'context text',
+                        {'data': {'entities': [], 'relationships': [], 'chunks': [{'content': 'vector-only chunk'}]}},
+                    )
+                ),
+            ),
+        ):
+            result = await _build_query_context(
+                query='what happened',
+                ll_keywords='',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=MagicMock(),
+            )
+
+        assert result is not None
+        assert result.context == 'context text'
+
+    @pytest.mark.asyncio
+    async def test_mix_mode_with_no_entities_relations_or_vector_chunks_returns_none(self):
+        """Mix mode should still return None when no retrieval source returns data."""
+        query_param = QueryParam(mode='mix')
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        with (
+            patch(
+                'yar.operate._perform_kg_search',
+                new=AsyncMock(
+                    return_value={
+                        'final_entities': [],
+                        'final_relations': [],
+                        'vector_chunks': [],
+                        'chunk_tracking': {},
+                        'query_embedding': None,
+                    }
+                ),
+            ),
+            patch('yar.operate._apply_token_truncation', new=AsyncMock()) as truncation_mock,
+        ):
+            result = await _build_query_context(
+                query='what happened',
+                ll_keywords='',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=MagicMock(),
+            )
+
+        assert result is None
+        truncation_mock.assert_not_awaited()
+
+
+@pytest.mark.offline
+class TestPerformKgSearchScoreAwareMerge:
+    """Regression tests for score-aware entity/relation merge behavior."""
+
+    @pytest.mark.asyncio
+    async def test_entity_merge_prefers_highest_scored_candidate(self):
+        query_param = QueryParam(mode='hybrid', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        local_entities = [
+            {'entity_name': 'A', 'score': 0.9, 'rank': 1},
+            {'entity_name': 'B', 'score': 0.2},
+        ]
+        global_entities = [
+            {'entity_name': 'B', 'score': 0.95},
+            {'entity_name': 'C', 'score': 0.7},
+        ]
+
+        with (
+            patch(
+                'yar.operate._get_node_data',
+                new=AsyncMock(return_value=(local_entities, [])),
+            ),
+            patch(
+                'yar.operate._get_edge_data',
+                new=AsyncMock(return_value=([], global_entities)),
+            ),
+        ):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='local-keyword',
+                hl_keywords='global-keyword',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        assert [entity['entity_name'] for entity in result['final_entities']] == ['B', 'A', 'C']
+        assert len([entity for entity in result['final_entities'] if entity['entity_name'] == 'B']) == 1
+
+    @pytest.mark.asyncio
+    async def test_relation_merge_prefers_highest_scored_duplicate(self):
+        query_param = QueryParam(mode='hybrid', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        local_relations = [
+            {'src_tgt': ('a', 'b'), 'rank': 2, 'weight': 0.2},
+            {'src_tgt': ('c', 'd'), 'score': 0.4},
+        ]
+        global_relations = [
+            {'src_id': 'a', 'tgt_id': 'b', 'score': 0.8},
+            {'src_id': 'e', 'tgt_id': 'f', 'weight': 3.0},
+        ]
+
+        with (
+            patch(
+                'yar.operate._get_node_data',
+                new=AsyncMock(return_value=([], local_relations)),
+            ),
+            patch(
+                'yar.operate._get_edge_data',
+                new=AsyncMock(return_value=(global_relations, [])),
+            ),
+        ):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='local-keyword',
+                hl_keywords='global-keyword',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        def relation_key(relation: dict[str, str]) -> tuple[str, str]:
+            src_tgt = relation.get('src_tgt')
+            if isinstance(src_tgt, (tuple, list)) and len(src_tgt) == 2:
+                return tuple(sorted((str(src_tgt[0]), str(src_tgt[1]))))
+            return tuple(sorted((str(relation.get('src_id')), str(relation.get('tgt_id')))))
+
+        assert [relation_key(relation) for relation in result['final_relations']] == [
+            ('a', 'b'),
+            ('c', 'd'),
+            ('e', 'f'),
+        ]
+        assert result['final_relations'][0].get('src_id') == 'a'
+
+
+
+@pytest.mark.offline
+class TestPerformKgSearchBranchExecution:
+    """Tests for branch execution behavior in _perform_kg_search."""
+
+    @pytest.mark.asyncio
+    async def test_hybrid_runs_node_and_edge_retrieval_concurrently_when_both_keywords_present(self):
+        query_param = QueryParam(mode='hybrid', top_k=5)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        node_started = asyncio.Event()
+        edge_started = asyncio.Event()
+        release = asyncio.Event()
+        state = {'concurrent_launch': False}
+
+        async def node_side_effect(*_args, **_kwargs):
+            node_started.set()
+            if edge_started.is_set():
+                state['concurrent_launch'] = True
+            await release.wait()
+            return ([{'entity_name': 'LocalEntity', 'score': 0.8}], [{'src_tgt': ('l', 'm'), 'score': 0.3}])
+
+        async def edge_side_effect(*_args, **_kwargs):
+            edge_started.set()
+            if node_started.is_set():
+                state['concurrent_launch'] = True
+            await release.wait()
+            return (
+                [{'src_id': 'g', 'tgt_id': 'h', 'score': 0.9}],
+                [{'entity_name': 'GlobalEntity', 'score': 0.4}],
+            )
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(side_effect=node_side_effect)) as node_mock,
+            patch('yar.operate._get_edge_data', new=AsyncMock(side_effect=edge_side_effect)) as edge_mock,
+        ):
+            search_task = asyncio.create_task(
+                _perform_kg_search(
+                    query='query',
+                    ll_keywords='local-keyword',
+                    hl_keywords='global-keyword',
+                    knowledge_graph_inst=MagicMock(),
+                    entities_vdb=MagicMock(),
+                    relationships_vdb=MagicMock(),
+                    text_chunks_db=text_chunks_db,
+                    query_param=query_param,
+                    chunks_vdb=None,
+                )
+            )
+
+            await node_started.wait()
+            await edge_started.wait()
+            assert state['concurrent_launch'] is True
+            assert not search_task.done()
+
+            release.set()
+            result = await search_task
+
+        assert node_mock.await_count == 1
+        assert edge_mock.await_count == 1
+        assert [entity['entity_name'] for entity in result['final_entities']] == [
+            'LocalEntity',
+            'GlobalEntity',
+        ]
+        assert [
+            tuple(sorted((str(rel.get('src_id') or rel['src_tgt'][0]), str(rel.get('tgt_id') or rel['src_tgt'][1]))))
+            for rel in result['final_relations']
+        ] == [('g', 'h'), ('l', 'm')]
+
+    @pytest.mark.asyncio
+    async def test_hybrid_with_only_low_level_keywords_uses_node_branch_only(self):
+        query_param = QueryParam(mode='hybrid', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        with (
+            patch(
+                'yar.operate._get_node_data',
+                new=AsyncMock(return_value=([{'entity_name': 'OnlyLocal'}], [{'src_tgt': ('a', 'b')}])),
+            ) as node_mock,
+            patch('yar.operate._get_edge_data', new=AsyncMock(return_value=([], []))) as edge_mock,
+        ):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='local-keyword',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        node_mock.assert_awaited_once()
+        edge_mock.assert_not_awaited()
+        assert [entity['entity_name'] for entity in result['final_entities']] == ['OnlyLocal']
+        assert result['final_relations'] == [{'src_tgt': ('a', 'b')}]
+
+    @pytest.mark.asyncio
+    async def test_mix_with_only_high_level_keywords_uses_edge_branch_only(self):
+        query_param = QueryParam(mode='mix', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))) as node_mock,
+            patch(
+                'yar.operate._get_edge_data',
+                new=AsyncMock(
+                    return_value=(
+                        [{'src_id': 'x', 'tgt_id': 'y', 'score': 0.5}],
+                        [{'entity_name': 'OnlyGlobal'}],
+                    )
+                ),
+            ) as edge_mock,
+            patch('yar.operate._get_vector_context', new=AsyncMock(return_value=[])) as vector_mock,
+        ):
+            result = await _perform_kg_search(
+                query='query',
+                ll_keywords='',
+                hl_keywords='global-keyword',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        node_mock.assert_not_awaited()
+        edge_mock.assert_awaited_once()
+        vector_mock.assert_not_awaited()
+        assert [entity['entity_name'] for entity in result['final_entities']] == ['OnlyGlobal']
+        assert result['final_relations'][0]['src_id'] == 'x'
+
+    @pytest.mark.asyncio
+    async def test_local_and_global_modes_keep_mode_specific_branching(self):
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        with (
+            patch(
+                'yar.operate._get_node_data',
+                new=AsyncMock(return_value=([{'entity_name': 'LocalModeEntity'}], [])),
+            ) as node_mock,
+            patch(
+                'yar.operate._get_edge_data',
+                new=AsyncMock(return_value=([{'src_id': 'g', 'tgt_id': 'h'}], [{'entity_name': 'GlobalModeEntity'}])),
+            ) as edge_mock,
+        ):
+            local_result = await _perform_kg_search(
+                query='',
+                ll_keywords='local-keyword',
+                hl_keywords='global-keyword',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=QueryParam(mode='local', top_k=3),
+                chunks_vdb=None,
+            )
+            global_result = await _perform_kg_search(
+                query='',
+                ll_keywords='local-keyword',
+                hl_keywords='global-keyword',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=QueryParam(mode='global', top_k=3),
+                chunks_vdb=None,
+            )
+
+        assert node_mock.await_count == 1
+        assert edge_mock.await_count == 1
+        assert [entity['entity_name'] for entity in local_result['final_entities']] == ['LocalModeEntity']
+        assert local_result['final_relations'] == []
+        assert [entity['entity_name'] for entity in global_result['final_entities']] == ['GlobalModeEntity']
+        assert global_result['final_relations'][0]['src_id'] == 'g'
+
+    @pytest.mark.asyncio
+    async def test_mix_with_no_keywords_keeps_empty_fallback(self):
+        query_param = QueryParam(mode='mix', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))) as node_mock,
+            patch('yar.operate._get_edge_data', new=AsyncMock(return_value=([], []))) as edge_mock,
+            patch('yar.operate._get_vector_context', new=AsyncMock(return_value=[])) as vector_mock,
+        ):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        node_mock.assert_not_awaited()
+        edge_mock.assert_not_awaited()
+        vector_mock.assert_not_awaited()
+        assert result['final_entities'] == []
+        assert result['final_relations'] == []
+        assert result['vector_chunks'] == []

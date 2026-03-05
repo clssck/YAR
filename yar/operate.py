@@ -143,9 +143,7 @@ def _truncate_extract_input_content(content: str, global_config: dict[str, Any],
         truncated_chars = max(1, int(len(content) * ratio))
         truncated_content = content[:truncated_chars]
 
-    logger.info(
-        f'{chunk_key}: extraction input truncated from {len(token_ids)} to {max_extract_input_tokens} tokens'
-    )
+    logger.info(f'{chunk_key}: extraction input truncated from {len(token_ids)} to {max_extract_input_tokens} tokens')
     return truncated_content
 
 
@@ -3811,20 +3809,39 @@ async def _perform_kg_search(
         )
 
     else:  # hybrid or mix mode
-        if len(ll_keywords) > 0:
-            local_entities, local_relations = await _get_node_data(
-                ll_keywords,
-                knowledge_graph_inst,
-                entities_vdb,
-                query_param,
+        if len(ll_keywords) > 0 and len(hl_keywords) > 0:
+            (
+                (local_entities, local_relations),
+                (global_relations, global_entities),
+            ) = await asyncio.gather(
+                _get_node_data(
+                    ll_keywords,
+                    knowledge_graph_inst,
+                    entities_vdb,
+                    query_param,
+                ),
+                _get_edge_data(
+                    hl_keywords,
+                    knowledge_graph_inst,
+                    relationships_vdb,
+                    query_param,
+                ),
             )
-        if len(hl_keywords) > 0:
-            global_relations, global_entities = await _get_edge_data(
-                hl_keywords,
-                knowledge_graph_inst,
-                relationships_vdb,
-                query_param,
-            )
+        else:
+            if len(ll_keywords) > 0:
+                local_entities, local_relations = await _get_node_data(
+                    ll_keywords,
+                    knowledge_graph_inst,
+                    entities_vdb,
+                    query_param,
+                )
+            if len(hl_keywords) > 0:
+                global_relations, global_entities = await _get_edge_data(
+                    hl_keywords,
+                    knowledge_graph_inst,
+                    relationships_vdb,
+                    query_param,
+                )
 
         # Get vector chunks for mix mode
         if query_param.mode == 'mix' and chunks_vdb:
@@ -3846,58 +3863,89 @@ async def _perform_kg_search(
                 else:
                     logger.warning(f'Vector chunk missing chunk_id: {chunk}')
 
-    # Round-robin merge entities
-    final_entities = []
-    seen_entities = set()
-    max_len = max(len(local_entities), len(global_entities))
-    for i in range(max_len):
-        # First from local
-        if i < len(local_entities):
-            entity = local_entities[i]
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _compute_merge_score(record: dict[str, Any], index: int) -> float:
+        score = 0.0
+
+        if 'score' in record:
+            score += _safe_float(record.get('score')) * 100.0
+        if 'similarity' in record:
+            score += _safe_float(record.get('similarity')) * 100.0
+        if 'cosine_similarity' in record:
+            score += _safe_float(record.get('cosine_similarity')) * 100.0
+
+        if 'distance' in record:
+            distance = max(_safe_float(record.get('distance')), 0.0)
+            score += (1.0 / (1.0 + distance)) * 50.0
+
+        if 'rank' in record:
+            score += max(_safe_float(record.get('rank')), 0.0)
+        if 'weight' in record:
+            score += max(_safe_float(record.get('weight')), 0.0)
+
+        score += max(query_param.top_k - index, 0)
+        return score
+
+    def _relation_key(relation: dict[str, Any]) -> tuple[str, str] | None:
+        src_tgt = relation.get('src_tgt')
+        if isinstance(src_tgt, (tuple, list)) and len(src_tgt) == 2:
+            return tuple(sorted((str(src_tgt[0]), str(src_tgt[1]))))
+        src_id = relation.get('src_id')
+        tgt_id = relation.get('tgt_id')
+        if src_id is None or tgt_id is None:
+            return None
+        return tuple(sorted((str(src_id), str(tgt_id))))
+
+    merged_entities: dict[str, tuple[float, int, int, dict[str, Any]]] = {}
+    for source_priority, source_entities in enumerate((local_entities, global_entities)):
+        for index, entity in enumerate(source_entities):
             entity_name = entity.get('entity_name')
-            if entity_name and entity_name not in seen_entities:
-                final_entities.append(entity)
-                seen_entities.add(entity_name)
+            if not entity_name:
+                continue
+            merge_score = _compute_merge_score(entity, index)
+            existing = merged_entities.get(entity_name)
+            candidate = (merge_score, source_priority, index, entity)
+            if (
+                existing is None
+                or merge_score > existing[0]
+                or (merge_score == existing[0] and (source_priority, index) < (existing[1], existing[2]))
+            ):
+                merged_entities[entity_name] = candidate
+    final_entities = [
+        item[3]
+        for item in sorted(
+            merged_entities.values(),
+            key=lambda x: (-x[0], x[1], x[2]),
+        )
+    ]
 
-        # Then from global
-        if i < len(global_entities):
-            entity = global_entities[i]
-            entity_name = entity.get('entity_name')
-            if entity_name and entity_name not in seen_entities:
-                final_entities.append(entity)
-                seen_entities.add(entity_name)
-
-    # Round-robin merge relations
-    final_relations = []
-    seen_relations = set()
-    max_len = max(len(local_relations), len(global_relations))
-    for i in range(max_len):
-        # First from local
-        if i < len(local_relations):
-            relation = local_relations[i]
-            # Build relation unique identifier
-            if 'src_tgt' in relation:
-                rel_key = tuple(sorted(relation['src_tgt']))
-            else:
-                rel_key = tuple(sorted([relation.get('src_id'), relation.get('tgt_id')]))
-
-            if rel_key not in seen_relations:
-                final_relations.append(relation)
-                seen_relations.add(rel_key)
-
-        # Then from global
-        if i < len(global_relations):
-            relation = global_relations[i]
-            # Build relation unique identifier
-            if 'src_tgt' in relation:
-                rel_key = tuple(sorted(relation['src_tgt']))
-            else:
-                rel_key = tuple(sorted([relation.get('src_id'), relation.get('tgt_id')]))
-
-            if rel_key not in seen_relations:
-                final_relations.append(relation)
-                seen_relations.add(rel_key)
-
+    merged_relations: dict[tuple[str, str], tuple[float, int, int, dict[str, Any]]] = {}
+    for source_priority, source_relations in enumerate((local_relations, global_relations)):
+        for index, relation in enumerate(source_relations):
+            rel_key = _relation_key(relation)
+            if rel_key is None:
+                continue
+            merge_score = _compute_merge_score(relation, index)
+            existing = merged_relations.get(rel_key)
+            candidate = (merge_score, source_priority, index, relation)
+            if (
+                existing is None
+                or merge_score > existing[0]
+                or (merge_score == existing[0] and (source_priority, index) < (existing[1], existing[2]))
+            ):
+                merged_relations[rel_key] = candidate
+    final_relations = [
+        item[3]
+        for item in sorted(
+            merged_relations.values(),
+            key=lambda x: (-x[0], x[1], x[2]),
+        )
+    ]
     logger.info(
         f'Raw search results: {len(final_entities)} entities, {len(final_relations)} relations, {len(vector_chunks)} vector chunks'
     )
@@ -4384,9 +4432,12 @@ async def _build_query_context(
     if not search_result['final_entities'] and not search_result['final_relations']:
         if query_param.mode != 'mix':
             return None
-        else:
-            if not search_result['chunk_tracking']:
-                return None
+
+        has_vector_chunks = any(
+            bool(chunk.get('content')) for chunk in search_result.get('vector_chunks', []) if isinstance(chunk, dict)
+        )
+        if not has_vector_chunks and not search_result['chunk_tracking']:
+            return None
 
     # Stage 1.5: Apply entity filter if specified (prevents context mixing between products)
     if query_param.entity_filter:
