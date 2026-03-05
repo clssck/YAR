@@ -10,9 +10,14 @@ This module tests:
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
+import yar.api.routers.explain_routes as explain_routes_module
 from yar.api.routers.explain_routes import (
     ExplainRequest,
     ExplainResponse,
@@ -263,3 +268,64 @@ class TestExplainResponse:
         """Test that model has JSON schema example configured."""
         schema = ExplainResponse.model_json_schema()
         assert 'examples' in schema or '$defs' in schema
+
+
+@pytest.mark.offline
+class TestExplainEndpointMetrics:
+    """Endpoint tests for explain metrics emission behavior."""
+
+    @pytest.mark.asyncio
+    async def test_explain_success_records_metric(self, monkeypatch):
+        mock_rag = MagicMock()
+        mock_rag.aquery_data = AsyncMock(
+            return_value={
+                'status': 'success',
+                'data': {
+                    'entities': [{'description': 'Entity description'}],
+                    'relationships': [{'description': 'Relation description'}],
+                    'chunks': [{'content': 'Chunk content'}],
+                },
+            }
+        )
+        record_metric_mock = AsyncMock()
+        monkeypatch.setattr(explain_routes_module, 'record_query_metric', record_metric_mock)
+
+        app = FastAPI()
+        app.include_router(explain_routes_module.create_explain_routes(mock_rag))
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+            response = await client.post('/query/explain', json={'query': 'Explain query', 'mode': 'mix'})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['success'] is True
+        record_metric_mock.assert_awaited_once()
+        metric_kwargs = record_metric_mock.await_args.kwargs
+        assert metric_kwargs['mode'] == 'mix'
+        assert metric_kwargs['entities_count'] == 1
+        assert metric_kwargs['relations_count'] == 1
+        assert metric_kwargs['chunks_count'] == 1
+
+    @pytest.mark.asyncio
+    async def test_explain_failure_records_metric(self, monkeypatch):
+        mock_rag = MagicMock()
+        mock_rag.aquery_data = AsyncMock(side_effect=RuntimeError('forced explain failure'))
+        record_metric_mock = AsyncMock()
+        monkeypatch.setattr(explain_routes_module, 'record_query_metric', record_metric_mock)
+
+        app = FastAPI()
+        app.include_router(explain_routes_module.create_explain_routes(mock_rag))
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+            response = await client.post('/query/explain', json={'query': 'Explain query', 'mode': 'local'})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['success'] is False
+        assert payload['context_preview'].startswith('Error:')
+        record_metric_mock.assert_awaited_once()
+        metric_kwargs = record_metric_mock.await_args.kwargs
+        assert metric_kwargs['mode'] == 'local'
+        assert metric_kwargs['entities_count'] == 0
+        assert metric_kwargs['relations_count'] == 0
+        assert metric_kwargs['chunks_count'] == 0

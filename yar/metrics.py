@@ -33,10 +33,24 @@ from yar.constants import (
 # Configuration
 METRICS_ENABLED = os.getenv('ENABLE_METRICS', str(DEFAULT_METRICS_ENABLED)).lower() == 'true'
 METRICS_HISTORY_SIZE = int(os.getenv('METRICS_HISTORY_SIZE', str(DEFAULT_METRICS_HISTORY_SIZE)))
+VALID_QUERY_MODES = frozenset({'local', 'global', 'hybrid', 'mix', 'naive'})
+UNKNOWN_QUERY_MODE = 'unknown'
 
 # Global metrics instance (singleton pattern)
 _metrics_instance: MetricsCollector | None = None
 _metrics_lock = asyncio.Lock()
+
+
+def normalize_query_mode(mode: str) -> str:
+    """Normalize mode values to a bounded set for stable metric cardinality."""
+    if not isinstance(mode, str):
+        return UNKNOWN_QUERY_MODE
+
+    normalized = mode.strip().lower()
+    if normalized in VALID_QUERY_MODES:
+        return normalized
+
+    return UNKNOWN_QUERY_MODE
 
 
 @dataclass
@@ -272,7 +286,7 @@ async def record_query_metric(
         QueryMetric(
             timestamp=time.time(),
             duration_ms=duration_ms,
-            mode=mode,
+            mode=normalize_query_mode(mode),
             cache_hit=cache_hit,
             entities_count=entities_count,
             relations_count=relations_count,

@@ -10,6 +10,7 @@ from yar.metrics import (
     MetricsCollector,
     QueryMetric,
     get_metrics_collector,
+    normalize_query_mode,
     record_query_metric,
 )
 
@@ -85,6 +86,22 @@ class TestMetricsCollector:
         collector.record_embed_call()
         collector.record_embed_call()
         assert collector.total_embed_calls == 2
+
+
+class TestModeNormalization:
+    """Test mode normalization and cardinality guards."""
+
+    def test_known_modes_are_normalized(self):
+        """Known query modes are normalized to lowercase canonical values."""
+        assert normalize_query_mode('MIX') == 'mix'
+        assert normalize_query_mode(' local ') == 'local'
+        assert normalize_query_mode('hybrid') == 'hybrid'
+
+    def test_unknown_modes_map_to_unknown(self):
+        """Unknown or malformed modes map to the unknown bucket."""
+        assert normalize_query_mode('custom_mode') == 'unknown'
+        assert normalize_query_mode('') == 'unknown'
+        assert normalize_query_mode(None) == 'unknown'  # type: ignore[arg-type]
 
 
 class TestPercentileCalculation:
@@ -313,3 +330,22 @@ class TestGlobalMetricsCollector:
         )
 
         assert collector.total_queries == initial_count + 1
+
+    @pytest.mark.asyncio
+    async def test_record_query_metric_helper_normalizes_unknown_mode(self):
+        """Helper should store unknown mode in bounded unknown bucket."""
+        collector = await get_metrics_collector()
+        initial_count = collector.total_queries
+
+        await record_query_metric(
+            duration_ms=50.0,
+            mode='non_standard_mode',
+            cache_hit=False,
+            entities_count=0,
+            relations_count=0,
+            chunks_count=0,
+            tokens_used=0,
+        )
+
+        assert collector.total_queries == initial_count + 1
+        assert collector.query_history[-1].mode == 'unknown'

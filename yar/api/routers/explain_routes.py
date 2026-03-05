@@ -209,6 +209,19 @@ def create_explain_routes(rag, api_key: str | None = None) -> APIRouter:
             logger.error(f'Error in query explain: {e}', exc_info=True)
             total_ms = (time.perf_counter() - start_time) * 1000
 
+            try:
+                await record_query_metric(
+                    duration_ms=total_ms,
+                    mode=request.mode,
+                    cache_hit=False,
+                    entities_count=0,
+                    relations_count=0,
+                    chunks_count=0,
+                    tokens_used=0,
+                )
+            except Exception as metric_error:
+                logger.warning(f'Failed to record query explain failure metric: {metric_error}')
+
             return ExplainResponse(
                 query=request.query,
                 mode=request.mode,

@@ -53,6 +53,16 @@ def _compute_cache_key(query: str, workspace: str, limit: int, language: str) ->
     return hashlib.sha256(key_data.encode()).hexdigest()[:16]
 
 
+def _build_local_cache_key(workspace: str, cache_hash: str) -> str:
+    """Build local in-memory cache key with workspace prefix."""
+    return f'{workspace}:{cache_hash}'
+
+
+def _build_redis_cache_key(workspace: str, cache_hash: str) -> str:
+    """Build Redis cache key with workspace prefix for scoped invalidation."""
+    return f'yar:fts:{workspace}:{cache_hash}'
+
+
 async def _get_redis_client():
     """Lazy initialize Redis client for FTS cache."""
     global _redis_client
@@ -92,8 +102,9 @@ async def get_cached_fts_results(
     if not FTS_CACHE_ENABLED:
         return None
 
-    cache_key = _compute_cache_key(query, workspace, limit, language)
-    redis_key = f'yar:fts:{cache_key}'
+    cache_hash = _compute_cache_key(query, workspace, limit, language)
+    cache_key = _build_local_cache_key(workspace, cache_hash)
+    redis_key = _build_redis_cache_key(workspace, cache_hash)
     current_time = time.time()
 
     # Try Redis first (if enabled)
@@ -104,7 +115,7 @@ async def get_cached_fts_results(
                 cached_json = await redis_client.get(redis_key)
                 if cached_json:
                     results = json.loads(cached_json)
-                    logger.debug(f'Redis FTS cache hit for hash {cache_key[:8]}')
+                    logger.debug(f'Redis FTS cache hit for hash {cache_hash[:8]}')
                     # Update local cache for faster subsequent hits
                     _fts_cache[cache_key] = (results, current_time)
                     return results
@@ -114,7 +125,7 @@ async def get_cached_fts_results(
     # Check local cache
     cached = _fts_cache.get(cache_key)
     if cached and (current_time - cached[1]) < FTS_CACHE_TTL:
-        logger.debug(f'Local FTS cache hit for hash {cache_key[:8]}')
+        logger.debug(f'Local FTS cache hit for hash {cache_hash[:8]}')
         return cached[0]
 
     return None
@@ -139,8 +150,9 @@ async def store_fts_results(
     if not FTS_CACHE_ENABLED:
         return
 
-    cache_key = _compute_cache_key(query, workspace, limit, language)
-    redis_key = f'yar:fts:{cache_key}'
+    cache_hash = _compute_cache_key(query, workspace, limit, language)
+    cache_key = _build_local_cache_key(workspace, cache_hash)
+    redis_key = _build_redis_cache_key(workspace, cache_hash)
     current_time = time.time()
 
     # Manage local cache size - LRU eviction
@@ -163,7 +175,7 @@ async def store_fts_results(
                     FTS_CACHE_TTL,
                     json.dumps(results),
                 )
-                logger.debug(f'FTS results cached in Redis for hash {cache_key[:8]}')
+                logger.debug(f'FTS results cached in Redis for hash {cache_hash[:8]}')
         except Exception as e:
             logger.debug(f'Redis FTS cache write error: {e}')
 
@@ -173,14 +185,8 @@ async def invalidate_fts_cache_for_workspace(workspace: str) -> int:
 
     Call this when documents are added/modified/deleted in a workspace.
 
-    Note: Since cache keys are hashes and don't encode workspace in a
-    recoverable way, this clears all local cache entries. For Redis,
-    it clears all FTS cache entries. In practice, this is acceptable
-    because:
-    1. Document changes are relatively infrequent
-    2. FTS cache TTL is short (5 minutes)
-    3. Cache rebuild cost is low
-
+    Cache keys include workspace prefixes, enabling selective invalidation
+    for both local and Redis caches.
     Args:
         workspace: Workspace identifier (for logging)
 
@@ -189,10 +195,13 @@ async def invalidate_fts_cache_for_workspace(workspace: str) -> int:
     """
     invalidated = 0
 
-    # Clear local cache
+    workspace_prefix = f'{workspace}:'
+    # Clear local cache entries scoped to this workspace only
     async with _fts_cache_lock:
-        invalidated = len(_fts_cache)
-        _fts_cache.clear()
+        local_keys = [key for key in _fts_cache if key.startswith(workspace_prefix)]
+        invalidated = len(local_keys)
+        for key in local_keys:
+            del _fts_cache[key]
         logger.info(f'FTS cache invalidated for workspace {workspace}: cleared {invalidated} local entries')
 
     # Clear Redis FTS cache (if enabled)
@@ -206,7 +215,7 @@ async def invalidate_fts_cache_for_workspace(workspace: str) -> int:
                 while True:
                     cursor, keys = await redis_client.scan(
                         cursor=cursor,
-                        match='yar:fts:*',
+                        match=f'yar:fts:{workspace}:*',
                         count=100,
                     )
                     if keys:
