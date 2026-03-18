@@ -495,34 +495,22 @@ def test_aquery_data_endpoint():
     print(f'API endpoint: {endpoint}')
     print('-' * 60)
 
-    try:
-        # Send request
-        print('Sending request...')
-        start_time = time.time()
+    # Send request
+    print('Sending request...')
+    start_time = time.time()
 
-        response = requests.post(endpoint, json=query_request, headers=AUTH_HEADERS, timeout=30)
+    response = requests.post(endpoint, json=query_request, headers=AUTH_HEADERS, timeout=30)
 
-        end_time = time.time()
-        response_time = end_time - start_time
+    assert response.status_code == 200, f'Expected 200, got {response.status_code}: {response.text}'
 
-        print(f'Response time: {response_time:.2f} seconds')
-        print(f'HTTP status code: {response.status_code}')
+    end_time = time.time()
+    response_time = end_time - start_time
 
-        if response.status_code == 200:
-            data = response.json()
-            print_query_results(data)
-        else:
-            print(f'Request failed: {response.status_code}')
-            print(f'Error message: {response.text}')
+    print(f'Response time: {response_time:.2f} seconds')
+    print(f'HTTP status code: {response.status_code}')
 
-    except requests.exceptions.ConnectionError:
-        print('❌ Connection failed: Please ensure YAR API service is running')
-        print('   Start command: python -m yar.api.yar_server')
-    except requests.exceptions.Timeout:
-        print('❌ Request timeout: Query processing took too long')
-    except Exception as e:
-        print(f'❌ Error occurred: {e!s}')
-
+    data = response.json()
+    print_query_results(data)
 
 def print_query_results(data: dict[str, Any]):
     """Format and print query results"""
@@ -639,7 +627,7 @@ def print_query_results(data: dict[str, Any]):
 
 @pytest.mark.integration
 @pytest.mark.requires_api
-def compare_with_regular_query():
+def test_compare_with_regular_query():
     """Compare results between regular query and data query"""
 
     query_text = 'YAR的作者是谁'
@@ -740,7 +728,7 @@ if __name__ == '__main__':
         test_aquery_data_endpoint()
 
         print('\nRunning comparison test...')
-        compare_with_regular_query()
+        test_compare_with_regular_query()
 
         print('\nRunning new reference tests...')
         run_all_reference_tests()

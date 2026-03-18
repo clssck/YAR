@@ -267,7 +267,7 @@ class TestExplainResponse:
     def test_json_schema_example(self):
         """Test that model has JSON schema example configured."""
         schema = ExplainResponse.model_json_schema()
-        assert 'examples' in schema or '$defs' in schema
+        assert 'example' in schema
 
 
 @pytest.mark.offline

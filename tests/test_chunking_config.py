@@ -272,45 +272,6 @@ class TestChunkCharacterOffsets:
 
 # ============================================================================
 # Metadata Integration Tests
-# ============================================================================
-
-
-@pytest.mark.offline
-class TestChunkingMetadataStorage:
-    """Tests for chunking metadata storage in document processing."""
-
-    def test_metadata_dict_structure(self):
-        """Test that chunking metadata has expected structure."""
-        # Simulate metadata that would be stored
-        metadata = {
-            'processing_start_time': 1234567890,
-            'processing_end_time': 1234567900,
-            'chunking_preset': 'semantic',
-            'chunk_token_size': 1200,
-            'chunk_overlap_token_size': 100,
-        }
-
-        assert 'chunking_preset' in metadata
-        assert 'chunk_token_size' in metadata
-        assert 'chunk_overlap_token_size' in metadata
-        assert metadata['chunking_preset'] in ('semantic', 'recursive', None)
-        assert isinstance(metadata['chunk_token_size'], int)
-        assert isinstance(metadata['chunk_overlap_token_size'], int)
-
-    def test_metadata_preset_fallback(self):
-        """Test that None preset defaults to 'semantic' in metadata."""
-        doc_chunking_preset = None
-        fallback_preset = doc_chunking_preset or 'semantic'
-
-        assert fallback_preset == 'semantic'
-
-    def test_metadata_preserves_explicit_preset(self):
-        """Test that explicit preset is preserved in metadata."""
-        doc_chunking_preset = 'recursive'
-        stored_preset = doc_chunking_preset or 'semantic'
-
-        assert stored_preset == 'recursive'
-
 
 # ============================================================================
 # Edge Cases and Error Handling

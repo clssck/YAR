@@ -948,6 +948,11 @@ class TestQueryIntegration:
         assert response.status_code == 200
         # Verify the RAG was called with proper params
         mock_rag.aquery_llm.assert_called_once()
+        call_kwargs = mock_rag.aquery_llm.call_args
+        assert call_kwargs.kwargs['param'].conversation_history == [
+            {'role': 'user', 'content': 'What is AI?'},
+            {'role': 'assistant', 'content': 'AI is...'},
+        ]
 
     @pytest.mark.asyncio
     async def test_query_with_custom_keywords(self, client, mock_rag):

@@ -486,23 +486,6 @@ Paragraph 2.
   })
 })
 
-// =============================================================================
-// Query Mode Tests
-// =============================================================================
-
-describe('Query Mode Types', () => {
-  type QueryMode = 'local' | 'global' | 'hybrid' | 'naive' | 'mix'
-
-  test('all query modes are valid', () => {
-    const modes: QueryMode[] = ['local', 'global', 'hybrid', 'naive', 'mix']
-    expect(modes).toHaveLength(5)
-  })
-
-  test('mix is the default mode', () => {
-    const defaultMode: QueryMode = 'mix'
-    expect(defaultMode).toBe('mix')
-  })
-})
 
 describe('Non-stream reference propagation', () => {
   test('attaches references to assistant message and state', () => {
@@ -543,65 +526,5 @@ describe('Non-stream reference propagation', () => {
 
     expect(assistantMessage.references).toBeUndefined()
     expect(updatedMessages[0].references).toBeUndefined()
-  })
-})
-
-
-// =============================================================================
-// Message Type Tests
-// =============================================================================
-
-describe('Message Types', () => {
-  interface MessageWithError {
-    id: string
-    role: 'user' | 'assistant'
-    content: string
-    isError?: boolean
-    errorType?: 'timeout' | 'auth' | 'server' | 'network' | 'unknown'
-    isThinking?: boolean
-    timestamp?: number
-  }
-
-  test('creates valid user message', () => {
-    const msg: MessageWithError = {
-      id: 'msg-1',
-      role: 'user',
-      content: 'Hello',
-    }
-    expect(msg.role).toBe('user')
-    expect(msg.isError).toBeUndefined()
-  })
-
-  test('creates valid assistant message', () => {
-    const msg: MessageWithError = {
-      id: 'msg-2',
-      role: 'assistant',
-      content: 'Hi there',
-      timestamp: Date.now(),
-    }
-    expect(msg.role).toBe('assistant')
-    expect(msg.timestamp).toBeDefined()
-  })
-
-  test('creates error message', () => {
-    const msg: MessageWithError = {
-      id: 'msg-3',
-      role: 'assistant',
-      content: 'Error occurred',
-      isError: true,
-      errorType: 'server',
-    }
-    expect(msg.isError).toBe(true)
-    expect(msg.errorType).toBe('server')
-  })
-
-  test('creates thinking message', () => {
-    const msg: MessageWithError = {
-      id: 'msg-4',
-      role: 'assistant',
-      content: '',
-      isThinking: true,
-    }
-    expect(msg.isThinking).toBe(true)
   })
 })
