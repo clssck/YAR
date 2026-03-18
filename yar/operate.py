@@ -6,10 +6,10 @@ import os
 import re
 import time
 from collections import Counter, defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, cast, overload
+from typing import Any, cast
 
 import json_repair
 from dotenv import load_dotenv
@@ -49,6 +49,7 @@ from yar.constants import (
 )
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
+from yar.types import GlobalConfig
 from yar.utils import (
     CacheData,
     Tokenizer,
@@ -85,7 +86,7 @@ from yar.utils import (
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / '.env', override=False)
 
 
-def _resolve_max_file_paths(global_config: dict[str, Any]) -> int:
+def _resolve_max_file_paths(global_config: GlobalConfig) -> int:
     """Resolve max_file_paths with safe int parsing and non-negative clamp."""
 
     raw_max_paths = global_config.get('max_file_paths', DEFAULT_MAX_FILE_PATHS)
@@ -101,7 +102,7 @@ def _resolve_max_file_paths(global_config: dict[str, Any]) -> int:
     return max(0, max_file_paths)
 
 
-def _truncate_extract_input_content(content: str, global_config: dict[str, Any], chunk_key: str) -> str:
+def _truncate_extract_input_content(content: str, global_config: GlobalConfig, chunk_key: str) -> str:
     """Apply extraction input token guard to avoid oversized extraction prompts."""
 
     raw_limit = global_config.get('max_extract_input_tokens', os.getenv('MAX_EXTRACT_INPUT_TOKENS', '20480'))
@@ -340,8 +341,8 @@ async def _handle_entity_relation_summary(
     description_type: str,
     entity_or_relation_name: str,
     description_list: list[str],
-    seperator: str,
-    global_config: dict,
+    separator: str,
+    global_config: GlobalConfig,
     llm_response_cache: BaseKVStorage | None = None,
 ) -> tuple[str, bool]:
     """Handle entity relation description summary using map-reduce approach.
@@ -380,15 +381,25 @@ async def _handle_entity_relation_summary(
     llm_was_used = False  # Track whether LLM was used during the entire process
 
     # Iterative map-reduce process
+    MAX_SUMMARY_ITERATIONS = 10  # Safety cap for map-reduce summarization
+    iteration = 0
     while True:
         # Calculate total tokens in current list
         total_tokens = sum(len(tokenizer.encode(desc)) for desc in current_list)
+
+        iteration += 1
+        if iteration > MAX_SUMMARY_ITERATIONS:
+            logger.warning(
+                f'Summarizing {entity_or_relation_name}: hit max iterations ({MAX_SUMMARY_ITERATIONS}), '
+                f'returning concatenated result ({len(current_list)} descriptions, {total_tokens} tokens)'
+            )
+            return separator.join(current_list), llm_was_used
 
         # If total length is within limits, perform final summarization
         if total_tokens <= summary_context_size or len(current_list) <= 2:
             if len(current_list) < force_llm_summary_on_merge and total_tokens < summary_max_tokens:
                 # no LLM needed, just join the descriptions
-                final_description = seperator.join(current_list)
+                final_description = separator.join(current_list)
                 return final_description if final_description else '', llm_was_used
             else:
                 if total_tokens > summary_context_size and len(current_list) <= 2:
@@ -465,7 +476,7 @@ async def _summarize_descriptions(
     description_type: str,
     description_name: str,
     description_list: list[str],
-    global_config: dict,
+    global_config: GlobalConfig,
     llm_response_cache: BaseKVStorage | None = None,
 ) -> str:
     """Helper function to summarize a list of descriptions using LLM.
@@ -554,7 +565,7 @@ Respond with ONLY a JSON array:
 
 async def _batch_infer_entity_types(
     unknown_entities: list[dict[str, Any]],
-    global_config: dict,
+    global_config: GlobalConfig,
     knowledge_graph_inst: BaseGraphStorage | None = None,
     entity_vdb: BaseVectorStorage | None = None,
     batch_size: int = 20,
@@ -605,7 +616,6 @@ async def _batch_infer_entity_types(
             response = await use_llm_func(prompt)
 
             # Parse JSON from response
-            import re
 
             text = response
             if '```' in text:
@@ -687,7 +697,7 @@ async def _handle_single_entity_extraction(
     if len(record_attributes) != 4 or 'entity' not in record_attributes[0]:
         if len(record_attributes) > 1 and 'entity' in record_attributes[0]:
             logger.warning(
-                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/4 feilds on ENTITY `{record_attributes[1]}` @ `{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
+                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/4 fields on ENTITY `{record_attributes[1]}` @ `{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
             )
             logger.debug(record_attributes)
         return None
@@ -810,9 +820,9 @@ async def rebuild_knowledge_from_chunks(
     relationships_vdb: BaseVectorStorage,
     text_chunks_storage: BaseKVStorage,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, Any],
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    global_config: GlobalConfig,
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     relation_chunks_storage: BaseKVStorage | None = None,
 ) -> None:
@@ -1175,8 +1185,6 @@ async def _process_extraction_result(
     fixed_records = []
     for record in records:
         record = record.strip()
-        if record is None:
-            continue
         entity_records = split_string_by_multi_markers(record, [f'{tuple_delimiter}entity{tuple_delimiter}'])
         for entity_record in entity_records:
             if not entity_record.startswith('entity') and not entity_record.startswith('relation'):
@@ -1198,13 +1206,11 @@ async def _process_extraction_result(
 
     if len(fixed_records) != len(records):
         logger.warning(
-            f'{chunk_key}: LLM output format error; find LLM use {tuple_delimiter} as record seperators instead new-line'
+            f'{chunk_key}: LLM output format error; find LLM use {tuple_delimiter} as record separators instead new-line'
         )
 
     for record in fixed_records:
         record = record.strip()
-        if record is None:
-            continue
 
         # Fix various forms of tuple_delimiter corruption from the LLM output using the dedicated function
         delimiter_core = tuple_delimiter[2:-2]  # Extract "#" from "<|#|>"
@@ -1292,10 +1298,10 @@ async def _rebuild_single_entity(
     chunk_ids: list[str],
     chunk_entities: dict,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     entity_chunks_storage: BaseKVStorage | None = None,
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
 ) -> None:
     """Rebuild a single entity from cached extraction results"""
 
@@ -1522,11 +1528,11 @@ async def _rebuild_single_relationship(
     chunk_ids: list[str],
     chunk_relationships: dict,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     relation_chunks_storage: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
 ) -> None:
     """Rebuild a single relationship from cached extraction results
 
@@ -1772,9 +1778,9 @@ async def _merge_nodes_then_upsert(
     nodes_data: list[dict],
     knowledge_graph_inst: BaseGraphStorage,
     entity_vdb: BaseVectorStorage | None,
-    global_config: dict,
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    global_config: GlobalConfig,
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
     llm_response_cache: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
 ):
@@ -2018,9 +2024,9 @@ async def _merge_edges_then_upsert(
     knowledge_graph_inst: BaseGraphStorage,
     relationships_vdb: BaseVectorStorage | None,
     entity_vdb: BaseVectorStorage | None,
-    global_config: dict,
-    pipeline_status: dict | None = None,
-    pipeline_status_lock=None,
+    global_config: GlobalConfig,
+    pipeline_status: dict[str, Any] | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
     llm_response_cache: BaseKVStorage | None = None,
     added_entities: list | None = None,  # New parameter to track entities added during edge processing
     relation_chunks_storage: BaseKVStorage | None = None,
@@ -2465,7 +2471,7 @@ async def _resolve_entity_aliases_for_batch(
     all_nodes: dict[str, list],
     all_edges: dict[tuple, list],
     entity_vdb: BaseVectorStorage,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
 ) -> tuple[dict[str, list], dict[tuple, list]]:
     """Resolve entity aliases before merging into the knowledge graph.
 
@@ -2631,16 +2637,16 @@ async def _resolve_entity_aliases_for_batch(
 
 
 async def merge_nodes_and_edges(
-    chunk_results: list,
+    chunk_results: list[Any],
     knowledge_graph_inst: BaseGraphStorage,
     entity_vdb: BaseVectorStorage,
     relationships_vdb: BaseVectorStorage,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     full_entities_storage: BaseKVStorage | None = None,
     full_relations_storage: BaseKVStorage | None = None,
     doc_id: str | None = None,
     pipeline_status: dict[str, Any] | None = None,
-    pipeline_status_lock: asyncio.Lock | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
     llm_response_cache: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     relation_chunks_storage: BaseKVStorage | None = None,
@@ -2976,12 +2982,12 @@ async def merge_nodes_and_edges(
 
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     pipeline_status: dict[str, Any] | None = None,
-    pipeline_status_lock: asyncio.Lock | None = None,
+    pipeline_status_lock: asyncio.Lock | Any | None = None,
     llm_response_cache: BaseKVStorage | None = None,
     text_chunks_storage: BaseKVStorage | None = None,
-) -> list:
+) -> list[Any]:
     # Check for cancellation at the start of entity extraction
     await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'entity extraction')
 
@@ -3275,8 +3281,8 @@ def _enrich_local_keywords(
 
         focused_ll = [kw for kw in cleaned_ll if not _is_generic_local_keyword(kw)]
         if focused_ll:
-            # Keep the most specific low-level signal to minimize cross-domain bleed.
-            return [focused_ll[0]]
+            # Keep all focused low-level signals so multi-entity queries preserve each entity.
+            return focused_ll
 
     seen_hl: set[str] = set()
     focused_hl: list[str] = []
@@ -3317,7 +3323,7 @@ async def kg_query(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     chunks_vdb: BaseVectorStorage | None = None,
@@ -3359,7 +3365,7 @@ async def kg_query(
         use_model_func = query_param.model_func
     else:
         use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
-        use_model_func = partial(use_model_func, _priority=5)
+        use_model_func = cast(Callable[..., Awaitable[str]], partial(use_model_func, _priority=5))
 
     hl_keywords, ll_keywords = await get_keywords_from_query(query, query_param, global_config, hashing_kv)
     ll_keywords = _enrich_local_keywords(
@@ -3447,6 +3453,8 @@ async def kg_query(
         ll_keywords_str,
         query_param.user_prompt or '',
         query_param.enable_rerank,
+        query_param.enable_bm25_fusion,
+        query_param.enable_hyde,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
@@ -3481,6 +3489,8 @@ async def kg_query(
                 'll_keywords': ll_keywords_str,
                 'user_prompt': query_param.user_prompt or '',
                 'enable_rerank': query_param.enable_rerank,
+                'enable_bm25_fusion': query_param.enable_bm25_fusion,
+                'enable_hyde': query_param.enable_hyde,
             }
             await save_to_cache(
                 hashing_kv,
@@ -3528,7 +3538,7 @@ async def kg_query(
 async def get_keywords_from_query(
     query: str,
     query_param: QueryParam,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[list[str], list[str]]:
     """
@@ -3555,10 +3565,24 @@ async def get_keywords_from_query(
     return hl_keywords, ll_keywords
 
 
+def _conversation_history_cache_hash(conversation_history: list[dict[str, Any]] | None) -> str:
+    """Return a compact, stable hash for keyword extraction conversation history."""
+    if not conversation_history:
+        return ''
+
+    normalized_history = json.dumps(
+        conversation_history,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    return compute_args_hash(normalized_history)
+
+
 async def extract_keywords_only(
     text: str,
     param: QueryParam,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[list[str], list[str]]:
     """
@@ -3571,13 +3595,18 @@ async def extract_keywords_only(
     examples = '\n'.join(PROMPTS['keywords_extraction_examples'])
 
     language = global_config['addon_params'].get('language', DEFAULT_SUMMARY_LANGUAGE)
+    conversation_history_hash = _conversation_history_cache_hash(param.conversation_history)
 
     # 2. Handle cache if needed - add cache type for keywords
-    args_hash = compute_args_hash(
+    hash_args: list[Any] = [
         param.mode,
         text,
         language,
-    )
+    ]
+    if conversation_history_hash:
+        hash_args.append(conversation_history_hash)
+
+    args_hash = compute_args_hash(*hash_args)
     cached_result = await handle_cache(hashing_kv, args_hash, text, param.mode, cache_type='keywords')
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
@@ -3603,7 +3632,7 @@ async def extract_keywords_only(
         use_model_func = param.model_func
     else:
         use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
-        use_model_func = partial(use_model_func, _priority=5)
+        use_model_func = cast(Callable[..., Awaitable[str]], partial(use_model_func, _priority=5))
 
     result = cast(str, await use_model_func(kw_prompt, keyword_extraction=True))
 
@@ -3641,6 +3670,8 @@ async def extract_keywords_only(
                 'user_prompt': param.user_prompt or '',
                 'enable_rerank': param.enable_rerank,
             }
+            if conversation_history_hash:
+                queryparam_dict['conversation_history_hash'] = conversation_history_hash
             await save_to_cache(
                 hashing_kv,
                 CacheData(
@@ -3760,19 +3791,30 @@ async def _perform_kg_search(
     kg_chunk_pick_method = text_chunks_db.global_config.get('kg_chunk_pick_method', DEFAULT_KG_CHUNK_PICK_METHOD)
     query_embedding = None
     embedding_query_text = query  # Text to embed (query or hypothetical answer for HyDE)
+    ll_search_terms = _split_keyword_terms(ll_keywords)
+    normalized_query = query.strip()
+    should_reuse_entity_embedding = bool(
+        normalized_query
+        and ll_search_terms
+        and (
+            query_param.enable_hyde
+            or (len(ll_search_terms) == 1 and ll_search_terms[0].casefold() == normalized_query.casefold())
+        )
+    )
 
     # HyDE: Generate hypothetical answer if enabled
     if query and query_param.enable_hyde:
         try:
-            use_model_func = query_param.model_func or text_chunks_db.global_config.get('llm_model_func')
+            use_model_func = cast(Callable[..., Awaitable[str]], query_param.model_func or text_chunks_db.global_config.get('llm_model_func'))
             if use_model_func:
                 hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
                 hypothetical_answer = cast(str, await use_model_func(hyde_prompt))
-                if hypothetical_answer and isinstance(hypothetical_answer, str) and len(hypothetical_answer) > 20:
-                    embedding_query_text = hypothetical_answer
-                    logger.debug(
-                        f'HyDE: Generated hypothetical answer ({len(hypothetical_answer)} chars) for embedding'
-                    )
+                normalized_hypothetical_answer = hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
+                hyde_answer_length = len(normalized_hypothetical_answer)
+                logger.debug(f'HyDE: Generated hypothetical answer length={hyde_answer_length}')
+                if hyde_answer_length >= 10:
+                    embedding_query_text = normalized_hypothetical_answer
+                    logger.debug(f'HyDE: Using hypothetical answer ({hyde_answer_length} chars) for embedding')
                 else:
                     logger.warning('HyDE: Generated answer too short, using original query')
             else:
@@ -3780,7 +3822,7 @@ async def _perform_kg_search(
         except Exception as e:
             logger.warning(f'HyDE: Failed to generate hypothetical answer: {e}, using original query')
 
-    if query and (kg_chunk_pick_method == 'VECTOR' or chunks_vdb):
+    if query and (kg_chunk_pick_method == 'VECTOR' or chunks_vdb or should_reuse_entity_embedding):
         actual_embedding_func = text_chunks_db.embedding_func
         if actual_embedding_func:
             try:
@@ -3798,6 +3840,7 @@ async def _perform_kg_search(
             knowledge_graph_inst,
             entities_vdb,
             query_param,
+            query_embedding=query_embedding if should_reuse_entity_embedding else None,
         )
 
     elif query_param.mode == 'global' and len(hl_keywords) > 0:
@@ -3819,6 +3862,7 @@ async def _perform_kg_search(
                     knowledge_graph_inst,
                     entities_vdb,
                     query_param,
+                    query_embedding=query_embedding if should_reuse_entity_embedding else None,
                 ),
                 _get_edge_data(
                     hl_keywords,
@@ -3834,6 +3878,7 @@ async def _perform_kg_search(
                     knowledge_graph_inst,
                     entities_vdb,
                     query_param,
+                    query_embedding=query_embedding if should_reuse_entity_embedding else None,
                 )
             if len(hl_keywords) > 0:
                 global_relations, global_entities = await _get_edge_data(
@@ -3869,37 +3914,70 @@ async def _perform_kg_search(
         except (TypeError, ValueError):
             return default
 
+    def _clamp_unit(value: Any) -> float:
+        return min(max(_safe_float(value), 0.0), 1.0)
+
+    def _saturating_score(value: Any, damping: float) -> float:
+        normalized_value = max(_safe_float(value), 0.0)
+        if normalized_value <= 0.0:
+            return 0.0
+        return normalized_value / (normalized_value + damping)
+
+    merge_score_config = getattr(text_chunks_db, 'global_config', {}) or {}
+    merge_similarity_weight = max(_safe_float(merge_score_config.get('kg_merge_similarity_weight'), 0.5), 0.0)
+    merge_degree_weight = max(_safe_float(merge_score_config.get('kg_merge_degree_weight'), 0.15), 0.0)
+    merge_weight_weight = max(_safe_float(merge_score_config.get('kg_merge_weight_weight'), 0.15), 0.0)
+    merge_position_weight = max(_safe_float(merge_score_config.get('kg_merge_position_weight'), 0.2), 0.0)
+    merge_weight_total = (
+        merge_similarity_weight
+        + merge_degree_weight
+        + merge_weight_weight
+        + merge_position_weight
+    )
+    if merge_weight_total <= 0.0:
+        merge_similarity_weight = 0.5
+        merge_degree_weight = 0.15
+        merge_weight_weight = 0.15
+        merge_position_weight = 0.2
+        merge_weight_total = 1.0
+
+    merge_damping = 10.0
+    normalized_top_k = max(query_param.top_k, 1)
+
     def _compute_merge_score(record: dict[str, Any], index: int) -> float:
-        score = 0.0
-
-        if 'score' in record:
-            score += _safe_float(record.get('score')) * 100.0
-        if 'similarity' in record:
-            score += _safe_float(record.get('similarity')) * 100.0
-        if 'cosine_similarity' in record:
-            score += _safe_float(record.get('cosine_similarity')) * 100.0
-
+        similarity_candidates = [
+            _safe_float(record.get('score')),
+            _safe_float(record.get('similarity')),
+            _safe_float(record.get('cosine_similarity')),
+        ]
         if 'distance' in record:
             distance = max(_safe_float(record.get('distance')), 0.0)
-            score += (1.0 / (1.0 + distance)) * 50.0
+            similarity_candidates.append(1.0 / (1.0 + distance))
 
-        if 'rank' in record:
-            score += max(_safe_float(record.get('rank')), 0.0)
-        if 'weight' in record:
-            score += max(_safe_float(record.get('weight')), 0.0)
+        similarity_score = _clamp_unit(max(similarity_candidates))
+        degree_score = _saturating_score(record.get('rank'), merge_damping)
+        weight_score = _saturating_score(record.get('weight'), merge_damping)
+        position_score = max(normalized_top_k - index, 0) / normalized_top_k
 
-        score += max(query_param.top_k - index, 0)
-        return score
+        weighted_score = (
+            similarity_score * merge_similarity_weight
+            + degree_score * merge_degree_weight
+            + weight_score * merge_weight_weight
+            + position_score * merge_position_weight
+        )
+        return weighted_score / merge_weight_total
 
     def _relation_key(relation: dict[str, Any]) -> tuple[str, str] | None:
         src_tgt = relation.get('src_tgt')
         if isinstance(src_tgt, (tuple, list)) and len(src_tgt) == 2:
-            return tuple(sorted((str(src_tgt[0]), str(src_tgt[1]))))
+            a, b = str(src_tgt[0]), str(src_tgt[1])
+            return (a, b) if a <= b else (b, a)
         src_id = relation.get('src_id')
         tgt_id = relation.get('tgt_id')
         if src_id is None or tgt_id is None:
             return None
-        return tuple(sorted((str(src_id), str(tgt_id))))
+        a, b = str(src_id), str(tgt_id)
+        return (a, b) if a <= b else (b, a)
 
     merged_entities: dict[str, tuple[float, int, int, dict[str, Any]]] = {}
     for source_priority, source_entities in enumerate((local_entities, global_entities)):
@@ -3962,7 +4040,7 @@ async def _perform_kg_search(
 async def _apply_token_truncation(
     search_result: dict[str, Any],
     query_param: QueryParam,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
 ) -> dict[str, Any]:
     """
     Apply token-based truncation to entities and relations for LLM efficiency.
@@ -4233,7 +4311,7 @@ async def _build_context_str(
     merged_chunks: list[dict],
     query: str,
     query_param: QueryParam,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     chunk_tracking: dict | None = None,
     entity_id_to_original: dict | None = None,
     relation_id_to_original: dict | None = None,
@@ -4484,7 +4562,7 @@ async def _build_query_context(
     truncation_result = await _apply_token_truncation(
         search_result,
         query_param,
-        text_chunks_db.global_config,
+        cast(GlobalConfig, text_chunks_db.global_config),
     )
 
     # Stage 3: Merge chunks using filtered entities/relations
@@ -4512,7 +4590,7 @@ async def _build_query_context(
         merged_chunks=merged_chunks,
         query=query,
         query_param=query_param,
-        global_config=text_chunks_db.global_config,
+        global_config=cast(GlobalConfig, text_chunks_db.global_config),
         chunk_tracking=search_result['chunk_tracking'],
         entity_id_to_original=truncation_result['entity_id_to_original'],
         relation_id_to_original=truncation_result['relation_id_to_original'],
@@ -4575,13 +4653,29 @@ async def _query_entity_candidates(
     term: str,
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
-) -> list[dict[str, Any]]:
+    query_embedding: list[float] | None = None,
+ ) -> list[dict[str, Any]]:
     """Query entity candidates for a single term.
 
     Uses hybrid entity search when supported by the storage backend (vector + trigram),
     otherwise falls back to vector-only search.
     """
     hybrid_search = getattr(entities_vdb, 'hybrid_entity_search', None)
+
+    if query_embedding is not None:
+        try:
+            vector_results = await entities_vdb.query(
+                term,
+                top_k=query_param.top_k,
+                query_embedding=query_embedding,
+            )
+            if vector_results or not callable(hybrid_search):
+                return vector_results
+        except Exception as e:
+            logger.error(f'Entity vector search failed for term "{term[:50]}...": {e}')
+            if not callable(hybrid_search):
+                return []
+
     if callable(hybrid_search):
         try:
             hybrid_results = await hybrid_search(term, top_k=query_param.top_k)
@@ -4602,7 +4696,8 @@ async def _get_node_data(
     knowledge_graph_inst: BaseGraphStorage,
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
-):
+    query_embedding: list[float] | None = None,
+ ):
     # get similar entities
     logger.info(f'Query nodes: {query} (top_k:{query_param.top_k}, cosine:{entities_vdb.cosine_better_than_threshold})')
 
@@ -4616,7 +4711,12 @@ async def _get_node_data(
     # Query each term independently to preserve specific entity matches
     # when keywords are comma-joined (e.g., "IBM, Google, Microsoft, IonQ").
     for term in search_terms:
-        term_results = await _query_entity_candidates(term, entities_vdb, query_param)
+        term_results = await _query_entity_candidates(
+            term,
+            entities_vdb,
+            query_param,
+            query_embedding=query_embedding,
+        )
         for result in term_results:
             entity_name = result.get('entity_name')
             if not entity_name or entity_name in seen_entities:
@@ -4630,7 +4730,12 @@ async def _get_node_data(
 
     # If keyword-split search misses, retry with the full query string once.
     if not results and len(search_terms) > 1:
-        full_query_results = await _query_entity_candidates(query, entities_vdb, query_param)
+        full_query_results = await _query_entity_candidates(
+            query,
+            entities_vdb,
+            query_param,
+            query_embedding=query_embedding,
+        )
         for result in full_query_results:
             entity_name = result.get('entity_name')
             if not entity_name or entity_name in seen_entities:
@@ -5158,35 +5263,12 @@ async def _find_related_text_unit_from_relations(
     return result_chunks
 
 
-@overload
-async def naive_query(
-    query: str,
-    chunks_vdb: BaseVectorStorage,
-    query_param: QueryParam,
-    global_config: dict[str, Any],
-    hashing_kv: BaseKVStorage | None = None,
-    system_prompt: str | None = None,
-    return_raw_data: Literal[True] = True,
-) -> dict[str, Any]: ...
-
-
-@overload
-async def naive_query(
-    query: str,
-    chunks_vdb: BaseVectorStorage,
-    query_param: QueryParam,
-    global_config: dict[str, Any],
-    hashing_kv: BaseKVStorage | None = None,
-    system_prompt: str | None = None,
-    return_raw_data: Literal[False] = False,
-) -> str | AsyncIterator[str]: ...
-
 
 async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
-    global_config: dict[str, Any],
+    global_config: GlobalConfig,
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
 ) -> QueryResult | None:
@@ -5218,7 +5300,7 @@ async def naive_query(
         use_model_func = query_param.model_func
     else:
         use_model_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
-        use_model_func = partial(use_model_func, _priority=5)
+        use_model_func = cast(Callable[..., Awaitable[str]], partial(use_model_func, _priority=5))
 
     tokenizer = global_config['tokenizer']
     if not tokenizer:
@@ -5231,12 +5313,15 @@ async def naive_query(
         try:
             hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
             hypothetical_answer = cast(str, await use_model_func(hyde_prompt))
-            if hypothetical_answer and isinstance(hypothetical_answer, str) and len(hypothetical_answer) > 20:
+            normalized_hypothetical_answer = hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
+            hyde_answer_length = len(normalized_hypothetical_answer)
+            logger.debug(f'HyDE (naive): Generated hypothetical answer length={hyde_answer_length}')
+            if hyde_answer_length >= 10:
                 embedding_func = getattr(chunks_vdb, 'embedding_func', None)
                 if embedding_func:
-                    query_embedding = await embedding_func([hypothetical_answer])
+                    query_embedding = await embedding_func([normalized_hypothetical_answer])
                     query_embedding = query_embedding[0]
-                    logger.debug(f'HyDE (naive): Generated hypothetical answer ({len(hypothetical_answer)} chars)')
+                    logger.debug(f'HyDE (naive): Using hypothetical answer ({hyde_answer_length} chars)')
                 else:
                     logger.warning('HyDE: No embedding function available on chunks_vdb')
             else:
@@ -5367,6 +5452,8 @@ async def naive_query(
         query_param.max_total_tokens,
         query_param.user_prompt or '',
         query_param.enable_rerank,
+        query_param.enable_bm25_fusion,
+        query_param.enable_hyde,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
     cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
@@ -5397,6 +5484,8 @@ async def naive_query(
                 'max_total_tokens': query_param.max_total_tokens,
                 'user_prompt': query_param.user_prompt or '',
                 'enable_rerank': query_param.enable_rerank,
+                'enable_bm25_fusion': query_param.enable_bm25_fusion,
+                'enable_hyde': query_param.enable_hyde,
             }
             await save_to_cache(
                 hashing_kv,

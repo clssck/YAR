@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import os
+import re
 import time
 import traceback
 import warnings
@@ -91,7 +92,7 @@ from yar.operate import (
     rebuild_knowledge_from_chunks,
 )
 from yar.prompt import PROMPTS
-from yar.types import KnowledgeGraph
+from yar.types import GlobalConfig, KnowledgeGraph
 from yar.utils import (
     EmbeddingFunc,
     TiktokenTokenizer,
@@ -180,8 +181,6 @@ class YAR:
     max_total_tokens: int = field(default=get_env_value('MAX_TOTAL_TOKENS', DEFAULT_MAX_TOTAL_TOKENS, int))
     """Maximum total tokens in context (including system prompt, entities, relations and chunks)."""
 
-    cosine_threshold: int = field(default=get_env_value('COSINE_THRESHOLD', DEFAULT_COSINE_THRESHOLD, int))
-    """Cosine threshold of vector DB retrieval for entities, relations and chunks."""
 
     related_chunk_number: int = field(default=get_env_value('RELATED_CHUNK_NUMBER', DEFAULT_RELATED_CHUNK_NUMBER, int))
     """Number of related chunks to grab from single entity or relation."""
@@ -334,7 +333,7 @@ class YAR:
     # LLM Configuration
     # ---
 
-    llm_model_func: Callable[..., object] | None = field(default=None)
+    llm_model_func: Callable[..., Awaitable[Any]] | None = field(default=None)
     """Function for interacting with the large language model (LLM). Must be set before use."""
 
     llm_model_name: str = field(default='gpt-4o-mini')
@@ -362,10 +361,10 @@ class YAR:
     # Rerank Configuration
     # ---
 
-    rerank_model_func: Callable[..., object] | None = field(default=None)
+    rerank_model_func: Callable[..., Awaitable[Any]] | None = field(default=None)
     """Function for reranking retrieved documents. All rerank configurations (model name, API keys, top_k, etc.) should be included in this function. Optional."""
 
-    min_rerank_score: float = field(default=get_env_value('MIN_RERANK_SCORE', DEFAULT_MIN_RERANK_SCORE, float))
+    min_rerank_score: float | None = field(default=get_env_value('MIN_RERANK_SCORE', DEFAULT_MIN_RERANK_SCORE, float))
     """Minimum rerank score threshold for filtering chunks after reranking."""
 
     # Storage
@@ -392,7 +391,7 @@ class YAR:
     max_source_ids_per_entity: int = field(
         default=get_env_value('MAX_SOURCE_IDS_PER_ENTITY', DEFAULT_MAX_SOURCE_IDS_PER_ENTITY, int)
     )
-    """Maximum number of source (chunk) ids in entity Grpah + VDB."""
+    """Maximum number of source (chunk) ids in entity Graph + VDB."""
 
     max_source_ids_per_relation: int = field(
         default=get_env_value(
@@ -430,7 +429,7 @@ class YAR:
     # Storages Management
     # ---
 
-    cosine_better_than_threshold: float = field(default=float(os.getenv('COSINE_THRESHOLD', 0.2)))
+    cosine_better_than_threshold: float = field(default=get_env_value('COSINE_THRESHOLD', DEFAULT_COSINE_THRESHOLD, float))
 
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
 
@@ -515,7 +514,7 @@ class YAR:
         self.embedding_token_limit = embedding_max_token_size
 
         # Fix global_config now
-        global_config = asdict(self)
+        global_config = cast(GlobalConfig, asdict(self))
         # Restore original EmbeddingFunc object (asdict converts it to dict)
         global_config['embedding_func'] = original_embedding_func
 
@@ -1859,7 +1858,7 @@ class YAR:
                                     knowledge_graph_inst=self.chunk_entity_relation_graph,
                                     entity_vdb=self.entities_vdb,
                                     relationships_vdb=self.relationships_vdb,
-                                    global_config=asdict(self),
+                                    global_config=cast(GlobalConfig, asdict(self)),
                                     full_entities_storage=self.full_entities,
                                     full_relations_storage=self.full_relations,
                                     doc_id=doc_id,
@@ -2042,7 +2041,7 @@ class YAR:
         try:
             chunk_results = await extract_entities(
                 chunk,
-                global_config=asdict(self),
+                global_config=cast(GlobalConfig, asdict(self)),
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,
@@ -2466,7 +2465,7 @@ class YAR:
         """
         if param is None:
             param = QueryParam()
-        global_config = asdict(self)
+        global_config = cast(GlobalConfig, asdict(self))
 
         # Create a copy of param to avoid modifying the original
         data_param = QueryParam(
@@ -2596,7 +2595,7 @@ class YAR:
             param = QueryParam()
         logger.debug(f'[aquery_llm] Query param: {param}')
 
-        global_config = asdict(self)
+        global_config = cast(GlobalConfig, asdict(self))
 
         try:
             query_result = None
@@ -3345,7 +3344,7 @@ class YAR:
                         relationships_vdb=self.relationships_vdb,
                         text_chunks_storage=self.text_chunks,
                         llm_response_cache=self.llm_response_cache,
-                        global_config=asdict(self),
+                        global_config=cast(GlobalConfig, asdict(self)),
                         pipeline_status=pipeline_status,
                         pipeline_status_lock=pipeline_status_lock,
                         entity_chunks_storage=self.entity_chunks,
@@ -3919,7 +3918,6 @@ class YAR:
                         llm_response = await llm_callable(validation_prompt)
 
                         # Parse JSON response
-                        import re
 
                         # Extract JSON from response (handle markdown code blocks)
                         json_match = re.search(r'\{[^{}]*\}', llm_response, re.DOTALL)
@@ -4205,7 +4203,6 @@ class YAR:
                                         llm_callable = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
                                         llm_response = await llm_callable(validation_prompt)
 
-                                        import re
 
                                         json_match = re.search(r'\{[^{}]*\}', llm_response, re.DOTALL)
                                         if not json_match:

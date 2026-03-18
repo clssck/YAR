@@ -80,7 +80,7 @@ class TestQueryParam:
         assert param.stream is False
         assert param.hl_keywords == []
         assert param.ll_keywords == []
-
+        assert param.enable_rerank is False
     def test_custom_values(self):
         """Test custom values override defaults."""
         param = QueryParam(
@@ -192,9 +192,9 @@ class TestDocProcessingStatus:
         # Status should remain PROCESSED
         assert status.status == DocStatus.PROCESSED
 
-    def test_chunks_list_default_factory(self):
-        """Test chunks_list default factory creates new list each time."""
-        status1 = DocProcessingStatus(
+    def test_chunks_list_default_is_none(self):
+        """Test chunks_list defaults to None (not an empty list)."""
+        status = DocProcessingStatus(
             content_summary='Test1',
             content_length=100,
             file_path='/test1.txt',
@@ -202,16 +202,7 @@ class TestDocProcessingStatus:
             created_at='2024-01-01T00:00:00Z',
             updated_at='2024-01-01T00:00:00Z',
         )
-        status2 = DocProcessingStatus(
-            content_summary='Test2',
-            content_length=100,
-            file_path='/test2.txt',
-            status=DocStatus.PENDING,
-            created_at='2024-01-01T00:00:00Z',
-            updated_at='2024-01-01T00:00:00Z',
-        )
-        # Should be separate lists
-        assert status1.chunks_list is not status2.chunks_list
+        assert status.chunks_list is None
 
 
 class TestDeletionResult:

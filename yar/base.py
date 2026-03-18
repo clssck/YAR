@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -120,13 +120,13 @@ class QueryParam:
     ll_keywords: list[str] = field(default_factory=list)
     """List of low-level keywords to refine retrieval focus."""
 
-    # History messages are only sent to LLM for context, not used for retrieval
+    # History messages are sent to the LLM and can influence keyword extraction for retrieval.
     conversation_history: list[dict[str, str]] = field(default_factory=list)
     """Stores past conversation history to maintain context.
     Format: [{"role": "user/assistant", "content": "message"}].
     """
 
-    model_func: Callable[..., object] | None = None
+    model_func: Callable[..., Awaitable[Any]] | None = None
     """Optional override for the LLM model function to use for this specific query.
     If provided, this will be used instead of the global model function.
     This allows using different models for different query modes.
@@ -138,13 +138,10 @@ class QueryParam:
     It's purpose is the let user customize the way LLM generate the response.
     """
 
-    enable_rerank: bool = (
-        os.getenv('RERANK_BINDING', 'null').lower() != 'null'
-        and os.getenv('RERANK_BY_DEFAULT', 'true').lower() == 'true'
-    )
+    enable_rerank: bool = os.getenv('RERANK_BY_DEFAULT', 'false').lower() == 'true'
     """Enable reranking for retrieved text chunks.
-    Default is False when RERANK_BINDING=null (no reranker configured).
-    When a reranker is configured, defaults to True unless RERANK_BY_DEFAULT=false.
+    Default is False so reranking stays opt-in even when a rerank model is configured.
+    Set RERANK_BY_DEFAULT=true or pass enable_rerank=True explicitly to enable it.
     """
 
     enable_hyde: bool = os.getenv('ENABLE_HYDE', 'false').lower() == 'true'
@@ -836,7 +833,7 @@ class DocProcessingStatus:
     """Tracking ID for monitoring progress"""
     chunks_count: int | None = None
     """Number of chunks after splitting, used for processing"""
-    chunks_list: list[str] | None = field(default_factory=list)
+    chunks_list: list[str] | None = field(default=None)
     """List of chunk IDs associated with this document, used for deletion"""
     error_msg: str | None = None
     """Error message if failed"""
@@ -872,11 +869,11 @@ class DocStatusStorage(BaseKVStorage, ABC):
         """Get counts of documents in each status"""
 
     @abstractmethod
-    async def get_docs_by_status(self, status: DocStatus) -> dict[str, DocProcessingStatus]:
+    async def get_docs_by_status(self, status: DocStatus, limit: int = 10000) -> dict[str, DocProcessingStatus]:
         """Get all documents with a specific status"""
 
     @abstractmethod
-    async def get_docs_by_track_id(self, track_id: str) -> dict[str, DocProcessingStatus]:
+    async def get_docs_by_track_id(self, track_id: str, limit: int = 10000) -> dict[str, DocProcessingStatus]:
         """Get all documents with a specific track_id"""
 
     @abstractmethod

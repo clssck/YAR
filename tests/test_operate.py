@@ -18,11 +18,12 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from yar.base import QueryParam, TextChunkSchema
+from yar.base import QueryContextResult, QueryParam, TextChunkSchema
 from yar.constants import DEFAULT_MAX_FILE_PATHS, DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
 from yar.operate import (
     _build_query_context,
     _enrich_local_keywords,
+    _get_node_data,
     _perform_kg_search,
     _resolve_max_file_paths,
     _split_keyword_terms,
@@ -31,6 +32,7 @@ from yar.operate import (
     create_chunker,
     extract_keywords_only,
     get_keywords_from_query,
+    kg_query,
 )
 
 # ============================================================================
@@ -287,7 +289,7 @@ class TestHandleEntityRelationSummary:
             description_type='entity',
             entity_or_relation_name='TestEntity',
             description_list=[],
-            seperator=GRAPH_FIELD_SEP,
+            separator=GRAPH_FIELD_SEP,
             global_config={},
         )
 
@@ -303,7 +305,7 @@ class TestHandleEntityRelationSummary:
             description_type='entity',
             entity_or_relation_name='TestEntity',
             description_list=['Single description'],
-            seperator=GRAPH_FIELD_SEP,
+            separator=GRAPH_FIELD_SEP,
             global_config={},
         )
 
@@ -330,7 +332,7 @@ class TestHandleEntityRelationSummary:
             description_type='entity',
             entity_or_relation_name='TestEntity',
             description_list=descriptions,
-            seperator=GRAPH_FIELD_SEP,
+            separator=GRAPH_FIELD_SEP,
             global_config=global_config,
         )
 
@@ -372,7 +374,7 @@ class TestHandleEntityRelationSummary:
                 description_type='entity',
                 entity_or_relation_name='TestEntity',
                 description_list=descriptions,
-                seperator=GRAPH_FIELD_SEP,
+                separator=GRAPH_FIELD_SEP,
                 global_config=global_config,
                 llm_response_cache=mock_cache,
             )
@@ -597,6 +599,52 @@ class TestExtractKeywordsOnly:
         mock_llm.assert_called_once()
         assert isinstance(hl, list)
         assert isinstance(ll, list)
+
+    @pytest.mark.asyncio
+    async def test_conversation_history_included_in_keyword_cache_hash(self):
+        """Keyword cache keys should vary when conversation history changes."""
+        mock_llm = AsyncMock(return_value='{"high_level_keywords": ["ai"], "low_level_keywords": ["ml"]}')
+
+        global_config = {
+            'llm_model_func': mock_llm,
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+            'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE},
+        }
+        param = QueryParam(
+            conversation_history=[
+                {'role': 'user', 'content': 'Tell me about Fitusiran.'},
+                {'role': 'assistant', 'content': 'It is an RNAi therapeutic.'},
+            ]
+        )
+        hashing_kv = Mock()
+        hashing_kv.global_config = {'enable_llm_cache': True}
+        compute_hash = Mock(return_value='keywords-cache-hash')
+
+        with (
+            patch('yar.operate._conversation_history_cache_hash', return_value='history-hash') as history_hash_mock,
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+            patch('yar.operate.compute_args_hash', new=compute_hash),
+            patch('yar.operate.save_to_cache', new=AsyncMock()) as save_mock,
+        ):
+            hl, ll = await extract_keywords_only(
+                text='What about dosing?',
+                param=param,
+                global_config=global_config,
+                hashing_kv=hashing_kv,
+            )
+
+        history_hash_mock.assert_called_once_with(param.conversation_history)
+        assert hl == ['ai']
+        assert ll == ['ml']
+        assert compute_hash.call_args.args == (
+            param.mode,
+            'What about dosing?',
+            DEFAULT_SUMMARY_LANGUAGE,
+            'history-hash',
+        )
+
+        saved_cache = save_mock.await_args.args[1]
+        assert saved_cache.queryparam['conversation_history_hash'] == 'history-hash'
 
     @pytest.mark.asyncio
     async def test_invalid_json_response(self):
@@ -976,6 +1024,17 @@ class TestOperateHelpers:
         )
         assert enriched == ['quantum computing']
 
+    def test_enrich_local_keywords_keeps_multiple_focused_low_level_terms(self):
+        """Local mode should preserve all focused auto-generated low-level keywords."""
+        enriched = _enrich_local_keywords(
+            hl_keywords=['hemophilia treatment', 'drug comparison'],
+            ll_keywords=['Fitusiran', 'company research', 'Eptacog'],
+            mode='local',
+            user_supplied_ll=False,
+        )
+
+        assert enriched == ['Fitusiran', 'Eptacog']
+
     def test_enrich_local_keywords_falls_back_to_query_when_high_level_is_generic(self):
         """When all HL terms are generic, local mode should use the original query."""
         enriched = _enrich_local_keywords(
@@ -1136,6 +1195,35 @@ class TestPerformKgSearchScoreAwareMerge:
         assert len([entity for entity in result['final_entities'] if entity['entity_name'] == 'B']) == 1
 
     @pytest.mark.asyncio
+    async def test_entity_merge_normalizes_rank_so_hubs_do_not_dominate_similarity(self):
+        query_param = QueryParam(mode='local', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+
+        local_entities = [
+            {'entity_name': 'ExactMatch', 'score': 0.95, 'rank': 2},
+            {'entity_name': 'HubEntity', 'score': 0.05, 'rank': 500},
+        ]
+
+        with patch('yar.operate._get_node_data', new=AsyncMock(return_value=(local_entities, []))):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='ExactMatch, HubEntity',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        assert [entity['entity_name'] for entity in result['final_entities']] == [
+            'ExactMatch',
+            'HubEntity',
+        ]
+
+    @pytest.mark.asyncio
     async def test_relation_merge_prefers_highest_scored_duplicate(self):
         query_param = QueryParam(mode='hybrid', top_k=3)
         text_chunks_db = MagicMock()
@@ -1185,6 +1273,93 @@ class TestPerformKgSearchScoreAwareMerge:
         ]
         assert result['final_relations'][0].get('src_id') == 'a'
 
+
+
+@pytest.mark.offline
+class TestEntityQueryEmbeddingReuse:
+    """Regression tests for reusing precomputed entity query embeddings."""
+
+    @pytest.mark.asyncio
+    async def test_perform_kg_search_reuses_precomputed_embedding_for_entity_search(self):
+        query_param = QueryParam(
+            mode='local',
+            top_k=3,
+            enable_hyde=True,
+            model_func=AsyncMock(return_value='Detailed hypothetical answer for retrieval.'),
+        )
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {'kg_chunk_pick_method': 'TEXT'}
+        text_chunks_db.embedding_func = AsyncMock(return_value=[[0.1, 0.2]])
+
+        with patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))) as node_mock:
+            await _perform_kg_search(
+                query='Amazon',
+                ll_keywords='Amazon',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        text_chunks_db.embedding_func.assert_awaited_once_with(['Detailed hypothetical answer for retrieval.'])
+        assert node_mock.await_args.kwargs['query_embedding'] == [0.1, 0.2]
+
+    @pytest.mark.asyncio
+    async def test_perform_kg_search_accepts_short_hyde_answers(self):
+        query_param = QueryParam(
+            mode='local',
+            top_k=3,
+            enable_hyde=True,
+            model_func=AsyncMock(return_value='Founded2019'),
+        )
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {'kg_chunk_pick_method': 'TEXT'}
+        text_chunks_db.embedding_func = AsyncMock(return_value=[[0.3, 0.4]])
+
+        with patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))) as node_mock:
+            await _perform_kg_search(
+                query='When was Acme founded?',
+                ll_keywords='Acme',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        text_chunks_db.embedding_func.assert_awaited_once_with(['Founded2019'])
+        assert node_mock.await_args.kwargs['query_embedding'] == [0.3, 0.4]
+
+    @pytest.mark.asyncio
+    async def test_get_node_data_passes_precomputed_embedding_to_vector_search(self):
+        entities_vdb = MagicMock()
+        entities_vdb.cosine_better_than_threshold = 0.2
+        entities_vdb.hybrid_entity_search = None
+        entities_vdb.query = AsyncMock(return_value=[{'entity_name': 'Amazon', 'score': 0.9}])
+
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={'Amazon': {'entity_type': 'COMPANY', 'description': 'Cloud provider'}}
+        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(return_value={'Amazon': 2})
+
+        with patch('yar.operate._find_most_related_edges_from_entities', new=AsyncMock(return_value=[])):
+            node_datas, relations = await _get_node_data(
+                'Amazon',
+                knowledge_graph_inst,
+                entities_vdb,
+                QueryParam(mode='local', top_k=5),
+                query_embedding=[0.1, 0.2],
+            )
+
+        assert relations == []
+        assert node_datas[0]['entity_name'] == 'Amazon'
+        assert entities_vdb.query.await_args.kwargs['query_embedding'] == [0.1, 0.2]
 
 
 @pytest.mark.offline
@@ -1397,3 +1572,69 @@ class TestPerformKgSearchBranchExecution:
         assert result['final_entities'] == []
         assert result['final_relations'] == []
         assert result['vector_chunks'] == []
+
+
+@pytest.mark.offline
+class TestQueryCacheKeyInputs:
+    """Regression tests for query cache key inputs."""
+
+    @pytest.mark.asyncio
+    async def test_kg_query_cache_hash_and_metadata_include_bm25_and_hyde_flags(self):
+        query_param = QueryParam(
+            mode='mix',
+            enable_bm25_fusion=True,
+            enable_hyde=True,
+            model_func=AsyncMock(return_value='Answer'),
+        )
+        global_config = {
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+        }
+        hashing_kv = Mock()
+        hashing_kv.global_config = {'enable_llm_cache': True}
+
+        context_result = QueryContextResult(
+            context='Context block',
+            raw_data={'data': {'references': []}},
+        )
+        compute_hash = Mock(return_value='query-cache-hash')
+
+        with (
+            patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['High'], ['Low']))),
+            patch('yar.operate._build_query_context', new=AsyncMock(return_value=context_result)),
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+            patch('yar.operate.compute_args_hash', new=compute_hash),
+            patch('yar.operate.save_to_cache', new=AsyncMock()) as save_mock,
+        ):
+            result = await kg_query(
+                query='What changed?',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(),
+                query_param=query_param,
+                global_config=global_config,
+                hashing_kv=hashing_kv,
+            )
+
+        assert result is not None
+        assert compute_hash.call_args.args == (
+            query_param.mode,
+            'What changed?',
+            query_param.response_type,
+            query_param.top_k,
+            query_param.chunk_top_k,
+            query_param.max_entity_tokens,
+            query_param.max_relation_tokens,
+            query_param.max_total_tokens,
+            'High',
+            'Low',
+            query_param.user_prompt or '',
+            query_param.enable_rerank,
+            query_param.enable_bm25_fusion,
+            query_param.enable_hyde,
+            query_param.entity_filter or '',
+        )
+
+        saved_cache = save_mock.await_args.args[1]
+        assert saved_cache.queryparam['enable_bm25_fusion'] is True
+        assert saved_cache.queryparam['enable_hyde'] is True

@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import Any, cast
 
-from .base import DeletionResult, StorageNameSpace
+from .base import BaseGraphStorage, BaseKVStorage, BaseVectorStorage, DeletionResult, StorageNameSpace
 from .constants import GRAPH_FIELD_SEP
 from .kg.shared_storage import get_storage_keyed_lock
 from .utils import compute_mdhash_id, logger, make_relation_chunk_key
@@ -55,12 +55,12 @@ async def _persist_graph_updates(
 
 
 async def adelete_by_entity(
-    chunk_entity_relation_graph,
-    entities_vdb,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
     entity_name: str,
-    entity_chunks_storage=None,
-    relation_chunks_storage=None,
+    entity_chunks_storage: BaseKVStorage | None = None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> DeletionResult:
     """Asynchronously delete an entity and all its relationships.
 
@@ -142,11 +142,11 @@ async def adelete_by_entity(
 
 
 async def adelete_by_relation(
-    chunk_entity_relation_graph,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    relationships_vdb: BaseVectorStorage,
     source_entity: str,
     target_entity: str,
-    relation_chunks_storage=None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> DeletionResult:
     """Asynchronously delete a relation between two entities.
 
@@ -455,15 +455,15 @@ async def _edit_entity_impl(
 
 
 async def aedit_entity(
-    chunk_entity_relation_graph,
-    entities_vdb,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
     entity_name: str,
     updated_data: dict[str, str],
     allow_rename: bool = True,
     allow_merge: bool = False,
-    entity_chunks_storage=None,
-    relation_chunks_storage=None,
+    entity_chunks_storage: BaseKVStorage | None = None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
     """Asynchronously edit entity information.
 
@@ -634,13 +634,13 @@ async def aedit_entity(
 
 
 async def aedit_relation(
-    chunk_entity_relation_graph,
-    entities_vdb,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
     source_entity: str,
     target_entity: str,
     updated_data: dict[str, Any],
-    relation_chunks_storage=None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
     """Asynchronously edit relation information.
 
@@ -684,7 +684,7 @@ async def aedit_relation(
             logger.debug(f'Relation Edit: delete vdb for `{source_entity}`~`{target_entity}`')
 
             # 2. Update relation information in the graph
-            new_edge_data = {**edge_data, **updated_data}
+            new_edge_data = {**(edge_data or {}), **updated_data}
             await chunk_entity_relation_graph.upsert_edge(source_entity, target_entity, new_edge_data)
 
             # 3. Recalculate relation's vector representation and update vector database
@@ -731,7 +731,7 @@ async def aedit_relation(
                 has_stored_data = stored_data and isinstance(stored_data, dict) and stored_data.get('chunk_ids')
 
                 # Get old and new source_id
-                old_source_id = edge_data.get('source_id', '')
+                old_source_id = edge_data.get('source_id', '') if edge_data else ''
                 old_chunk_ids = [cid for cid in old_source_id.split(GRAPH_FIELD_SEP) if cid]
 
                 new_source_id = new_edge_data.get('source_id', '')
@@ -743,7 +743,7 @@ async def aedit_relation(
                 if source_id_changed or not has_stored_data:
                     # Get existing full chunk_ids from storage
                     existing_full_chunk_ids = []
-                    if has_stored_data:
+                    if stored_data is not None:
                         existing_full_chunk_ids = [cid for cid in stored_data.get('chunk_ids', []) if cid]
 
                     # If no stored data exists, use old source_id as baseline
@@ -788,13 +788,13 @@ async def aedit_relation(
 
 
 async def acreate_entity(
-    chunk_entity_relation_graph,
-    entities_vdb,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
     entity_name: str,
     entity_data: dict[str, Any],
-    entity_chunks_storage=None,
-    relation_chunks_storage=None,
+    entity_chunks_storage: BaseKVStorage | None = None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
     """Asynchronously create a new entity.
 
@@ -898,13 +898,13 @@ async def acreate_entity(
 
 
 async def acreate_relation(
-    chunk_entity_relation_graph,
-    entities_vdb,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
     source_entity: str,
     target_entity: str,
     relation_data: dict[str, Any],
-    relation_chunks_storage=None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
     """Asynchronously create a new relation between entities.
 
@@ -1382,15 +1382,15 @@ async def _merge_entities_impl(
 
 
 async def amerge_entities(
-    chunk_entity_relation_graph,
-    entities_vdb,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
     source_entities: list[str],
     target_entity: str,
     merge_strategy: dict[str, str] | None = None,
     target_entity_data: dict[str, Any] | None = None,
-    entity_chunks_storage=None,
-    relation_chunks_storage=None,
+    entity_chunks_storage: BaseKVStorage | None = None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
     """Asynchronously merge multiple entities into one entity.
 
@@ -1583,8 +1583,8 @@ def _merge_attributes(
 
 
 async def get_entity_info(
-    chunk_entity_relation_graph,
-    entities_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
     entity_name: str,
     include_vector_data: bool = False,
 ) -> dict[str, str | None | dict[str, str]]:
@@ -1610,8 +1610,8 @@ async def get_entity_info(
 
 
 async def get_relation_info(
-    chunk_entity_relation_graph,
-    relationships_vdb,
+    chunk_entity_relation_graph: BaseGraphStorage,
+    relationships_vdb: BaseVectorStorage,
     src_entity: str,
     tgt_entity: str,
     include_vector_data: bool = False,
