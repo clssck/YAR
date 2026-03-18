@@ -77,14 +77,17 @@ async def _get_redis_client():
         try:
             import redis.asyncio as redis
 
-            _redis_client = redis.from_url(REDIS_URI, decode_responses=True)
-            await _redis_client.ping()
+            candidate = redis.from_url(REDIS_URI, decode_responses=True)
+            await candidate.ping()
+            _redis_client = candidate
             logger.info(f'Redis FTS cache connected: {REDIS_URI}')
         except ImportError:
             logger.warning('Redis package not installed for FTS cache')
+            _redis_client = None
             return None
         except Exception as e:
             logger.warning(f'Failed to connect to Redis for FTS cache: {e}')
+            _redis_client = None
             return None
     return _redis_client
 
@@ -250,11 +253,13 @@ def get_fts_cache_stats() -> dict[str, Any]:
     current_time = time.time()
 
     # Count valid (non-expired) entries
-    valid_entries = sum(1 for _, (_, ts) in _fts_cache.items() if (current_time - ts) < FTS_CACHE_TTL)
+    cache_snapshot = list(_fts_cache.items())
+
+    valid_entries = sum(1 for _, (_, ts) in cache_snapshot if (current_time - ts) < FTS_CACHE_TTL)
 
     return {
         'enabled': FTS_CACHE_ENABLED,
-        'total_entries': len(_fts_cache),
+        'total_entries': len(cache_snapshot),
         'valid_entries': valid_entries,
         'max_size': FTS_CACHE_MAX_SIZE,
         'ttl_seconds': FTS_CACHE_TTL,

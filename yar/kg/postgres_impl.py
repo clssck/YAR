@@ -2718,7 +2718,7 @@ class PostgreSQLDB:
         results = results if results else []
 
         # Store in cache
-        if use_cache and results:
+        if use_cache and results is not None:
             await store_fts_results(query, ws, limit, language, results)
 
         return results
@@ -4022,6 +4022,7 @@ class PGVectorStorage(BaseVectorStorage):
             logger.debug(f'[{self.workspace}] Successfully deleted entity {entity_name}')
         except Exception as e:
             logger.error(f'[{self.workspace}] Error deleting entity {entity_name}: {e}')
+            raise
 
     async def delete_entity_relation(self, entity_name: str) -> None:
         """Delete all relations associated with an entity.
@@ -4039,6 +4040,7 @@ class PGVectorStorage(BaseVectorStorage):
             logger.debug(f'[{self.workspace}] Successfully deleted relations for entity {entity_name}')
         except Exception as e:
             logger.error(f'[{self.workspace}] Error deleting relations for entity {entity_name}: {e}')
+            raise
 
     async def get_by_id(self, id: str) -> dict[str, Any] | None:
         """Get vector data by its ID
@@ -6131,10 +6133,8 @@ class PGGraphStorage(BaseGraphStorage):
         visited_edge_pairs = set()
 
         # Normalize limits
-        max_depth = 0 if max_depth is None else int(max_depth)
-        max_nodes = 0 if max_nodes is None else int(max_nodes)
-        max_depth_int = max_depth
-        max_nodes_int = max_nodes
+        max_depth_int = int(max_depth) if max_depth else float('inf')
+        max_nodes_int = int(max_nodes) if max_nodes else float('inf')
 
         # Get starting node data
         # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)

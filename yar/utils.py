@@ -509,8 +509,10 @@ class EmbeddingFunc:
                     detected = len(result)
 
             if self._detected_dim is None:
-                self._detected_dim = detected
-                logger.info(f'Auto-detected embedding dimension from result: {detected}D')
+                async with self._detection_lock:
+                    if self._detected_dim is None:  # double-check under lock
+                        self._detected_dim = detected
+                        logger.info(f'Auto-detected embedding dimension from result: {detected}D')
             return detected
 
         # 2. Already detected from previous call
