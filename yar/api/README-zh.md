@@ -462,10 +462,16 @@ RERANK_BINDING_API_KEY=your_rerank_api_key_here
 
 可以按查询启用或禁用 Reranking。
 
-`/query` 和 `/query/stream` API 端点包含一个 `enable_rerank` 参数，默认设置为 `true`，用于控制当前查询是否激活 reranking。要将 `enable_rerank` 参数的默认值更改为 `false`，请设置以下环境变量：
+`/query` 和 `/query/stream` API 端点包含一个 `enable_rerank` 参数，默认值为 `false`，因此 reranking 保持显式启用。若要启用 reranking 基础设施，请先配置独立的 rerank 模型，然后设置：
 
 ```
-RERANK_BY_DEFAULT=False
+ENABLE_RERANK=true
+```
+
+如果还希望查询默认自动启用 reranking，请再设置：
+
+```
+RERANK_BY_DEFAULT=true
 ```
 
 ### .env 文件示例

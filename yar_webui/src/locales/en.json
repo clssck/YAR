@@ -541,7 +541,7 @@
       "userPromptTooltip": "Provide additional response requirements to the LLM (unrelated to query content, only for output processing).",
       "userPromptPlaceholder": "Enter custom prompt (optional)",
       "enableRerank": "Enable Rerank",
-      "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True.",
+      "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is False.",
       "citationMode": "Citation Mode",
       "citationModeTooltip": "Add source citations to responses:\n• None: No citations (fastest)\n• Inline: [n] markers in text only\n• Footnotes: Full footnotes with document titles",
       "citationModeOptions": {

@@ -468,10 +468,16 @@ For comprehensive reranker configuration examples, please refer to the `env.exam
 
 Reranking can be enabled or disabled on a per-query basis.
 
-The `/query` and `/query/stream` API endpoints include an `enable_rerank` parameter, which is set to `true` by default, controlling whether reranking is active for the current query. To change the default value of the `enable_rerank` parameter to `false`, set the following environment variable:
+The `/query` and `/query/stream` API endpoints include an `enable_rerank` parameter, which is `false` by default so reranking stays opt-in. To enable reranking infrastructure, configure a dedicated rerank model and set:
 
 ```
-RERANK_BY_DEFAULT=False
+ENABLE_RERANK=true
+```
+
+If you also want queries to opt in automatically by default, set:
+
+```
+RERANK_BY_DEFAULT=true
 ```
 
 ### Include Chunk Content in References

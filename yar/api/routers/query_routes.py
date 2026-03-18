@@ -267,7 +267,7 @@ class QueryRequest(BaseModel):
 
     enable_rerank: bool | None = Field(
         default=None,
-        description='Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True.',
+        description='Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is False.',
     )
 
     enable_hyde: bool | None = Field(
@@ -694,7 +694,7 @@ def create_query_routes(
         - **mix**: Integrates knowledge graph retrieval with vector search (recommended)
         - **bypass**: Direct LLM query without knowledge retrieval
 
-        conversation_history parameteris sent to LLM only, does not affect retrieval results.
+        conversation_history is sent to the LLM and can also influence retrieval via keyword extraction in multi-turn queries.
 
         **Usage Examples:**
 
@@ -937,7 +937,7 @@ def create_query_routes(
         - **mix**: Integrated knowledge graph + vector retrieval (recommended)
         - **bypass**: Direct LLM query without knowledge retrieval
 
-        conversation_history parameteris sent to LLM only, does not affect retrieval results.
+        conversation_history is sent to the LLM and can also influence retrieval via keyword extraction in multi-turn queries.
 
         **Usage Examples**
 
