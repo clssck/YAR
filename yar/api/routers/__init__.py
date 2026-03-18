@@ -7,11 +7,11 @@ unless the caller actually needs those specific routes.
 from typing import Any
 
 __all__ = (
+    'create_document_routes',
+    'create_graph_routes',
     'create_s3_routes',
     'create_search_routes',
     'create_upload_routes',
-    'document_router',
-    'graph_router',
     'query_router',
 )
 
@@ -33,13 +33,13 @@ def __getattr__(name: str) -> Any:
 
         return exported
 
-    if name == 'document_router':
-        from .document_routes import router as exported
+    if name == 'create_document_routes':
+        from .document_routes import create_document_routes as exported
 
         return exported
 
-    if name == 'graph_router':
-        from .graph_routes import router as exported
+    if name == 'create_graph_routes':
+        from .graph_routes import create_graph_routes as exported
 
         return exported
 

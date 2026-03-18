@@ -2381,17 +2381,16 @@ async def background_delete_documents(
     finally:
         # Final summary and check for pending requests
         async with pipeline_status_lock:
+            # Read pending flag before clearing it
+            has_pending_request = pipeline_status.get('request_pending', False)
             pipeline_status['busy'] = False
-            pipeline_status['request_pending'] = False  # Reset pending requests flag
-            pipeline_status['cancellation_requested'] = False  # Always reset cancellation flag
+            pipeline_status['request_pending'] = False
+            pipeline_status['cancellation_requested'] = False
             completion_msg = (
                 f'Deletion completed: {len(successful_deletions)} successful, {len(failed_deletions)} failed'
             )
             pipeline_status['latest_message'] = completion_msg
             pipeline_status['history_messages'].append(completion_msg)
-
-            # Check if there are pending document indexing requests
-            has_pending_request = pipeline_status.get('request_pending', False)
 
         # If there are pending requests, start document processing pipeline
         if has_pending_request:

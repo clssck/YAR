@@ -1236,7 +1236,7 @@ async def initialize_pipeline_status(workspace: str | None = None):
                 'job_name': '-',  # Current job name (indexing files/indexing texts)
                 'job_start': None,  # Job start time
                 'docs': 0,  # Total number of documents to be indexed
-                'batchs': 0,  # Number of batches for processing documents
+                'batches': 0,  # Number of batches for processing documents
                 'cur_batch': 0,  # Current processing batch
                 'request_pending': False,  # Flag for pending request for processing
                 'latest_message': '',  # Latest message from pipeline processing

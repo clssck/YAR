@@ -1519,7 +1519,7 @@ class YAR:
                         'job_name': 'Default Job',
                         'job_start': datetime.now(timezone.utc).isoformat(),
                         'docs': 0,
-                        'batchs': 0,  # Total number of files to be processed
+                        'batches': 0,  # Total number of files to be processed
                         'cur_batch': 0,  # Number of files already processed
                         'request_pending': False,  # Clear any previous request
                         'cancellation_requested': False,  # Initialize cancellation flag
@@ -1576,9 +1576,9 @@ class YAR:
                 log_message = f'Processing {len(to_process_docs)} document(s)'
                 logger.info(log_message)
 
-                # Update pipeline_status, batchs now represents the total number of files to be processed
+                # Update pipeline_status, batches now represents the total number of files to be processed
                 pipeline_status['docs'] = len(to_process_docs)
-                pipeline_status['batchs'] = len(to_process_docs)
+                pipeline_status['batches'] = len(to_process_docs)
                 pipeline_status['cur_batch'] = 0
                 pipeline_status['latest_message'] = log_message
                 pipeline_status['history_messages'].append(log_message)
@@ -2882,7 +2882,7 @@ class YAR:
                         'job_name': 'Single document deletion',
                         'job_start': datetime.now(timezone.utc).isoformat(),
                         'docs': 1,
-                        'batchs': 1,
+                        'batches': 1,
                         'cur_batch': 0,
                         'request_pending': False,
                         'cancellation_requested': False,
