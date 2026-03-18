@@ -7,6 +7,7 @@ import {
   Routes,
   useNavigate,
 } from 'react-router-dom'
+import { ErrorBoundary } from 'react-error-boundary'
 import { Toaster } from 'sonner'
 import ThemeProvider from '@/components/ThemeProvider'
 import ComponentDemo from '@/features/ComponentDemo'
@@ -25,6 +26,23 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+function ErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
+      <h1 className="text-2xl font-bold text-destructive">Something went wrong</h1>
+      <pre className="max-w-lg overflow-auto rounded-md bg-muted p-4 text-sm">
+        {error.message}
+      </pre>
+      <button
+        onClick={resetErrorBoundary}
+        className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+      >
+        Try again
+      </button>
+    </div>
+  )
+}
 
 const AppContent = () => {
   const [initializing, setInitializing] = useState(true)
@@ -83,12 +101,14 @@ const AppContent = () => {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      {/* Component demo page - accessible without auth for testing */}
-      <Route path="/demo" element={<ComponentDemo />} />
-      <Route path="/*" element={isAuthenticated ? <App /> : null} />
-    </Routes>
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        {/* Component demo page - accessible without auth for testing */}
+        <Route path="/demo" element={<ComponentDemo />} />
+        <Route path="/*" element={isAuthenticated ? <App /> : null} />
+      </Routes>
+    </ErrorBoundary>
   )
 }
 

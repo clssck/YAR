@@ -317,6 +317,16 @@ const useSettingsStoreBase = create<SettingsState>()(
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
       version: 26,
+      partialize: (state) => {
+        // Exclude large ephemeral data and runtime-only fields from localStorage
+        const {
+          retrievalHistory,
+          userPromptHistory,
+          searchLabelDropdownRefreshTrigger,
+          ...persisted
+        } = state
+        return persisted
+      },
       migrate: (persistedState: unknown, version: number) => {
         // Cast to the expected state type for migration operations
         const state = persistedState as Partial<SettingsState> &
@@ -394,7 +404,7 @@ const useSettingsStoreBase = create<SettingsState>()(
             max_entity_tokens: 10000,
             max_relation_tokens: 10000,
             max_total_tokens: 32000,
-            enable_rerank: true,
+            enable_rerank: false,
           }
         }
         if (version < 16) {

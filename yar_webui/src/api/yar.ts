@@ -8,6 +8,23 @@ import { errorMessage } from '@/lib/utils'
 import { navigationService } from '@/services/navigation'
 import { useSettingsStore } from '@/stores/settings'
 
+/**
+ * Build auth headers from current state. Used by both axios interceptor and
+ * streaming fetch to ensure consistent auth token handling.
+ */
+export function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const token = localStorage.getItem('YAR-API-TOKEN')
+  const apiKey = useSettingsStore.getState().apiKey
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey
+  }
+  return headers
+}
+
 // Types
 // Property values can be primitive types, arrays, or nested objects
 export type PropertyValue =
@@ -195,7 +212,7 @@ export type QueryRequest = {
   conversation_history?: Message[]
   /** User-provided prompt for the query. If provided, this will be used instead of the default value from prompt template. */
   user_prompt?: string
-  /** Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True. */
+  /** Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is False. */
   enable_rerank?: boolean
   /** Citation mode for post-processing citations. 'none' = no citations, 'inline' = [n] markers only, 'footnotes' = full footnotes with document titles */
   citation_mode?: 'none' | 'inline' | 'footnotes'
@@ -360,16 +377,8 @@ const axiosInstance = axios.create({
 
 // Interceptor: add api key and check authentication
 axiosInstance.interceptors.request.use((config) => {
-  const apiKey = useSettingsStore.getState().apiKey
-  const token = localStorage.getItem('YAR-API-TOKEN')
-
-  // Always include token if it exists, regardless of path
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  if (apiKey) {
-    config.headers['X-API-Key'] = apiKey
-  }
+  const authHeaders = getAuthHeaders()
+  Object.assign(config.headers, authHeaders)
   return config
 })
 
@@ -494,17 +503,10 @@ export const queryTextStream = async (
   onCitations?: (metadata: CitationsMetadata) => void,
   onReferences?: (references: StreamReference[]) => void,
 ) => {
-  const apiKey = useSettingsStore.getState().apiKey
-  const token = localStorage.getItem('YAR-API-TOKEN')
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     Accept: 'application/x-ndjson',
-  }
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey
+    ...getAuthHeaders(),
   }
 
   try {
