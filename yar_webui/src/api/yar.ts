@@ -344,7 +344,7 @@ export type PipelineStatusResponse = {
   job_name: string
   job_start?: string
   docs: number
-  batchs: number
+  batches: number
   cur_batch: number
   request_pending: boolean
   cancellation_requested?: boolean
@@ -365,7 +365,7 @@ export type LoginResponse = {
 }
 
 export const InvalidApiKeyError = 'Invalid API Key'
-export const RequireApiKeError = 'API Key required'
+export const RequireApiKeyError = 'API Key required'
 
 // Axios instance
 const axiosInstance = axios.create({
@@ -502,6 +502,7 @@ export const queryTextStream = async (
   onError?: (error: string) => void,
   onCitations?: (metadata: CitationsMetadata) => void,
   onReferences?: (references: StreamReference[]) => void,
+  signal?: AbortSignal,
 ) => {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -514,6 +515,7 @@ export const queryTextStream = async (
       method: 'POST',
       headers: headers,
       body: JSON.stringify(request),
+      signal,
     })
 
     if (!response.ok) {

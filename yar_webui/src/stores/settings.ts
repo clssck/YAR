@@ -113,6 +113,8 @@ interface SettingsState {
   triggerSearchLabelDropdownRefresh: () => void
 }
 
+let graphRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null
+
 const useSettingsStoreBase = create<SettingsState>()(
   persist(
     (set) => ({
@@ -203,8 +205,12 @@ const useSettingsStoreBase = create<SettingsState>()(
           set({ graphMaxNodes: nodes, queryLabel: '' })
 
           // Restore the label after a short delay.
-          setTimeout(() => {
+          if (graphRefreshTimeoutId !== null) {
+            clearTimeout(graphRefreshTimeoutId)
+          }
+          graphRefreshTimeoutId = setTimeout(() => {
             set({ queryLabel: currentLabel })
+            graphRefreshTimeoutId = null
           }, 300)
         } else {
           set({ graphMaxNodes: nodes })
@@ -223,8 +229,12 @@ const useSettingsStoreBase = create<SettingsState>()(
         if (triggerRefresh) {
           const currentLabel = state.queryLabel
           set({ graphMinDegree: degree, queryLabel: '' })
-          setTimeout(() => {
+          if (graphRefreshTimeoutId !== null) {
+            clearTimeout(graphRefreshTimeoutId)
+          }
+          graphRefreshTimeoutId = setTimeout(() => {
             set({ queryLabel: currentLabel })
+            graphRefreshTimeoutId = null
           }, 300)
         } else {
           set({ graphMinDegree: degree })
@@ -240,8 +250,12 @@ const useSettingsStoreBase = create<SettingsState>()(
         if (triggerRefresh) {
           const currentLabel = state.queryLabel
           set({ graphIncludeOrphans: include, queryLabel: '' })
-          setTimeout(() => {
+          if (graphRefreshTimeoutId !== null) {
+            clearTimeout(graphRefreshTimeoutId)
+          }
+          graphRefreshTimeoutId = setTimeout(() => {
             set({ queryLabel: currentLabel })
+            graphRefreshTimeoutId = null
           }, 300)
         } else {
           set({ graphIncludeOrphans: include })

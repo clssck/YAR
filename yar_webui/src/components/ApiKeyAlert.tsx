@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { InvalidApiKeyError, RequireApiKeError } from '@/api/yar'
+import { InvalidApiKeyError, RequireApiKeyError } from '@/api/yar'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -35,7 +35,7 @@ const ApiKeyAlert = ({
     if (message) {
       if (
         message.includes(InvalidApiKeyError) ||
-        message.includes(RequireApiKeError)
+        message.includes(RequireApiKeyError)
       ) {
         setOpened(true)
       }

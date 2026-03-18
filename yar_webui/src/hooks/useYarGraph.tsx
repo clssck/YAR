@@ -261,9 +261,9 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
   // Add nodes from raw graph data
   for (const rawNode of rawGraph?.nodes ?? []) {
     // Ensure we have fresh random positions for nodes
-    seedrandom(rawNode.id + Date.now().toString(), { global: true })
-    const x = Math.random()
-    const y = Math.random()
+    const rng = seedrandom(rawNode.id + Date.now().toString())
+    const x = rng()
+    const y = rng()
 
     graph.addNode(rawNode.id, {
       label: rawNode.labels.join(', '),
@@ -622,7 +622,7 @@ const useLightrangeGraph = () => {
         const processedNodes: RawNodeType[] = []
         for (const node of extendedGraph.nodes) {
           // Generate random color values
-          seedrandom(node.id, { global: true })
+          const rng = seedrandom(node.id)
           const nodeEntityType = node.properties?.entity_type as
             | string
             | undefined
@@ -634,8 +634,8 @@ const useLightrangeGraph = () => {
             labels: node.labels,
             properties: node.properties,
             size: 10, // Default size, will be calculated later
-            x: Math.random(), // Random position, will be adjusted later
-            y: Math.random(), // Random position, will be adjusted later
+            x: rng(), // Random position, will be adjusted later
+            y: rng(), // Random position, will be adjusted later
             color: color, // Random color
             degree: 0, // Initial degree, will be calculated later
           })
@@ -865,8 +865,8 @@ const useLightrangeGraph = () => {
             Math.sqrt(nodeToExpand.size) * 4, // Base on node size
             Math.sqrt(nodesToAdd.size) * 3, // Scale with number of nodes
           ) / cameraRatio // Adjust for zoom level
-        seedrandom(Date.now().toString(), { global: true })
-        const randomAngle = Math.random() * 2 * Math.PI
+        const rng = seedrandom(Date.now().toString())
+        const randomAngle = rng() * 2 * Math.PI
 
         // Add new nodes
         for (const nodeId of nodesToAdd) {

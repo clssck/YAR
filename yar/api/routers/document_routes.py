@@ -639,7 +639,7 @@ class PipelineStatusResponse(BaseModel):
         job_name: Current job name (e.g., indexing files/indexing texts)
         job_start: Job start time as ISO format string with timezone (optional)
         docs: Total number of documents to be indexed
-        batchs: Number of batches for processing documents
+        batches: Number of batches for processing documents
         cur_batch: Current processing batch
         request_pending: Flag for pending request for processing
         latest_message: Latest message from pipeline processing
@@ -652,7 +652,7 @@ class PipelineStatusResponse(BaseModel):
     job_name: str = 'Default Job'
     job_start: str | None = None
     docs: int = 0
-    batchs: int = 0
+    batches: int = 0
     cur_batch: int = 0
     request_pending: bool = False
     latest_message: str = ''
@@ -2230,7 +2230,7 @@ async def background_delete_documents(
                 'job_name': f'Deleting {total_docs} Documents',
                 'job_start': datetime.now().isoformat(),
                 'docs': total_docs,
-                'batchs': total_docs,
+                'batches': total_docs,
                 'cur_batch': 0,
                 'latest_message': 'Starting document deletion process',
             }
@@ -2770,7 +2770,7 @@ def create_document_routes(
                     'job_name': 'Clearing Documents',
                     'job_start': datetime.now().isoformat(),
                     'docs': 0,
-                    'batchs': 0,
+                    'batches': 0,
                     'cur_batch': 0,
                     'request_pending': False,  # Clear any previous request
                     'latest_message': 'Starting document clearing process',
@@ -2922,7 +2922,7 @@ def create_document_routes(
                 - job_name (str): Current job name (e.g., indexing files/indexing texts)
                 - job_start (str, optional): Job start time as ISO format string
                 - docs (int): Total number of documents to be indexed
-                - batchs (int): Number of batches for processing documents
+                - batches (int): Number of batches for processing documents
                 - cur_batch (int): Current processing batch
                 - request_pending (bool): Flag for pending request for processing
                 - latest_message (str): Latest message from pipeline processing

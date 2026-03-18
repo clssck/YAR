@@ -552,8 +552,9 @@ export default function RetrievalTesting() {
         state.addUserPromptToHistory(state.querySettings.user_prompt.trim())
       }
 
+      const { show_references_section, ...sendableSettings } = state.querySettings
       const queryParams = {
-        ...state.querySettings,
+        ...sendableSettings,
         query: actualQuery,
         response_type: 'Multiple Paragraphs',
         conversation_history: prevMessages
@@ -566,6 +567,8 @@ export default function RetrievalTesting() {
         // Run query
         if (state.querySettings.stream) {
           let errorMessage = ''
+          abortControllerRef.current?.abort()
+          abortControllerRef.current = new AbortController()
           await queryTextStream(
             queryParams,
             updateAssistantMessage,
@@ -644,6 +647,7 @@ export default function RetrievalTesting() {
                 ),
               )
             },
+            abortControllerRef.current.signal,
           )
           if (errorMessage) {
             if (assistantMessage.content) {
@@ -850,6 +854,8 @@ export default function RetrievalTesting() {
   const isReceivingResponseRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const formRef = useRef<HTMLFormElement>(null)
 
   // Add cleanup effect for memory leak prevention
   useEffect(() => {
@@ -858,6 +864,7 @@ export default function RetrievalTesting() {
       if (thinkingStartTime.current) {
         thinkingStartTime.current = null
       }
+      abortControllerRef.current?.abort()
     }
   }, [])
 
@@ -916,7 +923,7 @@ export default function RetrievalTesting() {
 
   // Add event listeners to the form area to prevent disabling auto-scroll when interacting with form
   useEffect(() => {
-    const form = document.querySelector('form')
+    const form = formRef.current
     if (!form) return
 
     const handleFormMouseDown = () => {
@@ -1228,6 +1235,7 @@ export default function RetrievalTesting() {
 
         <search>
           <form
+            ref={formRef}
             onSubmit={handleSubmit}
             className="flex shrink-0 items-center gap-2"
             autoComplete="on"

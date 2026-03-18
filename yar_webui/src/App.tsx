@@ -1,7 +1,7 @@
 import { Loader2Icon, ZapIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getAuthStatus, InvalidApiKeyError, RequireApiKeError } from '@/api/yar'
+import { getAuthStatus, InvalidApiKeyError, RequireApiKeyError } from '@/api/yar'
 import ApiKeyAlert from '@/components/ApiKeyAlert'
 import ThemeProvider from '@/components/ThemeProvider'
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
@@ -201,7 +201,7 @@ function App() {
     if (message) {
       if (
         message.includes(InvalidApiKeyError) ||
-        message.includes(RequireApiKeError)
+        message.includes(RequireApiKeyError)
       ) {
         setApiKeyAlertOpen(true)
       }

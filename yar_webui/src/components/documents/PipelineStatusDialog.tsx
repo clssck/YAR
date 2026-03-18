@@ -53,7 +53,7 @@ export default function PipelineStatusDialog({
     if (!container || isUserScrolled) return
 
     container.scrollTop = container.scrollHeight
-  }, [isUserScrolled])
+  }, [isUserScrolled, status?.history_messages?.length])
 
   const handleScroll = () => {
     const container = historyRef.current
@@ -127,7 +127,7 @@ export default function PipelineStatusDialog({
       >
         <DialogDescription className="sr-only">
           {status?.job_name
-            ? `${t('documentPanel.pipelineStatus.jobName')}: ${status.job_name}, ${t('documentPanel.pipelineStatus.progress')}: ${status.cur_batch}/${status.batchs}`
+            ? `${t('documentPanel.pipelineStatus.jobName')}: ${status.job_name}, ${t('documentPanel.pipelineStatus.progress')}: ${status.cur_batch}/${status.batches}`
             : t('documentPanel.pipelineStatus.noActiveJob')}
         </DialogDescription>
         <DialogHeader className="flex flex-row items-center">
@@ -250,7 +250,7 @@ export default function PipelineStatusDialog({
               <span>
                 {t('documentPanel.pipelineStatus.progress')}:{' '}
                 {status
-                  ? `${status.cur_batch}/${status.batchs} ${t('documentPanel.pipelineStatus.unit')}`
+                  ? `${status.cur_batch}/${status.batches} ${t('documentPanel.pipelineStatus.unit')}`
                   : '-'}
               </span>
             </div>
