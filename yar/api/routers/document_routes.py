@@ -2387,7 +2387,7 @@ async def background_delete_documents(
         # Final summary and check for pending requests
         async with pipeline_status_lock:
             pipeline_status['busy'] = False
-            pipeline_status['pending_requests'] = False  # Reset pending requests flag
+            pipeline_status['request_pending'] = False  # Reset pending requests flag
             pipeline_status['cancellation_requested'] = False  # Always reset cancellation flag
             completion_msg = (
                 f'Deletion completed: {len(successful_deletions)} successful, {len(failed_deletions)} failed'

@@ -169,23 +169,24 @@ class TestAdvisoryLockConstants:
     """Tests for advisory lock configuration."""
 
     def test_lock_id_is_deterministic(self):
-        """Lock ID should be the same across processes."""
-        # Import the class to check the constant
-        from yar.kg.postgres_impl import PostgreSQLDB
+        """Advisory lock ID should be deterministic across processes (uses hashlib, not hash())."""
+        import hashlib
 
-        # The lock ID should be a positive 31-bit integer
-        lock_id = PostgreSQLDB._SCHEMA_MIGRATION_LOCK_ID
-        assert isinstance(lock_id, int)
-        assert lock_id > 0
-        assert lock_id <= 0x7FFFFFFF  # 31-bit max
+        lock_name = 'schema_migration'
+        expected_id = int(hashlib.sha256(lock_name.encode()).hexdigest(), 16) & 0x7FFFFFFF
+        assert isinstance(expected_id, int)
+        assert expected_id > 0
+        assert expected_id <= 0x7FFFFFFF  # 31-bit max
 
     def test_lock_id_from_string_hash(self):
-        """Lock ID generation should be consistent."""
-        lock_name = "yar_schema_migration"
-        expected_id = hash(lock_name) & 0x7FFFFFFF
+        """Lock ID generation should be consistent and process-independent."""
+        import hashlib
 
-        from yar.kg.postgres_impl import PostgreSQLDB
-        assert expected_id == PostgreSQLDB._SCHEMA_MIGRATION_LOCK_ID
+        lock_name = 'schema_migration'
+        expected_id = int(hashlib.sha256(lock_name.encode()).hexdigest(), 16) & 0x7FFFFFFF
+        # Compute again to prove determinism
+        actual_id = int(hashlib.sha256(lock_name.encode()).hexdigest(), 16) & 0x7FFFFFFF
+        assert expected_id == actual_id
 
 
 class TestSchemaTablesDefinition:

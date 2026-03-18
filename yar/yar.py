@@ -1968,14 +1968,16 @@ class YAR:
                 doc_tasks = []
                 for doc_id, status_doc in to_process_docs.items():
                     doc_tasks.append(
-                        process_document(
-                            doc_id,
-                            status_doc,
-                            split_by_character,
-                            split_by_character_only,
-                            pipeline_status,
-                            pipeline_status_lock,
-                            semaphore,
+                        asyncio.create_task(
+                            process_document(
+                                doc_id,
+                                status_doc,
+                                split_by_character,
+                                split_by_character_only,
+                                pipeline_status,
+                                pipeline_status_lock,
+                                semaphore,
+                            )
                         )
                     )
 
@@ -2640,7 +2642,8 @@ class YAR:
                     enable_cot=True,
                     stream=param.stream,
                 )
-                if type(response) is str:
+                if isinstance(response, str):
+                    await self._query_done()
                     return {
                         'status': 'success',
                         'message': 'Bypass mode LLM non streaming response',
@@ -2653,6 +2656,7 @@ class YAR:
                         },
                     }
                 else:
+                    await self._query_done()
                     return {
                         'status': 'success',
                         'message': 'Bypass mode LLM streaming response',

@@ -809,9 +809,6 @@ class PostgreSQLDB:
     # Schema Migration Tracking (Production Hardening)
     # ========================================================================
 
-    # Advisory lock ID for schema migrations (deterministic 31-bit integer)
-    # Using a fixed hash ensures all processes use the same lock
-    _SCHEMA_MIGRATION_LOCK_ID: ClassVar[int] = hash('yar_schema_migration') & 0x7FFFFFFF
 
     @asynccontextmanager
     async def _advisory_lock(self, lock_name: str = 'schema_migration'):
@@ -832,7 +829,7 @@ class PostgreSQLDB:
                 await self.execute('ALTER TABLE ...')
         """
         # Generate deterministic lock ID from name
-        lock_id = hash(lock_name) & 0x7FFFFFFF  # 31-bit positive integer
+        lock_id = int(hashlib.sha256(lock_name.encode()).hexdigest(), 16) & 0x7FFFFFFF  # 31-bit positive integer
 
         await self._ensure_pool()
         assert self.pool is not None
@@ -2234,6 +2231,8 @@ class PostgreSQLDB:
             try:
                 # Step 1: Remove duplicates, keeping the row with latest update_time
                 # Uses a CTE to identify duplicates and delete all but the newest
+                dedup_columns = [col.strip() for col in dedup_key.split(',')]
+                dedup_join = ' AND '.join(f'a.{col} = b.{col}' for col in dedup_columns)
                 dedup_sql = f"""
                 DELETE FROM {table} a
                 USING (
@@ -2243,7 +2242,7 @@ class PostgreSQLDB:
                     HAVING COUNT(*) > 1
                 ) b
                 WHERE a.workspace = b.workspace
-                  AND a.{dedup_key.split(',')[0].strip()} = b.{dedup_key.split(',')[0].strip()}
+                  AND {dedup_join}
                   AND a.update_time < b.max_time
                 """
                 await self.execute(dedup_sql)
@@ -2592,7 +2591,7 @@ class PostgreSQLDB:
                 raise
 
         try:
-            await self._run_with_retry(_operation, with_age=with_age, graph_name=graph_name)
+            return await self._run_with_retry(_operation, with_age=with_age, graph_name=graph_name)
         except Exception as e:
             logger.error(f'PostgreSQL database, {_sanitize_for_log(sql, data)}, error: {e}')
             raise

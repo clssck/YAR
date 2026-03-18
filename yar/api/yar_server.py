@@ -420,12 +420,11 @@ def create_app(args):
             prompt,
             system_prompt=None,
             history_messages=None,
-            keyword_extraction=False,
             **kwargs,
         ) -> str | AsyncIterator[str]:
             from yar.llm.openai import openai_complete_if_cache
 
-            keyword_extraction = kwargs.pop('keyword_extraction', None)
+            keyword_extraction = kwargs.pop('keyword_extraction', False)
             if keyword_extraction:
                 kwargs['response_format'] = GPTKeywordExtractionFormat
             if history_messages is None:
