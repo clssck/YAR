@@ -105,7 +105,7 @@ class QueryBuilder:
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
-async def validate_upload_size(file: UploadFile, max_size_mb: int | None) -> bytes:
+async def validate_upload_size(file: UploadFile, max_size_mb: int | float | None) -> bytes:
     """Validate file upload size with streaming to prevent memory exhaustion.
 
     Two-phase validation:
@@ -160,7 +160,7 @@ async def validate_upload_size(file: UploadFile, max_size_mb: int | None) -> byt
 
 def validate_text_payload_size(
     texts: list[str],
-    max_size_mb: int | None,
+    max_size_mb: int | float | None,
     *,
     payload_name: str = 'Text payload',
 ) -> None:

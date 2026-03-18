@@ -165,7 +165,7 @@ def create_openai_async_client(
         if timeout is not None:
             merged_configs['timeout'] = timeout
 
-        return AsyncOpenAI(**merged_configs)
+        return AsyncOpenAI(**merged_configs)  # ty: ignore[invalid-argument-type]
 
 
 # Cache for detected embedding dimensions: (model, base_url) -> dimension

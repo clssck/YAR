@@ -7,7 +7,7 @@ consistency and makes maintenance easier.
 """
 
 # Default values for server settings
-DEFAULT_WOKERS = 2
+DEFAULT_WORKERS = 2
 DEFAULT_MAX_GRAPH_NODES = 1000
 
 # Default values for extraction settings
@@ -58,8 +58,8 @@ DEFAULT_RELATED_CHUNK_NUMBER = 16  # Increased from 12 to improve context recall
 DEFAULT_KG_CHUNK_PICK_METHOD = 'VECTOR'
 
 # Rerank configuration defaults
-# Local reranking uses mxbai-rerank-xsmall-v1 by default (see rerank.py)
-DEFAULT_ENABLE_RERANK = True
+# Reranking stays opt-in because it requires a separate rerank model.
+DEFAULT_ENABLE_RERANK = False
 # Minimum rerank score threshold - set to None to disable filtering
 # Testing shows reranking works best for ordering only, without score cutoffs
 # (filtering hurts recall on domain-specific content)

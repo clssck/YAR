@@ -64,6 +64,8 @@ from yar.constants import (
     SOURCE_IDS_LIMIT_METHOD_FIFO,
     VALID_SOURCE_IDS_LIMIT_METHODS,
 )
+from yar.exceptions import QueueFullError, WorkerTimeoutError
+from yar.types import GlobalConfig
 
 # Precompile regex pattern for JSON sanitization (module-level, compiled once)
 _SURROGATE_PATTERN = re.compile(r'[\uD800-\uDFFF\uFFFE\uFFFF]')
@@ -643,21 +645,6 @@ def parse_cache_key(cache_key: str) -> tuple[str, str, str] | None:
         return parts[0], parts[1], parts[2]
     return None
 
-
-# Custom exception classes
-class QueueFullError(Exception):
-    """Raised when the queue is full and the wait times out"""
-
-    pass
-
-
-class WorkerTimeoutError(Exception):
-    """Worker-level timeout exception with specific timeout information"""
-
-    def __init__(self, timeout_value: float, timeout_type: str = 'execution'):
-        self.timeout_value = timeout_value
-        self.timeout_type = timeout_type
-        super().__init__(f'Worker {timeout_type} timeout after {timeout_value}s')
 
 
 class HealthCheckTimeoutError(Exception):
@@ -1928,9 +1915,9 @@ async def aexport_data(
     else:
         raise ValueError(f'Unsupported file format: {file_format}. Choose from: csv, excel, md, txt')
     if file_format is not None:
-        print(f'Data exported to: {output_path} with format: {file_format}')
+        logger.info(f'Data exported to: {output_path} with format: {file_format}')
     else:
-        print('Data displayed as table format')
+        logger.info('Data displayed as table format')
 
 
 def export_data(
@@ -2757,7 +2744,7 @@ class TokenTracker:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        print(self)
+        logger.info(str(self))
 
     def reset(self):
         self.prompt_tokens = 0
@@ -2804,7 +2791,7 @@ class TokenTracker:
 async def apply_rerank_if_enabled(
     query: str,
     retrieved_docs: list[dict],
-    global_config: dict,
+    global_config: GlobalConfig,
     enable_rerank: bool = True,
     top_n: int | None = None,
 ) -> list[dict]:
@@ -2893,7 +2880,7 @@ async def process_chunks_unified(
     query: str,
     unique_chunks: list[dict],
     query_param: QueryParam,
-    global_config: dict,
+    global_config: GlobalConfig,
     source_type: str = 'mixed',
     chunk_token_limit: int | None = None,  # Add parameter for dynamic token limit
 ) -> list[dict]:

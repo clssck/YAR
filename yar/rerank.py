@@ -44,7 +44,7 @@ def create_rerank_func(
     model: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
-    enable_chunking: bool = False,
+    enable_chunking: bool = True,
     max_tokens_per_doc: int = 480,
 ):
     """
@@ -287,7 +287,7 @@ async def generic_rerank_api(
     extra_body: dict[str, Any] | None = None,
     response_format: str = 'standard',  # "standard" (Jina/Cohere) or "aliyun"
     request_format: str = 'standard',  # "standard" (Jina/Cohere) or "aliyun"
-    enable_chunking: bool = False,
+    enable_chunking: bool = True,
     max_tokens_per_doc: int = 480,
 ) -> list[dict[str, Any]]:
     """
@@ -538,14 +538,14 @@ if __name__ == '__main__':
 
         # Use the configured reranker (reads from env vars)
         try:
-            print('=== Rerank via create_rerank_func() ===')
+            logger.info('=== Rerank via create_rerank_func() ===')
             rerank_func = create_rerank_func()
             result = await rerank_func(query=query, documents=docs, top_n=2)
-            print('Results:')
+            logger.info('Results:')
             for item in result:
-                print(f'Index: {item["index"]}, Score: {item["relevance_score"]:.4f}')
-                print(f'Document: {docs[item["index"]]}')
+                logger.info(f'Index: {item["index"]}, Score: {item["relevance_score"]:.4f}')
+                logger.info(f'Document: {docs[item["index"]]}')
         except Exception as e:
-            print(f'Error: {e}')
+            logger.error(f'Error: {e}')
 
     asyncio.run(main())

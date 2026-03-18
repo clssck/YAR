@@ -27,7 +27,7 @@ from yar.constants import (
     DEFAULT_SUMMARY_MAX_TOKENS,
     DEFAULT_TIMEOUT,
     DEFAULT_TOP_K,
-    DEFAULT_WOKERS,
+    DEFAULT_WORKERS,
 )
 from yar.llm.binding_options import (
     OpenAILLMOptions,
@@ -175,7 +175,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--workers',
         type=int,
-        default=get_env_value('WORKERS', DEFAULT_WOKERS, int),
+        default=get_env_value('WORKERS', DEFAULT_WORKERS, int),
         help='Number of worker processes (default: from env or 1)',
     )
 
@@ -197,8 +197,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--enable-rerank',
         action='store_true',
-        default=get_env_value('ENABLE_RERANK', True, bool),
-        help='Enable local reranking with sentence-transformers (default: True)',
+        default=get_env_value('ENABLE_RERANK', False, bool),
+        help='Enable reranking support with a separately configured rerank model (default: False)',
     )
     parser.add_argument(
         '--disable-rerank',

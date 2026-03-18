@@ -13,7 +13,7 @@ from yar.api.config import global_args
 from yar.api.utils_api import check_env_file, display_splash_screen
 from yar.constants import (
     DEFAULT_TIMEOUT,
-    DEFAULT_WOKERS,
+    DEFAULT_WORKERS,
 )
 from yar.kg.shared_storage import initialize_share_data
 from yar.utils import get_env_value
@@ -155,7 +155,7 @@ def main():
 
             # Set configuration variables in gunicorn_config, prioritizing command line arguments
             gunicorn_config.workers = (
-                global_args.workers if global_args.workers else get_env_value('WORKERS', DEFAULT_WOKERS, int)
+                global_args.workers if global_args.workers else get_env_value('WORKERS', DEFAULT_WORKERS, int)
             )
 
             # Bind configuration prioritizes command line arguments

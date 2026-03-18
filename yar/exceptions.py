@@ -57,6 +57,10 @@ class APITimeoutError(APIConnectionError):
         super().__init__(message='Request timed out.', request=request)
 
 
+class YARError(Exception):
+    """Base exception for all YAR errors."""
+
+
 class StorageNotInitializedError(RuntimeError):
     """Raised when storage operations are attempted before initialization."""
 
@@ -71,7 +75,7 @@ class StorageNotInitializedError(RuntimeError):
         )
 
 
-class PipelineNotInitializedError(KeyError):
+class PipelineNotInitializedError(YARError, KeyError):
     """Raised when pipeline status is accessed before initialization."""
 
     def __init__(self, namespace: str = ''):
@@ -111,9 +115,6 @@ class LockTimeoutError(TimeoutError):
         self.key = key
         self.timeout = timeout
 
-
-class YARError(Exception):
-    """Base exception for all YAR errors."""
 
 
 class StorageError(YARError):
@@ -176,3 +177,19 @@ class LLMError(YARError):
             parts.append(f'op={operation}')
         prefix = f'[{", ".join(parts)}]' if parts else ''
         super().__init__(f'{prefix} {message}'.strip())
+
+
+
+class QueueFullError(YARError):
+    """Raised when the queue is full and the wait times out."""
+
+    pass
+
+
+class WorkerTimeoutError(YARError):
+    """Worker-level timeout exception with specific timeout information."""
+
+    def __init__(self, timeout_value: float, timeout_type: str = 'execution'):
+        self.timeout_value = timeout_value
+        self.timeout_type = timeout_type
+        super().__init__(f'Worker {timeout_type} timeout after {timeout_value}s')

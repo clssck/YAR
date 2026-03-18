@@ -212,13 +212,15 @@ async def run_inference(
         print(f'Base URL: {base_url}\n')
 
         async def llm_func(prompt: str) -> str:
-            return await openai_complete_if_cache(
+            result = await openai_complete_if_cache(
                 model=model,
                 prompt=prompt,
                 system_prompt="You are a helpful assistant that classifies entities.",
                 api_key=api_key,
                 base_url=base_url,
             )
+            assert isinstance(result, str)
+            return result
 
         # Process in batches
         all_inferences: dict[str, str] = {}
