@@ -1833,12 +1833,8 @@ class YAR:
                                             'processing_start_time': processing_start_time,
                                             'processing_end_time': processing_end_time,
                                             'chunking_preset': doc_chunking_preset or 'semantic',
-                                            'chunk_token_size': effective_chunk_size
-                                            if 'effective_chunk_size' in dir()
-                                            else self.chunk_token_size,
-                                            'chunk_overlap_token_size': effective_overlap
-                                            if 'effective_overlap' in dir()
-                                            else self.chunk_overlap_token_size,
+                                            'chunk_token_size': effective_chunk_size,
+                                            'chunk_overlap_token_size': effective_overlap,
                                         },
                                     }
                                 }

@@ -1088,7 +1088,7 @@ class PostgreSQLDB:
             logger.warning(f'Failed to migrate LLM cache schema: {e}')
 
     async def _migrate_timestamp_columns(self):
-        """Migrate timestamp columns in tables to witimezone-free types, assuming original data is in UTC time"""
+        """Migrate timestamp columns in tables to timezone-free types, assuming original data is in UTC time"""
         # Tables and columns that need migration
         tables_to_migrate = {
             'YAR_VDB_ENTITY': ['create_time', 'update_time'],
@@ -1135,7 +1135,7 @@ class PostgreSQLDB:
                         # Check column type
                         if data_type == 'timestamp without time zone':
                             logger.debug(
-                                f'Column {table_name}.{column_name} is already witimezone-free, no migration needed'
+                                f'Column {table_name}.{column_name} is already timezone-free, no migration needed'
                             )
                             continue
 
@@ -3190,7 +3190,6 @@ class PGKVStorage(BaseKVStorage):
 
         # Get current UTC time and convert to naive datetime for database storage
         current_time = datetime.datetime.now(timezone.utc).replace(tzinfo=None)
-        db = self._db_required()
 
         if is_namespace(self.namespace, NameSpace.KV_STORE_TEXT_CHUNKS):
             upsert_sql = SQL_TEMPLATES['upsert_text_chunk']
@@ -4652,7 +4651,6 @@ class PGDocStatusStorage(DocStatusStorage):
                   metadata = EXCLUDED.metadata,
                   error_msg = EXCLUDED.error_msg,
                   s3_key = EXCLUDED.s3_key,
-                  created_at = EXCLUDED.created_at,
                   updated_at = EXCLUDED.updated_at"""
 
         batch_data = []

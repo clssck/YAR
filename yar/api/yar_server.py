@@ -447,21 +447,6 @@ def create_app(args):
 
         return optimized_openai_alike_model_complete
 
-    def create_llm_model_func(binding: str):
-        """
-        Create LLM model function based on binding type.
-        Supports: openai (OpenAI-compatible APIs including local servers like vLLM, LiteLLM)
-        """
-        # Use optimized function with pre-processed configuration
-        return create_optimized_openai_llm_func(config_cache, args, llm_timeout)
-
-    def create_llm_model_kwargs(binding: str, args, llm_timeout: int) -> dict:
-        """
-        Create LLM model kwargs based on binding type.
-        Uses lazy import for binding-specific options.
-        """
-        return {}
-
     def create_entity_resolution_config(args) -> 'EntityResolutionConfig':
         """
         Create EntityResolutionConfig from command line/env arguments.
@@ -645,7 +630,7 @@ def create_app(args):
         rag = YAR(
             working_dir=args.working_dir,
             workspace=args.workspace,
-            llm_model_func=create_llm_model_func(args.llm_binding),
+            llm_model_func=create_optimized_openai_llm_func(config_cache, args, llm_timeout),
             llm_model_name=args.llm_model,
             llm_model_max_async=args.max_async,
             summary_max_tokens=args.summary_max_tokens,
@@ -653,7 +638,7 @@ def create_app(args):
             chunk_token_size=int(args.chunk_size),
             chunk_overlap_token_size=int(args.chunk_overlap_size),
             chunking_func=chunking_func,
-            llm_model_kwargs=create_llm_model_kwargs(args.llm_binding, args, llm_timeout),
+            llm_model_kwargs={},
             embedding_func=embedding_func,
             default_llm_timeout=llm_timeout,
             default_embedding_timeout=embedding_timeout,

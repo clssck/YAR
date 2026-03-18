@@ -285,7 +285,7 @@ def create_alias_routes(rag, api_key: str | None = None):
 
         # Count first
         count_sql = f'SELECT COUNT(*) as count FROM YAR_ENTITY_ALIASES WHERE {where_clause}'
-        count_result = await db.query(count_sql, params=qb.params)
+        count_result = await db.query(count_sql, params=qb.params.copy())
         count = count_result.get('count', 0) if count_result else 0
 
         # Delete using query (supports params list)

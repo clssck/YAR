@@ -88,11 +88,6 @@ def format_datetime(dt: Any) -> str | None:
     return dt.isoformat()
 
 
-router = APIRouter(
-    prefix='/documents',
-    tags=['documents'],
-)
-
 # Temporary file prefix
 temp_prefix = '__tmp__'
 
@@ -792,7 +787,7 @@ def validate_file_path_security(file_path_str: str, base_dir: Path) -> Path | No
 
         return candidate_path
 
-    except (OSError, ValueError, Exception) as e:
+    except (OSError, ValueError) as e:
         logger.warning(f'Invalid file path detected: {file_path_str} - {e!s}')
         return None
 
@@ -2341,7 +2336,7 @@ async def background_delete_documents(
                                             security_msg = f'Security violation: Unsafe enqueued file path detected - {enqueued_file.name}'
                                             logger.warning(security_msg)
 
-                            if deleted_files == []:
+                            if not deleted_files:
                                 file_error_msg = f'File deletion skipped, missing or unsafe file: {result.file_path}'
                                 logger.warning(file_error_msg)
                                 async with pipeline_status_lock:
@@ -2418,6 +2413,7 @@ def create_document_routes(
     When s3_client is provided, uploaded documents will be stored in S3
     in addition to local filesystem, and archived after processing.
     """
+    router = APIRouter(prefix='/documents', tags=['documents'])
     # Create combined auth dependency for document routes
     combined_auth = get_combined_auth_dependency(api_key)
 

@@ -12,8 +12,6 @@ from yar.api.utils_api import get_combined_auth_dependency, handle_api_error
 from yar.constants import NS_ORPHAN_CONNECTION_STATUS
 from yar.utils import logger
 
-router = APIRouter(tags=['graph'])
-
 
 class EntityUpdateRequest(BaseModel):
     entity_name: str
@@ -136,6 +134,7 @@ class RelationCreateRequest(BaseModel):
 
 
 def create_graph_routes(rag, api_key: str | None = None):
+    router = APIRouter(tags=['graph'])
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.get('/graph/label/list', dependencies=[Depends(combined_auth)])

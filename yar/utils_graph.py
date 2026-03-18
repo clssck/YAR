@@ -167,7 +167,7 @@ async def adelete_by_relation(
     # Use keyed lock for relation to ensure atomic graph and vector db operations
     workspace = relationships_vdb.global_config.get('workspace', '')
     namespace = f'{workspace}:GraphDB' if workspace else 'GraphDB'
-    sorted_edge_key = sorted([source_entity, target_entity])
+    sorted_edge_key = [source_entity, target_entity]
     async with get_storage_keyed_lock(sorted_edge_key, namespace=namespace, enable_logging=False):
         try:
             # Check if the relation exists
@@ -1549,11 +1549,12 @@ def _merge_attributes(
             merged_data[key] = values[-1]
         elif strategy == 'join_unique':
             # Handle fields separated by GRAPH_FIELD_SEP
-            unique_items = set()
+            seen = {}
             for value in values:
                 items = str(value).split(GRAPH_FIELD_SEP)
-                unique_items.update(items)
-            merged_data[key] = GRAPH_FIELD_SEP.join(unique_items)
+                for item in items:
+                    seen.setdefault(item, None)
+            merged_data[key] = GRAPH_FIELD_SEP.join(seen)
         elif strategy == 'join_unique_comma':
             # Handle fields separated by comma, join unique items with comma
             unique_items = set()
