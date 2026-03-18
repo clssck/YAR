@@ -114,6 +114,12 @@ class S3ClientManager:
                 cls._session_refs[session_key] -= 1
                 logger.debug(f'S3 session {session_key} reference count: {cls._session_refs[session_key]}')
 
+                if cls._session_refs[session_key] <= 0:
+                    # Clean up session when no more references
+                    del cls._sessions[session_key]
+                    del cls._session_refs[session_key]
+                    logger.info(f'Closed and removed S3 session for {session_key}')
+
 
 @dataclass
 class S3Client:

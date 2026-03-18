@@ -4375,12 +4375,12 @@ class PGDocStatusStorage(DocStatusStorage):
             counts[doc['status']] = doc['count']
         return counts
 
-    async def get_docs_by_status(self, status: DocStatus) -> dict[str, DocProcessingStatus]:
+    async def get_docs_by_status(self, status: DocStatus, limit: int = 10000) -> dict[str, DocProcessingStatus]:
         """all documents with a specific status"""
         db = self._db_required()
-        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and status=$2'
-        params = {'workspace': self.workspace, 'status': status.value}
-        result = await db.query(sql, list(params.values()), multirows=True)
+        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and status=$2 LIMIT $3'
+        params = [self.workspace, status.value, limit]
+        result = await db.query(sql, params, multirows=True)
 
         docs_by_status = {}
         for element in result:
@@ -4402,12 +4402,12 @@ class PGDocStatusStorage(DocStatusStorage):
 
         return docs_by_status
 
-    async def get_docs_by_track_id(self, track_id: str) -> dict[str, DocProcessingStatus]:
+    async def get_docs_by_track_id(self, track_id: str, limit: int = 10000) -> dict[str, DocProcessingStatus]:
         """Get all documents with a specific track_id"""
         db = self._db_required()
-        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and track_id=$2'
-        params = {'workspace': self.workspace, 'track_id': track_id}
-        result = await db.query(sql, list(params.values()), multirows=True)
+        sql = 'select * from YAR_DOC_STATUS where workspace=$1 and track_id=$2 LIMIT $3'
+        params = [self.workspace, track_id, limit]
+        result = await db.query(sql, params, multirows=True)
 
         docs_by_track_id = {}
         for element in result:
@@ -4884,8 +4884,8 @@ class PGGraphStorage(BaseGraphStorage):
         """Best-effort sanitization for identifiers we interpolate into Cypher.
 
         This avoids common parse errors without altering the semantic value.
-        Control chars are stripped, quotes/backticks are escaped, and we keep
-        the result ASCII-only to match server expectations.
+        Control chars are stripped, quotes/backticks are escaped, and the
+        result is validated to be non-empty.
         """
 
         # Drop control characters that can break AGE parsing
@@ -4896,8 +4896,10 @@ class PGGraphStorage(BaseGraphStorage):
         normalized_id = normalized_id.replace('"', '\\"')  # double quote
         normalized_id = normalized_id.replace('`', '\\`')  # backtick
 
-        # Keep it compact and ASCII to avoid encoding surprises
-        normalized_id = normalized_id.encode('ascii', 'ignore').decode('ascii')
+        # Reject empty results after normalization
+        normalized_id = normalized_id.strip()
+        if not normalized_id:
+            raise ValueError(f'Entity ID is empty after normalization (original: {node_id[:50]!r})')
         return normalized_id
 
     async def initialize(self):
@@ -6953,7 +6955,6 @@ SQL_TEMPLATES = {
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                  FROM YAR_RELATION_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
-    'filter_keys': 'SELECT id FROM {table_name} WHERE workspace=$1 AND id IN ({ids})',
     'upsert_doc_full': """INSERT INTO YAR_DOC_FULL (id, content, doc_name, workspace, s3_key, meta)
                         VALUES ($1, $2, $3, $4, $5, $6)
                         ON CONFLICT (workspace,id) DO UPDATE
@@ -7142,6 +7143,7 @@ SQL_TEMPLATES = {
               WHERE r.workspace = $1
                 AND (r.source_id = e.entity_name OR r.target_id = e.entity_name)
           )
+        LIMIT 1000
         """,
     # Get entities with degree <= max_degree (sparse entities)
     # $1 = workspace, $2 = max_degree
@@ -7160,6 +7162,7 @@ SQL_TEMPLATES = {
         WHERE e.workspace = $1
           AND COALESCE(degree_counts.degree, 0) <= $2
         ORDER BY COALESCE(degree_counts.degree, 0) ASC, e.entity_name
+        LIMIT 1000
         """,
     # Note: Similarity calculation assumes cosine distance (1 - distance = similarity)
     # For L2 or inner product metrics, interpret the similarity column differently

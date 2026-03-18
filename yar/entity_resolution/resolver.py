@@ -257,14 +257,14 @@ def _parse_llm_json_response(response: str) -> list[dict[str, Any]]:
             return parsed
         return []
     except json.JSONDecodeError as e:
-        logger.debug(f'Failed to parse LLM JSON response: {e}')
+        logger.warning(f'Failed to parse LLM JSON response: {e}')
         # Try to extract JSON from mixed content
         json_match = re.search(r'\[[\s\S]*\]', text)
         if json_match:
             try:
                 return json.loads(json_match.group())
             except json.JSONDecodeError:
-                pass
+                logger.warning('Failed to extract JSON array from LLM response via regex fallback')
         return []
 
 
@@ -444,7 +444,11 @@ async def llm_review_entities_batch(
 
         matches = item.get('matches_existing', False)
         canonical = item.get('canonical', new_entity)
-        confidence = float(item.get('confidence', 0.5))
+        try:
+            confidence = max(0.0, min(1.0, float(item.get('confidence', 0.5))))
+        except (ValueError, TypeError):
+            logger.warning(f'Invalid confidence value from LLM: {item.get("confidence")}, defaulting to 0.5')
+            confidence = 0.5
         reasoning = item.get('reasoning', '')
 
         # Apply confidence threshold with soft match logging

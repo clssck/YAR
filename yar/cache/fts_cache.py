@@ -66,7 +66,14 @@ def _build_redis_cache_key(workspace: str, cache_hash: str) -> str:
 async def _get_redis_client():
     """Lazy initialize Redis client for FTS cache."""
     global _redis_client
-    if _redis_client is None and REDIS_FTS_CACHE_ENABLED:
+    if _redis_client is not None:
+        return _redis_client  # Fast path: already initialized
+    if not REDIS_FTS_CACHE_ENABLED:
+        return None
+    async with _fts_cache_lock:
+        # Double-check after acquiring lock
+        if _redis_client is not None:
+            return _redis_client
         try:
             import redis.asyncio as redis
 
@@ -117,16 +124,18 @@ async def get_cached_fts_results(
                     results = json.loads(cached_json)
                     logger.debug(f'Redis FTS cache hit for hash {cache_hash[:8]}')
                     # Update local cache for faster subsequent hits
-                    _fts_cache[cache_key] = (results, current_time)
+                    async with _fts_cache_lock:
+                        _fts_cache[cache_key] = (results, current_time)
                     return results
         except Exception as e:
             logger.debug(f'Redis FTS cache read error: {e}')
 
-    # Check local cache
-    cached = _fts_cache.get(cache_key)
-    if cached and (current_time - cached[1]) < FTS_CACHE_TTL:
-        logger.debug(f'Local FTS cache hit for hash {cache_hash[:8]}')
-        return cached[0]
+    # Check local cache (under lock to prevent race with eviction)
+    async with _fts_cache_lock:
+        cached = _fts_cache.get(cache_key)
+        if cached and (current_time - cached[1]) < FTS_CACHE_TTL:
+            logger.debug(f'Local FTS cache hit for hash {cache_hash[:8]}')
+            return cached[0]
 
     return None
 
