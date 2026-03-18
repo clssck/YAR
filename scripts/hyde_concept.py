@@ -14,6 +14,7 @@ import json
 import os
 
 import numpy as np
+import pytest
 from openai import AsyncOpenAI
 
 # Config
@@ -25,12 +26,21 @@ PG_USER = os.getenv('POSTGRES_USER', 'yar')
 PG_PASS = os.getenv('POSTGRES_PASSWORD', 'yar_pass')
 PG_DB = os.getenv('POSTGRES_DATABASE', 'yar')
 
-client = AsyncOpenAI()
+pytestmark = pytest.mark.integration
+
+_client: AsyncOpenAI | None = None
+
+
+def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI()
+    return _client
 
 
 async def get_embedding(text: str) -> list[float]:
     """Get embedding for a single text."""
-    response = await client.embeddings.create(
+    response = await _get_client().embeddings.create(
         model=EMBEDDING_MODEL,
         input=text,
         dimensions=1536,  # Match DB dimension (text-embedding-3-large at 1536)
@@ -49,13 +59,15 @@ Question: {query}
 Output valid JSON:
 {{"hypothetical_answers": ["answer1", "answer2", "answer3"]}}"""
 
-    response = await client.chat.completions.create(
+    response = await _get_client().chat.completions.create(
         model=LLM_MODEL,
         messages=[{'role': 'user', 'content': prompt}],
         temperature=0.7,
     )
 
     content = response.choices[0].message.content
+    if content is None:
+        return []
     # Parse JSON from response
     try:
         # Handle markdown code blocks

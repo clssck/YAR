@@ -7,7 +7,7 @@ Tests are organized by component: chunking, aggregation, API, factory.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -553,6 +553,37 @@ class TestGenericAPIChunking:
             assert len(results) == 1
 
     @pytest.mark.asyncio
+    async def test_chunking_is_enabled_by_default(self):
+        """DIAGNOSTIC: If this fails, long docs are not chunked unless callers opt in."""
+        factory, _, session = mock_aiohttp(
+            200,
+            {
+                "results": [
+                    {"index": 0, "relevance_score": 0.9},
+                    {"index": 1, "relevance_score": 0.8},
+                    {"index": 2, "relevance_score": 0.7},
+                ]
+            },
+        )
+
+        long_doc = "word " * 200
+
+        with patch("yar.rerank.aiohttp.ClientSession", factory):
+            results = await generic_rerank_api(
+                query="test",
+                documents=[long_doc],
+                model="model",
+                base_url="https://api.test.com",
+                api_key="key",
+                max_tokens_per_doc=50,
+            )
+
+            _, kwargs = session.call_args
+            sent_docs = kwargs["json"]["documents"]
+            assert len(sent_docs) > 1, "Default rerank path should chunk long documents"
+            assert len(results) == 1
+
+    @pytest.mark.asyncio
     async def test_chunking_preserves_top_n_at_document_level(self):
         """DIAGNOSTIC: If this fails, top_n is applied to chunks not docs."""
         factory, _, _ = mock_aiohttp(
@@ -609,6 +640,18 @@ class TestFactoryRouting:
         for binding in ["cohere", "jina", "deepinfra", "openai", "aliyun"]:
             func = create_rerank_func(binding=binding, api_key="test")
             assert callable(func), f"{binding} binding should create callable"
+
+    @pytest.mark.asyncio
+    async def test_factory_enables_chunking_by_default(self):
+        """DIAGNOSTIC: If this fails, factory callers silently skip chunking."""
+        generic_mock = AsyncMock(return_value=[])
+
+        with patch("yar.rerank.generic_rerank_api", new=generic_mock):
+            rerank = create_rerank_func(binding="cohere", api_key="test")
+            await rerank("test", ["doc one", "doc two"], top_n=1)
+
+        assert generic_mock.await_args is not None
+        assert generic_mock.await_args.kwargs["enable_chunking"] is True
 
 
 class TestFactoryEnvVars:

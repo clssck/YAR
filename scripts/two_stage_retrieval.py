@@ -15,12 +15,20 @@ Compare retrieval quality between:
 2. Two-stage: top_k=150 → rerank → top 30
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 
 import numpy as np
-from openai import AsyncOpenAI
-from sentence_transformers import CrossEncoder
+import pytest
+
+try:
+    from openai import AsyncOpenAI
+    from sentence_transformers import CrossEncoder
+except ImportError:
+    AsyncOpenAI = None  # type: ignore[assignment,misc]
+    CrossEncoder = None
 
 # Config
 EMBEDDING_MODEL = 'text-embedding-3-large'
@@ -30,17 +38,31 @@ PG_USER = os.getenv('POSTGRES_USER', 'yar')
 PG_PASS = os.getenv('POSTGRES_PASSWORD', 'yar_pass')
 PG_DB = os.getenv('POSTGRES_DATABASE', 'yar')
 
-client = AsyncOpenAI()
+pytestmark = pytest.mark.integration
 
-# Load reranker model (same as YAR uses)
-print('Loading reranker model...')
-reranker = CrossEncoder('mixedbread-ai/mxbai-rerank-xsmall-v1')
-print('Reranker loaded!')
+_client: AsyncOpenAI | None = None
+_reranker: CrossEncoder | None = None
+
+
+def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI()
+    return _client
+
+
+def _get_reranker() -> CrossEncoder:
+    global _reranker
+    if CrossEncoder is None:
+        pytest.skip('sentence_transformers not installed')
+    if _reranker is None:
+        _reranker = CrossEncoder('mixedbread-ai/mxbai-rerank-xsmall-v1')
+    return _reranker
 
 
 async def get_embedding(text: str) -> list[float]:
     """Get embedding for a single text."""
-    response = await client.embeddings.create(
+    response = await _get_client().embeddings.create(
         model=EMBEDDING_MODEL,
         input=text,
         dimensions=1536,
@@ -87,7 +109,7 @@ def rerank_chunks(query: str, chunks: list[dict], top_n: int = 30) -> list[dict]
     pairs = [(query, chunk['content']) for chunk in chunks]
 
     # Get scores
-    scores = reranker.predict(pairs)
+    scores = _get_reranker().predict(pairs)
 
     # Add scores to chunks
     for i, chunk in enumerate(chunks):

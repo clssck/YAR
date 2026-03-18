@@ -64,7 +64,7 @@ from yar.constants import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT,
     DEFAULT_TOP_K,
-    DEFAULT_WOKERS,
+    DEFAULT_WORKERS,
     DEFAULT_WORKSPACE,
     FIELD_CONTENT,
     FIELD_DESCRIPTION,
@@ -103,10 +103,10 @@ class TestServerSettings:
     """Tests for server setting constants."""
 
     def test_default_workers_defined(self):
-        """Test DEFAULT_WOKERS is defined and is an integer."""
-        assert DEFAULT_WOKERS == 2
-        assert isinstance(DEFAULT_WOKERS, int)
-        assert DEFAULT_WOKERS > 0
+        """Test DEFAULT_WORKERS is defined and is an integer."""
+        assert DEFAULT_WORKERS == 2
+        assert isinstance(DEFAULT_WORKERS, int)
+        assert DEFAULT_WORKERS > 0
 
     def test_default_max_graph_nodes_defined(self):
         """Test DEFAULT_MAX_GRAPH_NODES is defined and is an integer."""
@@ -267,7 +267,7 @@ class TestRerankConfiguration:
     def test_default_enable_rerank_is_bool(self):
         """Test DEFAULT_ENABLE_RERANK is a boolean."""
         assert isinstance(DEFAULT_ENABLE_RERANK, bool)
-        assert DEFAULT_ENABLE_RERANK is True
+        assert DEFAULT_ENABLE_RERANK is False
 
     def test_default_min_rerank_score_is_valid(self):
         """Test DEFAULT_MIN_RERANK_SCORE is None or a valid float."""

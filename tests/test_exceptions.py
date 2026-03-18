@@ -29,9 +29,12 @@ from yar.exceptions import (
     PermissionDeniedError,
     PipelineCancelledException,
     PipelineNotInitializedError,
+    QueueFullError,
     RateLimitError,
     StorageNotInitializedError,
     UnprocessableEntityError,
+    WorkerTimeoutError,
+    YARError,
 )
 
 
@@ -418,3 +421,48 @@ class TestExceptionRaising:
 
         assert exc_info.value.message == 'User requested stop'
 
+
+
+class TestQueueFullError:
+    """Tests for QueueFullError."""
+
+    def test_inherits_yar_error(self):
+        assert issubclass(QueueFullError, YARError)
+
+    def test_is_catchable_as_yar_error(self):
+        with pytest.raises(YARError):
+            raise QueueFullError()
+
+    def test_default_message(self):
+        err = QueueFullError()
+        assert str(err) == ''
+
+    def test_custom_message(self):
+        err = QueueFullError('queue capacity exceeded')
+        assert 'queue capacity exceeded' in str(err)
+
+
+class TestWorkerTimeoutError:
+    """Tests for WorkerTimeoutError."""
+
+    def test_inherits_yar_error(self):
+        assert issubclass(WorkerTimeoutError, YARError)
+
+    def test_is_catchable_as_yar_error(self):
+        with pytest.raises(YARError):
+            raise WorkerTimeoutError(timeout_value=30.0)
+
+    def test_attributes(self):
+        err = WorkerTimeoutError(timeout_value=30.0, timeout_type='execution')
+        assert err.timeout_value == 30.0
+        assert err.timeout_type == 'execution'
+
+    def test_message_format(self):
+        err = WorkerTimeoutError(timeout_value=10.5, timeout_type='idle')
+        assert 'idle' in str(err)
+        assert '10.5' in str(err)
+
+    def test_default_timeout_type(self):
+        err = WorkerTimeoutError(timeout_value=5.0)
+        assert err.timeout_type == 'execution'
+        assert 'execution' in str(err)

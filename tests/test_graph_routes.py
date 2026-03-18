@@ -925,6 +925,7 @@ class TestOrphanBackgroundControlEndpoints:
         payload = response.json()
         assert payload['status'] == 'already_running'
         assert payload['queued_request']['max_candidates'] == 5
+        assert status['pending_request'] is not None
         assert status['pending_request']['max_degree'] == 1
         mock_rag.aprocess_orphan_connections_background.assert_not_called()
 

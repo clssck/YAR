@@ -26,6 +26,8 @@ exclude = [
     "tests/test_base.py",                     # abstract class tests
     "tests/test_explain_routes.py",           # API route tests
     "tests/test_kreuzberg_adapter.py",        # document adapter tests
+    "tests/test_graph_storage.py",             # pytest.skip/fail decorator issue
+    "tests/test_rag_live_integration.py",      # pytest.skip/fail decorator issue
 ]
 
 [rules]
@@ -36,3 +38,4 @@ redundant-cast = "ignore"           # Intentional casts for clarity
 invalid-return-type = "warn"        # @sync_wrapper() decorated methods have empty bodies (impl in decorator)
 empty-body = "ignore"               # @sync_wrapper() decorated stubs intentionally use `...` bodies
 invalid-assignment = "warn"         # AsyncMock assignments in tests
+unused-ignore-comment = "ignore"    # ty: ignore comments on pytest skip/fail and private attrs

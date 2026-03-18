@@ -5,9 +5,10 @@ memory exhaustion from oversized file uploads.
 """
 
 import io
+from typing import cast
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from yar.api.utils_api import validate_text_payload_size, validate_upload_size
 
@@ -39,7 +40,7 @@ class TestValidateUploadSize:
         content = b'x' * 100_000_000  # 100MB
         mock_file = MockUploadFile(content)
 
-        result = await validate_upload_size(mock_file, None)
+        result = await validate_upload_size(cast(UploadFile, mock_file), None)
 
         assert result == content
 
@@ -49,7 +50,7 @@ class TestValidateUploadSize:
         content = b'x' * 100_000_000  # 100MB
         mock_file = MockUploadFile(content)
 
-        result = await validate_upload_size(mock_file, 0)
+        result = await validate_upload_size(cast(UploadFile, mock_file), 0)
 
         assert result == content
 
@@ -59,7 +60,7 @@ class TestValidateUploadSize:
         content = b'x' * 500_000  # 500KB
         mock_file = MockUploadFile(content)
 
-        result = await validate_upload_size(mock_file, 1)  # 1MB limit
+        result = await validate_upload_size(cast(UploadFile, mock_file), 1)  # 1MB limit
 
         assert result == content
 
@@ -69,7 +70,7 @@ class TestValidateUploadSize:
         content = b'x' * (1024 * 1024)  # Exactly 1MB
         mock_file = MockUploadFile(content)
 
-        result = await validate_upload_size(mock_file, 1)  # 1MB limit
+        result = await validate_upload_size(cast(UploadFile, mock_file), 1)  # 1MB limit
 
         assert result == content
 
@@ -80,7 +81,7 @@ class TestValidateUploadSize:
         mock_file = MockUploadFile(content, size=2 * 1024 * 1024)  # Header says 2MB
 
         with pytest.raises(HTTPException) as exc_info:
-            await validate_upload_size(mock_file, 1)  # 1MB limit
+            await validate_upload_size(cast(UploadFile, mock_file), 1)  # 1MB limit
 
         assert exc_info.value.status_code == 413
         assert 'File too large' in exc_info.value.detail
@@ -94,7 +95,7 @@ class TestValidateUploadSize:
         mock_file = MockUploadFile(content, size=None)  # No header size
 
         with pytest.raises(HTTPException) as exc_info:
-            await validate_upload_size(mock_file, 1)  # 1MB limit
+            await validate_upload_size(cast(UploadFile, mock_file), 1)  # 1MB limit
 
         assert exc_info.value.status_code == 413
         assert 'File too large' in exc_info.value.detail
@@ -106,7 +107,7 @@ class TestValidateUploadSize:
         mock_file = MockUploadFile(content)
 
         with pytest.raises(HTTPException) as exc_info:
-            await validate_upload_size(mock_file, 1)
+            await validate_upload_size(cast(UploadFile, mock_file), 1)
 
         detail = exc_info.value.detail
         # Should show formatted sizes like "2.5MB exceeds limit of 1MB"
@@ -120,7 +121,7 @@ class TestValidateUploadSize:
         mock_file = MockUploadFile(content, size=None)  # No header to force streaming
 
         with pytest.raises(HTTPException) as exc_info:
-            await validate_upload_size(mock_file, 2)
+            await validate_upload_size(cast(UploadFile, mock_file), 2)
 
         # Should fail when reading exceeds 2MB
         assert exc_info.value.status_code == 413
@@ -131,7 +132,7 @@ class TestValidateUploadSize:
         content = b''
         mock_file = MockUploadFile(content)
 
-        result = await validate_upload_size(mock_file, 1)
+        result = await validate_upload_size(cast(UploadFile, mock_file), 1)
 
         assert result == b''
 
@@ -141,7 +142,7 @@ class TestValidateUploadSize:
         content = b'Hello, World!'
         mock_file = MockUploadFile(content)
 
-        result = await validate_upload_size(mock_file, 1)
+        result = await validate_upload_size(cast(UploadFile, mock_file), 1)
 
         assert isinstance(result, bytes)
         assert result == content

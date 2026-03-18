@@ -316,9 +316,7 @@ async def test_graph_basic(storage):
             )
         else:
             print(f'Failed to read reverse edge properties: {node2_id} -> {node1_id}')
-            pytest.fail(
-                f'Failed to read reverse edge properties: {node2_id} -> {node1_id}, undirected graph property verification failed'
-            )
+            pytest.fail(f'Failed to read reverse edge properties: {node2_id} -> {node1_id}, undirected graph property verification failed')
 
         print('Basic tests completed, data is preserved in the database.')
         return True
