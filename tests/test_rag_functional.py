@@ -383,7 +383,7 @@ class TestStreamingFunctional:
         assert response.status_code == 200
         # Streaming responses should have content-type for NDJSON
         content_type = response.headers.get("content-type", "")
-        assert "application/x-ndjson" in content_type or "text/event-stream" in content_type or response.content
+        assert "application/x-ndjson" in content_type or "text/event-stream" in content_type
 
     async def test_stream_accumulates_to_complete_response(self, client, mock_rag):
         """Test streaming chunks accumulate to complete response."""

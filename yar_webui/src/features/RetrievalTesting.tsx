@@ -368,14 +368,14 @@ export default function RetrievalTesting() {
       try {
         // Run query
         if (state.querySettings.stream) {
-          let errorMessage = ''
+          let streamErrorMessage = ''
           abortControllerRef.current?.abort()
           abortControllerRef.current = new AbortController()
           await queryTextStream(
             queryParams,
             updateAssistantMessage,
             (error) => {
-              errorMessage += error
+              streamErrorMessage += error
             },
             // Citation callback - use position markers to insert citations client-side
             // NEW: No longer receives annotated_response (which duplicated payload)
@@ -451,11 +451,11 @@ export default function RetrievalTesting() {
             },
             abortControllerRef.current.signal,
           )
-          if (errorMessage) {
+          if (streamErrorMessage) {
             if (assistantMessage.content) {
-              errorMessage = `${assistantMessage.content}\n${errorMessage}`
+              streamErrorMessage = `${assistantMessage.content}\n${streamErrorMessage}`
             }
-            updateAssistantMessage(errorMessage, true)
+            updateAssistantMessage(streamErrorMessage, true)
           }
         } else {
           const response = await queryText(queryParams)

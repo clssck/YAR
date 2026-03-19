@@ -1361,6 +1361,11 @@ export default function DocumentManager() {
     startPollingInterval,
   ])
 
+  const hasActiveProcessing = useMemo(
+    () => hasActiveDocumentsStatus(statusCounts),
+    [statusCounts],
+  )
+
   // Set up intelligent polling with dynamic interval based on document status
   useEffect(() => {
     if (currentTab !== 'documents' || !health) {
@@ -1369,7 +1374,7 @@ export default function DocumentManager() {
     }
 
     // Determine polling interval based on document status
-    const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
+    const hasActiveDocuments = hasActiveProcessing
     const pollingInterval = hasActiveDocuments ? 5000 : 30000 // 5s if active, 30s if idle
 
     startPollingInterval(pollingInterval)
@@ -1380,7 +1385,7 @@ export default function DocumentManager() {
   }, [
     health,
     currentTab,
-    statusCounts,
+    hasActiveProcessing,
     startPollingInterval,
     clearPollingInterval,
   ])
