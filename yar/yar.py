@@ -3430,8 +3430,7 @@ class YAR:
                         ) from persistence_error
                     # If there was an original exception, log the persistence error but don't override the original error
                     # The original error result was already returned in the except block
-                if original_exception is None:
-                    await self._invalidate_fts_cache('document deletion')
+                await self._invalidate_fts_cache('document deletion')
             else:
                 logger.debug(f'No deletion operations were started for document {doc_id}, skipping persistence')
 

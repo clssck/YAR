@@ -3510,13 +3510,13 @@ async def kg_query(
         if len(response) > len(sys_prompt):
             response = (
                 response.replace(sys_prompt, '')
-                .replace('user', '')
-                .replace('model', '')
                 .replace(query, '')
                 .replace('<system>', '')
                 .replace('</system>', '')
                 .strip()
             )
+            # Strip Gemini-style role tags only at start of response
+            response = re.sub(r'^(user|model)\s*', '', response, flags=re.IGNORECASE).strip()
 
         # Validate and optionally fix citations
         available_refs = context_result.raw_data.get('data', {}).get('references', [])
@@ -4540,6 +4540,8 @@ async def _build_query_context(
             if (
                 r.get('src_tgt', ('', ''))[0].lower() in filtered_entity_names
                 or r.get('src_tgt', ('', ''))[1].lower() in filtered_entity_names
+                or r.get('src_id', '').lower() in filtered_entity_names
+                or r.get('tgt_id', '').lower() in filtered_entity_names
             )
         ]
 
@@ -5506,13 +5508,13 @@ async def naive_query(
             response = (
                 response[len(sys_prompt) :]
                 .replace(sys_prompt, '')
-                .replace('user', '')
-                .replace('model', '')
                 .replace(query, '')
                 .replace('<system>', '')
                 .replace('</system>', '')
                 .strip()
             )
+            # Strip Gemini-style role tags only at start of response
+            response = re.sub(r'^(user|model)\s*', '', response, flags=re.IGNORECASE).strip()
 
         # Validate and optionally fix citations
         available_refs = raw_data.get('data', {}).get('references', [])

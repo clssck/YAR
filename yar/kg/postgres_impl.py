@@ -2234,7 +2234,7 @@ class PostgreSQLDB:
                 dedup_columns = [col.strip() for col in dedup_key.split(',')]
                 dedup_join = ' AND '.join(f'a.{col} = b.{col}' for col in dedup_columns)
                 dedup_sql = f"""
-                DELETE FROM {table} a
+                DELETE FROM {table} AS a
                 USING (
                     SELECT workspace, {dedup_key}, MAX(update_time) as max_time
                     FROM {table}
@@ -5290,6 +5290,7 @@ class PGGraphStorage(BaseGraphStorage):
                     with_age=True,
                     graph_name=self.graph_name,
                 )
+                data = None  # execute() returns status string, not rows
 
         except Exception as e:
             raise PGGraphQueryException(
