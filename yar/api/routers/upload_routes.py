@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -26,7 +27,7 @@ from yar.api.config import global_args
 from yar.api.utils_api import get_combined_auth_dependency, validate_upload_size
 from yar.kg.postgres_impl import PGDocStatusStorage, PGKVStorage
 from yar.storage.s3_client import S3Client
-from yar.utils import compute_mdhash_id, logger
+from yar.utils import compute_mdhash_id, generate_track_id, logger
 from yar.validators import validate_doc_id, validate_s3_key, validate_workspace_name
 
 
@@ -122,6 +123,45 @@ class ProcessS3Response(BaseModel):
             }
         }
     )
+
+
+async def _process_s3_document(
+    rag: 'YAR',
+    text_content: str,
+    doc_id: str,
+    s3_url: str,
+    s3_key: str,
+    archive_after_processing: bool,
+    s3_client: S3Client,
+) -> None:
+    """Background task: run RAG pipeline and optionally archive the S3 object."""
+    try:
+        await rag.ainsert(
+            input=text_content,
+            ids=doc_id,
+            file_paths=s3_url,
+        )
+
+        if archive_after_processing:
+            try:
+                archive_key = await s3_client.move_to_archive(s3_key)
+                logger.info(f'Moved to archive: {s3_key} -> {archive_key}')
+
+                archive_url = s3_client.get_s3_url(archive_key)
+                if isinstance(rag.text_chunks, PGKVStorage):
+                    updated_count = await rag.text_chunks.update_s3_key_by_doc_id(
+                        full_doc_id=doc_id,
+                        s3_key=archive_key,
+                        archive_url=archive_url,
+                    )
+                    logger.info(f'Updated {updated_count} chunks with archive s3_key: {archive_key}')
+                if isinstance(rag.doc_status, PGDocStatusStorage):
+                    await rag.doc_status.update_s3_key(doc_id, archive_key)
+                    logger.info(f'Updated doc_status with archive s3_key: {archive_key}')
+            except Exception as e:
+                logger.warning(f'Failed to archive document: {e}')
+    except Exception as e:
+        logger.error(f'Background S3 processing failed for {doc_id}: {e}')
 
 
 def create_upload_routes(
@@ -376,6 +416,7 @@ def create_upload_routes(
     )
     async def process_from_s3(
         request: ProcessS3Request,
+        background_tasks: BackgroundTasks,
         _: Annotated[bool, Depends(optional_api_key)] = True,
     ) -> ProcessS3Response:
         """Process a staged document through the RAG pipeline."""
@@ -440,46 +481,28 @@ def create_upload_routes(
                     detail='Document content is empty after decoding',
                 )
 
-            # Process through RAG pipeline
-            # Use s3_url as file_path for citation reference
-            logger.info(f'Processing S3 document: {s3_key} (doc_id: {doc_id})')
+            # Generate track_id for tracking
+            track_id = generate_track_id('s3')
 
-            track_id = await rag.ainsert(
-                input=text_content,
-                ids=doc_id,
-                file_paths=s3_url,
+            # Schedule processing in background
+            logger.info(f'Scheduling S3 document processing: {s3_key} (doc_id: {doc_id})')
+            background_tasks.add_task(
+                _process_s3_document,
+                rag,
+                text_content,
+                doc_id,
+                s3_url,
+                s3_key,
+                request.archive_after_processing,
+                s3_client,
             )
 
-            # Move to archive if requested
-            archive_key = None
-            if request.archive_after_processing:
-                try:
-                    archive_key = await s3_client.move_to_archive(s3_key)
-                    logger.info(f'Moved to archive: {s3_key} -> {archive_key}')
-
-                    # Update database chunks with archive s3_key
-                    archive_url = s3_client.get_s3_url(archive_key)
-                    if isinstance(rag.text_chunks, PGKVStorage):
-                        updated_count = await rag.text_chunks.update_s3_key_by_doc_id(
-                            full_doc_id=doc_id,
-                            s3_key=archive_key,
-                            archive_url=archive_url,
-                        )
-                        logger.info(f'Updated {updated_count} chunks with archive s3_key: {archive_key}')
-                    if isinstance(rag.doc_status, PGDocStatusStorage):
-                        await rag.doc_status.update_s3_key(doc_id, archive_key)
-                        logger.info(f'Updated doc_status with archive s3_key: {archive_key}')
-                except Exception as e:
-                    logger.warning(f'Failed to archive document: {e}')
-                    # Don't fail the request, processing succeeded
-
             return ProcessS3Response(
-                status='processing_complete',
+                status='processing_started',
                 track_id=track_id,
                 doc_id=doc_id,
                 s3_key=s3_key,
-                archive_key=archive_key,
-                message='Document processed and stored in RAG pipeline',
+                message='Document processing started in background',
             )
 
         except HTTPException:

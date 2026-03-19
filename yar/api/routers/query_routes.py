@@ -191,6 +191,7 @@ async def filter_reasoning_stream(response_stream):
 class QueryRequest(BaseModel):
     query: str = Field(
         min_length=3,
+        max_length=100_000,
         description='The query text',
     )
 
@@ -339,6 +340,26 @@ class QueryRequest(BaseModel):
                 raise ValueError("Each message must have a 'role' key.")
             if not isinstance(msg['role'], str) or not msg['role'].strip():
                 raise ValueError("Each message 'role' must be a non-empty string.")
+            if 'content' not in msg:
+                raise ValueError("Each message must have a 'content' key.")
+            if not isinstance(msg['content'], str):
+                raise ValueError("Each message 'content' must be a string.")
+        return conversation_history
+
+    @field_validator('hl_keywords', 'll_keywords', mode='after')
+    @classmethod
+    def keywords_length_check(cls, keywords: list[str]) -> list[str]:
+        if len(keywords) > 100:
+            raise ValueError('At most 100 keywords allowed.')
+        return keywords
+
+    @field_validator('conversation_history', mode='after')
+    @classmethod
+    def conversation_history_length_check(
+        cls, conversation_history: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]] | None:
+        if conversation_history is not None and len(conversation_history) > 200:
+            raise ValueError('At most 200 conversation history messages allowed.')
         return conversation_history
 
     def to_query_params(self, is_stream: bool) -> 'QueryParam':
