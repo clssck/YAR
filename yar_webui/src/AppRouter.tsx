@@ -27,12 +27,12 @@ const queryClient = new QueryClient({
   },
 })
 
-function ErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
+function ErrorFallback({ error, resetErrorBoundary }: { error: unknown; resetErrorBoundary: () => void }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
       <h1 className="text-2xl font-bold text-destructive">Something went wrong</h1>
       <pre className="max-w-lg overflow-auto rounded-md bg-muted p-4 text-sm">
-        {error.message}
+        {error instanceof Error ? error.message : String(error)}
       </pre>
       <button
         onClick={resetErrorBoundary}

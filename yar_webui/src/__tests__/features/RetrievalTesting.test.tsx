@@ -297,8 +297,8 @@ Paragraph 2.
 
 describe('Non-stream reference propagation', () => {
   test('attaches references to assistant message and state', () => {
-    const assistantMessage = { id: 'assistant-1' }
-    const messages = [{ id: 'assistant-1' }, { id: 'assistant-2' }]
+    const assistantMessage: { id: string; references?: NonStreamReference[] } = { id: 'assistant-1' }
+    const messages: { id: string; references?: NonStreamReference[] }[] = [{ id: 'assistant-1' }, { id: 'assistant-2' }]
     const references: NonStreamReference[] = [
       { reference_id: '1', file_path: '/docs/source.pdf' },
     ]

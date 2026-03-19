@@ -61,7 +61,7 @@ describe('queryTextStream NDJSON parsing', () => {
     ]
 
     const ndjson = `${JSON.stringify({ response: 'Answer chunk', references })}\n`
-    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as typeof fetch
+    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as unknown as typeof fetch
 
     const chunks: string[] = []
     const receivedReferences: StreamReference[][] = []
@@ -93,7 +93,7 @@ describe('queryTextStream NDJSON parsing', () => {
     ]
 
     const finalChunk = JSON.stringify({ response: 'Buffered answer', references })
-    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as typeof fetch
+    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as unknown as typeof fetch
 
     const chunks: string[] = []
     const receivedReferences: StreamReference[][] = []
@@ -112,7 +112,7 @@ describe('queryTextStream NDJSON parsing', () => {
 
   test('reports malformed references payload in streamed lines and skips onReferences', async () => {
     const ndjson = `${JSON.stringify({ response: 'Chunk before bad refs', references: { invalid: true } })}\n`
-    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as typeof fetch
+    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as unknown as typeof fetch
 
     const chunks: string[] = []
     const receivedReferences: StreamReference[][] = []
@@ -135,7 +135,7 @@ describe('queryTextStream NDJSON parsing', () => {
 
   test('routes citation_error event from final buffered object to onError', async () => {
     const finalChunk = JSON.stringify({ citation_error: 'citation service unavailable' })
-    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as typeof fetch
+    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as unknown as typeof fetch
 
     const onError = mock(() => {})
 
