@@ -608,7 +608,7 @@ class TestQueryStreamEndpoint:
         assert response.status_code == 200
         lines = _ndjson_lines(response.text)
         assert any(line.get('response') == 'partial chunk' for line in lines)
-        assert any('stream exploded' in line.get('error', '') for line in lines)
+        assert any('error' in line for line in lines)
 
     @pytest.mark.asyncio
     async def test_non_stream_mode_returns_single_ndjson_object(self, client, mock_rag):

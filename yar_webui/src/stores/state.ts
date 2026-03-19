@@ -189,7 +189,8 @@ const parseTokenPayload = (token: string): { sub?: string; role?: string } => {
     // JWT tokens are in the format: header.payload.signature
     const parts = token.split('.')
     if (parts.length !== 3) return {}
-    const payload = JSON.parse(atob(parts[1]))
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const payload = JSON.parse(atob(base64))
     return payload
   } catch (e) {
     console.error('Error parsing token payload:', e)

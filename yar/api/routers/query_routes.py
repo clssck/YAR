@@ -553,7 +553,7 @@ async def _extract_and_stream_citations(
         yield json.dumps({'citation_error': 'Citation module not available'}) + '\n'
     except Exception as e:
         logger.error(f'Citation extraction error: {e!s}')
-        yield json.dumps({'citation_error': str(e)}) + '\n'
+        yield json.dumps({'citation_error': 'Citation extraction failed'}) + '\n'
 
 
 def create_query_routes(
@@ -1129,7 +1129,7 @@ def create_query_routes(
                                     collected_response.append(chunk)
                         except Exception as e:
                             logger.error(f'Streaming error: {e!s}')
-                            yield f'{json.dumps({"error": str(e)})}\n'
+                            yield f'{json.dumps({"error": "Stream processing error"})}\n'
 
                     # After streaming completes, extract citations if enabled
                     if citation_mode in ['inline', 'footnotes'] and collected_response:

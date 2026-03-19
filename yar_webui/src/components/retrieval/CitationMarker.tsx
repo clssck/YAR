@@ -15,6 +15,7 @@ import {
   HoverCardTrigger,
 } from '@/components/ui/HoverCard'
 import { cn } from '@/lib/utils'
+import { isSafeUrl } from '@/utils/url'
 
 interface CitationMarkerProps {
   /** The citation marker text, e.g., "[1]" or "[1,2]" */
@@ -144,7 +145,7 @@ export function CitationMarker({
               {/* File path with optional link */}
               {source.presigned_url ? (
                 <a
-                  href={source.presigned_url}
+                  href={isSafeUrl(source.presigned_url) ? source.presigned_url : '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 pl-6 truncate group"

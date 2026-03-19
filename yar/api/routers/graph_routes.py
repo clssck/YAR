@@ -167,7 +167,7 @@ def create_graph_routes(rag, api_key: str | None = None):
     @router.get('/graph/label/search', dependencies=[Depends(combined_auth)])
     @handle_api_error('searching labels')
     async def search_labels(
-        q: str = Query(..., description='Search query string'),
+        q: str = Query(..., max_length=500, description='Search query string'),
         limit: int = Query(50, description='Maximum number of search results to return', ge=1, le=100),
     ):
         """
@@ -185,9 +185,9 @@ def create_graph_routes(rag, api_key: str | None = None):
     @router.get('/graphs', dependencies=[Depends(combined_auth)])
     @handle_api_error('getting knowledge graph')
     async def get_knowledge_graph(
-        label: str = Query(..., description='Label to get knowledge graph for'),
-        max_depth: int = Query(3, description='Maximum depth of graph', ge=1),
-        max_nodes: int = Query(1000, description='Maximum nodes to return', ge=1),
+        label: str = Query(..., max_length=500, description='Label to get knowledge graph for'),
+        max_depth: int = Query(3, description='Maximum depth of graph', ge=1, le=10),
+        max_nodes: int = Query(1000, description='Maximum nodes to return', ge=1, le=10_000),
         min_degree: int = Query(
             0,
             description='Minimum degree (connections) required for nodes to be included. 0=all nodes, 1=exclude orphans, 2+=only well-connected nodes',

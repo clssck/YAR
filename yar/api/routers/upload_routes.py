@@ -18,6 +18,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
 )
 from pydantic import BaseModel, ConfigDict, Field
@@ -324,7 +325,7 @@ def create_upload_routes(
     )
     async def get_presigned_url(
         s3_key: str,
-        expiry: int = 3600,
+        expiry: int = Query(default=3600, ge=60, le=86400, description='URL expiry in seconds (1 min to 24 hours)'),
         _: Annotated[bool, Depends(optional_api_key)] = True,
     ) -> PresignedUrlResponse:
         """Get presigned URL for a document."""

@@ -1188,7 +1188,7 @@ async def _process_extraction_result(
         entity_records = split_string_by_multi_markers(record, [f'{tuple_delimiter}entity{tuple_delimiter}'])
         for entity_record in entity_records:
             if not entity_record.startswith('entity') and not entity_record.startswith('relation'):
-                entity_record = f'entity<|{entity_record}'
+                entity_record = f'entity{tuple_delimiter}{entity_record}'
             entity_relation_records = split_string_by_multi_markers(
                 # treat "relationship" and "relation" interchangeable
                 entity_record,

@@ -28,6 +28,7 @@ import type { CitationsMetadata, Message } from '@/api/yar'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import { remarkFootnotes } from '@/utils/remarkFootnotes'
+import { isSafeUrl } from '@/utils/url'
 import { CitationMarker } from './CitationMarker'
 
 // KaTeX configuration options interface
@@ -353,7 +354,7 @@ export const ChatMessage = ({
                 <li className="my-1">
                   <span>[{refNumber}] </span>
                   <a
-                    href={matchingRef.presigned_url}
+                    href={isSafeUrl(matchingRef.presigned_url) ? matchingRef.presigned_url : '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline"

@@ -337,6 +337,7 @@ const useSettingsStoreBase = create<SettingsState>()(
           retrievalHistory,
           userPromptHistory,
           searchLabelDropdownRefreshTrigger,
+          apiKey,
           ...persisted
         } = state
         return persisted

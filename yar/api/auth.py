@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
+from yar.utils import logger
+
 from .config import get_env_value
 
 # use the .env that is inside the current folder
@@ -22,7 +24,11 @@ class TokenPayload(BaseModel):
 
 class AuthHandler:
     def __init__(self):
-        self.secret = get_env_value('TOKEN_SECRET', 'yar-jwt-default-secret')
+        self.secret = get_env_value('TOKEN_SECRET', '')
+        if not self.secret:
+            logger.warning('TOKEN_SECRET not set — using auto-generated secret (tokens will not survive restart)')
+            import secrets
+            self.secret = secrets.token_urlsafe(32)
         self.algorithm = get_env_value('JWT_ALGORITHM', 'HS256')
         self.expire_hours = get_env_value('TOKEN_EXPIRE_HOURS', 48, int)
         self.guest_expire_hours = get_env_value('GUEST_TOKEN_EXPIRE_HOURS', 24, int)
