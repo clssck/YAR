@@ -4,90 +4,13 @@ This module tests the BM25 full-text search endpoint using httpx AsyncClient
 and FastAPI's TestClient pattern with mocked PostgreSQLDB.
 """
 
-# Import FastAPI components
-from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel, Field
 
-# Import the components we need from search_routes without triggering full init
-# We'll recreate the essential parts for testing
-
-
-class SearchResult(BaseModel):
-    """A single search result (chunk match)."""
-
-    id: str = Field(description='Chunk ID')
-    full_doc_id: str = Field(description='Parent document ID')
-    chunk_order_index: int = Field(description='Position in document')
-    tokens: int = Field(description='Token count')
-    content: str = Field(description='Chunk content')
-    file_path: str | None = Field(default=None, description='Source file path')
-    s3_key: str | None = Field(default=None, description='S3 key for source document')
-    char_start: int | None = Field(default=None, description='Character offset start')
-    char_end: int | None = Field(default=None, description='Character offset end')
-    score: float = Field(description='BM25 relevance score')
-
-
-class SearchResponse(BaseModel):
-    """Response model for search endpoint."""
-
-    query: str = Field(description='Original search query')
-    results: list[SearchResult] = Field(description='Matching chunks')
-    count: int = Field(description='Number of results returned')
-    workspace: str = Field(description='Workspace searched')
-
-
-def create_test_search_routes(db: Any, api_key: str | None = None):
-    """Create search routes for testing (simplified version without auth dep)."""
-    from fastapi import APIRouter, HTTPException, Query
-
-    router = APIRouter(prefix='/search', tags=['search'])
-
-    @router.get('', response_model=SearchResponse)
-    async def search(
-        q: Annotated[str, Query(description='Search query', min_length=1)],
-        limit: Annotated[int, Query(description='Max results', ge=1, le=100)] = 10,
-        workspace: Annotated[str, Query(description='Workspace')] = 'default',
-    ) -> SearchResponse:
-        """Perform BM25 full-text search on chunks."""
-        try:
-            results = await db.full_text_search(
-                query=q,
-                workspace=workspace,
-                limit=limit,
-            )
-
-            search_results = [
-                SearchResult(
-                    id=r.get('id', ''),
-                    full_doc_id=r.get('full_doc_id', ''),
-                    chunk_order_index=r.get('chunk_order_index', 0),
-                    tokens=r.get('tokens', 0),
-                    content=r.get('content', ''),
-                    file_path=r.get('file_path'),
-                    s3_key=r.get('s3_key'),
-                    char_start=r.get('char_start'),
-                    char_end=r.get('char_end'),
-                    score=float(r.get('score', 0)),
-                )
-                for r in results
-            ]
-
-            return SearchResponse(
-                query=q,
-                results=search_results,
-                count=len(search_results),
-                workspace=workspace,
-            )
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Search failed: {e}') from e
-
-    return router
+from yar.api.routers.search_routes import create_search_routes
 
 
 @pytest.fixture
@@ -99,10 +22,18 @@ def mock_db():
 
 
 @pytest.fixture
-def app(mock_db):
+def mock_kv_storage(mock_db):
+    """Create a mock PGKVStorage whose .db attribute is mock_db."""
+    kv = MagicMock()
+    kv.db = mock_db
+    return kv
+
+
+@pytest.fixture
+def app(mock_kv_storage):
     """Create FastAPI app with search routes."""
     app = FastAPI()
-    router = create_test_search_routes(db=mock_db, api_key=None)
+    router = create_search_routes(kv_storage=mock_kv_storage, api_key=None)
     app.include_router(router)
     return app
 
@@ -359,7 +290,7 @@ class TestSearchErrors:
         response = await client.get('/search', params={'q': 'test'})
 
         assert response.status_code == 500
-        assert 'Database connection failed' in response.json()['detail']
+        assert 'performing BM25 search' in response.json()['detail']
 
     @pytest.mark.asyncio
     async def test_search_handles_missing_fields(self, client, mock_db):

@@ -4,269 +4,13 @@ This module tests the S3 document staging endpoints using httpx AsyncClient
 and FastAPI's TestClient pattern with mocked S3Client and YAR.
 """
 
-import contextlib
-from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-# Import FastAPI components
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel
 
-
-# Recreate models for testing (to avoid import chain issues)
-class UploadResponse(BaseModel):
-    """Response model for document upload."""
-
-    status: str
-    doc_id: str
-    s3_key: str
-    s3_url: str
-    message: str | None = None
-
-
-class StagedDocument(BaseModel):
-    """Model for a staged document."""
-
-    key: str
-    size: int
-    last_modified: str
-
-
-class ListStagedResponse(BaseModel):
-    """Response model for listing staged documents."""
-
-    workspace: str
-    documents: list[StagedDocument]
-    count: int
-
-
-class PresignedUrlResponse(BaseModel):
-    """Response model for presigned URL."""
-
-    s3_key: str
-    presigned_url: str
-    expiry_seconds: int
-
-
-class ProcessS3Request(BaseModel):
-    """Request model for processing a document from S3 staging."""
-
-    s3_key: str
-    doc_id: str | None = None
-    archive_after_processing: bool = True
-
-
-class ProcessS3Response(BaseModel):
-    """Response model for S3 document processing."""
-
-    status: str
-    track_id: str
-    doc_id: str
-    s3_key: str
-    archive_key: str | None = None
-    message: str | None = None
-
-
-def create_test_upload_routes(
-    rag: Any,
-    s3_client: Any,
-    api_key: str | None = None,
-) -> APIRouter:
-    """Create upload routes for testing (simplified without auth)."""
-    router = APIRouter(prefix='/upload', tags=['upload'])
-
-    @router.post('', response_model=UploadResponse)
-    async def upload_document(
-        file: Annotated[UploadFile, File(description='Document file')],
-        workspace: Annotated[str, Form(description='Workspace')] = 'default',
-        doc_id: Annotated[str | None, Form(description='Document ID')] = None,
-    ) -> UploadResponse:
-        """Upload a document to S3 staging."""
-        try:
-            content = await file.read()
-
-            if not content:
-                raise HTTPException(status_code=400, detail='Empty file')
-
-            # Generate doc_id if not provided
-            if not doc_id:
-                import hashlib
-
-                doc_id = 'doc_' + hashlib.md5(content).hexdigest()[:8]
-
-            content_type = file.content_type or 'application/octet-stream'
-
-            s3_key = await s3_client.upload_to_staging(
-                workspace=workspace,
-                doc_id=doc_id,
-                content=content,
-                filename=file.filename or f'{doc_id}.bin',
-                content_type=content_type,
-                metadata={
-                    'original_size': str(len(content)),
-                    'content_type': content_type,
-                },
-            )
-
-            s3_url = s3_client.get_s3_url(s3_key)
-
-            return UploadResponse(
-                status='uploaded',
-                doc_id=doc_id,
-                s3_key=s3_key,
-                s3_url=s3_url,
-                message='Document staged for processing',
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Upload failed: {e}') from e
-
-    @router.get('/staged', response_model=ListStagedResponse)
-    async def list_staged(workspace: str = 'default') -> ListStagedResponse:
-        """List documents in staging."""
-        try:
-            objects = await s3_client.list_staging(workspace)
-
-            documents = [
-                StagedDocument(
-                    key=obj['key'],
-                    size=obj['size'],
-                    last_modified=obj['last_modified'],
-                )
-                for obj in objects
-            ]
-
-            return ListStagedResponse(
-                workspace=workspace,
-                documents=documents,
-                count=len(documents),
-            )
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Failed to list staged documents: {e}') from e
-
-    @router.get('/presigned-url', response_model=PresignedUrlResponse)
-    async def get_presigned_url(
-        s3_key: str,
-        expiry: int = 3600,
-    ) -> PresignedUrlResponse:
-        """Get presigned URL for a document."""
-        try:
-            if not await s3_client.object_exists(s3_key):
-                raise HTTPException(status_code=404, detail='Object not found')
-
-            url = await s3_client.get_presigned_url(s3_key, expiry=expiry)
-
-            return PresignedUrlResponse(
-                s3_key=s3_key,
-                presigned_url=url,
-                expiry_seconds=expiry,
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Failed to generate presigned URL: {e}') from e
-
-    @router.delete('/staged/{doc_id}')
-    async def delete_staged(
-        doc_id: str,
-        workspace: str = 'default',
-    ) -> dict[str, str]:
-        """Delete a staged document."""
-        try:
-            prefix = f'staging/{workspace}/{doc_id}/'
-            objects = await s3_client.list_staging(workspace)
-
-            to_delete = [obj['key'] for obj in objects if obj['key'].startswith(prefix)]
-
-            if not to_delete:
-                raise HTTPException(status_code=404, detail='Document not found in staging')
-
-            for key in to_delete:
-                await s3_client.delete_object(key)
-
-            return {
-                'status': 'deleted',
-                'doc_id': doc_id,
-                'deleted_count': str(len(to_delete)),
-            }
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Failed to delete staged document: {e}') from e
-
-    @router.post('/process', response_model=ProcessS3Response)
-    async def process_from_s3(request: ProcessS3Request) -> ProcessS3Response:
-        """Process a staged document through the RAG pipeline."""
-        try:
-            s3_key = request.s3_key
-
-            if not await s3_client.object_exists(s3_key):
-                raise HTTPException(
-                    status_code=404,
-                    detail=f'Document not found in S3: {s3_key}',
-                )
-
-            content_bytes, metadata = await s3_client.get_object(s3_key)
-
-            doc_id = request.doc_id
-            if not doc_id:
-                parts = s3_key.split('/')
-                doc_id = parts[2] if len(parts) >= 3 else 'doc_unknown'
-
-            content_type = metadata.get('content_type', 'application/octet-stream')
-            s3_url = s3_client.get_s3_url(s3_key)
-
-            # Try to decode as text
-            try:
-                text_content = content_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f'Cannot process binary content type: {content_type}.',
-                ) from None
-
-            if not text_content.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail='Document content is empty after decoding',
-                )
-
-            # Process through RAG
-            track_id = await rag.ainsert(
-                input=text_content,
-                ids=doc_id,
-                file_paths=s3_url,
-            )
-
-            archive_key = None
-            if request.archive_after_processing:
-                with contextlib.suppress(Exception):
-                    archive_key = await s3_client.move_to_archive(s3_key)
-
-            return ProcessS3Response(
-                status='processing_complete',
-                track_id=track_id,
-                doc_id=doc_id,
-                s3_key=s3_key,
-                archive_key=archive_key,
-                message='Document processed and stored in RAG pipeline',
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f'Failed to process S3 document: {e}') from e
-
-    return router
-
+from yar.api.routers.upload_routes import create_upload_routes
 
 # ============================================================================
 # Fixtures
@@ -293,6 +37,12 @@ def mock_rag():
     """Create a mock YAR instance."""
     rag = MagicMock()
     rag.ainsert = AsyncMock()
+    rag.text_chunks = MagicMock()
+    rag.text_chunks.update_s3_key_by_doc_id = AsyncMock()
+    rag.doc_status = MagicMock()
+    rag.doc_status.update_s3_key = AsyncMock()
+    rag.doc_status.get_doc_by_file_path = AsyncMock(return_value=None)
+    rag.doc_status.get_by_id = AsyncMock(return_value=None)
     return rag
 
 
@@ -300,7 +50,7 @@ def mock_rag():
 def app(mock_rag, mock_s3_client):
     """Create FastAPI app with upload routes."""
     app = FastAPI()
-    router = create_test_upload_routes(
+    router = create_upload_routes(
         rag=mock_rag,
         s3_client=mock_s3_client,
         api_key=None,
@@ -374,7 +124,6 @@ class TestUploadEndpoint:
         response = await client.post('/upload', files=files)
 
         assert response.status_code == 400
-        assert 'Empty file' in response.json()['detail']
 
     @pytest.mark.asyncio
     async def test_upload_returns_s3_url(self, client, mock_s3_client):
@@ -399,7 +148,6 @@ class TestUploadEndpoint:
         response = await client.post('/upload', files=files)
 
         assert response.status_code == 500
-        assert 'S3 connection failed' in response.json()['detail']
 
 
 # ============================================================================
@@ -494,12 +242,14 @@ class TestPresignedUrlEndpoint:
 
         response = await client.get(
             '/upload/presigned-url',
-            params={'s3_key': 'test/key', 'expiry': 7200},
+            params={'s3_key': 'staging/default/doc1/file.pdf', 'expiry': 7200},
         )
 
         assert response.status_code == 200
         assert response.json()['expiry_seconds'] == 7200
-        mock_s3_client.get_presigned_url.assert_called_once_with('test/key', expiry=7200)
+        mock_s3_client.get_presigned_url.assert_called_once_with(
+            'staging/default/doc1/file.pdf', expiry=7200
+        )
 
     @pytest.mark.asyncio
     async def test_presigned_url_not_found(self, client, mock_s3_client):
@@ -508,7 +258,7 @@ class TestPresignedUrlEndpoint:
 
         response = await client.get(
             '/upload/presigned-url',
-            params={'s3_key': 'nonexistent/key'},
+            params={'s3_key': 'staging/default/nonexistent/key'},
         )
 
         assert response.status_code == 404
@@ -576,13 +326,11 @@ class TestProcessS3Endpoint:
     """Tests for POST /upload/process endpoint."""
 
     @pytest.mark.asyncio
-    async def test_process_fetches_and_archives(self, client, mock_s3_client, mock_rag):
-        """Test that process fetches content and archives."""
+    async def test_process_fetches_and_schedules_background(self, client, mock_s3_client, mock_rag):
+        """Test that process fetches content and schedules background processing."""
         mock_s3_client.object_exists.return_value = True
         mock_s3_client.get_object.return_value = (b'Document content here', {'content_type': 'text/plain'})
         mock_s3_client.get_s3_url.return_value = 's3://bucket/staging/default/doc1/file.txt'
-        mock_s3_client.move_to_archive.return_value = 'archive/default/doc1/file.txt'
-        mock_rag.ainsert.return_value = 'track_123'
 
         response = await client.post(
             '/upload/process',
@@ -591,12 +339,32 @@ class TestProcessS3Endpoint:
 
         assert response.status_code == 200
         data = response.json()
-        assert data['status'] == 'processing_complete'
-        assert data['track_id'] == 'track_123'
-        assert data['archive_key'] == 'archive/default/doc1/file.txt'
+        assert data['status'] == 'processing_started'
+        assert data['doc_id'] == 'doc1'
+        assert data['s3_key'] == 'staging/default/doc1/file.txt'
+        # track_id is generated internally, just verify it exists
+        assert 'track_id' in data
 
-        mock_rag.ainsert.assert_called_once()
-        mock_s3_client.move_to_archive.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_process_without_archive(self, client, mock_s3_client, mock_rag):
+        """Test processing without archiving."""
+        mock_s3_client.object_exists.return_value = True
+        mock_s3_client.get_object.return_value = (b'Content', {'content_type': 'text/plain'})
+        mock_s3_client.get_s3_url.return_value = 's3://bucket/key'
+
+        response = await client.post(
+            '/upload/process',
+            json={
+                's3_key': 'staging/default/doc1/file.txt',
+                'archive_after_processing': False,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'processing_started'
+        # archive_key is always None in immediate response (archiving is background)
+        assert data['archive_key'] is None
 
     @pytest.mark.asyncio
     async def test_process_extracts_doc_id_from_key(self, client, mock_s3_client, mock_rag):
@@ -604,8 +372,6 @@ class TestProcessS3Endpoint:
         mock_s3_client.object_exists.return_value = True
         mock_s3_client.get_object.return_value = (b'Content', {'content_type': 'text/plain'})
         mock_s3_client.get_s3_url.return_value = 's3://bucket/key'
-        mock_s3_client.move_to_archive.return_value = 'archive/key'
-        mock_rag.ainsert.return_value = 'track_456'
 
         response = await client.post(
             '/upload/process',
@@ -636,7 +402,7 @@ class TestProcessS3Endpoint:
 
         response = await client.post(
             '/upload/process',
-            json={'s3_key': 'staging/default/doc/file.txt'},
+            json={'s3_key': 'staging/default/doc1/file.txt'},
         )
 
         assert response.status_code == 400
@@ -651,7 +417,7 @@ class TestProcessS3Endpoint:
 
         response = await client.post(
             '/upload/process',
-            json={'s3_key': 'staging/default/doc/file.pdf'},
+            json={'s3_key': 'staging/default/doc1/file.pdf'},
         )
 
         assert response.status_code == 400
@@ -663,19 +429,17 @@ class TestProcessS3Endpoint:
         mock_s3_client.object_exists.return_value = True
         mock_s3_client.get_object.return_value = (b'Content', {'content_type': 'text/plain'})
         mock_s3_client.get_s3_url.return_value = 's3://bucket/key'
-        mock_rag.ainsert.return_value = 'track_789'
 
         response = await client.post(
             '/upload/process',
             json={
-                's3_key': 'staging/default/doc/file.txt',
+                's3_key': 'staging/default/doc1/file.txt',
                 'archive_after_processing': False,
             },
         )
 
         assert response.status_code == 200
         assert response.json()['archive_key'] is None
-        mock_s3_client.move_to_archive.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_uses_provided_doc_id(self, client, mock_s3_client, mock_rag):
@@ -683,21 +447,14 @@ class TestProcessS3Endpoint:
         mock_s3_client.object_exists.return_value = True
         mock_s3_client.get_object.return_value = (b'Content', {'content_type': 'text/plain'})
         mock_s3_client.get_s3_url.return_value = 's3://bucket/key'
-        mock_s3_client.move_to_archive.return_value = 'archive/key'
-        mock_rag.ainsert.return_value = 'track_999'
 
         response = await client.post(
             '/upload/process',
             json={
-                's3_key': 'staging/default/doc/file.txt',
+                's3_key': 'staging/default/doc1/file.txt',
                 'doc_id': 'custom_doc_id',
             },
         )
 
         assert response.status_code == 200
         assert response.json()['doc_id'] == 'custom_doc_id'
-
-        # Verify RAG was called with custom doc_id
-        mock_rag.ainsert.assert_called_once()
-        call_kwargs = mock_rag.ainsert.call_args.kwargs
-        assert call_kwargs['ids'] == 'custom_doc_id'

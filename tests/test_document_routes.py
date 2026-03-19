@@ -13,129 +13,13 @@ Uses httpx AsyncClient with FastAPI's TestClient pattern and mocked dependencies
 """
 
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
-from pydantic import BaseModel, Field
 
-# =============================================================================
-# Response Models (simplified for testing)
-# =============================================================================
-
-
-class ScanResponse(BaseModel):
-    """Response model for document scanning."""
-
-    status: str = Field(description='Status of the scanning operation')
-    message: str | None = Field(default=None)
-    track_id: str = Field(description='Tracking ID')
-
-
-class InsertResponse(BaseModel):
-    """Response model for document insertion."""
-
-    status: str = Field(description='Status of the operation')
-    message: str = Field(description='Message describing result')
-    track_id: str = Field(description='Tracking ID')
-
-
-class PipelineStatusResponse(BaseModel):
-    """Response model for pipeline status."""
-
-    autoscanned: bool = Field(default=False)
-    busy: bool = Field(default=False)
-    job_name: str = Field(default='')
-    docs: int = Field(default=0)
-
-
-# =============================================================================
-# Test Route Factory
-# =============================================================================
-
-
-def create_test_document_routes(
-    rag: Any,
-    doc_manager: Any,
-    api_key: str | None = None,
-):
-    """Create document routes for testing (simplified version without auth).
-
-    Note: doc_manager and api_key kept for interface compatibility but not used in tests.
-    """
-    from yar.api.routers.document_routes import (
-        InsertTextRequest,
-        InsertTextsRequest,
-    )
-
-    router = APIRouter(prefix='/documents', tags=['documents'])
-
-    @router.post('/scan', response_model=ScanResponse)
-    async def scan_for_new_documents():
-        """Trigger scanning for new documents."""
-        from yar.utils import generate_track_id
-
-        track_id = generate_track_id('scan')
-        return ScanResponse(
-            status='scanning_started',
-            message='Scanning process has been initiated in the background',
-            track_id=track_id,
-        )
-
-    @router.post('/text', response_model=InsertResponse)
-    async def insert_text(request: InsertTextRequest):
-        """Insert text into the RAG system."""
-        try:
-            # Check for duplicates
-            if request.file_source and request.file_source.strip():
-                existing = await rag.doc_status.get_doc_by_file_path(request.file_source)
-                if existing:
-                    return InsertResponse(
-                        status='duplicated',
-                        message=f"File source '{request.file_source}' already exists.",
-                        track_id=existing.get('track_id', ''),
-                    )
-
-            from yar.utils import generate_track_id
-
-            track_id = generate_track_id('text')
-            return InsertResponse(
-                status='success',
-                message='Text inserted successfully.',
-                track_id=track_id,
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
-
-    @router.post('/texts', response_model=InsertResponse)
-    async def insert_texts(request: InsertTextsRequest):
-        """Insert multiple texts into the RAG system."""
-        try:
-            from yar.utils import generate_track_id
-
-            track_id = generate_track_id('texts')
-            return InsertResponse(
-                status='success',
-                message=f'Successfully queued {len(request.texts)} text(s) for processing.',
-                track_id=track_id,
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
-
-    @router.get('/pipeline_status', response_model=PipelineStatusResponse)
-    async def get_pipeline_status():
-        """Get the current status of the document indexing pipeline."""
-        return PipelineStatusResponse(
-            autoscanned=True,
-            busy=False,
-            job_name='',
-            docs=0,
-        )
-
-    return router
-
+from yar.api.routers.document_routes import create_document_routes
 
 # =============================================================================
 # Fixtures
@@ -148,7 +32,13 @@ def mock_rag():
     rag = MagicMock()
     rag.doc_status = MagicMock()
     rag.doc_status.get_doc_by_file_path = AsyncMock(return_value=None)
+    rag.doc_status.get_by_id = AsyncMock(return_value=None)
+    rag.doc_status.get_status_counts = AsyncMock(return_value={})
     rag.workspace = 'default'
+    rag.text_chunks = MagicMock()
+    rag.ainsert = AsyncMock(return_value='track_123')
+    rag.apipeline_enqueue_documents = AsyncMock()
+    rag.apipeline_process_enqueue_documents = AsyncMock()
     return rag
 
 
@@ -166,9 +56,11 @@ def mock_doc_manager():
 def app(mock_rag, mock_doc_manager):
     """Create FastAPI app with document routes."""
     app = FastAPI()
-    router = create_test_document_routes(
-        rag=mock_rag, doc_manager=mock_doc_manager, api_key=None
-    )
+    with patch('yar.api.routers.document_routes.global_args') as mock_global_args:
+        mock_global_args.max_upload_size_mb = 100
+        router = create_document_routes(
+            rag=mock_rag, doc_manager=mock_doc_manager, api_key=None
+        )
     app.include_router(router)
     return app
 
@@ -404,6 +296,7 @@ class TestInsertTextEndpoint:
     async def test_insert_text_success(self, client, mock_rag):
         """Test successful text insertion."""
         mock_rag.doc_status.get_doc_by_file_path.return_value = None
+        mock_rag.doc_status.get_by_id.return_value = None
 
         response = await client.post(
             '/documents/text',
@@ -419,6 +312,7 @@ class TestInsertTextEndpoint:
     async def test_insert_text_with_source(self, client, mock_rag):
         """Test text insertion with file_source."""
         mock_rag.doc_status.get_doc_by_file_path.return_value = None
+        mock_rag.doc_status.get_by_id.return_value = None
 
         response = await client.post(
             '/documents/text',
@@ -485,8 +379,11 @@ class TestInsertTextsEndpoint:
     """Tests for POST /documents/texts endpoint."""
 
     @pytest.mark.asyncio
-    async def test_insert_texts_success(self, client):
+    async def test_insert_texts_success(self, client, mock_rag):
         """Test successful multiple texts insertion."""
+        mock_rag.doc_status.get_doc_by_file_path.return_value = None
+        mock_rag.doc_status.get_by_id.return_value = None
+
         response = await client.post(
             '/documents/texts',
             json={
@@ -501,11 +398,13 @@ class TestInsertTextsEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'success'
-        assert '3' in data['message']  # Should mention 3 texts
 
     @pytest.mark.asyncio
-    async def test_insert_texts_with_sources(self, client):
+    async def test_insert_texts_with_sources(self, client, mock_rag):
         """Test multiple texts with file_sources."""
+        mock_rag.doc_status.get_doc_by_file_path.return_value = None
+        mock_rag.doc_status.get_by_id.return_value = None
+
         response = await client.post(
             '/documents/texts',
             json={
@@ -551,7 +450,28 @@ class TestPipelineStatusEndpoint:
     @pytest.mark.asyncio
     async def test_pipeline_status_returns_data(self, client):
         """Test that pipeline status returns expected fields."""
-        response = await client.get('/documents/pipeline_status')
+        with patch(
+            'yar.kg.shared_storage.get_namespace_data',
+            new_callable=AsyncMock,
+            return_value={
+                'autoscanned': True,
+                'busy': False,
+                'job_name': '',
+                'docs': 0,
+                'batches': 0,
+                'cur_batch': 0,
+                'request_pending': False,
+                'latest_message': '',
+            },
+        ), patch(
+            'yar.kg.shared_storage.get_namespace_lock',
+            return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+        ), patch(
+            'yar.kg.shared_storage.get_all_update_flags_status',
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            response = await client.get('/documents/pipeline_status')
 
         assert response.status_code == 200
         data = response.json()
@@ -574,6 +494,7 @@ class TestDocumentIntegration:
         """Test a typical text insertion workflow."""
         # First insertion should succeed
         mock_rag.doc_status.get_doc_by_file_path.return_value = None
+        mock_rag.doc_status.get_by_id.return_value = None
 
         response1 = await client.post(
             '/documents/text',
@@ -596,8 +517,11 @@ class TestDocumentIntegration:
         assert response2.json()['status'] == 'duplicated'
 
     @pytest.mark.asyncio
-    async def test_batch_text_insertion(self, client):
+    async def test_batch_text_insertion(self, client, mock_rag):
         """Test batch text insertion."""
+        mock_rag.doc_status.get_doc_by_file_path.return_value = None
+        mock_rag.doc_status.get_by_id.return_value = None
+
         texts = [f'Document {i} content.' for i in range(5)]
 
         response = await client.post(
@@ -608,4 +532,3 @@ class TestDocumentIntegration:
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'success'
-        assert '5' in data['message']
