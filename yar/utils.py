@@ -1696,12 +1696,10 @@ async def aexport_data(
 
     # --- Entities ---
     all_nodes = await chunk_entity_relation_graph.get_all_nodes()
-    all_entities = []
     for node_data in all_nodes:
         entity_name = node_data.get('entity_id') or node_data.get('id')
         if not entity_name:
             continue
-        all_entities.append(entity_name)
         source_id = node_data.get('source_id')
 
         entity_info = {
@@ -1724,48 +1722,27 @@ async def aexport_data(
             entity_row['vector_data'] = str(entity_info['vector_data'])
         entities_data.append(entity_row)
 
-    # --- Relations ---
-    for src_entity in all_entities:
-        for tgt_entity in all_entities:
-            if src_entity == tgt_entity:
-                continue
+    # --- Relations (O(E) via get_all_edges instead of O(N²) has_edge loop) ---
+    all_edges = await chunk_entity_relation_graph.get_all_edges()
+    for edge in all_edges:
+        src_entity = edge.get('source', '').strip('"')  # PG returns quoted agtype
+        tgt_entity = edge.get('target', '').strip('"')
+        if not src_entity or not tgt_entity:
+            continue
+        source_id = edge.get('source_id')
 
-            edge_exists = await chunk_entity_relation_graph.has_edge(src_entity, tgt_entity)
-            if edge_exists:
-                # Get edge information from graph
-                edge_data = await chunk_entity_relation_graph.get_edge(src_entity, tgt_entity)
-                source_id = edge_data.get('source_id') if edge_data else None
-
-                relation_info = {
-                    'graph_data': edge_data,
-                    'source_id': source_id,
-                }
-
-                # Optional: Get vector database information
-                if include_vector_data:
-                    rel_id = compute_mdhash_id(src_entity + tgt_entity, prefix='rel-')
-                    vector_data = await relationships_vdb.get_by_id(rel_id)
-                    relation_info['vector_data'] = vector_data
-
-                relation_row = {
-                    'src_entity': src_entity,
-                    'tgt_entity': tgt_entity,
-                    'source_id': relation_info['source_id'],
-                    'graph_data': str(relation_info['graph_data']),  # Convert to string
-                }
-                if include_vector_data and 'vector_data' in relation_info:
-                    relation_row['vector_data'] = str(relation_info['vector_data'])
-                relations_data.append(relation_row)
-
-    # --- Relationships (from VectorDB) ---
-    all_relationships = await relationships_vdb.client_storage
-    for rel in all_relationships['data']:
-        relationships_data.append(
-            {
-                'relationship_id': rel['__id__'],
-                'data': str(rel),  # Convert to string for compatibility
-            }
-        )
+        relation_row = {
+            'src_entity': src_entity,
+            'tgt_entity': tgt_entity,
+            'source_id': source_id,
+            'graph_data': str(edge),
+        }
+        if include_vector_data:
+            rel_id = compute_mdhash_id(src_entity + tgt_entity, prefix='rel-')
+            vector_data = await relationships_vdb.get_by_id(rel_id)
+            if vector_data:
+                relation_row['vector_data'] = str(vector_data)
+        relations_data.append(relation_row)
 
     # Export based on format
     if file_format == 'csv':

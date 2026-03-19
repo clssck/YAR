@@ -839,11 +839,11 @@ class PostgreSQLDB:
             lock_name: Name for the lock (used to generate lock ID)
 
         Yields:
-            None - lock is held for the duration of the context
+            conn - the connection holding the advisory lock
 
         Example:
-            async with self._advisory_lock('schema_migration'):
-                await self.execute('ALTER TABLE ...')
+            async with self._advisory_lock('schema_migration') as conn:
+                await conn.execute('ALTER TABLE ...')
         """
         # Generate deterministic lock ID from name
         lock_id = int(hashlib.sha256(lock_name.encode()).hexdigest(), 16) & 0x7FFFFFFF  # 31-bit positive integer
@@ -856,11 +856,26 @@ class PostgreSQLDB:
                 # Acquire exclusive advisory lock (blocks until available)
                 await conn.execute(f'SELECT pg_advisory_lock({lock_id})')
                 logger.debug(f'PostgreSQL, Acquired advisory lock: {lock_name} (id={lock_id})')
-                yield
+                yield conn
             finally:
                 # Release the lock
                 await conn.execute(f'SELECT pg_advisory_unlock({lock_id})')
                 logger.debug(f'PostgreSQL, Released advisory lock: {lock_name} (id={lock_id})')
+
+    async def _execute_on_conn(self, conn: 'asyncpg.Connection', sql: str, params: list | None = None) -> None:
+        """Execute SQL on an explicit connection (used for migration DDL under advisory lock)."""
+        if params:
+            await conn.execute(sql, *params)
+        else:
+            await conn.execute(sql)
+
+    async def _query_on_conn(self, conn: 'asyncpg.Connection', sql: str, params: list | None = None) -> dict | None:
+        """Query SQL on an explicit connection (used for migration checks under advisory lock)."""
+        if params:
+            row = await conn.fetchrow(sql, *params)
+        else:
+            row = await conn.fetchrow(sql)
+        return dict(row) if row else None
 
     async def _ensure_schema_migrations_table(self) -> None:
         """Bootstrap the schema migrations table (must exist before tracking).
@@ -1705,10 +1720,10 @@ class PostgreSQLDB:
 
         # Acquire advisory lock to prevent race conditions during schema changes
         # Multiple processes starting simultaneously will wait here
-        async with self._advisory_lock('schema_migration'):
-            await self._check_tables_locked()
+        async with self._advisory_lock('schema_migration') as conn:
+            await self._check_tables_locked(conn)
 
-    async def _check_tables_locked(self):
+    async def _check_tables_locked(self, conn: 'asyncpg.Connection'):
         """Internal method that runs table creation under advisory lock."""
         # Tables to skip in the main loop (already created or special handling)
         skip_tables = {'YAR_SCHEMA_MIGRATIONS'}
@@ -1972,7 +1987,7 @@ class PostgreSQLDB:
         )
 
         await self._run_migration(
-            self._add_unique_constraints(),
+            self._add_unique_constraints(conn),
             'unique_constraints',
             'Failed to add unique constraints for data integrity',
         )
@@ -2193,7 +2208,7 @@ class PostgreSQLDB:
                 # Non-fatal - table will still function with default vacuum settings
                 logger.warning(f'PostgreSQL, Failed to configure autovacuum for {table_name}: {e}')
 
-    async def _add_unique_constraints(self):
+    async def _add_unique_constraints(self, conn: 'asyncpg.Connection'):
         """Add UNIQUE constraints to prevent duplicate entities and relations.
 
         Duplicates cause:
@@ -2230,7 +2245,7 @@ class PostgreSQLDB:
             SELECT 1 FROM information_schema.tables
             WHERE table_name = $1 AND table_schema = 'public'
             """
-            exists = await self.query(check_table_sql, [table.lower()])
+            exists = await self._query_on_conn(conn, check_table_sql, [table.lower()])
             if not exists:
                 continue
 
@@ -2240,7 +2255,7 @@ class PostgreSQLDB:
             WHERE table_name = $1 AND constraint_name = $2
             AND constraint_type = 'UNIQUE' AND table_schema = 'public'
             """
-            constraint_exists = await self.query(check_constraint_sql, [table.lower(), constraint])
+            constraint_exists = await self._query_on_conn(conn, check_constraint_sql, [table.lower(), constraint])
             if constraint_exists:
                 logger.debug(f'PostgreSQL, UNIQUE constraint {constraint} already exists')
                 continue
@@ -2262,15 +2277,19 @@ class PostgreSQLDB:
                   AND {dedup_join}
                   AND (a.update_time < b.max_time OR (a.update_time = b.max_time AND a.ctid < b.max_ctid))
                 """
-                await self.execute(dedup_sql)
-                logger.debug(f'PostgreSQL, Removed duplicates from {table}')
 
                 # Step 2: Add the UNIQUE constraint
                 add_constraint_sql = f"""
                 ALTER TABLE {table}
                 ADD CONSTRAINT {constraint} UNIQUE {columns}
                 """
-                await self.execute(add_constraint_sql)
+
+                # Wrap DELETE + ALTER in a transaction so a concurrent upsert
+                # between them cannot reintroduce duplicates and break ALTER TABLE
+                async with conn.transaction():
+                    await self._execute_on_conn(conn, dedup_sql)
+                    logger.debug(f'PostgreSQL, Removed duplicates from {table}')
+                    await self._execute_on_conn(conn, add_constraint_sql)
                 logger.info(f'PostgreSQL, Added UNIQUE constraint {constraint} to {table}')
 
             except Exception as e:
