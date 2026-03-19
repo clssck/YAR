@@ -1864,11 +1864,12 @@ async def _merge_nodes_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(source_ids)
 
     # 6.2 Finalize entity type by highest count
-    entity_type = sorted(
-        Counter([dp['entity_type'] for dp in nodes_data] + already_entity_types).items(),
-        key=lambda x: x[1],
-        reverse=True,
-    )[0][0]
+    all_types = [dp['entity_type'] for dp in nodes_data] + already_entity_types
+    entity_type = (
+        sorted(Counter(all_types).items(), key=lambda x: x[1], reverse=True)[0][0]
+        if all_types
+        else 'UNKNOWN'
+    )
 
     # 7. Deduplicate nodes by description, keeping first occurrence in the same document
     unique_nodes = {}
@@ -2092,7 +2093,7 @@ async def _merge_edges_then_upsert(
         )
 
     # 3. Finalize source_id by applying source ids limit
-    limit_method = str(global_config.get('source_ids_limit_method', ''))
+    limit_method = str(global_config.get('source_ids_limit_method', '')) or SOURCE_IDS_LIMIT_METHOD_KEEP
     max_source_limit = int(global_config.get('max_source_ids_per_relation', 0))
     source_ids = apply_source_ids_limit(
         full_source_ids,
@@ -2100,7 +2101,6 @@ async def _merge_edges_then_upsert(
         limit_method,
         identifier=f'`{src_id}`~`{tgt_id}`',
     )
-    limit_method = str(global_config.get('source_ids_limit_method', '')) or SOURCE_IDS_LIMIT_METHOD_KEEP
 
     # 4. Only keep edges with source_id in the final source_ids list if in KEEP mode
     if limit_method == SOURCE_IDS_LIMIT_METHOD_KEEP:

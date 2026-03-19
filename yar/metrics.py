@@ -33,7 +33,7 @@ from yar.constants import (
 # Configuration
 METRICS_ENABLED = os.getenv('ENABLE_METRICS', str(DEFAULT_METRICS_ENABLED)).lower() == 'true'
 METRICS_HISTORY_SIZE = int(os.getenv('METRICS_HISTORY_SIZE', str(DEFAULT_METRICS_HISTORY_SIZE)))
-VALID_QUERY_MODES = frozenset({'local', 'global', 'hybrid', 'mix', 'naive'})
+VALID_QUERY_MODES = frozenset({'local', 'global', 'hybrid', 'mix', 'naive', 'bypass'})
 UNKNOWN_QUERY_MODE = 'unknown'
 
 # Global metrics instance (singleton pattern)

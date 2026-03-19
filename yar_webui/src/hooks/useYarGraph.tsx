@@ -406,14 +406,16 @@ const useLightrangeGraph = () => {
 
   // Graph data fetching logic
   useEffect(() => {
+    let cancelled = false
+
     // Skip if fetch is already in progress
     if (fetchInProgressRef.current) {
-      return
+      return () => { cancelled = true }
     }
 
     // Empty queryLabel should be only handle once(avoid infinite loop)
     if (!queryLabel && emptyDataHandledRef.current) {
-      return
+      return () => { cancelled = true }
     }
 
     // Only fetch data when graphDataFetchAttempted is false (avoids re-fetching on vite dev mode)
@@ -464,6 +466,7 @@ const useLightrangeGraph = () => {
       // 3. Process data
       dataPromise
         .then((result) => {
+          if (cancelled) return
           const state = useGraphStore.getState()
           const data = result?.rawGraph
 
@@ -560,6 +563,7 @@ const useLightrangeGraph = () => {
           }
         })
         .catch((error) => {
+          if (cancelled) return
           console.error('Error fetching graph data:', error)
 
           // Reset state on error
@@ -570,6 +574,11 @@ const useLightrangeGraph = () => {
           state.setGraphDataFetchAttempted(false)
           state.setLastSuccessfulQueryLabel('') // Clear last successful query label on error
         })
+    }
+
+    return () => {
+      cancelled = true
+      fetchInProgressRef.current = false
     }
   }, [
     queryLabel,

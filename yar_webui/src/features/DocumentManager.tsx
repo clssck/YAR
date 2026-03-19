@@ -1518,7 +1518,7 @@ export default function DocumentManager() {
   // Reset selection state when page, status filter, or sort changes
   useEffect(() => {
     setSelectedDocIds([])
-  }, [])
+  }, [pagination.page, statusFilter, sortField, sortDirection])
 
   // Central effect to handle all data fetching
   useEffect(() => {

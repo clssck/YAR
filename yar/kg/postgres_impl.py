@@ -2236,14 +2236,14 @@ class PostgreSQLDB:
                 dedup_sql = f"""
                 DELETE FROM {table} AS a
                 USING (
-                    SELECT workspace, {dedup_key}, MAX(update_time) as max_time
+                    SELECT workspace, {dedup_key}, MAX(update_time) as max_time, MAX(ctid) as max_ctid
                     FROM {table}
                     GROUP BY workspace, {dedup_key}
                     HAVING COUNT(*) > 1
                 ) b
                 WHERE a.workspace = b.workspace
                   AND {dedup_join}
-                  AND a.update_time < b.max_time
+                  AND (a.update_time < b.max_time OR (a.update_time = b.max_time AND a.ctid < b.max_ctid))
                 """
                 await self.execute(dedup_sql)
                 logger.debug(f'PostgreSQL, Removed duplicates from {table}')

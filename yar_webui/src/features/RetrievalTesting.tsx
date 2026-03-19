@@ -558,7 +558,7 @@ export default function RetrievalTesting() {
         query: actualQuery,
         response_type: 'Multiple Paragraphs',
         conversation_history: prevMessages
-          .filter((m) => m.isError !== true)
+          .filter((m) => m.isError !== true && (m.role === 'user' || m.role === 'assistant'))
           .map((m) => ({ role: m.role, content: m.content })),
         ...(effectiveMode ? { mode: effectiveMode } : {}),
       }
