@@ -322,7 +322,7 @@ class TestExplainEndpointMetrics:
         assert response.status_code == 200
         payload = response.json()
         assert payload['success'] is False
-        assert payload['context_preview'].startswith('Error:')
+        assert payload['context_preview'] == 'Query explain failed. Check server logs for details.'
         record_metric_mock.assert_awaited_once()
         metric_kwargs = record_metric_mock.await_args.kwargs
         assert metric_kwargs['mode'] == 'local'

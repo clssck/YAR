@@ -4,6 +4,7 @@ YAR (Yet Another RAG) FastAPI Server
 
 import argparse
 import configparser
+import hmac
 import logging
 import logging.config
 import os
@@ -785,7 +786,8 @@ def create_app(args):
                 'webui_description': webui_description,
             }
         username = form_data.username
-        if auth_handler.accounts.get(username) != form_data.password:
+        stored_password = auth_handler.accounts.get(username, '')
+        if not hmac.compare_digest(stored_password, form_data.password):
             raise HTTPException(status_code=401, detail='Incorrect credentials')
 
         # Regular user login

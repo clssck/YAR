@@ -10,7 +10,7 @@ Endpoints:
 """
 
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from yar.api.utils_api import get_combined_auth_dependency
@@ -180,7 +180,7 @@ def create_metrics_routes(api_key: str | None = None) -> APIRouter:
             )
         except Exception as e:
             logger.error(f'Error getting metrics: {e}', exc_info=True)
-            raise
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.get(
         '/metrics/queries',
@@ -208,6 +208,6 @@ def create_metrics_routes(api_key: str | None = None) -> APIRouter:
             )
         except Exception as e:
             logger.error(f'Error getting recent queries: {e}', exc_info=True)
-            raise
+            raise HTTPException(status_code=500, detail='Internal server error') from e
 
     return router

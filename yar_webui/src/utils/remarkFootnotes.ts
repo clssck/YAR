@@ -34,7 +34,9 @@ export const remarkFootnotes: Plugin<[], Root> = () => {
         const hasConsecutiveFootnote = /^\[\^[^\]]+\]/.test(remainingText)
 
         // Add footnote reference as HTML with placeholder link
-        const footnoteHtml = `<sup><a href="#footnote-${id}" class="footnote-ref">${id}</a></sup>`
+        // Sanitize footnote ID to prevent HTML injection from LLM-generated content
+        const safeId = id.replace(/[^a-zA-Z0-9_.-]/g, '_')
+        const footnoteHtml = `<sup><a href="#footnote-${safeId}" class="footnote-ref">${safeId}</a></sup>`
 
         // Add spacing if there's a consecutive footnote
         const htmlWithSpacing = hasConsecutiveFootnote

@@ -354,7 +354,9 @@ async def openai_complete_if_cache(
 
     logger.debug('===== Entering func of LLM =====')
     logger.debug(f'Model: {model}   Base URL: {base_url}')
-    logger.debug(f'Client Configs: {client_configs}')
+    # Scrub sensitive keys from client_configs before logging
+    _safe_configs = {k: ('***' if k in ('api_key', 'api_secret', 'token') else v) for k, v in client_configs.items()} if client_configs else {}
+    logger.debug(f'Client Configs: {_safe_configs}')
     logger.debug(f'Additional kwargs: {kwargs}')
     logger.debug(f'Num of history messages: {len(history_messages)}')
     verbose_debug(f'System prompt: {system_prompt}')
@@ -396,7 +398,7 @@ async def openai_complete_if_cache(
         await openai_async_client.close()
         raise
     except Exception as e:
-        logger.error(f'OpenAI API Call Failed,\nModel: {model},\nParams: {kwargs}, Got: {e}')
+        logger.error(f'OpenAI API Call Failed,\nModel: {model}, Got: {e}')
         await openai_async_client.close()
         raise
 

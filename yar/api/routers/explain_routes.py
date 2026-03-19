@@ -233,7 +233,7 @@ def create_explain_routes(rag, api_key: str | None = None) -> APIRouter:
                     connectivity_passed=False,
                 ),
                 tokens=TokenStats(context_tokens=0),
-                context_preview=f'Error: {e!s}',
+                context_preview='Query explain failed. Check server logs for details.',
                 success=False,
             )
 
