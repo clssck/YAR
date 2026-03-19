@@ -2224,18 +2224,11 @@ async def background_delete_documents(
     successful_deletions = []
     failed_deletions = []
 
-    # Double-check pipeline status before proceeding
+    # busy + job_name already claimed by the handler under lock (TOCTOU-safe).
+    # Populate remaining status fields under the lock.
     async with pipeline_status_lock:
-        if pipeline_status.get('busy', False):
-            logger.warning('Error: Unexpected pipeline busy state, aborting deletion.')
-            return  # Abort deletion operation
-
-        # Set pipeline status to busy for deletion
         pipeline_status.update(
             {
-                'busy': True,
-                # Job name can not be changed, it's verified in adelete_by_doc_id()
-                'job_name': f'Deleting {total_docs} Documents',
                 'job_start': datetime.now().isoformat(),
                 'docs': total_docs,
                 'batches': total_docs,
@@ -3063,6 +3056,9 @@ def create_document_routes(
                         message='Cannot delete documents while pipeline is busy',
                         doc_id=', '.join(doc_ids),
                     )
+                # Claim busy inside the lock to close the TOCTOU window
+                pipeline_status['busy'] = True
+                pipeline_status['job_name'] = f'Deleting {len(doc_ids)} Documents'
 
             # Add deletion task to background tasks
             background_tasks.add_task(

@@ -655,7 +655,7 @@ class KeyedUnifiedLock:
         current_time = time.time()
 
         # 1. Cleanup multiprocess locks using generic function
-        if _is_multiprocess and _lock_registry is not None and isinstance(_registry_guard, asyncio.Lock):
+        if _is_multiprocess and _lock_registry is not None and not isinstance(_registry_guard, asyncio.Lock):
             try:
                 await _registry_guard.acquire()
                 if _lock_cleanup_data is not None:

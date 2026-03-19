@@ -3,6 +3,7 @@ import configparser
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import ssl
@@ -3393,6 +3394,7 @@ class PGKVStorage(BaseKVStorage):
             logger.debug(f'[{self.workspace}] Successfully deleted {len(ids)} records from {self.namespace}')
         except Exception as e:
             logger.error(f'[{self.workspace}] Error while deleting records from {self.namespace}: {e}')
+            raise
 
     async def drop(self) -> dict[str, str]:
         """Drop the storage"""
@@ -3610,6 +3612,8 @@ class PGVectorStorage(BaseVectorStorage):
             embeddings = await self.embedding_func([query], _priority=5)  # higher priority for query
             embedding = embeddings[0]
 
+        if any(math.isnan(v) or math.isinf(v) for v in embedding):
+            raise ValueError('Embedding vector contains NaN or Inf values')
         embedding_values = [float(value) for value in embedding]
         embedding_string = ','.join(str(value) for value in embedding_values)
 
@@ -4046,6 +4050,7 @@ class PGVectorStorage(BaseVectorStorage):
             logger.debug(f'[{self.workspace}] Successfully deleted {len(ids)} vectors from {self.namespace}')
         except Exception as e:
             logger.error(f'[{self.workspace}] Error while deleting vectors from {self.namespace}: {e}')
+            raise
 
     async def delete_entity(self, entity_name: str) -> None:
         """Delete an entity by its name from the vector storage.
@@ -4642,6 +4647,7 @@ class PGDocStatusStorage(DocStatusStorage):
             logger.debug(f'[{self.workspace}] Successfully deleted {len(ids)} records from {self.namespace}')
         except Exception as e:
             logger.error(f'[{self.workspace}] Error while deleting records from {self.namespace}: {e}')
+            raise
 
     async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
         """Update or insert document status
