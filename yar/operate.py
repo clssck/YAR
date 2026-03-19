@@ -3795,9 +3795,10 @@ async def _perform_kg_search(
     should_reuse_entity_embedding = bool(
         normalized_query
         and ll_search_terms
+        and len(ll_search_terms) == 1
         and (
             query_param.enable_hyde
-            or (len(ll_search_terms) == 1 and ll_search_terms[0].casefold() == normalized_query.casefold())
+            or ll_search_terms[0].casefold() == normalized_query.casefold()
         )
     )
 

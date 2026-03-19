@@ -103,6 +103,23 @@ if VECTOR_DISTANCE_METRIC not in VECTOR_OPS_CLASS:
 # Patterns for sensitive parameter keys that should be masked in logs
 _SENSITIVE_KEY_PATTERNS = frozenset({'password', 'secret', 'token', 'key', 'credential', 'auth'})
 _VECTOR_TABLE_NAMES = frozenset({'YAR_VDB_CHUNKS', 'YAR_VDB_ENTITY', 'YAR_VDB_RELATION'})
+_VALID_FTS_LANGUAGES = frozenset({
+    'simple', 'arabic', 'armenian', 'basque', 'catalan', 'danish', 'dutch',
+    'english', 'finnish', 'french', 'german', 'greek', 'hindi', 'hungarian',
+    'indonesian', 'irish', 'italian', 'lithuanian', 'nepali', 'norwegian',
+    'portuguese', 'romanian', 'russian', 'serbian', 'spanish', 'swedish',
+    'tamil', 'turkish', 'yiddish',
+})
+
+
+def _validate_fts_language(language: str) -> str:
+    """Validate FTS language against PostgreSQL built-in text search configs."""
+    if language not in _VALID_FTS_LANGUAGES:
+        raise ValueError(
+            f"Invalid FTS language: {language!r}. "
+            f"Must be one of: {sorted(_VALID_FTS_LANGUAGES)}"
+        )
+    return language
 
 
 def _parse_bool_config(value: Any, *, default: bool, key_name: str) -> bool:
@@ -2672,6 +2689,8 @@ class PostgreSQLDB:
         Returns:
             List of matching chunks with content, score, metadata, and s3_key
         """
+        language = _validate_fts_language(language)
+
         from yar.cache.fts_cache import get_cached_fts_results, store_fts_results
 
         ws = workspace or self.workspace
@@ -3616,6 +3635,8 @@ class PGVectorStorage(BaseVectorStorage):
         Returns:
             List of chunks with content, metadata, and rrf_score
         """
+        language = _validate_fts_language(language)
+
         import asyncio
 
         from yar.utils import reciprocal_rank_fusion
@@ -3886,6 +3907,8 @@ class PGVectorStorage(BaseVectorStorage):
         Returns:
             List of chunks with content, metadata, and boosted rrf_score
         """
+        language = _validate_fts_language(language)
+
         from yar.utils import reciprocal_rank_fusion
 
         # Get entity-linked chunk IDs for boosting

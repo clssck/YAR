@@ -1556,12 +1556,15 @@ def _merge_attributes(
                     seen.setdefault(item, None)
             merged_data[key] = GRAPH_FIELD_SEP.join(seen)
         elif strategy == 'join_unique_comma':
-            # Handle fields separated by comma, join unique items with comma
-            unique_items = set()
+            # Handle fields separated by comma, join unique items preserving insertion order
+            seen: dict[str, None] = {}
             for value in values:
                 items = str(value).split(',')
-                unique_items.update(item.strip() for item in items if item.strip())
-            merged_data[key] = ','.join(sorted(unique_items))
+                for item in items:
+                    stripped = item.strip()
+                    if stripped:
+                        seen.setdefault(stripped, None)
+            merged_data[key] = ','.join(seen)
         elif strategy == 'max':
             # For numeric fields like weight
             numeric_values: list[float] = []
