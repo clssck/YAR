@@ -395,15 +395,5 @@ describe('Status Filter', () => {
   })
 })
 
-// =============================================================================
-// Component Rendering Tests
-// =============================================================================
-// NOTE: DocumentManager component rendering tests are disabled because the component
-// has complex useEffect chains with interdependent state updates that cause infinite
-// loops in the test environment. The utility function tests above provide solid
-// coverage of the core business logic.
-//
-// If rendering tests are needed in the future, consider:
-// 1. Using React Testing Library's `waitFor` with proper async handling
-// 2. Creating a simplified wrapper component for testing
-// 3. Using integration/E2E tests with Playwright (see e2e/documents.spec.ts)
+// Component rendering tests live in DocumentManager.render.test.tsx
+// (separated to isolate mock.module scope from other test files)

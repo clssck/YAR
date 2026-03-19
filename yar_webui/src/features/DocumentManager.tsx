@@ -434,6 +434,9 @@ export default function DocumentManager() {
   const prevPipelineBusyRef = useRef<boolean | undefined>(undefined)
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const recoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fetchDocumentsRef = useRef<() => Promise<void>>(null!)
+  const isCircuitBreakerOpenRef = useRef<() => boolean>(null!)
+  const handleIntelligentRefreshRef = useRef<(page?: number) => Promise<void>>(null!)
 
   // Add retry mechanism state
   const [retryState, setRetryState] = useState({
@@ -948,14 +951,12 @@ export default function DocumentManager() {
   }, [])
 
   // Circuit breaker utility functions
+  const { isOpen: cbIsOpen, nextRetryTime: cbNextRetryTime } = circuitBreakerState
   const isCircuitBreakerOpen = useCallback(() => {
-    if (!circuitBreakerState.isOpen) return false
+    if (!cbIsOpen) return false
 
     const now = Date.now()
-    if (
-      circuitBreakerState.nextRetryTime &&
-      now >= circuitBreakerState.nextRetryTime
-    ) {
+    if (cbNextRetryTime && now >= cbNextRetryTime) {
       // Reset circuit breaker to half-open state
       setCircuitBreakerState((prev) => ({
         ...prev,
@@ -966,7 +967,8 @@ export default function DocumentManager() {
     }
 
     return true
-  }, [circuitBreakerState])
+  }, [cbIsOpen, cbNextRetryTime])
+  useEffect(() => { isCircuitBreakerOpenRef.current = isCircuitBreakerOpen }, [isCircuitBreakerOpen])
 
   const recordFailure = useCallback((error: Error) => {
     const now = Date.now()
@@ -1105,21 +1107,19 @@ export default function DocumentManager() {
       recordFailure,
     ],
   )
+  useEffect(() => { handleIntelligentRefreshRef.current = handleIntelligentRefresh }, [handleIntelligentRefresh])
 
   // New paginated data fetching function
   const fetchPaginatedDocuments = useCallback(
     async (
       page: number,
-      pageSize: number,
+      _pageSize: number,
       _statusFilter: StatusFilter, // eslint-disable-line @typescript-eslint/no-unused-vars
     ) => {
-      // Update pagination state
-      setPagination((prev) => ({ ...prev, page, page_size: pageSize }))
-
-      // Use intelligent refresh
-      await handleIntelligentRefresh(page)
+      // Use intelligent refresh via ref to break dep cycle
+      await handleIntelligentRefreshRef.current(page)
     },
-    [handleIntelligentRefresh],
+    [],
   )
 
   // Legacy fetchDocuments function for backward compatibility
@@ -1135,6 +1135,7 @@ export default function DocumentManager() {
     pagination.page_size,
     statusFilter,
   ])
+  useEffect(() => { fetchDocumentsRef.current = fetchDocuments }, [fetchDocuments])
 
   // Function to clear current polling interval
   const clearPollingInterval = useCallback(() => {
@@ -1152,13 +1153,13 @@ export default function DocumentManager() {
       pollingIntervalRef.current = setInterval(async () => {
         try {
           // Check circuit breaker before making request
-          if (isCircuitBreakerOpen()) {
+          if (isCircuitBreakerOpenRef.current()) {
             return // Skip this polling cycle
           }
 
           // Only perform fetch if component is still mounted
           if (isMountedRef.current) {
-            await fetchDocuments()
+            await fetchDocumentsRef.current()
             recordSuccess() // Record successful operation
           }
         } catch (err) {
@@ -1200,15 +1201,18 @@ export default function DocumentManager() {
       }, intervalMs)
     },
     [
-      fetchDocuments,
       t,
       clearPollingInterval,
-      isCircuitBreakerOpen,
       recordSuccess,
       recordFailure,
       classifyError,
       retryState.count,
     ],
+  )
+
+  const hasActiveProcessing = useMemo(
+    () => hasActiveDocumentsStatus(statusCounts),
+    [statusCounts],
   )
 
   const scanDocuments = useCallback(async () => {
@@ -1236,8 +1240,7 @@ export default function DocumentManager() {
         recoveryTimeoutRef.current = null
         if (isMountedRef.current && currentTab === 'documents' && health) {
           // Restore intelligent polling interval based on document status
-          const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
-          const normalInterval = hasActiveDocuments ? 5000 : 30000
+          const normalInterval = hasActiveProcessing ? 5000 : 30000
           startPollingInterval(normalInterval)
         }
       }, 15000) // Restore after 15 seconds
@@ -1251,7 +1254,7 @@ export default function DocumentManager() {
         )
       }
     }
-  }, [t, startPollingInterval, currentTab, health, statusCounts])
+  }, [t, startPollingInterval, currentTab, health, hasActiveProcessing])
 
   // Retry failed documents
   const retryFailedDocuments = useCallback(async () => {
@@ -1280,8 +1283,7 @@ export default function DocumentManager() {
         recoveryTimeoutRef.current = setTimeout(() => {
           recoveryTimeoutRef.current = null
           if (isMountedRef.current && currentTab === 'documents' && health) {
-            const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
-            const normalInterval = hasActiveDocuments ? 5000 : 30000
+            const normalInterval = hasActiveProcessing ? 5000 : 30000
             startPollingInterval(normalInterval)
           }
         }, 15000)
@@ -1307,7 +1309,7 @@ export default function DocumentManager() {
         setIsRetrying(false)
       }
     }
-  }, [t, isRetrying, startPollingInterval, currentTab, health, statusCounts])
+  }, [t, isRetrying, startPollingInterval, currentTab, health, hasActiveProcessing])
 
   // Handle page size change - update state and save to store
   const handlePageSizeChange = useCallback(
@@ -1342,11 +1344,10 @@ export default function DocumentManager() {
       // pipelineBusy state has changed, trigger immediate refresh
       if (currentTab === 'documents' && health && isMountedRef.current) {
         // Use intelligent refresh to preserve current page
-        handleIntelligentRefresh()
+        handleIntelligentRefreshRef.current()
 
         // Reset polling timer after intelligent refresh
-        const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
-        const pollingInterval = hasActiveDocuments ? 5000 : 30000
+        const pollingInterval = hasActiveProcessing ? 5000 : 30000
         startPollingInterval(pollingInterval)
       }
     }
@@ -1356,15 +1357,10 @@ export default function DocumentManager() {
     pipelineBusy,
     currentTab,
     health,
-    handleIntelligentRefresh,
-    statusCounts,
+    hasActiveProcessing,
     startPollingInterval,
   ])
 
-  const hasActiveProcessing = useMemo(
-    () => hasActiveDocumentsStatus(statusCounts),
-    [statusCounts],
-  )
 
   // Set up intelligent polling with dynamic interval based on document status
   useEffect(() => {
