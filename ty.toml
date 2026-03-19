@@ -28,6 +28,7 @@ exclude = [
     "tests/test_kreuzberg_adapter.py",        # document adapter tests
     "tests/test_graph_storage.py",             # pytest.skip/fail decorator issue
     "tests/test_rag_live_integration.py",      # pytest.skip/fail decorator issue
+    "tests/test_aquery_data_endpoint.py",       # pytest.fail decorator issue (integration-only)
 ]
 
 [rules]
