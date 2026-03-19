@@ -359,6 +359,7 @@ export default function DocumentManager() {
     return () => {
       isMountedRef.current = false
       window.removeEventListener('beforeunload', handleBeforeUnload)
+      if (recoveryTimeoutRef.current) clearTimeout(recoveryTimeoutRef.current)
     }
   }, [])
 
@@ -432,6 +433,7 @@ export default function DocumentManager() {
   // Add refs to track previous pipelineBusy state and current interval
   const prevPipelineBusyRef = useRef<boolean | undefined>(undefined)
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const recoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Add retry mechanism state
   const [retryState, setRetryState] = useState({
@@ -1229,7 +1231,9 @@ export default function DocumentManager() {
       startPollingInterval(2000)
 
       // Set recovery timer to restore normal polling interval after 15 seconds
-      setTimeout(() => {
+      if (recoveryTimeoutRef.current) clearTimeout(recoveryTimeoutRef.current)
+      recoveryTimeoutRef.current = setTimeout(() => {
+        recoveryTimeoutRef.current = null
         if (isMountedRef.current && currentTab === 'documents' && health) {
           // Restore intelligent polling interval based on document status
           const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
@@ -1272,7 +1276,9 @@ export default function DocumentManager() {
         startPollingInterval(2000)
 
         // Restore normal polling after 15 seconds
-        setTimeout(() => {
+        if (recoveryTimeoutRef.current) clearTimeout(recoveryTimeoutRef.current)
+        recoveryTimeoutRef.current = setTimeout(() => {
+          recoveryTimeoutRef.current = null
           if (isMountedRef.current && currentTab === 'documents' && health) {
             const hasActiveDocuments = hasActiveDocumentsStatus(statusCounts)
             const normalInterval = hasActiveDocuments ? 5000 : 30000

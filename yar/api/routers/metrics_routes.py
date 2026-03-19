@@ -162,7 +162,7 @@ def create_metrics_routes(api_key: str | None = None) -> APIRouter:
         try:
             collector = await get_metrics_collector()
             stats = collector.compute_stats(window_seconds=window)
-            fts_stats = get_fts_cache_stats()
+            fts_stats = await get_fts_cache_stats()
 
             return MetricsResponse(
                 uptime_seconds=stats['uptime_seconds'],

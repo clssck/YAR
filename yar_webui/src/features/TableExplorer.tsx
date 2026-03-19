@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/Select'
+import { copyToClipboard } from '@/utils/clipboard'
 
 // Generic row type for database table data
 type TableRowData = Record<string, string | number | boolean | null | object>
@@ -72,41 +73,14 @@ function isJsonLike(value: CellValue): boolean {
   return typeof value === 'object' && value !== null
 }
 
-// Copy to clipboard helper
-async function copyToClipboard(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      // Fall through to legacy approach
-    }
-  }
-  // Fallback for older browsers
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  try {
-    document.body.appendChild(textarea)
-    textarea.select()
-    document.execCommand('copy')
-    return true
-  } catch {
-    return false
-  } finally {
-    if (textarea.parentNode) {
-      document.body.removeChild(textarea)
-    }
-  }
-}
 
 // Copy button component with feedback
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
-    const success = await copyToClipboard(text)
+    const result = await copyToClipboard(text)
+    const success = result.success
     if (success) {
       setCopied(true)
       toast.success(label ? `${label} copied` : 'Copied to clipboard')

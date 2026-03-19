@@ -4,6 +4,8 @@ import { healthCheckInterval } from '@/lib/constants'
 import { createSelectors } from '@/lib/utils'
 import { useSettingsStore } from './settings'
 
+let _healthCheckDelayTimer: ReturnType<typeof setTimeout> | null = null
+
 interface BackendState {
   health: boolean
   message: string | null
@@ -166,12 +168,18 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
   },
 
   resetHealthCheckTimerDelayed: (delayMs: number) => {
-    setTimeout(() => {
+    if (_healthCheckDelayTimer) clearTimeout(_healthCheckDelayTimer)
+    _healthCheckDelayTimer = setTimeout(() => {
+      _healthCheckDelayTimer = null
       get().resetHealthCheckTimer()
     }, delayMs)
   },
 
   clearHealthCheckTimer: () => {
+    if (_healthCheckDelayTimer) {
+      clearTimeout(_healthCheckDelayTimer)
+      _healthCheckDelayTimer = null
+    }
     const { healthCheckIntervalId } = get()
     if (healthCheckIntervalId) {
       clearInterval(healthCheckIntervalId)

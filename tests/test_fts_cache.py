@@ -217,7 +217,7 @@ class TestFTSCacheStats:
     @pytest.mark.asyncio
     async def test_stats_empty_cache(self):
         """Stats for empty cache."""
-        stats = get_fts_cache_stats()
+        stats = await get_fts_cache_stats()
         assert stats['total_entries'] == 0
         assert stats['valid_entries'] == 0
 
@@ -227,7 +227,7 @@ class TestFTSCacheStats:
         await store_fts_results('q1', 'ws', 10, 'en', [{'id': '1'}])
         await store_fts_results('q2', 'ws', 10, 'en', [{'id': '2'}])
 
-        stats = get_fts_cache_stats()
+        stats = await get_fts_cache_stats()
         assert stats['total_entries'] == 2
         assert stats['valid_entries'] == 2
 
@@ -243,6 +243,6 @@ class TestFTSCacheStats:
 
         await store_fts_results('q2', 'ws', 10, 'en', [{'id': '2'}])
 
-        stats = get_fts_cache_stats()
+        stats = await get_fts_cache_stats()
         assert stats['total_entries'] == 2
         assert stats['valid_entries'] == 1  # Only q2 is valid

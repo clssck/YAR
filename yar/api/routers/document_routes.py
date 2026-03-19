@@ -217,6 +217,7 @@ class InsertTextRequest(BaseModel):
 
     text: str = Field(
         min_length=1,
+        max_length=10_000_000,
         description='The text to insert',
     )
     file_source: str | None = Field(default=None, min_length=0, description='File Source')
@@ -261,6 +262,13 @@ class InsertTextsRequest(BaseModel):
     @classmethod
     def strip_texts_after(cls, texts: list[str]) -> list[str]:
         return [text.strip() for text in texts]
+
+    @field_validator('texts', mode='after')
+    @classmethod
+    def validate_texts_length(cls, texts: list[str]) -> list[str]:
+        if len(texts) > 500:
+            raise ValueError('Too many texts: maximum batch size is 500')
+        return texts
 
     @field_validator('file_sources', mode='after')
     @classmethod

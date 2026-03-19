@@ -897,7 +897,7 @@ class PostgreSQLDB:
             'SELECT version FROM YAR_SCHEMA_MIGRATIONS WHERE version = $1',
             [version],
         )
-        return result is not None
+        return bool(result) and 'version' in result
 
     async def _record_migration(self, version: int, name: str, checksum: str | None = None) -> None:
         """Record a successfully applied migration.

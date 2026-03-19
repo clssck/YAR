@@ -244,16 +244,16 @@ async def invalidate_fts_cache_for_workspace(workspace: str) -> int:
     return invalidated
 
 
-def get_fts_cache_stats() -> dict[str, Any]:
+async def get_fts_cache_stats() -> dict[str, Any]:
     """Get current FTS cache statistics.
 
     Returns:
         Dictionary with cache statistics
     """
-    current_time = time.time()
+    async with _fts_cache_lock:
+        cache_snapshot = list(_fts_cache.items())
 
-    # Count valid (non-expired) entries
-    cache_snapshot = list(_fts_cache.items())
+    current_time = time.time()
 
     valid_entries = sum(1 for _, (_, ts) in cache_snapshot if (current_time - ts) < FTS_CACHE_TTL)
 
