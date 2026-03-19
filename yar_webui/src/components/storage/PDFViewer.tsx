@@ -61,7 +61,13 @@ export default function PDFViewer({ url }: PDFViewerProps) {
   // Persisted zoom
   const [scale, setScale] = useState(() => {
     const saved = localStorage.getItem(ZOOM_KEY)
-    return saved ? parseFloat(saved) : 1.0
+    if (saved) {
+      const parsed = parseFloat(saved)
+      if (Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 5.0) {
+        return parsed
+      }
+    }
+    return 1.0
   })
 
   const viewerRef = useRef<HTMLDivElement>(null)
@@ -169,7 +175,12 @@ export default function PDFViewer({ url }: PDFViewerProps) {
     if (fitMode === 'width') {
       setFitMode('manual')
       const saved = localStorage.getItem(ZOOM_KEY)
-      if (saved) setScale(parseFloat(saved))
+      if (saved) {
+        const parsed = parseFloat(saved)
+        if (Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 5.0) {
+          setScale(parsed)
+        }
+      }
     } else {
       setFitMode('width')
       setScale(calculateFitWidth())

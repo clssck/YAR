@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from yar.api.utils_api import get_combined_auth_dependency, handle_api_error
 from yar.constants import NS_ORPHAN_CONNECTION_STATUS
@@ -14,16 +14,34 @@ from yar.utils import logger
 
 
 class EntityUpdateRequest(BaseModel):
-    entity_name: str
-    updated_data: dict[str, Any]
+    entity_name: str = Field(..., max_length=500)
+    updated_data: dict[str, Any] = Field(...)
     allow_rename: bool = False
     allow_merge: bool = False
 
+    @field_validator('updated_data')
+    @classmethod
+    def check_updated_data_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        import json
+
+        if len(json.dumps(v, default=str)) > 65_536:
+            raise ValueError('updated_data too large (max 64KB serialized)')
+        return v
+
 
 class RelationUpdateRequest(BaseModel):
-    source_id: str
-    target_id: str
-    updated_data: dict[str, Any]
+    source_id: str = Field(..., max_length=500)
+    target_id: str = Field(..., max_length=500)
+    updated_data: dict[str, Any] = Field(...)
+
+    @field_validator('updated_data')
+    @classmethod
+    def check_updated_data_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        import json
+
+        if len(json.dumps(v, default=str)) > 65_536:
+            raise ValueError('updated_data too large (max 64KB serialized)')
+        return v
 
 
 class EntityMergeRequest(BaseModel):
@@ -228,7 +246,7 @@ def create_graph_routes(rag, api_key: str | None = None):
     @router.get('/graph/entity/exists', dependencies=[Depends(combined_auth)])
     @handle_api_error('checking entity existence')
     async def check_entity_exists(
-        name: str = Query(..., description='Entity name to check'),
+        name: str = Query(..., max_length=500, description='Entity name to check'),
     ):
         """
         Check if an entity with the given name exists in the knowledge graph

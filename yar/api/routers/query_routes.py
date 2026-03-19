@@ -212,6 +212,7 @@ class QueryRequest(BaseModel):
 
     response_type: str | None = Field(
         min_length=1,
+        max_length=500,
         default=None,
         description="Defines the response format. Examples: 'Multiple Paragraphs', 'Single Paragraph', 'Bullet Points'.",
     )
@@ -263,6 +264,7 @@ class QueryRequest(BaseModel):
 
     user_prompt: str | None = Field(
         default=None,
+        max_length=100_000,
         description='User-provided prompt for the query. If provided, this will be used instead of the default value from prompt template.',
     )
 
@@ -317,6 +319,7 @@ class QueryRequest(BaseModel):
 
     entity_filter: str | None = Field(
         default=None,
+        max_length=500,
         description='Filter results to entities/chunks containing this term. Useful for multi-product corpora to prevent context mixing. Example: "Fitusiran" to restrict to Fitusiran-related content only.',
     )
 
@@ -344,6 +347,10 @@ class QueryRequest(BaseModel):
                 raise ValueError("Each message must have a 'content' key.")
             if not isinstance(msg['content'], str):
                 raise ValueError("Each message 'content' must be a string.")
+            if len(msg['content']) > 50_000:
+                raise ValueError(
+                    'Conversation message content exceeds maximum length of 50000 characters'
+                )
         return conversation_history
 
     @field_validator('hl_keywords', 'll_keywords', mode='after')

@@ -40,8 +40,8 @@ class AliasListResponse(BaseModel):
 class ManualAliasRequest(BaseModel):
     """Request to create a manual alias."""
 
-    alias: str = Field(..., description='The alias/variant name', min_length=1)
-    canonical_entity: str = Field(..., description='The canonical entity name', min_length=1)
+    alias: str = Field(..., description='The alias/variant name', min_length=1, max_length=500)
+    canonical_entity: str = Field(..., description='The canonical entity name', min_length=1, max_length=500)
 
 
 class ResolutionTriggerRequest(BaseModel):

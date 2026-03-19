@@ -56,7 +56,7 @@ class TestEntityUpdateRequestValidation:
     def test_missing_required_fields(self):
         """Test that missing required fields raises validation error."""
         with pytest.raises(ValidationError):
-            EntityUpdateRequest(entity_name='Tesla')  # type: ignore[call-arg]
+            EntityUpdateRequest(entity_name='Tesla')
 
 
 class TestRelationUpdateRequestValidation:
@@ -78,7 +78,7 @@ class TestRelationUpdateRequestValidation:
     def test_missing_target_id(self):
         """Test that missing target_id raises validation error."""
         with pytest.raises(ValidationError):
-            RelationUpdateRequest(  # type: ignore[call-arg]
+            RelationUpdateRequest(
                 source_id='Elon Musk',
                 updated_data={'description': 'test'},
             )
