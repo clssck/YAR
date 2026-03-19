@@ -9,8 +9,6 @@ This module tests:
 """
 
 import os
-import sys
-from argparse import Namespace
 from typing import cast
 from unittest.mock import patch
 
@@ -417,48 +415,6 @@ class TestPresetBehaviorCharacteristics:
 class TestInvalidPresetHandling:
     """Tests for handling invalid/malformed preset values."""
 
-    def test_unknown_preset_string(self):
-        """Test that unknown preset string falls back gracefully."""
-        # Unknown preset should either raise or fall back to default
-        try:
-            chunker = create_chunker(preset='unknown_preset')
-            # If it doesn't raise, it should still return a callable
-            assert callable(chunker)
-        except (ValueError, KeyError):
-            # Raising an error is also acceptable behavior
-            pass
-
-    def test_numeric_preset(self):
-        """Test handling of numeric preset value."""
-        try:
-            chunker = create_chunker(preset=123)  # type: ignore
-            # If accepted, should still work
-            assert callable(chunker)
-        except (TypeError, ValueError, AttributeError):
-            # Raising an error is acceptable
-            pass
-
-    def test_whitespace_preset(self):
-        """Test handling of whitespace-only preset."""
-        chunker = create_chunker(preset='   ')
-        # Should handle gracefully
-        assert callable(chunker)
-
-    def test_preset_with_special_chars(self):
-        """Test handling of preset with special characters."""
-        try:
-            chunker = create_chunker(preset='sem@ntic!')
-            assert callable(chunker)
-        except (ValueError, KeyError):
-            pass
-
-    def test_very_long_preset_string(self):
-        """Test handling of extremely long preset string."""
-        try:
-            chunker = create_chunker(preset='a' * 10000)
-            assert callable(chunker)
-        except (ValueError, KeyError, MemoryError):
-            pass
 
     def test_none_vs_empty_string_equivalence(self):
         """Test that None and empty string produce similar results."""
@@ -483,28 +439,6 @@ class TestInvalidPresetHandling:
 class TestConfigValidationErrors:
     """Tests for config validation error handling."""
 
-    def test_parse_args_validates_preset(self):
-        """Test that parse_args validates CHUNKING_PRESET."""
-        # Create a mock args namespace
-        args = Namespace()
-        args.chunk_size = 1200
-        args.chunk_overlap_size = 100
-
-        # Test with invalid preset - should raise ValueError
-        with patch.dict(os.environ, {'CHUNKING_PRESET': 'invalid_preset'}):
-            # Import fresh to pick up env var
-            if 'yar.api.config' in sys.modules:
-                del sys.modules['yar.api.config']
-
-            try:
-                pass
-                # parse_args may raise ValueError for invalid preset
-                # or it may accept it (depending on implementation)
-            except ValueError as e:
-                assert 'CHUNKING_PRESET' in str(e) or 'invalid' in str(e).lower()
-            except Exception:
-                # Other import errors are acceptable in test context
-                pass
 
     def test_preset_normalization_lowercase(self):
         """Test that preset values are normalized to lowercase."""
@@ -865,12 +799,3 @@ class TestAPIParameterHandling:
 
         result = chunker(None, "Test content", None, False, 100, 1200)
         assert isinstance(result, list)
-
-    def test_metadata_passed_to_pipeline(self):
-        """Test that metadata dict structure is correct for pipeline."""
-        # Simulate what gets passed to apipeline_enqueue_documents
-        metadata = {'chunking_preset': 'semantic'}
-
-        assert isinstance(metadata, dict)
-        assert 'chunking_preset' in metadata
-        assert metadata['chunking_preset'] in ('semantic', 'recursive', '', None)

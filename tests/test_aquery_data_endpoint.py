@@ -636,29 +636,17 @@ def test_compare_with_regular_query():
     print('-' * 60)
 
     # Regular query
-    try:
-        print('1. Regular query (/query):')
-        regular_response = requests.post(
-            f'{BASE_URL}/query',
-            json={'query': query_text, 'mode': 'mix'},
-            headers=AUTH_HEADERS,
-            timeout=30,
-        )
+    regular_response = requests.post(
+        f'{BASE_URL}/query',
+        json={'query': query_text, 'mode': 'mix'},
+        headers=AUTH_HEADERS,
+        timeout=30,
+    )
+    assert regular_response.status_code == 200
 
-        if regular_response.status_code == 200:
-            regular_data = regular_response.json()
-            response_text = regular_data.get('response', 'No response')
-            print(f'   Generated answer: {response_text[:300]}{"..." if len(response_text) > 300 else ""}')
-        else:
-            print(f'   Regular query failed: {regular_response.status_code}')
-            if regular_response.status_code == 403:
-                print('   Authentication failed - Please check API Key configuration')
-            elif regular_response.status_code == 401:
-                print('   Unauthorized - Please check authentication information')
-            print(f'   Error details: {regular_response.text}')
-
-    except Exception as e:
-        print(f'   Regular query error: {e!s}')
+    regular_data = regular_response.json()
+    response_text = regular_data.get('response', '')
+    assert response_text, 'Expected non-empty response from /query'
 
 
 @pytest.mark.integration

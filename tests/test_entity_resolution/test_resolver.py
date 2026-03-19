@@ -554,7 +554,7 @@ class TestLLMReviewEntitiesBatch:
         )
 
         assert result is not None
-        mock_entity_vdb.query.assert_called()
+        mock_entity_vdb.query.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_confidence_threshold_applied(
@@ -923,7 +923,7 @@ class TestResolveEntity:
         )
 
         # Verify store was called
-        mock_db.execute.assert_called()
+        mock_db.execute.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_no_auto_apply_skips_storage(
