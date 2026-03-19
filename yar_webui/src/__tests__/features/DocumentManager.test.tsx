@@ -6,29 +6,15 @@
  */
 import '../setup'
 import { describe, expect, test } from 'bun:test'
+import { getCountValue, hasActiveDocumentsStatus } from '@/utils/documentUtils'
 
 // =============================================================================
 // Utility Function Tests
 // =============================================================================
 
 describe('DocumentManager Utility Functions', () => {
-  // Since utility functions are defined inside the module, we test their behavior
-  // through the component or recreate them for unit testing
 
   describe('getCountValue behavior', () => {
-    // Recreate function for testing (mirrors implementation)
-    const getCountValue = (
-      counts: Record<string, number>,
-      ...keys: string[]
-    ): number => {
-      for (const key of keys) {
-        const value = counts[key]
-        if (typeof value === 'number') {
-          return value
-        }
-      }
-      return 0
-    }
 
     test('returns first matching key value', () => {
       const counts = { PROCESSING: 5, PENDING: 3 }
@@ -57,27 +43,6 @@ describe('DocumentManager Utility Functions', () => {
   })
 
   describe('hasActiveDocumentsStatus behavior', () => {
-    // Recreate function for testing
-    const getCountValue = (
-      counts: Record<string, number>,
-      ...keys: string[]
-    ): number => {
-      for (const key of keys) {
-        const value = counts[key]
-        if (typeof value === 'number') {
-          return value
-        }
-      }
-      return 0
-    }
-
-    const hasActiveDocumentsStatus = (
-      counts: Record<string, number>,
-    ): boolean =>
-      getCountValue(counts, 'PROCESSING', 'processing') > 0 ||
-      getCountValue(counts, 'PENDING', 'pending') > 0 ||
-      getCountValue(counts, 'PREPROCESSED', 'preprocessed') > 0
-
     test('returns true when PROCESSING count > 0', () => {
       expect(hasActiveDocumentsStatus({ PROCESSING: 1 })).toBe(true)
     })

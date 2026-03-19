@@ -75,6 +75,7 @@ import { useResponsive } from '@/hooks/useBreakpoint'
 import { cn, errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
+import { getCountValue, hasActiveDocumentsStatus } from '@/utils/documentUtils'
 
 type StatusFilter = DocStatus | 'all'
 
@@ -185,26 +186,6 @@ function StatusTimeline({ currentStatus }: StatusTimelineProps) {
     </div>
   )
 }
-
-// Utility functions defined outside component for better performance and to avoid dependency issues
-const getCountValue = (
-  counts: Record<string, number>,
-  ...keys: string[]
-): number => {
-  for (const key of keys) {
-    const value = counts[key]
-    if (typeof value === 'number') {
-      return value
-    }
-  }
-  return 0
-}
-
-const hasActiveDocumentsStatus = (counts: Record<string, number>): boolean =>
-  getCountValue(counts, 'PROCESSING', 'processing') > 0 ||
-  getCountValue(counts, 'PENDING', 'pending') > 0 ||
-  getCountValue(counts, 'PREPROCESSED', 'preprocessed') > 0
-
 const getDisplayFileName = (doc: DocStatusResponse, maxLength = 20): string => {
   // Check if file_path exists and is a non-empty string
   if (
