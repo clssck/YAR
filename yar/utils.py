@@ -3098,10 +3098,12 @@ def compute_incremental_chunk_ids(
     updated_chunk_ids = [cid for cid in existing_full_chunk_ids if cid not in chunks_to_remove]
 
     # Step 2: Add new chunks (preserving order from new_chunk_ids)
-    # Note: 'cid not in updated_chunk_ids' check ensures deduplication
+    # Use a parallel set for O(1) membership testing during dedup
+    seen_chunk_ids = set(updated_chunk_ids)
     for cid in new_chunk_ids:
-        if cid in chunks_to_add and cid not in updated_chunk_ids:
+        if cid in chunks_to_add and cid not in seen_chunk_ids:
             updated_chunk_ids.append(cid)
+            seen_chunk_ids.add(cid)
 
     return updated_chunk_ids
 

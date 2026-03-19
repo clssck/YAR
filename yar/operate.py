@@ -757,7 +757,7 @@ async def _handle_single_relationship_extraction(
     ):  # treat "relationship" and "relation" interchangeable
         if len(record_attributes) > 1 and 'relation' in record_attributes[0]:
             logger.warning(
-                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on REALTION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
+                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on RELATION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
             )
             logger.debug(record_attributes)
         return None
@@ -3780,7 +3780,6 @@ async def _perform_kg_search(
     global_entities = []
     global_relations = []
     vector_chunks = []
-    chunk_tracking = {}
 
     # Handle different query modes
 

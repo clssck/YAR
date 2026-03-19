@@ -1543,7 +1543,7 @@ class YAR:
                     if pipeline_status.get('cancellation_requested', False):
                         # Clear pending request
                         pipeline_status['request_pending'] = False
-                        # Celar cancellation flag
+                        # Clear cancellation flag
                         pipeline_status['cancellation_requested'] = False
 
                         log_message = 'Pipeline cancelled by user'
@@ -3443,15 +3443,6 @@ class YAR:
                     pipeline_status['latest_message'] = completion_msg
                     pipeline_status['history_messages'].append(completion_msg)
 
-        # Success path if no exceptions were raised
-        result = DeletionResult(
-            status='success',
-            doc_id=doc_id,
-            message=log_message,
-            status_code=200,
-            file_path=file_path,
-        )
-        return result
 
     async def adelete_by_entity(self, entity_name: str) -> DeletionResult:
         """Asynchronously delete an entity and all its relationships.
