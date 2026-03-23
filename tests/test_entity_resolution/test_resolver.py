@@ -12,7 +12,7 @@ These are unit tests using mocks - no database required.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -121,6 +121,16 @@ class TestParseLLMJsonResponse:
         result = _parse_llm_json_response(response)
         assert result == []
 
+    def test_invalid_json_logs_single_warning(self):
+        """Non-JSON plain text should fail once without duplicate warnings."""
+        response = 'This is not JSON at all'
+
+        with patch('yar.entity_resolution.resolver.logger.warning') as mock_warning:
+            result = _parse_llm_json_response(response)
+
+        assert result == []
+        mock_warning.assert_called_once()
+
     def test_empty_string_returns_empty(self):
         """Empty string should return empty list."""
         result = _parse_llm_json_response('')
@@ -172,6 +182,24 @@ class TestParseLLMJsonResponse:
         result = _parse_llm_json_response(response)
         assert len(result) == 1
         assert result[0]['new_entity'] == 'Test'
+
+    def test_embedded_single_object_recovery(self):
+        """JSON objects embedded in prose should be extracted and wrapped."""
+        response = 'Result: {"new_entity": "Solo", "canonical": "Solo Corp"} Thanks.'
+        result = _parse_llm_json_response(response)
+        assert result == [{'new_entity': 'Solo', 'canonical': 'Solo Corp'}]
+
+    def test_repairable_json_array_recovers(self):
+        """Minor syntax issues should be repaired using the repo JSON repair path."""
+        response = "[{'new_entity': 'FDA', 'canonical': 'US FDA',}]"
+        result = _parse_llm_json_response(response)
+        assert result == [{'new_entity': 'FDA', 'canonical': 'US FDA'}]
+
+    def test_markdown_wrapped_repairable_json_recovers(self):
+        """Markdown-wrapped malformed JSON should still be recovered."""
+        response = "```json\n[{'new_entity': 'Apple', 'canonical': 'Apple Inc',}]\n```"
+        result = _parse_llm_json_response(response)
+        assert result == [{'new_entity': 'Apple', 'canonical': 'Apple Inc'}]
 
 
 # --- TestGetCachedAlias ---

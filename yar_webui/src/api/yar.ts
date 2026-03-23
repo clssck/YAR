@@ -408,6 +408,9 @@ axiosInstance.interceptors.response.use(
   },
 )
 
+const GRAPH_REQUEST_TIMEOUT_MS = 10000
+
+
 // API methods
 export const queryGraphs = async (
   label: string,
@@ -415,12 +418,18 @@ export const queryGraphs = async (
   maxNodes: number,
   minDegree = 0,
   includeOrphans = false,
-): Promise<YarGraphType> => {
+  signal?: AbortSignal,
+ ): Promise<YarGraphType> => {
   const response = await axiosInstance.get(
     `/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}&min_degree=${minDegree}&include_orphans=${includeOrphans}`,
+    {
+      signal,
+      timeout: GRAPH_REQUEST_TIMEOUT_MS,
+    },
   )
   return response.data
 }
+
 
 export const getGraphLabels = async (): Promise<string[]> => {
   const response = await axiosInstance.get('/graph/label/list')

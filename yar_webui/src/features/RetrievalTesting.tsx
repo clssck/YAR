@@ -71,6 +71,8 @@ const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
   },
 ]
 
+const MIN_QUERY_LENGTH = 3
+
 export default function RetrievalTesting() {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
@@ -187,6 +189,18 @@ export default function RetrievalTesting() {
         // Prefix always overrides the selector
         effectiveMode = mode
         actualQuery = query
+      }
+
+      const trimmedQuery = actualQuery.trim()
+      if (trimmedQuery.length < MIN_QUERY_LENGTH) {
+        setInputError(
+          t(
+            'retrievePanel.retrieval.queryTooShort',
+            'Query must be at least {{min}} characters long',
+            { min: MIN_QUERY_LENGTH },
+          ),
+        )
+        return
       }
 
       // Clear error message
@@ -357,7 +371,7 @@ export default function RetrievalTesting() {
       const { show_references_section, ...sendableSettings } = state.querySettings
       const queryParams = {
         ...sendableSettings,
-        query: actualQuery,
+        query: trimmedQuery,
         response_type: 'Multiple Paragraphs',
         conversation_history: prevMessages
           .filter((m) => m.isError !== true && (m.role === 'user' || m.role === 'assistant'))

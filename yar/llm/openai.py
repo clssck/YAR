@@ -13,6 +13,7 @@ from openai import (
     RateLimitError,
 )
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -242,6 +243,7 @@ async def detect_embedding_dim(
         | retry_if_exception_type(APITimeoutError)
         | retry_if_exception_type(InvalidResponseError)
     ),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 async def openai_complete_if_cache(
     model: str,
@@ -387,14 +389,7 @@ async def openai_complete_if_cache(
             response = await openai_async_client.chat.completions.create(
                 model=api_model, messages=typed_messages, **kwargs
             )
-    except (APITimeoutError, APIConnectionError, RateLimitError) as e:
-        # Log specific error type for known API errors
-        error_names = {
-            APITimeoutError: 'Timeout',
-            APIConnectionError: 'Connection',
-            RateLimitError: 'Rate Limit',
-        }
-        logger.error(f'OpenAI API {error_names[type(e)]} Error: {e}')
+    except (APITimeoutError, APIConnectionError, RateLimitError):
         await openai_async_client.close()
         raise
     except Exception as e:

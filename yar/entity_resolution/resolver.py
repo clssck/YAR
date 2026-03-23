@@ -15,6 +15,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import json_repair
+
 from yar.utils import logger, normalize_unicode_for_entity_matching
 
 from .config import DEFAULT_CONFIG, EntityResolutionConfig
@@ -232,40 +234,64 @@ def _parse_llm_json_response(response: str) -> list[dict[str, Any]]:
     - Markdown code blocks (```json ... ```)
     - Leading/trailing whitespace
     - Single object vs array
+    - Prose surrounding the JSON payload
+    - Minor JSON syntax issues repairable by json_repair
 
     Returns empty list on parse failure.
     """
-    # Strip whitespace
-    text = response.strip()
-
-    # Remove markdown code blocks
-    if text.startswith('```'):
-        # Find end of first line (language specifier)
-        first_newline = text.find('\n')
-        if first_newline > 0:
-            text = text[first_newline + 1:]
-        # Remove trailing ```
-        if text.endswith('```'):
-            text = text[:-3].strip()
-
-    try:
-        parsed = json.loads(text)
-        # Ensure we always return a list
+    def _normalize_parsed(parsed: Any) -> list[dict[str, Any]]:
         if isinstance(parsed, dict):
             return [parsed]
         if isinstance(parsed, list):
             return parsed
         return []
-    except json.JSONDecodeError as e:
-        logger.warning(f'Failed to parse LLM JSON response: {e}')
-        # Try to extract JSON from mixed content
-        json_match = re.search(r'\[[\s\S]*\]', text)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError:
-                logger.warning('Failed to extract JSON array from LLM response via regex fallback')
+
+    def _try_parse(candidate: str) -> list[dict[str, Any]] | None:
+        if not candidate.strip():
+            return None
+        try:
+            parsed = json_repair.loads(candidate)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+
+        normalized = _normalize_parsed(parsed)
+        return normalized if isinstance(parsed, dict | list) else None
+
+    text = response.strip()
+    if not text:
         return []
+
+    try:
+        return _normalize_parsed(json.loads(text))
+    except json.JSONDecodeError as exc:
+        last_error: Exception = exc
+
+    candidates: list[str] = []
+    seen_candidates: set[str] = set()
+
+    def _add_candidate(candidate: str) -> None:
+        normalized = candidate.strip()
+        if normalized and normalized not in seen_candidates:
+            seen_candidates.add(normalized)
+            candidates.append(normalized)
+
+    _add_candidate(text)
+
+    for match in re.finditer(r'```(?:json)?\s*([\s\S]*?)\s*```', text):
+        _add_candidate(match.group(1))
+
+    for pattern in (r'\[[\s\S]*\]', r'\{[\s\S]*\}'):
+        match = re.search(pattern, text)
+        if match:
+            _add_candidate(match.group())
+
+    for candidate in candidates:
+        parsed = _try_parse(candidate)
+        if parsed is not None:
+            return parsed
+
+    logger.warning(f'Failed to parse LLM JSON response after repair attempts: {last_error}')
+    return []
 
 
 async def llm_review_entities_batch(

@@ -104,6 +104,47 @@ class TestOpenAIComplete:
             assert messages[0]['content'] == 'You are a helpful assistant'
 
     @pytest.mark.asyncio
+    async def test_openai_complete_retries_transient_failure_without_error_logging(self):
+        import httpx
+        from openai import APIConnectionError
+        from tenacity import wait_none
+
+        from yar.llm import openai as openai_module
+
+        mock_response = _create_chat_response('Recovered response')
+        transient_error = APIConnectionError(
+            request=httpx.Request('POST', 'https://example.com/v1/chat/completions')
+        )
+
+        with (
+            patch('yar.llm.openai.create_openai_async_client') as mock_client_factory,
+            patch.object(openai_module.logger, 'error') as mock_log_error,
+        ):
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(
+                side_effect=[transient_error, mock_response]
+            )
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            original_wait = openai_module.openai_complete_if_cache.retry.wait
+            openai_module.openai_complete_if_cache.retry.wait = wait_none()
+            try:
+                result = await openai_module.openai_complete_if_cache(
+                    model='gpt-4',
+                    prompt='Hello',
+                    api_key='test-key',
+                )
+            finally:
+                openai_module.openai_complete_if_cache.retry.wait = original_wait
+
+            assert result == 'Recovered response'
+            assert mock_client.chat.completions.create.await_count == 2
+            assert mock_client.close.await_count == 2
+            mock_log_error.assert_not_called()
+
+
+    @pytest.mark.asyncio
     async def test_openai_complete_empty_response_raises(self):
         from tenacity import RetryError
 
