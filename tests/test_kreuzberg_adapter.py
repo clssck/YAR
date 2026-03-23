@@ -833,32 +833,84 @@ YAR provides powerful RAG capabilities.
 class TestPdfiumAutoSetup:
     """Test the automatic pdfium setup for PDF support."""
 
-    def test_pdfium_symlink_created(self):
-        """Test that pdfium symlink is automatically created."""
+    def test_pdfium_setup_reports_actual_availability(self):
+        """Test setup only reports success when Kreuzberg can load a pdfium library."""
 
         import kreuzberg
+
+        from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg
 
         kreuzberg_file = kreuzberg.__file__
         assert kreuzberg_file is not None
         kreuzberg_dir = Path(kreuzberg_file).parent
-        pdfium_path = kreuzberg_dir / 'libpdfium.dylib'
 
-        # On macOS, check for dylib; on Linux, check for .so
-        if not pdfium_path.exists():
-            pdfium_path = kreuzberg_dir / 'libpdfium.so'
+        result = _setup_pdfium_for_kreuzberg()
+        available_targets = [
+            kreuzberg_dir / 'libpdfium.dylib',
+            kreuzberg_dir / 'libpdfium.so',
+        ]
 
-        # Symlink should exist (either pre-existing or auto-created)
-        assert pdfium_path.exists() or pdfium_path.is_symlink(), 'pdfium library should be available for PDF support'
+        assert result is any(target.exists() for target in available_targets)
 
     def test_setup_function_is_idempotent(self):
         """Test that setup function can be called multiple times safely."""
         from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg
 
-        # Should not raise even when called multiple times
         result1 = _setup_pdfium_for_kreuzberg()
         result2 = _setup_pdfium_for_kreuzberg()
 
-        assert result1 == result2  # Should return same result
+        assert result1 == result2
+
+    def test_setup_returns_false_without_target_or_source(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Test setup does not report success when no pdfium library exists anywhere."""
+
+        import sys
+        from types import ModuleType
+
+        from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg
+
+        kreuzberg_dir = tmp_path / 'kreuzberg'
+        kreuzberg_dir.mkdir()
+        source_dir = tmp_path / 'pypdfium2_raw'
+        source_dir.mkdir()
+
+        kreuzberg_module = ModuleType('kreuzberg')
+        kreuzberg_module.__file__ = str(kreuzberg_dir / '__init__.py')
+        pypdfium_module = ModuleType('pypdfium2_raw')
+        pypdfium_module.__file__ = str(source_dir / '__init__.py')
+
+        monkeypatch.setitem(sys.modules, 'kreuzberg', kreuzberg_module)
+        monkeypatch.setitem(sys.modules, 'pypdfium2_raw', pypdfium_module)
+
+        assert _setup_pdfium_for_kreuzberg() is False
+        assert not any(
+            (kreuzberg_dir / name).exists()
+            for name in ('libpdfium.dylib', 'libpdfium.so')
+        )
+
+    def test_setup_returns_true_for_prebundled_target(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Test an existing Kreuzberg pdfium library counts as a successful setup."""
+
+        import sys
+        from types import ModuleType
+
+        from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg
+
+        kreuzberg_dir = tmp_path / 'kreuzberg'
+        kreuzberg_dir.mkdir()
+        source_dir = tmp_path / 'pypdfium2_raw'
+        source_dir.mkdir()
+        (kreuzberg_dir / 'libpdfium.so').write_text('bundled')
+
+        kreuzberg_module = ModuleType('kreuzberg')
+        kreuzberg_module.__file__ = str(kreuzberg_dir / '__init__.py')
+        pypdfium_module = ModuleType('pypdfium2_raw')
+        pypdfium_module.__file__ = str(source_dir / '__init__.py')
+
+        monkeypatch.setitem(sys.modules, 'kreuzberg', kreuzberg_module)
+        monkeypatch.setitem(sys.modules, 'pypdfium2_raw', pypdfium_module)
+
+        assert _setup_pdfium_for_kreuzberg() is True
 
 
 class TestDocumentRoutesIntegration:

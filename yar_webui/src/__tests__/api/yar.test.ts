@@ -3,11 +3,6 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 const navigateToLogin = mock(() => {})
 
-mock.module('@/stores/settings', () => ({
-  useSettingsStore: {
-    getState: () => ({ apiKey: null }),
-  },
-}))
 
 mock.module('@/services/navigation', () => ({
   navigationService: {
@@ -15,11 +10,6 @@ mock.module('@/services/navigation', () => ({
   },
 }))
 
-mock.module('@/lib/constants', () => ({
-  backendBaseUrl: 'http://backend.test',
-  popularLabelsDefaultLimit: 20,
-  searchLabelsDefaultLimit: 20,
-}))
 
 import {
   type QueryRequest,

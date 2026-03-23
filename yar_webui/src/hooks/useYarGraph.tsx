@@ -120,12 +120,21 @@ export type EdgeType = {
   hidden?: boolean
 }
 
+const isGraphRequestCanceled = (error: unknown, signal?: AbortSignal) => {
+  if (signal?.aborted) return true
+  if (!(error instanceof Error)) return false
+  const axiosLikeError = error as Error & { code?: string }
+  return axiosLikeError.code === 'ERR_CANCELED'
+}
+
+
 const fetchGraph = async (
   label: string,
   maxDepth: number,
   maxNodes: number,
   minDegree = 0,
   includeOrphans = false,
+  signal?: AbortSignal,
 ) => {
   let rawData: YarGraphType | null = null
 
@@ -149,12 +158,16 @@ const fetchGraph = async (
       maxNodes,
       minDegree,
       includeOrphans,
+      signal,
     )
   } catch (e) {
+    if (isGraphRequestCanceled(e, signal)) {
+      throw e
+    }
     useBackendState
       .getState()
       .setErrorMessage(errorMessage(e), 'Query Graphs Error!')
-    return null
+    throw e
   }
 
   let rawGraph = null
@@ -362,7 +375,6 @@ const useLightrangeGraph = () => {
   const maxNodes = useSettingsStore.use.graphMaxNodes()
   const minDegree = useSettingsStore.use.graphMinDegree()
   const includeOrphans = useSettingsStore.use.graphIncludeOrphans()
-  const isFetching = useGraphStore.use.isFetching()
   const nodeToExpand = useGraphStore.use.nodeToExpand()
   const nodeToPrune = useGraphStore.use.nodeToPrune()
   // Subscribe to trigger re-render when graph data updates
@@ -407,7 +419,7 @@ const useLightrangeGraph = () => {
   // Graph data fetching logic
   useEffect(() => {
     let cancelled = false
-
+    const fetchController = new AbortController()
     // Skip if fetch is already in progress
     if (fetchInProgressRef.current) {
       return () => { cancelled = true }
@@ -420,7 +432,10 @@ const useLightrangeGraph = () => {
 
     // Only fetch data when graphDataFetchAttempted is false (avoids re-fetching on vite dev mode)
     // GraphDataFetchAttempted must set to false when queryLabel is changed
-    if (!isFetching && !useGraphStore.getState().graphDataFetchAttempted) {
+    if (
+      !useGraphStore.getState().isFetching &&
+      !useGraphStore.getState().graphDataFetchAttempted
+    ) {
       // Set flags
       fetchInProgressRef.current = true
       useGraphStore.getState().setGraphDataFetchAttempted(true)
@@ -443,7 +458,6 @@ const useLightrangeGraph = () => {
       const currentMinDegree = minDegree
       const currentIncludeOrphans = includeOrphans
 
-      // Declare a variable to store data promise
       let dataPromise: Promise<{
         rawGraph: RawGraph | null
         is_truncated: boolean | undefined
@@ -457,6 +471,7 @@ const useLightrangeGraph = () => {
           currentMaxNodes,
           currentMinDegree,
           currentIncludeOrphans,
+          fetchController.signal,
         )
       } else {
         // 2. If query label is empty, set data to null
@@ -563,21 +578,26 @@ const useLightrangeGraph = () => {
           }
         })
         .catch((error) => {
-          if (cancelled) return
+          if (cancelled || isGraphRequestCanceled(error, fetchController.signal)) {
+            const state = useGraphStore.getState()
+            state.setIsFetching(false)
+            fetchInProgressRef.current = false
+            return
+          }
           console.error('Error fetching graph data:', error)
 
-          // Reset state on error
+          // Stop the failed fetch without clearing the retry guard.
+          // Existing manual refresh/query-label changes reset it explicitly.
           const state = useGraphStore.getState()
           state.setIsFetching(false)
           dataLoadedRef.current = false
           fetchInProgressRef.current = false
-          state.setGraphDataFetchAttempted(false)
-          state.setLastSuccessfulQueryLabel('') // Clear last successful query label on error
         })
     }
 
     return () => {
       cancelled = true
+      fetchController.abort()
       fetchInProgressRef.current = false
     }
   }, [
@@ -586,7 +606,6 @@ const useLightrangeGraph = () => {
     maxNodes,
     minDegree,
     includeOrphans,
-    isFetching,
     t,
   ])
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,6 +19,12 @@ from yar.api.routers.graph_routes import (
     RelationCreateRequest,
     RelationUpdateRequest,
 )
+
+
+def _structured_orphan_request(value: object) -> dict[str, int | str]:
+    assert isinstance(value, dict)
+    return cast(dict[str, int | str], value)
+
 
 # =============================================================================
 # Request Model Validation Tests
@@ -894,7 +901,7 @@ class TestOrphanBackgroundControlEndpoints:
         assert response.status_code == 200
         assert response.json()['status'] == 'started'
         assert status['busy'] is True
-        assert status['active_request']['max_candidates'] == 4
+        assert _structured_orphan_request(status['active_request'])['max_candidates'] == 4
         mock_rag.aprocess_orphan_connections_background.assert_awaited_once_with(
             max_candidates=4,
             max_degree=2,
@@ -925,8 +932,8 @@ class TestOrphanBackgroundControlEndpoints:
         payload = response.json()
         assert payload['status'] == 'already_running'
         assert payload['queued_request']['max_candidates'] == 5
-        assert status['pending_request'] is not None
-        assert status['pending_request']['max_degree'] == 1
+        pending_request = _structured_orphan_request(status['pending_request'])
+        assert pending_request['max_degree'] == 1
         mock_rag.aprocess_orphan_connections_background.assert_not_called()
 
     @pytest.mark.asyncio

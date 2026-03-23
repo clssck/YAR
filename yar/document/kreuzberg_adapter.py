@@ -87,37 +87,39 @@ def _setup_pdfium_for_kreuzberg() -> bool:
             logger.debug('kreuzberg.__file__ is unavailable; skipping pdfium setup')
             return False
         kreuzberg_dir = Path(kreuzberg_file).parent
-        pdfium_target = kreuzberg_dir / 'libpdfium.dylib'
 
-        # Skip if already exists
-        if pdfium_target.exists():
-            return True
+        candidate_names = ('libpdfium.dylib', 'libpdfium.so')
+        for candidate_name in candidate_names:
+            if (kreuzberg_dir / candidate_name).exists():
+                return True
 
-        # Find pypdfium2's library
         pypdfium_file = pypdfium2_raw.__file__
         if not pypdfium_file:
             logger.debug('pypdfium2_raw.__file__ is unavailable; skipping pdfium setup')
             return False
         pypdfium_dir = Path(pypdfium_file).parent
-        pdfium_source = pypdfium_dir / 'libpdfium.dylib'
 
-        if not pdfium_source.exists():
-            # Try Linux naming
-            pdfium_source = pypdfium_dir / 'libpdfium.so'
-            pdfium_target = kreuzberg_dir / 'libpdfium.so'
+        for candidate_name in candidate_names:
+            pdfium_source = pypdfium_dir / candidate_name
+            pdfium_target = kreuzberg_dir / candidate_name
 
-        if pdfium_source.exists() and not pdfium_target.exists():
+            if pdfium_target.exists():
+                return True
+
+            if not pdfium_source.exists():
+                continue
+
             try:
                 os.symlink(pdfium_source, pdfium_target)
-                logger.debug(f'Created pdfium symlink: {pdfium_target} -> {pdfium_source}')
-                return True
             except OSError as e:
-                # May fail in read-only environments (Docker), which is fine
-                # as Docker images should have this pre-configured
                 logger.debug(f'Could not create pdfium symlink: {e}')
-                return False
+                return pdfium_target.exists()
 
-        return True
+            logger.debug(f'Created pdfium symlink: {pdfium_target} -> {pdfium_source}')
+            return pdfium_target.exists()
+
+        logger.debug('No bundled pdfium library found for Kreuzberg setup')
+        return False
     except ImportError:
         # pypdfium2 not installed
         return False

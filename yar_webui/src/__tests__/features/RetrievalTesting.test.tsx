@@ -13,6 +13,11 @@ import {
   renumberReferencesSequential,
   stripReferencesSection,
 } from '@/utils/textProcessing'
+import {
+  ALLOWED_RETRIEVAL_QUERY_MODES,
+  MIN_RETRIEVAL_QUERY_LENGTH,
+  validateRetrievalInput,
+} from '@/utils/retrievalInput'
 
 
 // =============================================================================
@@ -334,5 +339,54 @@ describe('Non-stream reference propagation', () => {
 
     expect(assistantMessage.references).toBeUndefined()
     expect(updatedMessages[0].references).toBeUndefined()
+  })
+})
+
+describe('validateRetrievalInput', () => {
+  test('rejects inputs shorter than the backend minimum length', () => {
+    expect(validateRetrievalInput('hi', null)).toEqual({
+      ok: false,
+      error: 'too_short',
+    })
+  })
+
+  test('rejects too-short prefixed queries after stripping the mode prefix', () => {
+    expect(validateRetrievalInput('/mix hi', null)).toEqual({
+      ok: false,
+      error: 'too_short',
+    })
+  })
+
+  test('rejects malformed slash prefixes without a query body', () => {
+    expect(validateRetrievalInput('/mix', null)).toEqual({
+      ok: false,
+      error: 'invalid_prefix',
+    })
+  })
+
+  test('rejects unknown prefixed modes', () => {
+    expect(validateRetrievalInput('/unknown hello', null)).toEqual({
+      ok: false,
+      error: 'invalid_mode',
+    })
+    expect(ALLOWED_RETRIEVAL_QUERY_MODES).toContain('mix')
+  })
+
+  test('returns the trimmed query and effective mode for valid input', () => {
+    expect(validateRetrievalInput('   hello   ', 'global')).toEqual({
+      ok: true,
+      effectiveMode: 'global',
+      trimmedQuery: 'hello',
+    })
+
+    expect(validateRetrievalInput('/mix   hello   ', null)).toEqual({
+      ok: true,
+      effectiveMode: 'mix',
+      trimmedQuery: 'hello',
+    })
+  })
+
+  test('exports the minimum query length used by the component', () => {
+    expect(MIN_RETRIEVAL_QUERY_LENGTH).toBe(3)
   })
 })

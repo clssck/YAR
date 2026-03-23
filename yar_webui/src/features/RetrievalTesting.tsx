@@ -36,6 +36,11 @@ import {
   renumberReferencesSequential,
   stripReferencesSection,
 } from '@/utils/textProcessing'
+import {
+  ALLOWED_RETRIEVAL_QUERY_MODES,
+  MIN_RETRIEVAL_QUERY_LENGTH,
+  validateRetrievalInput,
+} from '@/utils/retrievalInput'
 
 // Mode configuration with descriptions for the selector
 const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
@@ -70,9 +75,6 @@ const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
     descKey: 'retrievePanel.mode.bypassDesc',
   },
 ]
-
-const MIN_QUERY_LENGTH = 3
-
 export default function RetrievalTesting() {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
@@ -156,52 +158,34 @@ export default function RetrievalTesting() {
       e.preventDefault()
       if (!inputValue.trim() || isLoading) return
 
-      // Parse query mode prefix (legacy support - prefix overrides selector)
-      const allowedModes: QueryMode[] = [
-        'naive',
-        'local',
-        'global',
-        'hybrid',
-        'mix',
-        'bypass',
-      ]
-      const prefixMatch = inputValue.match(/^\/(\w+)\s+([\s\S]+)/)
-      let effectiveMode: QueryMode | undefined = modeOverride ?? undefined
-      let actualQuery = inputValue
+      const validatedInput = validateRetrievalInput(inputValue, modeOverride)
 
-      // If input starts with a slash, but does not match the valid prefix pattern, treat as error
-      if (/^\/\S+/.test(inputValue) && !prefixMatch) {
-        setInputError(t('retrievePanel.retrieval.queryModePrefixInvalid'))
-        return
-      }
+      if (!validatedInput.ok) {
+        if (validatedInput.error === 'invalid_prefix') {
+          setInputError(t('retrievePanel.retrieval.queryModePrefixInvalid'))
+          return
+        }
 
-      if (prefixMatch) {
-        const mode = prefixMatch[1] as QueryMode
-        const query = prefixMatch[2]
-        if (!allowedModes.includes(mode)) {
+        if (validatedInput.error === 'invalid_mode') {
           setInputError(
             t('retrievePanel.retrieval.queryModeError', {
-              modes: 'naive, local, global, hybrid, mix, bypass',
+              modes: ALLOWED_RETRIEVAL_QUERY_MODES.join(', '),
             }),
           )
           return
         }
-        // Prefix always overrides the selector
-        effectiveMode = mode
-        actualQuery = query
-      }
 
-      const trimmedQuery = actualQuery.trim()
-      if (trimmedQuery.length < MIN_QUERY_LENGTH) {
         setInputError(
           t(
             'retrievePanel.retrieval.queryTooShort',
             'Query must be at least {{min}} characters long',
-            { min: MIN_QUERY_LENGTH },
+            { min: MIN_RETRIEVAL_QUERY_LENGTH },
           ),
         )
         return
       }
+
+      const { effectiveMode, trimmedQuery } = validatedInput
 
       // Clear error message
       setInputError('')

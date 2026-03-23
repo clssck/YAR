@@ -147,6 +147,9 @@ let mockSettingsState = {
   enableNodeDrag: true,
   showLegend: true,
   theme: 'light' as 'light' | 'dark',
+  currentTab: 'knowledge-graph',
+  showFileName: false,
+  documentsPageSize: 10,
 }
 
 mock.module('@/stores/graph', () => ({
@@ -173,7 +176,13 @@ mock.module('@/stores/settings', () => ({
       enableNodeDrag: () => mockSettingsState.enableNodeDrag,
       showLegend: () => mockSettingsState.showLegend,
       theme: () => mockSettingsState.theme,
+      currentTab: () => mockSettingsState.currentTab,
+      showFileName: () => mockSettingsState.showFileName,
+      setShowFileName: () => mock(),
+      documentsPageSize: () => mockSettingsState.documentsPageSize,
+      setDocumentsPageSize: () => mock(),
     },
+    getState: () => ({ apiKey: null }),
   },
 }))
 
@@ -588,8 +597,12 @@ describe('GraphViewer Component Rendering', () => {
       enableNodeDrag: true,
       showLegend: true,
       theme: 'light',
-    }
+      currentTab: 'knowledge-graph',
+      showFileName: false,
+      documentsPageSize: 10,
   }
+  }
+
 
   describe('Basic Rendering', () => {
     test('renders without crashing', () => {

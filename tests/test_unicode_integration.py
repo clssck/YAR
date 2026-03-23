@@ -26,7 +26,13 @@ os.environ.setdefault('POSTGRES_USER', 'yar')
 os.environ.setdefault('POSTGRES_PASSWORD', 'yar_pass')
 os.environ.setdefault('POSTGRES_DATABASE', 'yar')
 
+from yar.kg.postgres_impl import PGVectorStorage, PostgreSQLDB
 from yar.utils import UNICODE_SECURITY_STRIP
+
+
+def _entities_db(entities_vdb: object) -> PostgreSQLDB:
+    assert isinstance(entities_vdb, PGVectorStorage)
+    return entities_vdb._db_required()
 
 
 @pytest.fixture
@@ -69,7 +75,7 @@ async def setup_rag(tmp_path):
     )
     await rag.initialize_storages()
 
-    db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+    db = _entities_db(rag.entities_vdb)
     for table in [
         'YAR_DOC_FULL',
         'YAR_DOC_CHUNKS',
@@ -123,7 +129,7 @@ class TestUnicodeNormalizationIntegration:
         await rag.ainsert(doc_with_zwc)
 
         # Get all entity names from database
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
         entities = await db.query(
             'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
@@ -160,7 +166,7 @@ class TestUnicodeNormalizationIntegration:
         await rag.ainsert(doc)
 
         # Get entity names from database
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
         entities = await db.query(
             'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
@@ -195,7 +201,7 @@ class TestUnicodeNormalizationIntegration:
         await rag.ainsert(doc)
 
         # Get entity names from database
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
         entities = await db.query(
             'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
@@ -233,7 +239,7 @@ class TestAliasResolutionNormalization:
         from yar.entity_resolution.resolver import get_cached_alias, store_alias
 
         rag = setup_rag
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
 
         # Store an alias with clean name
         await store_alias(
@@ -264,7 +270,7 @@ class TestAliasResolutionNormalization:
         from yar.entity_resolution.resolver import get_cached_alias, store_alias
 
         rag = setup_rag
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
 
         # Store an alias with NFC name
         await store_alias(
@@ -308,7 +314,7 @@ class TestPipelineIntegrationSmoke:
         await rag.ainsert(doc)
 
         # Get entity names from database
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
         entities = await db.query(
             'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[rag.workspace], multirows=True
         )
@@ -353,7 +359,7 @@ if __name__ == '__main__':
         await rag.ainsert(doc)
 
         # Check entities
-        db = rag.entities_vdb._db_required()  # ty: ignore[unresolved-attribute]
+        db = _entities_db(rag.entities_vdb)
         entities = await db.query(
             'SELECT entity_name FROM YAR_VDB_ENTITY WHERE workspace = $1', params=[workspace], multirows=True
         )

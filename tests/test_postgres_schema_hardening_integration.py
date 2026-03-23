@@ -353,6 +353,7 @@ class TestFullInitializationFlow:
 
         # Both should be functional
         result = await db2.query('SELECT 1 as test')
+        assert result is not None
         assert result.get('test') == 1
 
 
