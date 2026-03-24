@@ -441,45 +441,47 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
 """
 
 PROMPTS['kg_query_context'] = """
-Knowledge Graph Data (Entity):
+# Knowledge Graph Data (Entity)
 
 ```json
 {entities_str}
 ```
 
-Knowledge Graph Data (Relationship):
+# Knowledge Graph Data (Relationship)
 
 ```json
 {relations_str}
 ```
 
-Document Chunks (Each entry has a reference_id refer to the `Reference Document List`):
+# Document Chunks
+
+Each entry has a reference_id refer to the `Reference Document List`.
 
 ```json
 {text_chunks_str}
 ```
 
-Reference Document List (Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks):
+# Reference Document List
 
-```
+Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks.
+
 {reference_list_str}
-```
-
 """
 
 PROMPTS['naive_query_context'] = """
-Document Chunks (Each entry has a reference_id refer to the `Reference Document List`):
+# Document Chunks
+
+Each entry has a reference_id refer to the `Reference Document List`.
 
 ```json
 {text_chunks_str}
 ```
 
-Reference Document List (Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks):
+# Reference Document List
 
-```
+Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks.
+
 {reference_list_str}
-```
-
 """
 
 PROMPTS['keywords_extraction'] = """---Role---

@@ -222,25 +222,45 @@ class TestQueryContextPrompts:
         """Test KG query context prompt exists."""
         assert 'kg_query_context' in PROMPTS
 
-    def test_kg_query_context_placeholders(self):
-        """Test KG query context has required placeholders."""
+    def test_kg_query_context_markdown_structure(self):
+        """Test KG query context uses markdown headings and list-friendly references."""
         prompt = PROMPTS['kg_query_context']
+        rendered = prompt.format(
+            entities_str='[]',
+            relations_str='[]',
+            text_chunks_str='[]',
+            reference_list_str='- [doc-1] Example document',
+        )
 
         assert '{entities_str}' in prompt
         assert '{relations_str}' in prompt
         assert '{text_chunks_str}' in prompt
         assert '{reference_list_str}' in prompt
+        assert '# Knowledge Graph Data (Entity)' in prompt
+        assert '# Knowledge Graph Data (Relationship)' in prompt
+        assert '# Document Chunks' in prompt
+        assert '# Reference Document List' in prompt
+        assert prompt.count('```json') == 3
+        assert '```\n{reference_list_str}\n```' not in prompt
+        assert '- [doc-1] Example document' in rendered
+        assert '```\n- [doc-1] Example document\n```' not in rendered
 
-    def test_naive_query_context_exists(self):
-        """Test naive query context prompt exists."""
-        assert 'naive_query_context' in PROMPTS
-
-    def test_naive_query_context_placeholders(self):
-        """Test naive query context has required placeholders."""
+    def test_naive_query_context_markdown_structure(self):
+        """Test naive query context uses markdown headings and list-friendly references."""
         prompt = PROMPTS['naive_query_context']
+        rendered = prompt.format(
+            text_chunks_str='[]',
+            reference_list_str='- [doc-1] Example document',
+        )
 
         assert '{text_chunks_str}' in prompt
         assert '{reference_list_str}' in prompt
+        assert '# Document Chunks' in prompt
+        assert '# Reference Document List' in prompt
+        assert prompt.count('```json') == 1
+        assert '```\n{reference_list_str}\n```' not in prompt
+        assert '- [doc-1] Example document' in rendered
+        assert '```\n- [doc-1] Example document\n```' not in rendered
 
 
 class TestKeywordsExtractionPrompts:

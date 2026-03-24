@@ -294,6 +294,42 @@ describe('ChatMessage Component', () => {
 
       expect(container).toBeDefined()
     })
+    test('renders retrieval-style markdown content with semantic elements', () => {
+      const message = createMessage({
+        displayContent: [
+          '## Retrieved Context',
+          '',
+          '### Reference Documents',
+          '- [1] `docs/policy.md`',
+          '- [2] `docs/spec.json`',
+          '',
+          '```json',
+          '{',
+          '  "title": "Alpha",',
+          '  "score": 0.98',
+          '}',
+          '```',
+        ].join('\n'),
+      })
+
+      const { container, getByText } = render(<ChatMessage message={message} />)
+
+      const contextHeading = getByText('Retrieved Context')
+      expect(contextHeading.tagName).toBe('H2')
+
+      const referencesHeading = getByText('Reference Documents')
+      expect(referencesHeading.tagName).toBe('H3')
+
+      const listItems = container.querySelectorAll('li')
+      expect(listItems.length).toBe(2)
+      expect(listItems[0]?.textContent).toContain('[1]')
+      expect(listItems[1]?.textContent).toContain('docs/spec.json')
+
+      const codeBlock = container.querySelector('pre')
+      expect(codeBlock).not.toBeNull()
+      expect(codeBlock?.textContent).toContain('"score": 0.98')
+    })
+
   })
 
   describe('Mermaid Rendering State', () => {
