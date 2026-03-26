@@ -505,6 +505,18 @@ export type StreamReference = {
   presigned_url: string | null
 }
 
+/**
+ * Build a browser-accessible URL for a document reference.
+ * Routes through the API's S3 content proxy (`/s3/content/{key}`) so the
+ * browser never needs direct access to the internal S3 endpoint.
+ */
+export const getDocumentUrl = (ref: { s3_key: string | null; presigned_url: string | null }): string | null => {
+  if (ref.s3_key) {
+    return `${backendBaseUrl}/s3/content/${ref.s3_key}`
+  }
+  return ref.presigned_url
+}
+
 export const queryTextStream = async (
   request: QueryRequest,
   onChunk: (chunk: string) => void,
@@ -828,12 +840,10 @@ export const deleteDocuments = async (
   deleteFile = false,
   deleteLLMCache = false,
 ): Promise<DeleteDocResponse> => {
-  const response = await axiosInstance.delete('/documents/delete_document', {
-    data: {
-      doc_ids: docIds,
-      delete_file: deleteFile,
-      delete_llm_cache: deleteLLMCache,
-    },
+  const response = await axiosInstance.post('/documents/delete_document', {
+    doc_ids: docIds,
+    delete_file: deleteFile,
+    delete_llm_cache: deleteLLMCache,
   })
   return response.data
 }

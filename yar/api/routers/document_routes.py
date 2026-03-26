@@ -3004,7 +3004,7 @@ def create_document_routes(
         message: str = Field(description='Message describing the operation result')
         doc_id: str = Field(description='The ID of the document to delete')
 
-    @router.delete(
+    @router.post(
         '/delete_document',
         response_model=DeleteDocByIdResponse,
         dependencies=[Depends(combined_auth)],
@@ -3116,7 +3116,7 @@ def create_document_routes(
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail='Internal server error') from e
 
-    @router.delete(
+    @router.post(
         '/delete_entity',
         response_model=DeletionResult,
         dependencies=[Depends(combined_auth)],
@@ -3152,7 +3152,7 @@ def create_document_routes(
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail='Internal server error') from e
 
-    @router.delete(
+    @router.post(
         '/delete_relation',
         response_model=DeletionResult,
         dependencies=[Depends(combined_auth)],
