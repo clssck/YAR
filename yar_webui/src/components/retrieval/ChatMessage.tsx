@@ -25,6 +25,7 @@ import rehypeReact from 'rehype-react'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import type { CitationsMetadata, Message } from '@/api/yar'
+import { getDocumentUrl } from '@/api/yar'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import { remarkFootnotes } from '@/utils/remarkFootnotes'
@@ -349,12 +350,13 @@ export const ChatMessage = ({
                 fileName.includes(ref.file_path || ''),
             )
 
-            if (matchingRef?.presigned_url) {
+            const docUrl = matchingRef ? getDocumentUrl(matchingRef) : null
+            if (docUrl) {
               return (
                 <li className="my-1">
                   <span>[{refNumber}] </span>
                   <a
-                    href={isSafeUrl(matchingRef.presigned_url) ? matchingRef.presigned_url : '#'}
+                    href={isSafeUrl(docUrl) ? docUrl : '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline"

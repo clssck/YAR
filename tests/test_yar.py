@@ -827,18 +827,27 @@ class TestYARStorageLifecycle:
 class TestYARPublicMethods:
     """Tests for key public methods with mocked dependencies."""
 
-    @patch('yar.kg.verify_storage_implementation')
-    @patch('yar.utils.check_storage_env_vars')
+    @patch('yar.yar.get_namespace_lock')
+    @patch('yar.yar.get_namespace_data')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_adelete_by_doc_id(
         self,
         mock_check_env,
         mock_verify_storage,
+        mock_get_namespace_data,
+        mock_get_namespace_lock,
         temp_working_dir,
         mock_embedding_func,
         mock_llm_func,
     ):
         """Test adelete_by_doc_id returns DeletionResult."""
+        pipeline_status = {'busy': False, 'history_messages': []}
+        pipeline_status_lock = asyncio.Lock()
+        mock_get_namespace_data.return_value = pipeline_status
+        mock_get_namespace_lock.return_value = pipeline_status_lock
+
         rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
@@ -872,18 +881,27 @@ class TestYARPublicMethods:
         assert result.doc_id == 'test_doc_id'
         assert result.status in ['success', 'not_found', 'fail']
 
-    @patch('yar.kg.verify_storage_implementation')
-    @patch('yar.utils.check_storage_env_vars')
+    @patch('yar.yar.get_namespace_lock')
+    @patch('yar.yar.get_namespace_data')
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
     @pytest.mark.asyncio
     async def test_adelete_not_found(
         self,
         mock_check_env,
         mock_verify_storage,
+        mock_get_namespace_data,
+        mock_get_namespace_lock,
         temp_working_dir,
         mock_embedding_func,
         mock_llm_func,
     ):
         """Test adelete_by_doc_id when document not found."""
+        pipeline_status = {'busy': False, 'history_messages': []}
+        pipeline_status_lock = asyncio.Lock()
+        mock_get_namespace_data.return_value = pipeline_status
+        mock_get_namespace_lock.return_value = pipeline_status_lock
+
         rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
