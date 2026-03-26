@@ -8,6 +8,7 @@
 import { ExternalLinkIcon, FileTextIcon, LinkIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { CitationSource } from '@/api/yar'
+import { getDocumentUrl } from '@/api/yar'
 import Badge from '@/components/ui/Badge'
 import {
   HoverCard,
@@ -143,9 +144,9 @@ export function CitationMarker({
               )}
 
               {/* File path with optional link */}
-              {source.presigned_url ? (
+              {(() => { const docUrl = getDocumentUrl(source); return docUrl ? (
                 <a
-                  href={isSafeUrl(source.presigned_url) ? source.presigned_url : '#'}
+                  href={isSafeUrl(docUrl) ? docUrl : '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 pl-6 truncate group"
@@ -166,7 +167,7 @@ export function CitationMarker({
                 >
                   {source.file_path}
                 </p>
-              )}
+              ); })()}
             </div>
           ))}
 
