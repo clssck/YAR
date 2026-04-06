@@ -4516,42 +4516,63 @@ class PGDocStatusStorage(DocStatusStorage):
         offset = (page - 1) * page_size
 
         # Build parameterized query components
-        params: dict[str, Any] = {'workspace': self.workspace}
-        param_count = 1
+        params: list[Any] = [self.workspace]
+        where_clause = 'WHERE workspace=$1'
+        limit_param = 2
+        offset_param = 3
 
         # Build WHERE clause with parameterized query
         if status_filter is not None:
-            param_count += 1
+            params.append(status_filter.value)
             where_clause = 'WHERE workspace=$1 AND status=$2'
-            params['status'] = status_filter.value
-        else:
-            where_clause = 'WHERE workspace=$1'
+            limit_param = 3
+            offset_param = 4
 
         # Build ORDER BY clause using validated whitelist values
-        order_clause = f'ORDER BY {sort_field} {sort_direction.upper()}'
+        nullable_sort_fields = {'created_at', 'updated_at', 'file_path'}
+        nulls_clause = ' NULLS LAST' if sort_field in nullable_sort_fields else ''
+        order_clause = f'ORDER BY {sort_field} {sort_direction.upper()}{nulls_clause}'
+        outer_order_clause = f'ORDER BY p.{sort_field} {sort_direction.upper()}{nulls_clause}'
 
-        # Single query with window function for count + data (avoids separate round-trip)
-        # COUNT(*) OVER() computes total matching rows before LIMIT/OFFSET is applied
+        # Count and page in one query so empty/out-of-range pages still return the
+        # filtered total_count while preserving YAR-specific document fields.
+        #
+        # Apply the same ORDER BY in the outer SELECT. SQL does not guarantee the
+        # row order of a CTE/subquery unless the outermost query orders it too.
+        params.extend([page_size, offset])
         data_sql = f"""
-            SELECT *, COUNT(*) OVER() as total_count
-            FROM YAR_DOC_STATUS
-            {where_clause}
-            {order_clause}
-            LIMIT ${param_count + 1} OFFSET ${param_count + 2}
+            WITH filtered_docs AS (
+                SELECT *
+                FROM YAR_DOC_STATUS
+                {where_clause}
+            ),
+            total_count AS (
+                SELECT COUNT(*)::int AS total_count
+                FROM filtered_docs
+            ),
+            paged_docs AS (
+                SELECT *
+                FROM filtered_docs
+                {order_clause}
+                LIMIT ${limit_param} OFFSET ${offset_param}
+            )
+            SELECT p.*, total_count.total_count
+            FROM total_count
+            LEFT JOIN paged_docs p ON TRUE
+            {outer_order_clause}
         """
-        params['limit'] = page_size
-        params['offset'] = offset
-        param_values = list(params.values())
 
         db = self._db_required()
-        result = await db.query(data_sql, param_values, multirows=True)
+        result = await db.query(data_sql, params, multirows=True)
 
-        # Extract total count from first row (same for all rows due to OVER())
         total_count = result[0]['total_count'] if result else 0
 
         # Convert to (doc_id, DocProcessingStatus) tuples
         documents = []
         for element in result:
+            if element.get('id') is None:
+                continue
+
             doc_status = DocProcessingStatus(
                 content_summary=element['content_summary'],
                 content_length=element['content_length'],
