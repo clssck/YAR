@@ -14,6 +14,9 @@ This module tests:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from yar.base import (
     DeletionResult,
@@ -24,7 +27,14 @@ from yar.base import (
     QueryResult,
     StoragesStatus,
     TextChunkSchema,
-)
+ )
+from yar.evaluation.e2e_test_harness import resolve_dataset_path
+from yar.evaluation.eval_rag_quality import (
+    RAGEvaluator,
+    _calculate_ragas_score,
+    _has_complete_metrics,
+ )
+from yar.yar import YAR
 
 if TYPE_CHECKING:
     pass
@@ -441,8 +451,205 @@ class TestEdgeCases:
             max_total_tokens=32000,
             hl_keywords=['high', 'level'],
             ll_keywords=['low', 'level'],
+            enable_hyde=True,
+            enable_bm25_fusion=True,
+            bm25_weight=0.4,
+            entity_filter='Fitusiran',
         )
         assert param.mode == 'hybrid'
         assert param.response_type == 'Bullet Points'
         assert param.top_k == 50
         assert param.max_total_tokens == 32000
+        assert param.enable_hyde is True
+        assert param.enable_bm25_fusion is True
+        assert param.bm25_weight == 0.4
+        assert param.entity_filter == 'Fitusiran'
+
+
+@pytest.mark.offline
+class TestYARQueryMethods:
+    """Tests for YAR query wrapper semantics."""
+
+    @pytest.mark.asyncio
+    async def test_aquery_data_clones_all_query_fields(self):
+        """Data-only path should preserve newer QueryParam fields."""
+        rag = YAR.__new__(YAR)
+        rag.chunk_entity_relation_graph = object()
+        rag.entities_vdb = object()
+        rag.relationships_vdb = object()
+        rag.text_chunks = object()
+        rag.chunks_vdb = object()
+        rag.llm_response_cache = object()
+        rag._query_done = AsyncMock()
+
+        original_param = QueryParam(
+            mode='mix',
+            stream=True,
+            only_need_context=False,
+            only_need_prompt=True,
+            response_type='Bullet Points',
+            top_k=7,
+            chunk_top_k=4,
+            max_entity_tokens=123,
+            max_relation_tokens=456,
+            max_total_tokens=789,
+            hl_keywords=['high'],
+            ll_keywords=['low'],
+            conversation_history=[{'role': 'user', 'content': 'Earlier context'}],
+            model_func=AsyncMock(return_value='custom model'),
+            user_prompt='Be precise',
+            enable_rerank=True,
+            enable_hyde=True,
+            enable_bm25_fusion=True,
+            bm25_weight=0.55,
+            entity_filter='Fitusiran',
+        )
+
+        returned_result = QueryResult(
+            content='',
+            raw_data={'status': 'success', 'message': 'ok', 'data': {}, 'metadata': {}},
+        )
+
+        with (
+            patch('yar.yar.asdict', return_value={}),
+            patch('yar.yar.kg_query', new=AsyncMock(return_value=returned_result)) as kg_query_mock,
+        ):
+            result = await YAR.aquery_data(rag, 'test query', original_param)
+
+        cloned_param = kg_query_mock.await_args.args[5]
+        assert cloned_param is not original_param
+        assert cloned_param.only_need_context is True
+        assert cloned_param.only_need_prompt is False
+        assert cloned_param.stream is False
+        assert cloned_param.enable_hyde is True
+        assert cloned_param.enable_bm25_fusion is True
+        assert cloned_param.bm25_weight == 0.55
+        assert cloned_param.entity_filter == 'Fitusiran'
+        assert cloned_param.conversation_history == [{'role': 'user', 'content': 'Earlier context'}]
+        assert cloned_param.user_prompt == 'Be precise'
+        assert cloned_param.model_func is original_param.model_func
+        assert original_param.only_need_context is False
+        assert original_param.only_need_prompt is True
+        assert original_param.stream is True
+        assert result == {'status': 'success', 'message': 'ok', 'data': {}, 'metadata': {}}
+
+    @pytest.mark.asyncio
+    async def test_aquery_raises_for_backend_failure_payload(self):
+        """Backward-compatible wrapper should raise on real backend failure."""
+        rag = YAR.__new__(YAR)
+        rag.aquery_llm = AsyncMock(
+            return_value={
+                'status': 'failure',
+                'message': 'Query failed: upstream timeout',
+                'metadata': {},
+                'data': {},
+                'llm_response': {'content': None, 'response_iterator': None, 'is_streaming': False},
+            }
+        )
+
+        with pytest.raises(RuntimeError, match='Query failed: upstream timeout'):
+            await YAR.aquery(rag, 'test query')
+
+    @pytest.mark.asyncio
+    async def test_aquery_no_results_returns_user_facing_content(self):
+        """No-results path should remain truthful and non-exceptional."""
+        rag = YAR.__new__(YAR)
+        rag.aquery_llm = AsyncMock(
+            return_value={
+                'status': 'failure',
+                'message': 'Query returned no results',
+                'metadata': {'failure_reason': 'no_results'},
+                'data': {},
+                'llm_response': {
+                    'content': 'No relevant context found for the query.',
+                    'response_iterator': None,
+                    'is_streaming': False,
+                },
+            }
+        )
+
+        result = await YAR.aquery(rag, 'test query')
+
+        assert result == 'No relevant context found for the query.'
+
+
+class TestEvaluationHarnessHelpers:
+    """Focused tests for evaluation script helpers."""
+
+    def test_resolve_dataset_path_prefers_explicit_path(self, tmp_path):
+        """Explicit dataset path should win over bundled fallbacks."""
+        explicit_dataset = tmp_path / 'explicit.json'
+        explicit_dataset.write_text('{"test_cases": []}', encoding='utf-8')
+
+        bundled_dataset = tmp_path / 'bundled.json'
+        bundled_dataset.write_text('{"test_cases": [{"question": "q", "ground_truth": "a"}]}', encoding='utf-8')
+
+        resolved = resolve_dataset_path(explicit_dataset, [bundled_dataset])
+
+        assert resolved == explicit_dataset
+
+    def test_resolve_dataset_path_raises_actionable_error_when_missing(self, tmp_path):
+        """Missing bundled datasets should raise a clear actionable error."""
+        missing_candidates = [tmp_path / 'missing-a.json', tmp_path / 'missing-b.json']
+
+        with pytest.raises(FileNotFoundError, match='Provide --dataset') as exc_info:
+            resolve_dataset_path(None, missing_candidates)
+
+        message = str(exc_info.value)
+        assert 'missing-a.json' in message
+        assert 'missing-b.json' in message
+
+    def test_incomplete_metrics_do_not_produce_successful_ragas_score(self):
+        """Any missing or NaN metric should invalidate aggregate success scoring."""
+        metrics = {
+            'faithfulness': 0.9,
+            'answer_relevance': float('nan'),
+            'context_recall': 0.8,
+            'context_precision': 0.7,
+        }
+
+        assert _has_complete_metrics(metrics) is False
+        assert _calculate_ragas_score(metrics) != _calculate_ragas_score(metrics)
+
+    def test_benchmark_stats_exclude_incomplete_metric_rows(self):
+        """Benchmark aggregates must not count incomplete metric rows as successes."""
+        evaluator = object.__new__(RAGEvaluator)
+
+        stats = RAGEvaluator._calculate_benchmark_stats(
+            evaluator,
+            [
+                {
+                    'status': 'success',
+                    'metrics': {
+                        'faithfulness': 0.8,
+                        'answer_relevance': 0.7,
+                        'context_recall': 0.9,
+                        'context_precision': 0.6,
+                    },
+                    'ragas_score': 0.75,
+                },
+                {
+                    'status': 'incomplete',
+                    'metrics': {
+                        'faithfulness': 1.0,
+                        'answer_relevance': 1.0,
+                        'context_recall': float('nan'),
+                        'context_precision': 1.0,
+                    },
+                    'ragas_score': float('nan'),
+                },
+                {
+                    'status': 'error',
+                    'metrics': {},
+                    'ragas_score': 0,
+                },
+            ],
+        )
+
+        assert stats['total_tests'] == 3
+        assert stats['successful_tests'] == 1
+        assert stats['incomplete_tests'] == 1
+        assert stats['failed_tests'] == 2
+        assert stats['average_metrics']['ragas_score'] == 0.75
+        assert stats['max_ragas_score'] == 0.75
+        assert stats['min_ragas_score'] == 0.75

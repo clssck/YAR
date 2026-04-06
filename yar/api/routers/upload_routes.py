@@ -9,6 +9,7 @@ This module provides endpoints for:
 
 import asyncio
 import mimetypes
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import (
@@ -20,15 +21,16 @@ from fastapi import (
     HTTPException,
     Query,
     UploadFile,
-)
+    )
 from pydantic import BaseModel, ConfigDict, Field
 
 from yar import YAR
 from yar.api.config import global_args
 from yar.api.utils_api import get_combined_auth_dependency, validate_upload_size
+from yar.base import DocStatus
 from yar.kg.postgres_impl import PGDocStatusStorage, PGKVStorage
 from yar.storage.s3_client import S3Client
-from yar.utils import compute_mdhash_id, generate_track_id, logger
+from yar.utils import compute_mdhash_id, generate_track_id, get_content_summary, logger
 from yar.validators import validate_doc_id, validate_s3_key, validate_workspace_name
 
 
@@ -130,17 +132,19 @@ async def _process_s3_document(
     rag: 'YAR',
     text_content: str,
     doc_id: str,
+    track_id: str,
     s3_url: str,
     s3_key: str,
     archive_after_processing: bool,
     s3_client: S3Client,
-) -> None:
+    ) -> None:
     """Background task: run RAG pipeline and optionally archive the S3 object."""
     try:
         await rag.ainsert(
             input=text_content,
             ids=doc_id,
             file_paths=s3_url,
+            track_id=track_id,
         )
 
         if archive_after_processing:
@@ -163,7 +167,31 @@ async def _process_s3_document(
                 logger.warning(f'Failed to archive document: {e}')
     except Exception as e:
         logger.error(f'Background S3 processing failed for {doc_id}: {e}')
-
+        existing_doc = None
+        if hasattr(rag.doc_status, 'get_by_id'):
+            existing_doc = await rag.doc_status.get_by_id(doc_id)
+        existing_status = existing_doc.get('status') if isinstance(existing_doc, dict) else getattr(existing_doc, 'status', None)
+        existing_track_id = (
+            existing_doc.get('track_id') if isinstance(existing_doc, dict) else getattr(existing_doc, 'track_id', None)
+        )
+        if existing_status == DocStatus.FAILED and existing_track_id == track_id:
+            return
+        if hasattr(rag.doc_status, 'upsert'):
+            await rag.doc_status.upsert(
+                {
+                    doc_id: {
+                        'status': DocStatus.FAILED,
+                        'error_msg': str(e),
+                        'content_summary': get_content_summary(text_content),
+                        'content_length': len(text_content),
+                        'created_at': datetime.now(timezone.utc).isoformat(),
+                        'updated_at': datetime.now(timezone.utc).isoformat(),
+                        'file_path': s3_url,
+                        'track_id': track_id,
+                        'metadata': {},
+                    }
+                }
+            )
 
 def create_upload_routes(
     rag: YAR,
@@ -492,6 +520,7 @@ def create_upload_routes(
                 rag,
                 text_content,
                 doc_id,
+                track_id,
                 s3_url,
                 s3_key,
                 request.archive_after_processing,

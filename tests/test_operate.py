@@ -1361,7 +1361,49 @@ class TestEntityQueryEmbeddingReuse:
         assert node_datas[0]['entity_name'] == 'Amazon'
         assert entities_vdb.query.await_args.kwargs['query_embedding'] == [0.1, 0.2]
 
+    @pytest.mark.asyncio
+    async def test_get_node_data_interleaves_keyword_results_without_starving_later_terms(self):
+        entities_vdb = MagicMock()
+        entities_vdb.cosine_better_than_threshold = 0.2
 
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'AlphaOne': {'entity_type': 'COMPANY', 'description': 'Alpha one'},
+                'BetaOne': {'entity_type': 'COMPANY', 'description': 'Beta one'},
+            }
+        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(
+            return_value={'AlphaOne': 5, 'BetaOne': 3}
+        )
+
+        candidate_lists = [
+            [
+                {'entity_name': 'AlphaOne', 'score': 0.99},
+                {'entity_name': 'AlphaTwo', 'score': 0.98},
+            ],
+            [
+                {'entity_name': 'AlphaOne', 'score': 0.97},
+                {'entity_name': 'BetaOne', 'score': 0.96},
+            ],
+        ]
+
+        with (
+            patch('yar.operate._query_entity_candidates', new=AsyncMock(side_effect=candidate_lists)),
+            patch('yar.operate._find_most_related_edges_from_entities', new=AsyncMock(return_value=[])),
+        ):
+            node_datas, relations = await _get_node_data(
+                'alpha, beta',
+                knowledge_graph_inst,
+                entities_vdb,
+                QueryParam(mode='local', top_k=2),
+            )
+
+        assert relations == []
+        assert [node['entity_name'] for node in node_datas] == ['AlphaOne', 'BetaOne']
+        knowledge_graph_inst.get_nodes_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
+        knowledge_graph_inst.node_degrees_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
+        assert all(node['entity_name'] != 'AlphaTwo' for node in node_datas)
 @pytest.mark.offline
 class TestPerformKgSearchBranchExecution:
     """Tests for branch execution behavior in _perform_kg_search."""

@@ -512,7 +512,7 @@ export type StreamReference = {
  */
 export const getDocumentUrl = (ref: { s3_key: string | null; presigned_url: string | null }): string | null => {
   if (ref.s3_key) {
-    return `${backendBaseUrl}/s3/content/${ref.s3_key}`
+    return `${backendBaseUrl}/s3/content/${encodeURIComponent(ref.s3_key)}`
   }
   return ref.presigned_url
 }

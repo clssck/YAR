@@ -4709,25 +4709,42 @@ async def _get_node_data(
 
     results: list[dict[str, Any]] = []
     seen_entities: set[str] = set()
+    per_term_results: list[list[dict[str, Any]]] = []
 
     # Query each term independently to preserve specific entity matches
     # when keywords are comma-joined (e.g., "IBM, Google, Microsoft, IonQ").
     for term in search_terms:
-        term_results = await _query_entity_candidates(
-            term,
-            entities_vdb,
-            query_param,
-            query_embedding=query_embedding,
+        per_term_results.append(
+            await _query_entity_candidates(
+                term,
+                entities_vdb,
+                query_param,
+                query_embedding=query_embedding,
+            )
         )
-        for result in term_results:
-            entity_name = result.get('entity_name')
-            if not entity_name or entity_name in seen_entities:
-                continue
-            seen_entities.add(entity_name)
-            results.append(result)
+
+    term_offsets = [0] * len(per_term_results)
+    while len(results) < query_param.top_k:
+        added_result = False
+
+        for term_index, term_results in enumerate(per_term_results):
+            while term_offsets[term_index] < len(term_results):
+                result = term_results[term_offsets[term_index]]
+                term_offsets[term_index] += 1
+
+                entity_name = result.get('entity_name')
+                if not entity_name or entity_name in seen_entities:
+                    continue
+
+                seen_entities.add(entity_name)
+                results.append(result)
+                added_result = True
+                break
+
             if len(results) >= query_param.top_k:
                 break
-        if len(results) >= query_param.top_k:
+
+        if not added_result:
             break
 
     # If keyword-split search misses, retry with the full query string once.

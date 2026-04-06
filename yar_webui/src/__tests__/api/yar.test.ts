@@ -1,8 +1,9 @@
 import '../setup'
+import { createServer } from 'node:http'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
+const TEST_BACKEND_ORIGIN = 'http://127.0.0.1:45451'
 const navigateToLogin = mock(() => {})
-
 
 mock.module('@/services/navigation', () => ({
   navigationService: {
@@ -10,31 +11,70 @@ mock.module('@/services/navigation', () => ({
   },
 }))
 
+mock.module('@/lib/constants', () => ({
+  backendBaseUrl: TEST_BACKEND_ORIGIN,
+  popularLabelsDefaultLimit: 10,
+  searchLabelsDefaultLimit: 10,
+}))
 
-import {
-  type QueryRequest,
-  type StreamReference,
-  queryTextStream,
-} from '@/api/yar'
+import type { QueryRequest, StreamReference } from '@/api/yar'
 
-const makeSuccessResponse = (body: string): Response =>
-  new Response(body, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/x-ndjson',
-    },
+const { getDocumentUrl, queryTextStream } = await import('@/api/yar')
+
+const makeSuccessResponseBody = (body: string) => ({
+  statusCode: 200,
+  headers: {
+    'Content-Type': 'application/x-ndjson',
+    'Content-Length': String(Buffer.byteLength(body)),
+  },
+  body,
+})
+
+const startStreamServer = async (body: string) => {
+  const server = createServer((request, response) => {
+    response.setHeader('Access-Control-Allow-Origin', TEST_BACKEND_ORIGIN)
+    response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key')
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204)
+      response.end()
+      return
+    }
+
+    if (request.method === 'POST' && request.url === '/query/stream') {
+      const mocked = makeSuccessResponseBody(body)
+      response.writeHead(mocked.statusCode, mocked.headers)
+      response.end(mocked.body)
+      return
+    }
+
+    response.writeHead(404)
+    response.end('not found')
   })
 
-describe('queryTextStream NDJSON parsing', () => {
-  let originalFetch: typeof globalThis.fetch
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(45451, '127.0.0.1', () => resolve())
+  })
 
+  return {
+    stop: () => new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    }),
+  }
+}
+
+describe('queryTextStream NDJSON parsing', () => {
   beforeEach(() => {
-    originalFetch = globalThis.fetch
     localStorage.removeItem('YAR-API-TOKEN')
+    window.happyDOM.setURL(`${TEST_BACKEND_ORIGIN}/webui/`)
   })
 
   afterEach(() => {
-    globalThis.fetch = originalFetch
     navigateToLogin.mockReset()
   })
 
@@ -51,19 +91,23 @@ describe('queryTextStream NDJSON parsing', () => {
     ]
 
     const ndjson = `${JSON.stringify({ response: 'Answer chunk', references })}\n`
-    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as unknown as typeof fetch
+    const server = await startStreamServer(ndjson)
 
     const chunks: string[] = []
     const receivedReferences: StreamReference[][] = []
     const onError = mock(() => {})
 
-    await queryTextStream(
-      { query: 'What is AI?', mode: 'mix', stream: true } as QueryRequest,
-      (chunk) => chunks.push(chunk),
-      onError,
-      undefined,
-      (refs) => receivedReferences.push(refs),
-    )
+    try {
+      await queryTextStream(
+        { query: 'What is AI?', mode: 'mix', stream: true } as QueryRequest,
+        (chunk) => chunks.push(chunk),
+        onError,
+        undefined,
+        (refs) => receivedReferences.push(refs),
+      )
+    } finally {
+      await server.stop()
+    }
 
     expect(chunks).toEqual(['Answer chunk'])
     expect(receivedReferences).toEqual([references])
@@ -83,18 +127,22 @@ describe('queryTextStream NDJSON parsing', () => {
     ]
 
     const finalChunk = JSON.stringify({ response: 'Buffered answer', references })
-    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as unknown as typeof fetch
+    const server = await startStreamServer(finalChunk)
 
     const chunks: string[] = []
     const receivedReferences: StreamReference[][] = []
 
-    await queryTextStream(
-      { query: 'Tell me more', mode: 'mix', stream: true } as QueryRequest,
-      (chunk) => chunks.push(chunk),
-      undefined,
-      undefined,
-      (refs) => receivedReferences.push(refs),
-    )
+    try {
+      await queryTextStream(
+        { query: 'Tell me more', mode: 'mix', stream: true } as QueryRequest,
+        (chunk) => chunks.push(chunk),
+        undefined,
+        undefined,
+        (refs) => receivedReferences.push(refs),
+      )
+    } finally {
+      await server.stop()
+    }
 
     expect(chunks).toEqual(['Buffered answer'])
     expect(receivedReferences).toEqual([references])
@@ -102,19 +150,23 @@ describe('queryTextStream NDJSON parsing', () => {
 
   test('reports malformed references payload in streamed lines and skips onReferences', async () => {
     const ndjson = `${JSON.stringify({ response: 'Chunk before bad refs', references: { invalid: true } })}\n`
-    globalThis.fetch = mock(async () => makeSuccessResponse(ndjson)) as unknown as typeof fetch
+    const server = await startStreamServer(ndjson)
 
     const chunks: string[] = []
     const receivedReferences: StreamReference[][] = []
     const onError = mock(() => {})
 
-    await queryTextStream(
-      { query: 'What happened?', mode: 'mix', stream: true } as QueryRequest,
-      (chunk) => chunks.push(chunk),
-      onError,
-      undefined,
-      (refs) => receivedReferences.push(refs),
-    )
+    try {
+      await queryTextStream(
+        { query: 'What happened?', mode: 'mix', stream: true } as QueryRequest,
+        (chunk) => chunks.push(chunk),
+        onError,
+        undefined,
+        (refs) => receivedReferences.push(refs),
+      )
+    } finally {
+      await server.stop()
+    }
 
     expect(chunks).toEqual(['Chunk before bad refs'])
     expect(receivedReferences).toEqual([])
@@ -125,18 +177,42 @@ describe('queryTextStream NDJSON parsing', () => {
 
   test('routes citation_error event from final buffered object to onError', async () => {
     const finalChunk = JSON.stringify({ citation_error: 'citation service unavailable' })
-    globalThis.fetch = mock(async () => makeSuccessResponse(finalChunk)) as unknown as typeof fetch
+    const server = await startStreamServer(finalChunk)
 
     const onError = mock(() => {})
 
-    await queryTextStream(
-      { query: 'Need citations', mode: 'mix', stream: true } as QueryRequest,
-      () => {},
-      onError,
-    )
+    try {
+      await queryTextStream(
+        { query: 'Need citations', mode: 'mix', stream: true } as QueryRequest,
+        () => {},
+        onError,
+      )
+    } finally {
+      await server.stop()
+    }
 
     expect(onError).toHaveBeenCalledWith(
       'Citation error: citation service unavailable',
     )
+  })
+})
+
+describe('getDocumentUrl', () => {
+  test('encodes S3 keys before building proxy URLs', () => {
+    expect(
+      getDocumentUrl({
+        s3_key: 'folder/report #1?.pdf',
+        presigned_url: 'https://example.test/fallback.pdf',
+      }),
+    ).toBe(`${TEST_BACKEND_ORIGIN}/s3/content/folder%2Freport%20%231%3F.pdf`)
+  })
+
+  test('preserves presigned URLs when no S3 key is present', () => {
+    expect(
+      getDocumentUrl({
+        s3_key: null,
+        presigned_url: 'https://example.test/fallback.pdf?download=1',
+      }),
+    ).toBe('https://example.test/fallback.pdf?download=1')
   })
 })

@@ -4,13 +4,14 @@ This module tests the S3 document staging endpoints using httpx AsyncClient
 and FastAPI's TestClient pattern with mocked S3Client and YAR.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from yar.api.routers.upload_routes import create_upload_routes
+from yar.api.routers.upload_routes import _process_s3_document, create_upload_routes
+from yar.base import DocStatus
 
 # ============================================================================
 # Fixtures
@@ -43,6 +44,7 @@ def mock_rag():
     rag.doc_status.update_s3_key = AsyncMock()
     rag.doc_status.get_doc_by_file_path = AsyncMock(return_value=None)
     rag.doc_status.get_by_id = AsyncMock(return_value=None)
+    rag.doc_status.upsert = AsyncMock()
     return rag
 
 
@@ -322,29 +324,106 @@ class TestDeleteStagedEndpoint:
 
 
 @pytest.mark.offline
+class TestProcessS3BackgroundTask:
+    """Tests for the background helper used by POST /upload/process."""
+
+    @pytest.mark.asyncio
+    async def test_background_helper_passes_track_id_to_ainsert(self, mock_s3_client, mock_rag):
+        """Test that the generated track_id is preserved during ingestion."""
+        await _process_s3_document(
+            rag=mock_rag,
+            text_content='Document content here',
+            doc_id='doc1',
+            track_id='s3_track_123',
+            s3_url='s3://bucket/staging/default/doc1/file.txt',
+            s3_key='staging/default/doc1/file.txt',
+            archive_after_processing=False,
+            s3_client=mock_s3_client,
+        )
+
+        mock_rag.ainsert.assert_awaited_once_with(
+            input='Document content here',
+            ids='doc1',
+            file_paths='s3://bucket/staging/default/doc1/file.txt',
+            track_id='s3_track_123',
+        )
+
+    @pytest.mark.asyncio
+    async def test_background_helper_records_failed_status_with_track_id(self, mock_s3_client, mock_rag):
+        """Test that background failures are stored against the same track_id."""
+        mock_rag.ainsert.side_effect = RuntimeError('ingestion exploded')
+
+        await _process_s3_document(
+            rag=mock_rag,
+            text_content='Document content here',
+            doc_id='doc1',
+            track_id='s3_track_123',
+            s3_url='s3://bucket/staging/default/doc1/file.txt',
+            s3_key='staging/default/doc1/file.txt',
+            archive_after_processing=False,
+            s3_client=mock_s3_client,
+        )
+
+        mock_rag.doc_status.get_by_id.assert_awaited_once_with('doc1')
+        mock_rag.doc_status.upsert.assert_awaited_once()
+        failure_payload = mock_rag.doc_status.upsert.await_args.args[0]['doc1']
+        assert failure_payload['status'] == DocStatus.FAILED
+        assert failure_payload['track_id'] == 's3_track_123'
+        assert failure_payload['error_msg'] == 'ingestion exploded'
+        assert failure_payload['file_path'] == 's3://bucket/staging/default/doc1/file.txt'
+
+    @pytest.mark.asyncio
+    async def test_background_helper_skips_duplicate_failed_status(self, mock_s3_client, mock_rag):
+        """Test that helper does not double-record a failure already stored by ingestion."""
+        mock_rag.ainsert.side_effect = RuntimeError('ingestion exploded')
+        mock_rag.doc_status.get_by_id.return_value = {
+            'status': DocStatus.FAILED,
+            'track_id': 's3_track_123',
+        }
+
+        await _process_s3_document(
+            rag=mock_rag,
+            text_content='Document content here',
+            doc_id='doc1',
+            track_id='s3_track_123',
+            s3_url='s3://bucket/staging/default/doc1/file.txt',
+            s3_key='staging/default/doc1/file.txt',
+            archive_after_processing=False,
+            s3_client=mock_s3_client,
+        )
+
+        mock_rag.doc_status.upsert.assert_not_awaited()
+
+
+@pytest.mark.offline
 class TestProcessS3Endpoint:
     """Tests for POST /upload/process endpoint."""
 
     @pytest.mark.asyncio
-    async def test_process_fetches_and_schedules_background(self, client, mock_s3_client, mock_rag):
-        """Test that process fetches content and schedules background processing."""
+    async def test_process_returns_generated_track_id(self, client, mock_s3_client, mock_rag):
+        """Test that process returns the generated track_id while background work uses it."""
         mock_s3_client.object_exists.return_value = True
         mock_s3_client.get_object.return_value = (b'Document content here', {'content_type': 'text/plain'})
         mock_s3_client.get_s3_url.return_value = 's3://bucket/staging/default/doc1/file.txt'
 
-        response = await client.post(
-            '/upload/process',
-            json={'s3_key': 'staging/default/doc1/file.txt'},
-        )
+        with patch('yar.api.routers.upload_routes.generate_track_id', return_value='s3_track_123'):
+            response = await client.post(
+                '/upload/process',
+                json={'s3_key': 'staging/default/doc1/file.txt'},
+            )
 
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'processing_started'
         assert data['doc_id'] == 'doc1'
         assert data['s3_key'] == 'staging/default/doc1/file.txt'
-        # track_id is generated internally, just verify it exists
-        assert 'track_id' in data
-
+        assert data['track_id'] == 's3_track_123'
+        mock_rag.ainsert.assert_awaited_once_with(
+            input='Document content here',
+            ids='doc1',
+            file_paths='s3://bucket/staging/default/doc1/file.txt',
+            track_id='s3_track_123',
+        )
     @pytest.mark.asyncio
     async def test_process_without_archive(self, client, mock_s3_client, mock_rag):
         """Test processing without archiving."""

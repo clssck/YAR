@@ -1522,6 +1522,8 @@ export default function DocumentManager() {
     pagination.page,
     pagination.page_size,
     statusFilter,
+    sortField,
+    sortDirection,
     fetchPaginatedDocuments,
   ])
 

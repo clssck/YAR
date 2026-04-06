@@ -145,6 +145,51 @@ def _is_nan(value: Any) -> bool:
     return isinstance(value, float) and math.isnan(value)
 
 
+REQUIRED_METRIC_NAMES = (
+    'faithfulness',
+    'answer_relevance',
+    'context_recall',
+    'context_precision',
+)
+
+
+def _coerce_metric_value(value: Any) -> float:
+    """Return a float metric value or NaN when the metric is missing/invalid."""
+    if value is None or isinstance(value, bool):
+        return float('nan')
+
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return float('nan')
+
+    return coerced if not math.isnan(coerced) else float('nan')
+
+
+def _extract_metrics(scores_row: Any) -> dict[str, float]:
+    """Extract the required RAGAS metrics, preserving missing values as NaN."""
+    return {
+        'faithfulness': _coerce_metric_value(scores_row.get('faithfulness')),
+        'answer_relevance': _coerce_metric_value(scores_row.get('answer_relevancy')),
+        'context_recall': _coerce_metric_value(scores_row.get('context_recall')),
+        'context_precision': _coerce_metric_value(scores_row.get('context_precision')),
+    }
+
+
+def _has_complete_metrics(metrics: dict[str, float]) -> bool:
+    """Return True only when every required metric is present and finite."""
+    return all(not _is_nan(metrics.get(metric_name, float('nan'))) for metric_name in REQUIRED_METRIC_NAMES)
+
+
+def _calculate_ragas_score(metrics: dict[str, float]) -> float:
+    """Calculate the aggregate score only when the metric set is complete."""
+    if not _has_complete_metrics(metrics):
+        return float('nan')
+
+    return sum(metrics[metric_name] for metric_name in REQUIRED_METRIC_NAMES) / len(REQUIRED_METRIC_NAMES)
+
+
+
 class RAGEvaluator:
     """Evaluate RAG system quality using RAGAS metrics"""
 
@@ -499,6 +544,7 @@ class RAGEvaluator:
                     'error': str(e),
                     'metrics': {},
                     'ragas_score': 0,
+                    'status': 'error',
                     'timestamp': datetime.now().isoformat(),
                 }
 
@@ -559,7 +605,10 @@ class RAGEvaluator:
                     # Extract scores from first row
                     scores_row = df.iloc[0]
 
-                    # Extract scores (RAGAS v0.3+ uses .to_pandas())
+                    metrics = _extract_metrics(scores_row)
+                    ragas_score = _calculate_ragas_score(metrics)
+                    result_status = 'success' if _has_complete_metrics(metrics) else 'incomplete'
+
                     result = {
                         'test_number': idx,
                         'question': question,
@@ -568,20 +617,16 @@ class RAGEvaluator:
                         else rag_response['answer'],
                         'ground_truth': ground_truth[:200] + '...' if len(ground_truth) > 200 else ground_truth,
                         'project': test_case.get('project', 'unknown'),
-                        'metrics': {
-                            'faithfulness': float(scores_row.get('faithfulness', 0)),
-                            'answer_relevance': float(scores_row.get('answer_relevancy', 0)),
-                            'context_recall': float(scores_row.get('context_recall', 0)),
-                            'context_precision': float(scores_row.get('context_precision', 0)),
-                        },
+                        'metrics': metrics,
+                        'ragas_score': round(ragas_score, 4) if not _is_nan(ragas_score) else float('nan'),
+                        'status': result_status,
                         'timestamp': datetime.now().isoformat(),
                     }
 
-                    # Calculate RAGAS score (average of all metrics, excluding NaN values)
-                    metrics = result['metrics']
-                    valid_metrics = [v for v in metrics.values() if not _is_nan(v)]
-                    ragas_score = sum(valid_metrics) / len(valid_metrics) if valid_metrics else 0
-                    result['ragas_score'] = round(ragas_score, 4)
+                    if result_status == 'incomplete':
+                        result['warning'] = (
+                            'RAGAS returned incomplete or NaN metrics; excluding this case from aggregate success metrics.'
+                        )
 
                     # Update progress counter
                     progress_counter['completed'] += 1
@@ -597,6 +642,7 @@ class RAGEvaluator:
                         'error': str(e),
                         'metrics': {},
                         'ragas_score': 0,
+                        'status': 'error',
                         'timestamp': datetime.now().isoformat(),
                     }
                 finally:
@@ -720,12 +766,12 @@ class RAGEvaluator:
                         'test_number': idx,
                         'question': result.get('question', ''),
                         'project': result.get('project', 'unknown'),
-                        'faithfulness': f'{metrics.get("faithfulness", 0):.4f}',
-                        'answer_relevance': f'{metrics.get("answer_relevance", 0):.4f}',
-                        'context_recall': f'{metrics.get("context_recall", 0):.4f}',
-                        'context_precision': f'{metrics.get("context_precision", 0):.4f}',
-                        'ragas_score': f'{result.get("ragas_score", 0):.4f}',
-                        'status': 'success' if metrics else 'error',
+                        'faithfulness': self._format_metric_export(metrics.get('faithfulness', 0)),
+                        'answer_relevance': self._format_metric_export(metrics.get('answer_relevance', 0)),
+                        'context_recall': self._format_metric_export(metrics.get('context_recall', 0)),
+                        'context_precision': self._format_metric_export(metrics.get('context_precision', 0)),
+                        'ragas_score': self._format_metric_export(result.get('ragas_score', 0)),
+                        'status': result.get('status', 'success' if metrics else 'error'),
                         'timestamp': result.get('timestamp', ''),
                     }
                 )
@@ -735,17 +781,23 @@ class RAGEvaluator:
     def _format_metric(self, value: float, width: int = 6) -> str:
         """
         Format a metric value for display, handling NaN gracefully
-
+        
         Args:
             value: The metric value to format
             width: The width of the formatted string
-
+        
         Returns:
             Formatted string (e.g., "0.8523" or "  N/A ")
         """
         if _is_nan(value):
             return 'N/A'.center(width)
         return f'{value:.4f}'.rjust(width)
+
+    def _format_metric_export(self, value: float) -> str:
+        """Format a metric value for machine-readable exports."""
+        if _is_nan(value):
+            return 'N/A'
+        return f'{value:.4f}'
 
     def _display_results_table(self, results: list[dict[str, Any]]):
         """
@@ -781,14 +833,15 @@ class RAGEvaluator:
             question_display = (question[:47] + '...') if len(question) > 50 else question
 
             metrics = result.get('metrics', {})
+            result_status = result.get('status', 'success' if metrics else 'error')
             if metrics:
-                # Success case - format each metric, handling NaN values
+                # Metrics were returned, but they may still be incomplete/NaN.
                 faith = metrics.get('faithfulness', 0)
                 ans_rel = metrics.get('answer_relevance', 0)
                 ctx_rec = metrics.get('context_recall', 0)
                 ctx_prec = metrics.get('context_precision', 0)
                 ragas = result.get('ragas_score', 0)
-                status = '✓'
+                status = '✓' if result_status == 'success' else '!'
 
                 logger.info(
                     '%-4d | %-50s | %s | %s | %s | %s | %s | %6s',
@@ -829,84 +882,73 @@ class RAGEvaluator:
         Returns:
             Dictionary with benchmark statistics
         """
-        # Filter out results with errors
-        valid_results = [r for r in results if r.get('metrics')]
+        successful_results = [r for r in results if r.get('status') == 'success' and r.get('metrics')]
+        incomplete_results = [r for r in results if r.get('status') == 'incomplete']
         total_tests = len(results)
-        successful_tests = len(valid_results)
+        successful_tests = len(successful_results)
         failed_tests = total_tests - successful_tests
 
-        if not valid_results:
+        empty_metrics = {
+            'faithfulness': 0.0,
+            'answer_relevance': 0.0,
+            'context_recall': 0.0,
+            'context_precision': 0.0,
+            'ragas_score': 0.0,
+        }
+
+        if not successful_results:
             return {
                 'total_tests': total_tests,
                 'successful_tests': 0,
+                'incomplete_tests': len(incomplete_results),
                 'failed_tests': failed_tests,
                 'success_rate': 0.0,
+                'average_metrics': empty_metrics,
+                'min_ragas_score': 0.0,
+                'max_ragas_score': 0.0,
             }
 
-        # Calculate averages for each metric (handling NaN values correctly)
-        # Track both sum and count for each metric to handle NaN values properly
-        metrics_data = {
-            'faithfulness': {'sum': 0.0, 'count': 0},
-            'answer_relevance': {'sum': 0.0, 'count': 0},
-            'context_recall': {'sum': 0.0, 'count': 0},
-            'context_precision': {'sum': 0.0, 'count': 0},
-            'ragas_score': {'sum': 0.0, 'count': 0},
-        }
+        metrics_data = {metric_name: {'sum': 0.0, 'count': 0} for metric_name in empty_metrics}
 
-        for result in valid_results:
+        for result in successful_results:
             metrics = result.get('metrics', {})
 
-            # For each metric, sum non-NaN values and count them
-            faithfulness = metrics.get('faithfulness', 0)
-            if not _is_nan(faithfulness):
-                metrics_data['faithfulness']['sum'] += faithfulness
-                metrics_data['faithfulness']['count'] += 1
+            for metric_name in REQUIRED_METRIC_NAMES:
+                metric_value = metrics.get(metric_name, float('nan'))
+                if _is_nan(metric_value):
+                    continue
+                metrics_data[metric_name]['sum'] += metric_value
+                metrics_data[metric_name]['count'] += 1
 
-            answer_relevance = metrics.get('answer_relevance', 0)
-            if not _is_nan(answer_relevance):
-                metrics_data['answer_relevance']['sum'] += answer_relevance
-                metrics_data['answer_relevance']['count'] += 1
-
-            context_recall = metrics.get('context_recall', 0)
-            if not _is_nan(context_recall):
-                metrics_data['context_recall']['sum'] += context_recall
-                metrics_data['context_recall']['count'] += 1
-
-            context_precision = metrics.get('context_precision', 0)
-            if not _is_nan(context_precision):
-                metrics_data['context_precision']['sum'] += context_precision
-                metrics_data['context_precision']['count'] += 1
-
-            ragas_score = result.get('ragas_score', 0)
+            ragas_score = result.get('ragas_score', float('nan'))
             if not _is_nan(ragas_score):
                 metrics_data['ragas_score']['sum'] += ragas_score
                 metrics_data['ragas_score']['count'] += 1
 
-        # Calculate averages using actual counts for each metric
         avg_metrics = {}
         for metric_name, data in metrics_data.items():
-            if data['count'] > 0:
-                avg_val = data['sum'] / data['count']
-                avg_metrics[metric_name] = round(avg_val, 4) if not _is_nan(avg_val) else 0.0
-            else:
+            if data['count'] == 0:
                 avg_metrics[metric_name] = 0.0
+                continue
 
-        # Find min and max RAGAS scores (filter out NaN)
-        ragas_scores = []
-        for r in valid_results:
-            score = r.get('ragas_score', 0)
-            if _is_nan(score):
-                continue  # Skip NaN values
-            ragas_scores.append(score)
+            avg_val = data['sum'] / data['count']
+            avg_metrics[metric_name] = round(avg_val, 4) if not _is_nan(avg_val) else 0.0
 
-        min_score = min(ragas_scores) if ragas_scores else 0
-        max_score = max(ragas_scores) if ragas_scores else 0
+        ragas_scores = [
+            score
+            for score in (result.get('ragas_score', float('nan')) for result in successful_results)
+            if not _is_nan(score)
+        ]
+
+        min_score = min(ragas_scores) if ragas_scores else 0.0
+        max_score = max(ragas_scores) if ragas_scores else 0.0
 
         return {
             'total_tests': total_tests,
             'successful_tests': successful_tests,
+            'incomplete_tests': len(incomplete_results),
             'failed_tests': failed_tests,
-            'success_rate': round(successful_tests / total_tests * 100, 2),
+            'success_rate': round(successful_tests / total_tests * 100, 2) if total_tests else 0.0,
             'average_metrics': avg_metrics,
             'min_ragas_score': round(min_score, 4),
             'max_ragas_score': round(max_score, 4),
@@ -1036,7 +1078,8 @@ def generate_mode_comparison(
             for mode in QUERY_MODES:
                 if mode in all_results and q_idx < len(all_results[mode].get('results', [])):
                     result = all_results[mode]['results'][q_idx]
-                    scores[mode] = result.get('ragas_score', 0)
+                    score = result.get('ragas_score', float('nan'))
+                    scores[mode] = score if result.get('status') == 'success' and not _is_nan(score) else None
                 else:
                     scores[mode] = None
 

@@ -2333,13 +2333,24 @@ class YAR:
         # Call the new aquery_llm function to get complete results
         result = await self.aquery_llm(query, param, system_prompt)
 
-        # Extract and return only the LLM response for backward compatibility
-        llm_response = result.get('llm_response', {})
+        llm_response = result.get('llm_response', {}) if isinstance(result, dict) else {}
+        metadata = result.get('metadata', {}) if isinstance(result, dict) else {}
 
+        if isinstance(result, dict) and result.get('status') == 'failure':
+            if isinstance(metadata, dict) and metadata.get('failure_reason') == 'no_results':
+                if llm_response.get('is_streaming'):
+                    return llm_response.get('response_iterator')
+                return llm_response.get('content') or ''
+
+            message = result.get('message')
+            if not isinstance(message, str) or not message.strip():
+                message = 'Query processing failed'
+            raise RuntimeError(message)
+
+        # Extract and return only the LLM response for backward compatibility
         if llm_response.get('is_streaming'):
             return llm_response.get('response_iterator')
-        else:
-            return llm_response.get('content', '')
+        return llm_response.get('content', '') or ''
 
     @sync_wrapper()
     def query_data(
@@ -2465,24 +2476,11 @@ class YAR:
             param = QueryParam()
         global_config = cast(GlobalConfig, asdict(self))
 
-        # Create a copy of param to avoid modifying the original
-        data_param = QueryParam(
-            mode=param.mode,
-            only_need_context=True,  # Skip LLM generation, only get context and data
+        data_param = replace(
+            param,
+            only_need_context=True,
             only_need_prompt=False,
-            response_type=param.response_type,
-            stream=False,  # Data retrieval doesn't need streaming
-            top_k=param.top_k,
-            chunk_top_k=param.chunk_top_k,
-            max_entity_tokens=param.max_entity_tokens,
-            max_relation_tokens=param.max_relation_tokens,
-            max_total_tokens=param.max_total_tokens,
-            hl_keywords=param.hl_keywords,
-            ll_keywords=param.ll_keywords,
-            conversation_history=param.conversation_history,
-            model_func=param.model_func,
-            user_prompt=param.user_prompt,
-            enable_rerank=param.enable_rerank,
+            stream=False,
         )
 
         query_result = None

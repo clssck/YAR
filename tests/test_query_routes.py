@@ -236,14 +236,26 @@ class TestQueryRequestModel:
             QueryRequest(query='test query', conversation_history=history)
 
     def test_query_request_to_query_params(self):
-        """Test conversion to QueryParam."""
+        """Test conversion to QueryParam preserves query-engine fields."""
         from yar.api.routers.query_routes import QueryRequest
 
-        req = QueryRequest(query='test query', mode='local', top_k=5)
+        req = QueryRequest(
+            query='test query',
+            mode='local',
+            top_k=5,
+            enable_hyde=True,
+            enable_bm25_fusion=True,
+            bm25_weight=0.65,
+            entity_filter='Fitusiran',
+        )
         param = req.to_query_params(is_stream=False)
         assert param.mode == 'local'
         assert param.top_k == 5
         assert param.stream is False
+        assert param.enable_hyde is True
+        assert param.enable_bm25_fusion is True
+        assert param.bm25_weight == 0.65
+        assert param.entity_filter == 'Fitusiran'
 
 
 # =============================================================================
@@ -890,16 +902,49 @@ class TestQueryDataErrors:
         assert response.json()['detail'] == 'Internal server error'
 
     @pytest.mark.asyncio
-    async def test_query_data_invalid_response_format(self, client, mock_rag):
-        """Test handling of unexpected response format."""
-        mock_rag.aquery_data.return_value = 'not a dict'
+    async def test_query_data_failure_payload_returns_500(self, client, mock_rag):
+        """Backend failure payloads should map to HTTP 500."""
+        mock_rag.aquery_data.return_value = {
+            'status': 'failure',
+            'message': 'Query failed: upstream timeout',
+            'metadata': {},
+            'data': {},
+        }
+
+        response = await client.post('/query/data', json={'query': 'Test query'})
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Query failed: upstream timeout'
+
+    @pytest.mark.asyncio
+    async def test_query_data_no_results_failure_reason_returns_200(self, client, mock_rag):
+        """No-results payloads should remain non-exceptional for /query/data."""
+        mock_rag.aquery_data.return_value = {
+            'status': 'failure',
+            'message': 'Query returned no results',
+            'metadata': {'failure_reason': 'no_results'},
+            'data': {},
+        }
 
         response = await client.post('/query/data', json={'query': 'Test query'})
 
         assert response.status_code == 200
-        data = response.json()
-        assert data['status'] == 'failure'
-        assert data['message'] == 'Invalid response type'
+        assert response.json() == {
+            'status': 'failure',
+            'message': 'Query returned no results',
+            'metadata': {'failure_reason': 'no_results'},
+            'data': {},
+        }
+
+    @pytest.mark.asyncio
+    async def test_query_data_invalid_response_format(self, client, mock_rag):
+        """Unexpected response formats should map to HTTP 500."""
+        mock_rag.aquery_data.return_value = 'not a dict'
+
+        response = await client.post('/query/data', json={'query': 'Test query'})
+
+        assert response.status_code == 500
+        assert response.json()['detail'] == 'Invalid response type'
 
 
 # =============================================================================

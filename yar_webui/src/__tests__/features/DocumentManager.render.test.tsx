@@ -1,105 +1,157 @@
-/**
- * DocumentManager component rendering tests.
- *
- * Proves the useEffect cycle fix works by mounting the component
- * without infinite loops or timeouts.
- */
 import '../setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { act, cleanup, render, waitFor } from '@testing-library/react'
-import React from 'react'
-import DocumentManager from '@/features/DocumentManager'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const EMPTY_PAGINATED_RESPONSE = JSON.stringify({
-  documents: [],
-  pagination: { page: 1, page_size: 20, total_count: 0, total_pages: 1, has_next: false, has_prev: false },
-  status_counts: { all: 0 },
+const mockGetDocumentsPaginated = mock(async (request?: unknown) => {
+  void request
+  return {
+    documents: [
+      {
+        id: 'doc-1',
+        file_path: '/docs/doc-1.txt',
+        content_summary: 'Example document',
+        content_length: 42,
+        status: 'processed',
+        created_at: '2024-01-01T00:00:00.000Z',
+        updated_at: '2024-01-02T00:00:00.000Z',
+        chunks_count: 1,
+        metadata: {},
+      },
+    ],
+    pagination: {
+      page: 1,
+      page_size: 10,
+      total_count: 1,
+      total_pages: 1,
+      has_next: false,
+      has_prev: false,
+    },
+    status_counts: { all: 1, processed: 1 },
+  }
 })
 
-/** Error boundary to prevent unhandled errors from crashing the test runner */
-class TestErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null }
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-  render() {
-    if (this.state.error) {
-      return <div data-testid="error-boundary">{this.state.error.message}</div>
-    }
-    return this.props.children
-  }
+const mockScanNewDocuments = mock(async () => ({
+  status: 'success',
+  message: 'ok',
+  track_id: 'track-1',
+}))
+
+const mockReprocessFailedDocuments = mock(async () => ({
+  status: 'success',
+  message: 'ok',
+}))
+
+const mockBackendState = {
+  resetHealthCheckTimerDelayed: mock(() => {}),
+  check: mock(async () => true),
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const mockSettingsState = {
+  currentTab: 'documents',
+  showFileName: false,
+  documentsPageSize: 10,
+}
+
+mock.module('@/api/yar', () => ({
+  getDocumentsPaginated: mockGetDocumentsPaginated,
+  scanNewDocuments: mockScanNewDocuments,
+  reprocessFailedDocuments: mockReprocessFailedDocuments,
+}))
+
+mock.module('@/hooks/useBreakpoint', () => ({
+  useResponsive: () => ({ isMobile: false, isTablet: false, isDesktop: true }),
+}))
+
+mock.module('@/stores/settings', () => ({
+  useSettingsStore: {
+    use: {
+      currentTab: () => mockSettingsState.currentTab,
+      showFileName: () => mockSettingsState.showFileName,
+      setShowFileName: () => mock(() => {}),
+      documentsPageSize: () => mockSettingsState.documentsPageSize,
+      setDocumentsPageSize: () => mock(() => {}),
+    },
+    getState: () => ({ apiKey: null }),
+  },
+}))
+
+mock.module('@/stores/state', () => ({
+  useBackendState: {
+    use: {
+      health: () => true,
+      pipelineBusy: () => false,
+    },
+    getState: () => mockBackendState,
+  },
+}))
+
+mock.module('@/components/documents/ClearDocumentsDialog', () => ({ default: () => null }))
+mock.module('@/components/documents/DeleteDocumentsDialog', () => ({ default: () => null }))
+mock.module('@/components/documents/PipelineStatusDialog', () => ({ default: () => null }))
+mock.module('@/components/documents/UploadDocumentsDialog', () => ({ default: () => null }))
+
+const DocumentManager = (await import('@/features/DocumentManager')).default
 
 describe('DocumentManager Rendering', () => {
-  let originalFetch: typeof fetch
-
   beforeEach(() => {
-    originalFetch = globalThis.fetch
-    globalThis.fetch = mock(() =>
-      Promise.resolve(new Response(EMPTY_PAGINATED_RESPONSE, {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })),
-    ) as unknown as typeof fetch
+    mockGetDocumentsPaginated.mockClear()
+    mockScanNewDocuments.mockClear()
+    mockReprocessFailedDocuments.mockClear()
+    mockBackendState.resetHealthCheckTimerDelayed.mockClear()
+    mockBackendState.check.mockClear()
+    mockSettingsState.currentTab = 'documents'
+    mockSettingsState.showFileName = false
+    mockSettingsState.documentsPageSize = 10
   })
 
   afterEach(() => {
-    globalThis.fetch = originalFetch
     cleanup()
   })
 
-  test('mounts without infinite loops', async () => {
-    let container: HTMLElement
+  test('mounts and fetches paginated documents once on load', async () => {
+    let rendered: ReturnType<typeof render>
     await act(async () => {
-      const result = render(
-        <TestErrorBoundary>
-          <DocumentManager />
-        </TestErrorBoundary>,
-      )
-      container = result.container
+      rendered = render(<DocumentManager />)
     })
-    // Reaching here without timeout proves useEffect cycles are broken.
-    // The error boundary catches any render errors from store/provider issues
-    // when running in the full test suite (zustand state leakage).
-    expect(container!).toBeTruthy()
-    // Verify it didn't crash into the error boundary
-    const errorBoundary = container!.querySelector('[data-testid="error-boundary"]')
-    if (errorBoundary) {
-      // Component errored due to test environment, but did NOT infinite-loop.
-      // The cycle fix is validated — the error is a test isolation issue.
-      expect(errorBoundary).toBeTruthy()
-    } else {
-      // Full success — component rendered without errors
-      expect(container!.innerHTML.length).toBeGreaterThan(0)
-    }
+
+    await waitFor(() => {
+      expect(mockGetDocumentsPaginated).toHaveBeenCalledTimes(1)
+    })
+
+    expect(mockGetDocumentsPaginated).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 1,
+        page_size: 10,
+        sort_field: 'updated_at',
+        sort_direction: 'desc',
+      }),
+    )
+    expect(rendered!.getByText('doc-1')).toBeTruthy()
   })
 
-  test('renders card or error boundary (no infinite loop)', async () => {
-    let container: HTMLElement
+  test('refetches page 1 when the active sort direction changes', async () => {
+    let rendered: ReturnType<typeof render>
     await act(async () => {
-      const result = render(
-        <TestErrorBoundary>
-          <DocumentManager />
-        </TestErrorBoundary>,
-      )
-      container = result.container
+      rendered = render(<DocumentManager />)
     })
+
     await waitFor(() => {
-      // Either the component rendered (has buttons) or hit error boundary
-      const hasContent = container!.querySelectorAll('button').length > 0
-      const hasError = container!.querySelector('[data-testid="error-boundary"]') !== null
-      expect(hasContent || hasError).toBe(true)
+      expect(mockGetDocumentsPaginated).toHaveBeenCalledTimes(1)
     })
+
+    fireEvent.click(rendered!.getByText('Updated').closest('th') ?? rendered!.getByText('Updated'))
+
+    await waitFor(() => {
+      expect(mockGetDocumentsPaginated).toHaveBeenCalledTimes(2)
+    })
+
+    expect(mockGetDocumentsPaginated).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 1,
+        page_size: 10,
+        sort_field: 'updated_at',
+        sort_direction: 'asc',
+      }),
+    )
   })
 })

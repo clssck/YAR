@@ -1591,17 +1591,16 @@ def create_query_routes(
             param = request.to_query_params(False)  # No streaming for data endpoint
             response = await rag.aquery_data(request.query, param=param)
 
-            # aquery_data returns the new format with status, message, data, and metadata
-            if isinstance(response, dict):
-                return QueryDataResponse(**response)
-            else:
-                # Handle unexpected response format
-                return QueryDataResponse(
-                    status='failure',
-                    message='Invalid response type',
-                    data={},
-                    metadata={},
-                )
+            if not isinstance(response, dict):
+                raise HTTPException(status_code=500, detail='Invalid response type')
+
+            failure_message = get_query_failure_message(response)
+            if failure_message:
+                raise HTTPException(status_code=500, detail=failure_message)
+
+            return QueryDataResponse(**response)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f'Error processing data query: {e!s}', exc_info=True)
             raise HTTPException(status_code=500, detail='Internal server error') from e
