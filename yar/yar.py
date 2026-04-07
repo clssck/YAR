@@ -3814,7 +3814,12 @@ class YAR:
             return result
 
         try:
-            from yar.kg.postgres_impl import SQL_TEMPLATES, VECTOR_DISTANCE_METRIC, VECTOR_DISTANCE_OP
+            from yar.kg.postgres_impl import (
+                SQL_TEMPLATES,
+                VECTOR_DISTANCE_METRIC,
+                VECTOR_DISTANCE_OP,
+                normalize_vector_param,
+            )
 
             # Step 1: Get target entities (orphans or sparse entities based on max_degree)
             if target_max_degree == 0:
@@ -3852,23 +3857,17 @@ class YAR:
                     else SQL_TEMPLATES['get_connected_candidates']
                 )
 
-                # Format vector for PostgreSQL - comma-separated floats (SQL adds brackets)
-                if isinstance(orphan_vector, str):
-                    # Already a string, strip brackets if present
-                    vector_str = orphan_vector.strip('[]')
-                else:
-                    # Convert numpy/list to comma-separated string
-                    vector_str = ','.join(str(float(v)) for v in orphan_vector)
-
-                # Format SQL with vector embedded inline (asyncpg can't convert strings to pgvector)
+                candidate_vector = normalize_vector_param(
+                    orphan_vector,
+                    field_name=f'Orphan vector for {orphan_name}',
+                )
                 candidate_sql = candidate_sql_template.format(
-                    vector_str=vector_str,
                     distance_op=VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC],
                 )
 
                 candidates = await db.query(
                     candidate_sql,
-                    [workspace, orphan_name, sim_threshold, max_candidates],
+                    [workspace, orphan_name, candidate_vector, sim_threshold, max_candidates],
                     multirows=True,
                 )
 

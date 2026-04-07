@@ -75,6 +75,8 @@ const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
     descKey: 'retrievePanel.mode.bypassDesc',
   },
 ]
+
+const STREAM_CHUNK_FLUSH_DELAY_MS = 16
 export default function RetrievalTesting() {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
@@ -243,7 +245,20 @@ export default function RetrievalTesting() {
         }
       }
 
-      // Create a function to update the assistant's message
+      // Buffer streamed chunks so expensive parsing and markdown prep run once per frame.
+      let pendingStreamChunk = ''
+      let pendingStreamError = false
+      let pendingStreamFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+      const syncAssistantMessage = (updates: Partial<MessageWithError>) => {
+        Object.assign(assistantMessage, updates)
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessage.id ? { ...msg, ...updates } : msg,
+          ),
+        )
+      }
+
       const updateAssistantMessage = (chunk: string, isError?: boolean) => {
         assistantMessage.content += chunk
 
@@ -255,13 +270,10 @@ export default function RetrievalTesting() {
           thinkingStartTime.current = Date.now()
         }
 
-        // Use the new robust COT parsing function
         const cotResult = parseCOTContent(assistantMessage.content)
 
-        // Update thinking state
         assistantMessage.isThinking = cotResult.isThinking
 
-        // Only calculate time and extract thinking content once when thinking is complete
         if (cotResult.hasValidThinkBlock && !thinkingProcessed.current) {
           if (thinkingStartTime.current && !assistantMessage.thinkingTime) {
             const duration = (Date.now() - thinkingStartTime.current) / 1000
@@ -272,19 +284,14 @@ export default function RetrievalTesting() {
           thinkingProcessed.current = true
         }
 
-        // Update content based on parsing results
         assistantMessage.thinkingContent = cotResult.thinkingContent
-        // Only fallback to full content if not in a thinking state.
         if (cotResult.isThinking) {
           assistantMessage.displayContent = ''
         } else {
-          // Deduplicate LLM-generated References section and renumber to sequential
-          const rawContent =
-            cotResult.displayContent || assistantMessage.content
+          const rawContent = cotResult.displayContent || assistantMessage.content
           let processedContent = renumberReferencesSequential(
             deduplicateReferencesSection(rawContent),
           )
-          // Strip References section if user has disabled it
           const showRefs =
             useSettingsStore.getState().querySettings.show_references_section ??
             true
@@ -294,15 +301,12 @@ export default function RetrievalTesting() {
           assistantMessage.displayContent = processedContent
         }
 
-        // Detect if the assistant message contains a complete mermaid code block
-        // Simple heuristic: look for ```mermaid ... ```
         const mermaidBlockRegex = /```mermaid\s+([\s\S]+?)```/g
         let mermaidRendered = false
         let match: RegExpExecArray | null = mermaidBlockRegex.exec(
           assistantMessage.content,
         )
         while (match !== null) {
-          // If the block is not too short, consider it complete
           if (match[1] && match[1].trim().length > 10) {
             mermaidRendered = true
             break
@@ -311,37 +315,54 @@ export default function RetrievalTesting() {
         }
         assistantMessage.mermaidRendered = mermaidRendered
 
-        // Detect if the assistant message contains complete LaTeX formulas
         const latexRendered = detectLatexCompleteness(assistantMessage.content)
         assistantMessage.latexRendered = latexRendered
 
-        // Single unified update to avoid race conditions
-        setMessages((prev) => {
-          const newMessages = [...prev]
-          const lastMessage = newMessages[newMessages.length - 1]
-          if (lastMessage && lastMessage.id === assistantMessage.id) {
-            // Update all properties at once to maintain consistency
-            Object.assign(lastMessage, {
-              content: assistantMessage.content,
-              thinkingContent: assistantMessage.thinkingContent,
-              displayContent: assistantMessage.displayContent,
-              isThinking: assistantMessage.isThinking,
-              isError: isError,
-              mermaidRendered: assistantMessage.mermaidRendered,
-              latexRendered: assistantMessage.latexRendered,
-              thinkingTime: assistantMessage.thinkingTime,
-            })
-          }
-          return newMessages
+        syncAssistantMessage({
+          content: assistantMessage.content,
+          thinkingContent: assistantMessage.thinkingContent,
+          displayContent: assistantMessage.displayContent,
+          isThinking: assistantMessage.isThinking,
+          isError,
+          mermaidRendered: assistantMessage.mermaidRendered,
+          latexRendered: assistantMessage.latexRendered,
+          thinkingTime: assistantMessage.thinkingTime,
         })
 
-        // After updating content, scroll to bottom if auto-scroll is enabled
-        // Use a longer delay to ensure DOM has updated
         if (shouldFollowScrollRef.current) {
           setTimeout(() => {
             scrollToBottom()
           }, 30)
         }
+      }
+
+      const flushBufferedAssistantChunks = () => {
+        if (pendingStreamFlushTimer) {
+          clearTimeout(pendingStreamFlushTimer)
+          pendingStreamFlushTimer = null
+        }
+        if (!pendingStreamChunk) {
+          return
+        }
+
+        const bufferedChunk = pendingStreamChunk
+        const bufferedIsError = pendingStreamError || undefined
+        pendingStreamChunk = ''
+        pendingStreamError = false
+        updateAssistantMessage(bufferedChunk, bufferedIsError)
+      }
+
+      const queueAssistantMessageChunk = (chunk: string, isError?: boolean) => {
+        pendingStreamChunk += chunk
+        pendingStreamError ||= Boolean(isError)
+
+        if (pendingStreamFlushTimer) {
+          return
+        }
+
+        pendingStreamFlushTimer = setTimeout(() => {
+          flushBufferedAssistantChunks()
+        }, STREAM_CHUNK_FLUSH_DELAY_MS)
       }
 
       // Prepare query parameters
@@ -371,8 +392,9 @@ export default function RetrievalTesting() {
           abortControllerRef.current = new AbortController()
           await queryTextStream(
             queryParams,
-            updateAssistantMessage,
+            queueAssistantMessageChunk,
             (error) => {
+              flushBufferedAssistantChunks()
               streamErrorMessage += error
             },
             // Citation callback - use position markers to insert citations client-side
@@ -381,6 +403,8 @@ export default function RetrievalTesting() {
             (() => {
               let citationsApplied = false
               return (metadata: CitationsMetadata) => {
+                flushBufferedAssistantChunks()
+
                 // Guard against multiple invocations
                 if (
                   citationsApplied ||
@@ -413,47 +437,27 @@ export default function RetrievalTesting() {
                   finalContent += `\n\n---\n\n**References:**\n${metadata.footnotes.join('\n')}`
                 }
 
-                // Update message with annotated content and store citation metadata for HoverCards
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessage.id
-                      ? {
-                          ...msg,
-                          content: finalContent,
-                          displayContent: finalContent,
-                          citationsProcessed: true,
-                          citationsMetadata: metadata, // Store for HoverCard rendering
-                        }
-                      : msg,
-                  ),
-                )
-                // Also update the local reference for final cleanup operations
-                assistantMessage.content = finalContent
-                assistantMessage.displayContent = finalContent
-                assistantMessage.citationsProcessed = true
+                syncAssistantMessage({
+                  content: finalContent,
+                  displayContent: finalContent,
+                  citationsProcessed: true,
+                  citationsMetadata: metadata,
+                })
               }
             })(),
             // References callback - handle references with S3 presigned URLs
             (references: StreamReference[]) => {
-              // Store references in the message for rendering links
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMessage.id
-                    ? {
-                        ...msg,
-                        references: references,
-                      }
-                    : msg,
-                ),
-              )
+              assistantMessage.references = references
+              syncAssistantMessage({ references })
             },
             abortControllerRef.current.signal,
           )
+          flushBufferedAssistantChunks()
           if (streamErrorMessage) {
-            if (assistantMessage.content) {
-              streamErrorMessage = `${assistantMessage.content}\n${streamErrorMessage}`
-            }
-            updateAssistantMessage(streamErrorMessage, true)
+            const errorChunk = assistantMessage.content
+              ? `\n${streamErrorMessage}`
+              : streamErrorMessage
+            updateAssistantMessage(errorChunk, true)
           }
         } else {
           const response = await queryText(queryParams)
@@ -481,6 +485,9 @@ export default function RetrievalTesting() {
         // Clear loading and add messages to state
         setIsLoading(false)
         isReceivingResponseRef.current = false
+
+        // Flush any remaining buffered chunks before final parsing or history persistence.
+        flushBufferedAssistantChunks()
 
         // Enhanced cleanup with error handling to prevent memory leaks
         try {
@@ -520,10 +527,17 @@ export default function RetrievalTesting() {
             }
             assistantMessage.displayContent = processedContent
           }
+
+          syncAssistantMessage({
+            displayContent: assistantMessage.displayContent,
+            isThinking: false,
+            thinkingTime: assistantMessage.thinkingTime,
+          })
         } catch (error) {
           console.error('Error in final COT state validation:', error)
           // Force reset state on error
           assistantMessage.isThinking = false
+          syncAssistantMessage({ isThinking: false })
         } finally {
           // Ensure cleanup happens regardless of errors
           thinkingStartTime.current = null

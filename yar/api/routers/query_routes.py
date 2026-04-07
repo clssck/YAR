@@ -2,6 +2,7 @@
 This module contains all query-related routes for the YAR API.
 """
 
+import asyncio
 import json
 import re
 from typing import Any, Literal
@@ -74,50 +75,73 @@ def deduplicate_references_section(text: str) -> str:
     return REFERENCES_SECTION_PATTERN.sub(dedupe_refs, text)
 
 
-def renumber_references_sequential(text: str) -> str:
-    """Renumber citation markers to be sequential (1, 2, 3...) instead of sparse (2, 5, 9...).
+def _normalize_query_response_text(response_content: str) -> str:
+    """Apply non-stream response cleanup without rewriting reference IDs."""
+    if not response_content:
+        response_content = 'No relevant context found for the query.'
 
-    The LLM generates citations using original chunk indices which can be sparse.
-    This function renumbers them to be sequential for better UX.
+    response_content = strip_reasoning_tags(response_content)
+    return deduplicate_references_section(response_content)
 
-    Example: [2], [5], [9] → [1], [2], [3]
-    """
-    if not text:
-        return text
 
-    # Find all unique reference numbers in order of first appearance
-    ref_pattern = re.compile(r'\[(\d+)\]')
-    all_refs = ref_pattern.findall(text)
+def _attach_chunk_content(
+    references: list[dict[str, Any]],
+    chunks: list[dict[str, Any]],
+    *,
+    include_chunk_content: bool,
+ ) -> list[dict[str, Any]]:
+    """Attach grouped chunk content to copied reference payloads when requested."""
+    copied_references = [ref.copy() for ref in references]
+    if not include_chunk_content:
+        return copied_references
 
-    if not all_refs:
-        return text
+    ref_id_to_content: dict[str, list[str]] = {}
+    for chunk in chunks:
+        ref_id = chunk.get('reference_id', '')
+        content = chunk.get('content', '')
+        if ref_id and content:
+            ref_id_to_content.setdefault(ref_id, []).append(content)
 
-    # Get unique reference numbers in order of first appearance
-    seen: set[str] = set()
-    unique_refs: list[str] = []
-    for ref in all_refs:
-        if ref not in seen:
-            seen.add(ref)
-            unique_refs.append(ref)
+    for ref in copied_references:
+        ref_id = ref.get('reference_id', '')
+        chunk_content = ref_id_to_content.get(ref_id)
+        if chunk_content:
+            ref['content'] = chunk_content
 
-    # Create mapping: old_number -> new_sequential_number
-    ref_mapping: dict[str, str] = {}
-    for new_num, old_num in enumerate(unique_refs, start=1):
-        ref_mapping[old_num] = str(new_num)
+    return copied_references
 
-    # Replace using placeholder tokens to avoid conflicts (e.g., [1] -> [2] -> [1])
-    result = text
-    placeholder = '\x00REF_'  # Use null byte prefix as unlikely collision
 
-    # First pass: replace all refs with placeholders
-    for old_num in ref_mapping:
-        result = re.sub(rf'\[{old_num}\]', f'{placeholder}{old_num}\x00', result)
+async def _attach_presigned_urls(
+    references: list[dict[str, Any]],
+    s3_client: S3Client | None,
+ ) -> list[dict[str, Any]]:
+    """Attach presigned URLs concurrently, keeping failures non-fatal."""
+    if not s3_client or not references:
+        return references
 
-    # Second pass: replace placeholders with new sequential numbers
-    for old_num, new_num in ref_mapping.items():
-        result = result.replace(f'{placeholder}{old_num}\x00', f'[{new_num}]')
+    async def generate_url(s3_key: str) -> str | None:
+        try:
+            return await s3_client.get_presigned_url(s3_key)
+        except Exception as e:
+            logger.debug(f'Failed to generate presigned URL for {s3_key}: {e}')
+            return None
 
-    return result
+    pending_indices: list[int] = []
+    pending_tasks = []
+    for index, ref in enumerate(references):
+        s3_key = ref.get('s3_key')
+        if s3_key:
+            pending_indices.append(index)
+            pending_tasks.append(generate_url(s3_key))
+
+    if not pending_tasks:
+        return references
+
+    for index, presigned_url in zip(pending_indices, await asyncio.gather(*pending_tasks), strict=True):
+        if presigned_url:
+            references[index]['presigned_url'] = presigned_url
+
+    return references
 
 
 def get_query_failure_message(result: Any) -> str | None:
@@ -513,9 +537,8 @@ async def _extract_and_stream_citations(
             )
 
         # Build enhanced sources with metadata and presigned URLs
-        sources = []
-        for ref in citation_result.references:
-            source_item = {
+        sources = [
+            {
                 'reference_id': ref.reference_id,
                 'file_path': ref.file_path,
                 'document_title': ref.document_title,
@@ -525,16 +548,9 @@ async def _extract_and_stream_citations(
                 's3_key': getattr(ref, 's3_key', None),
                 'presigned_url': None,
             }
-
-            # Generate presigned URL if S3 client is available and s3_key exists
-            s3_key = getattr(ref, 's3_key', None)
-            if s3_client and s3_key:
-                try:
-                    source_item['presigned_url'] = await s3_client.get_presigned_url(s3_key)
-                except Exception as e:
-                    logger.debug(f'Failed to generate presigned URL for {s3_key}: {e}')
-
-            sources.append(source_item)
+            for ref in citation_result.references
+        ]
+        sources = await _attach_presigned_urls(sources, s3_client)
 
         # Format footnotes if requested
         footnotes = citation_result.footnotes if citation_mode == 'footnotes' else []
@@ -800,58 +816,24 @@ def create_query_routes(
             # Extract LLM response and references from unified result
             llm_response = result.get('llm_response', {})
             data = result.get('data', {})
-            references = data.get('references', [])
+            chunks = list(data.get('chunks', []))
+            references = await _attach_presigned_urls(
+                _attach_chunk_content(
+                    list(data.get('references', [])),
+                    chunks,
+                    include_chunk_content=bool(request.include_references and request.include_chunk_content),
+                ),
+                s3_client if request.include_references else None,
+            )
 
-            # Get the non-streaming response content
-            response_content = llm_response.get('content', '')
-            if not response_content:
-                response_content = 'No relevant context found for the query.'
-
-            # Strip reasoning tags like <think>...</think>
-            response_content = strip_reasoning_tags(response_content)
-
-            # Deduplicate LLM-generated References section
-            response_content = deduplicate_references_section(response_content)
-
-            # Renumber references to be sequential (1, 2, 3...) instead of sparse
-            response_content = renumber_references_sequential(response_content)
-
-            # Enrich references with chunk content if requested
-            if request.include_references and request.include_chunk_content:
-                chunks = data.get('chunks', [])
-                # Create a mapping from reference_id to chunk content
-                ref_id_to_content = {}
-                for chunk in chunks:
-                    ref_id = chunk.get('reference_id', '')
-                    content = chunk.get('content', '')
-                    if ref_id and content:
-                        # Collect chunk content; join later to avoid quadratic string concatenation
-                        ref_id_to_content.setdefault(ref_id, []).append(content)
-
-                # Add content to references
-                enriched_references = []
-                for ref in references:
-                    ref_copy = ref.copy()
-                    ref_id = ref.get('reference_id', '')
-                    if ref_id in ref_id_to_content:
-                        # Keep content as a list of chunks (one file may have multiple chunks)
-                        ref_copy['content'] = ref_id_to_content[ref_id]
-                    enriched_references.append(ref_copy)
-                references = enriched_references
-
-            # Generate presigned URLs for references with s3_key
-            if s3_client and request.include_references:
-                for ref in references:
-                    s3_key = ref.get('s3_key')
-                    if s3_key:
-                        try:
-                            ref['presigned_url'] = await s3_client.get_presigned_url(s3_key)
-                        except Exception as e:
-                            logger.debug(f'Failed to generate presigned URL for {s3_key}: {e}')
+            response_content = _normalize_query_response_text(llm_response.get('content', ''))
 
             # Return response with or without references based on request
             if request.include_references:
-                return QueryResponse(response=response_content, references=references)
+                return QueryResponse(
+                    response=response_content,
+                    references=[ReferenceItem.model_validate(ref) for ref in references],
+                )
             else:
                 return QueryResponse(response=response_content, references=None)
         except HTTPException:
@@ -1085,41 +1067,17 @@ def create_query_routes(
                     yield f'{json.dumps({"error": failure_message})}\n'
                     return
 
-                # Enrich references with chunk content if requested
-                if request.include_references and request.include_chunk_content:
-                    # Create a mapping from reference_id to chunk content
-                    ref_id_to_content = {}
-                    for chunk in chunks:
-                        ref_id = chunk.get('reference_id', '')
-                        content = chunk.get('content', '')
-                        if ref_id and content:
-                            # Collect chunk content
-                            ref_id_to_content.setdefault(ref_id, []).append(content)
+                references = await _attach_presigned_urls(
+                    _attach_chunk_content(
+                        references,
+                        chunks,
+                        include_chunk_content=bool(request.include_references and request.include_chunk_content),
+                    ),
+                    s3_client if request.include_references else None,
+                )
 
-                    # Add content to references
-                    enriched_references = []
-                    for ref in references:
-                        ref_copy = ref.copy()
-                        ref_id = ref.get('reference_id', '')
-                        if ref_id in ref_id_to_content:
-                            # Keep content as a list of chunks (one file may have multiple chunks)
-                            ref_copy['content'] = ref_id_to_content[ref_id]
-                        enriched_references.append(ref_copy)
-                    references = enriched_references
-
-                # Generate presigned URLs for references with s3_key
-                if s3_client and request.include_references:
-                    for ref in references:
-                        s3_key = ref.get('s3_key')
-                        if s3_key:
-                            try:
-                                ref['presigned_url'] = await s3_client.get_presigned_url(s3_key)
-                            except Exception as e:
-                                logger.debug(f'Failed to generate presigned URL for {s3_key}: {e}')
-
-                # Track collected response for citation extraction
-                collected_response = []
                 citation_mode = request.citation_mode or 'none'
+                should_extract_citations = citation_mode in ['inline', 'footnotes']
 
                 if llm_response.get('is_streaming'):
                     # Streaming mode: send references first, then stream response chunks
@@ -1127,19 +1085,22 @@ def create_query_routes(
                         yield f'{json.dumps({"references": references})}\n'
 
                     response_stream = llm_response.get('response_iterator')
+                    collected_response: list[str] | None = [] if should_extract_citations else None
                     if response_stream:
                         try:
                             # Filter <think>...</think> blocks in real-time
                             async for chunk in filter_reasoning_stream(response_stream):
                                 if chunk:  # Only send non-empty content
                                     yield f'{json.dumps({"response": chunk})}\n'
-                                    collected_response.append(chunk)
+                                    if collected_response is not None:
+                                        collected_response.append(chunk)
                         except Exception as e:
                             logger.error(f'Streaming error: {e!s}')
                             yield f'{json.dumps({"error": "Stream processing error"})}\n'
+                            return
 
                     # After streaming completes, extract citations if enabled
-                    if citation_mode in ['inline', 'footnotes'] and collected_response:
+                    if collected_response:
                         full_response = strip_reasoning_tags(''.join(collected_response))
                         async for line in _extract_and_stream_citations(
                             full_response,
@@ -1153,18 +1114,7 @@ def create_query_routes(
                             yield line
                 else:
                     # Non-streaming mode: send complete response in one message
-                    response_content = llm_response.get('content', '')
-                    if not response_content:
-                        response_content = 'No relevant context found for the query.'
-
-                    # Strip reasoning tags like <think>...</think>
-                    response_content = strip_reasoning_tags(response_content)
-
-                    # Deduplicate LLM-generated References section
-                    response_content = deduplicate_references_section(response_content)
-
-                    # Renumber references to be sequential (1, 2, 3...) instead of sparse
-                    response_content = renumber_references_sequential(response_content)
+                    response_content = _normalize_query_response_text(llm_response.get('content', ''))
 
                     # Create complete response object
                     complete_response: dict[str, Any] = {'response': response_content}
@@ -1174,7 +1124,7 @@ def create_query_routes(
                     yield f'{json.dumps(complete_response)}\n'
 
                     # Extract citations for non-streaming mode too
-                    if citation_mode in ['inline', 'footnotes'] and response_content:
+                    if should_extract_citations and response_content:
                         async for line in _extract_and_stream_citations(
                             response_content,
                             chunks,

@@ -112,33 +112,39 @@ class TestHelperFunctions:
         assert result.count('[1] Document.pdf') == 1
         assert '[2] Another.pdf' in result
 
-    def test_renumber_references_sequential(self):
-        """Test that sparse references are renumbered sequentially."""
-        from yar.api.routers.query_routes import renumber_references_sequential
+    def test_normalize_query_response_text_preserves_reference_ids(self):
+        """Response cleanup should not renumber citation markers independently."""
+        from yar.api.routers.query_routes import _normalize_query_response_text
 
-        text = 'See [2] and [5] and [9] for details.'
-        result = renumber_references_sequential(text)
-        assert '[1]' in result
-        assert '[2]' in result
-        assert '[3]' in result
-        assert '[5]' not in result
-        assert '[9]' not in result
+        text = 'See [2] and [5].\n\n### References\n- [2] Alpha.pdf\n- [2] Alpha.pdf\n- [5] Beta.pdf\n'
+        result = _normalize_query_response_text(text)
 
-    def test_renumber_references_preserves_order(self):
-        """Test that renumbering preserves first-appearance order."""
-        from yar.api.routers.query_routes import renumber_references_sequential
+        assert 'See [2] and [5].' in result
+        assert result.count('[2] Alpha.pdf') == 1
+        assert '[5] Beta.pdf' in result
 
-        text = 'First [5], then [2], then [5] again.'
-        result = renumber_references_sequential(text)
-        # [5] appears first -> becomes [1], [2] appears second -> becomes [2]
-        assert result == 'First [1], then [2], then [1] again.'
+    @pytest.mark.asyncio
+    async def test_attach_presigned_urls_ignores_failures(self):
+        """Presign failures should stay non-fatal and preserve other URLs."""
+        from yar.api.routers.query_routes import _attach_presigned_urls
 
-    def test_renumber_references_empty_input(self):
-        """Test that empty input is handled correctly."""
-        from yar.api.routers.query_routes import renumber_references_sequential
+        mock_s3 = MagicMock()
 
-        assert renumber_references_sequential('') == ''
-        assert renumber_references_sequential('No refs here') == 'No refs here'
+        async def presign(s3_key: str) -> str:
+            if s3_key == 'missing.pdf':
+                raise RuntimeError('boom')
+            return f'https://example.test/{s3_key}'
+
+        mock_s3.get_presigned_url = AsyncMock(side_effect=presign)
+        references = [
+            {'reference_id': '2', 's3_key': 'alpha.pdf'},
+            {'reference_id': '5', 's3_key': 'missing.pdf'},
+        ]
+
+        enriched = await _attach_presigned_urls(references, mock_s3)
+
+        assert enriched[0]['presigned_url'] == 'https://example.test/alpha.pdf'
+        assert 'presigned_url' not in enriched[1]
 
 
 # =============================================================================
@@ -327,22 +333,24 @@ class TestQueryEndpoint:
         assert 'reasoning' not in data['response']
 
     @pytest.mark.asyncio
-    async def test_query_deduplicates_and_renumbers_references_section(self, client, mock_rag):
-        """Test response quality cleanup for LLM-generated references."""
+    async def test_query_preserves_reference_ids_in_response_text(self, client, mock_rag):
+        """Route should keep response markers aligned with returned reference IDs."""
         mock_rag.aquery_llm.return_value = {
-            'llm_response': {
-                'content': ('Summary text.\n\n### References\n- [2] alpha.pdf\n- [2] alpha.pdf\n- [5] beta.pdf\n')
+            'llm_response': {'content': 'See [2] and [5] for details.'},
+            'data': {
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/alpha.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/beta.pdf'},
+                ]
             },
-            'data': {'references': []},
         }
 
-        response = await client.post('/query', json={'query': 'Test query'})
+        response = await client.post('/query', json={'query': 'Test query', 'include_references': True})
 
         assert response.status_code == 200
-        body = response.json()['response']
-        assert body.count('[1] alpha.pdf') == 1
-        assert '[2] beta.pdf' in body
-        assert '[5] beta.pdf' not in body
+        body = response.json()
+        assert body['response'] == 'See [2] and [5] for details.'
+        assert [ref['reference_id'] for ref in body['references']] == ['2', '5']
 
     @pytest.mark.asyncio
     async def test_query_include_chunk_content_groups_chunks_per_reference(self, client, mock_rag):
@@ -603,43 +611,89 @@ class TestQueryStreamEndpoint:
         assert 'End' in streamed_text
 
     @pytest.mark.asyncio
-    async def test_streaming_mode_reports_iterator_errors_in_ndjson(self, client, mock_rag):
-        """Iterator errors should be surfaced as NDJSON error objects."""
+    async def test_streaming_mode_successful_citations_emit_metadata(self, client, mock_rag, monkeypatch):
+        """Successful streaming should still emit citation metadata when requested."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'is_streaming': True, 'response_iterator': _stream_from_chunks(['chunk one'])},
+            'data': {'references': [{'reference_id': '2', 'file_path': '/docs/a.pdf'}], 'chunks': []},
+        }
+
+        async def fake_extract(*args, **kwargs):
+            yield json.dumps({'citations_metadata': {'markers': [], 'sources': [], 'footnotes': [], 'uncited_count': 0}}) + '\n'
+
+        monkeypatch.setattr('yar.api.routers.query_routes._extract_and_stream_citations', fake_extract)
+
+        response = await client.post(
+            '/query/stream',
+            json={'query': 'Test query', 'stream': True, 'citation_mode': 'inline'},
+        )
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert any('citations_metadata' in line for line in lines)
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_reports_iterator_errors_in_ndjson(self, client, mock_rag, monkeypatch):
+        """Iterator errors should stop the stream before citation post-processing."""
 
         async def broken_stream():
             yield 'partial chunk'
             raise RuntimeError('stream exploded')
+
+        async def fail_extract(*args, **kwargs):
+            pytest.fail('citation extraction should not run after a stream-processing error')
+            yield ''
+
+        monkeypatch.setattr('yar.api.routers.query_routes._extract_and_stream_citations', fail_extract)
 
         mock_rag.aquery_llm.return_value = {
             'llm_response': {'is_streaming': True, 'response_iterator': broken_stream()},
             'data': {'references': [], 'chunks': []},
         }
 
-        response = await client.post('/query/stream', json={'query': 'Test query', 'stream': True})
-
-        assert response.status_code == 200
-        lines = _ndjson_lines(response.text)
-        assert any(line.get('response') == 'partial chunk' for line in lines)
-        assert any('error' in line for line in lines)
-
-    @pytest.mark.asyncio
-    async def test_non_stream_mode_returns_single_ndjson_object(self, client, mock_rag):
-        """Non-stream mode should return one NDJSON line with complete response."""
-        mock_rag.aquery_llm.return_value = {
-            'llm_response': {'is_streaming': False, 'content': 'Answer text'},
-            'data': {'references': [{'reference_id': '1', 'file_path': '/docs/a.pdf'}], 'chunks': []},
-        }
-
         response = await client.post(
             '/query/stream',
-            json={'query': 'Test query', 'stream': False, 'include_references': False},
+            json={'query': 'Test query', 'stream': True, 'citation_mode': 'inline'},
         )
 
         assert response.status_code == 200
         lines = _ndjson_lines(response.text)
-        assert len(lines) == 1
-        assert lines[0]['response'] == 'Answer text'
-        assert 'references' not in lines[0]
+        assert lines == [
+            {'references': []},
+            {'response': 'partial chunk'},
+            {'error': 'Stream processing error'},
+        ]
+        assert not any('citations_metadata' in line for line in lines)
+    @pytest.mark.asyncio
+    async def test_non_stream_mode_preserves_reference_ids_in_response_text(self, client, mock_rag):
+        """Non-stream NDJSON mode should keep markers aligned with returned references."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'is_streaming': False, 'content': 'Answer cites [2] then [5].'},
+            'data': {
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/a.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/b.pdf'},
+                ],
+                'chunks': [],
+            },
+        }
+
+        response = await client.post(
+            '/query/stream',
+            json={'query': 'Test query', 'stream': False, 'include_references': True},
+        )
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines == [
+            {
+                'response': 'Answer cites [2] then [5].',
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/a.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/b.pdf'},
+                ],
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_non_stream_mode_include_chunk_content_enriches_references(self, client, mock_rag):

@@ -122,6 +122,28 @@ def _validate_fts_language(language: str) -> str:
         )
     return language
 
+def normalize_vector_param(vector: Any, *, field_name: str = 'Embedding vector') -> list[float]:
+    """Normalize pgvector inputs to a parameterizable list of finite floats."""
+    if isinstance(vector, str):
+        stripped = vector.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            stripped = stripped[1:-1].strip()
+        raw_values = [] if not stripped else [part.strip() for part in stripped.split(',')]
+    else:
+        raw_vector = vector.tolist() if hasattr(vector, 'tolist') else vector
+        raw_values = list(raw_vector)
+
+    try:
+        normalized = [float(value) for value in raw_values]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{field_name} must be a sequence of numeric values') from exc
+
+    if any(math.isnan(value) or math.isinf(value) for value in normalized):
+        raise ValueError(f'{field_name} contains NaN or Inf values')
+
+    return normalized
+
+
 
 def _parse_bool_config(value: Any, *, default: bool, key_name: str) -> bool:
     """Parse bool-like configuration values with safe fallback."""
@@ -3611,23 +3633,19 @@ class PGVectorStorage(BaseVectorStorage):
         else:
             embeddings = await self.embedding_func([query], _priority=5)  # higher priority for query
             embedding = embeddings[0]
-
-        if any(math.isnan(v) or math.isinf(v) for v in embedding):
-            raise ValueError('Embedding vector contains NaN or Inf values')
-        embedding_values = [float(value) for value in embedding]
-        embedding_string = ','.join(str(value) for value in embedding_values)
+        embedding_values = normalize_vector_param(embedding)
 
         sql = SQL_TEMPLATES[self.namespace].format(
-            embedding_string=embedding_string,
             distance_op=VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC],
         )
-        params = {
-            'workspace': self.workspace,
-            'closer_than_threshold': 1 - self.cosine_better_than_threshold,
-            'top_k': top_k,
-        }
+        params = [
+            self.workspace,
+            embedding_values,
+            1 - self.cosine_better_than_threshold,
+            top_k,
+        ]
         db = self._db_required()
-        results = await db.query(sql, params=list(params.values()), multirows=True)
+        results = await db.query(sql, params=params, multirows=True)
         return results
 
     async def hybrid_search(
@@ -7133,9 +7151,9 @@ SQL_TEMPLATES = {
                             EXTRACT(EPOCH FROM r.create_time)::BIGINT AS created_at
                      FROM YAR_VDB_RELATION r
                      WHERE r.workspace = $1
-                       AND r.content_vector {distance_op} '[{embedding_string}]'::vector < $2
-                     ORDER BY r.content_vector {distance_op} '[{embedding_string}]'::vector
-                     LIMIT $3;
+                       AND r.content_vector {distance_op} $2 < $3
+                     ORDER BY r.content_vector {distance_op} $2
+                     LIMIT $4;
                      """,
     'entities': """
                 SELECT e.entity_name,
@@ -7144,9 +7162,9 @@ SQL_TEMPLATES = {
                        EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
                 FROM YAR_VDB_ENTITY e
                 WHERE e.workspace = $1
-                  AND e.content_vector {distance_op} '[{embedding_string}]'::vector < $2
-                ORDER BY e.content_vector {distance_op} '[{embedding_string}]'::vector
-                LIMIT $3;
+                  AND e.content_vector {distance_op} $2 < $3
+                ORDER BY e.content_vector {distance_op} $2
+                LIMIT $4;
                 """,
     'chunks': """
               SELECT c.id,
@@ -7157,9 +7175,9 @@ SQL_TEMPLATES = {
               FROM YAR_VDB_CHUNKS c
               LEFT JOIN YAR_DOC_CHUNKS d ON c.workspace = d.workspace AND c.id = d.id
               WHERE c.workspace = $1
-                AND c.content_vector {distance_op} '[{embedding_string}]'::vector < $2
-              ORDER BY c.content_vector {distance_op} '[{embedding_string}]'::vector
-              LIMIT $3;
+                AND c.content_vector {distance_op} $2 < $3
+              ORDER BY c.content_vector {distance_op} $2
+              LIMIT $4;
               """,
     # DROP tables
     'drop_specific_table_workspace': """
@@ -7233,30 +7251,29 @@ SQL_TEMPLATES = {
         """,
     # Note: Similarity calculation assumes cosine distance (1 - distance = similarity)
     # For L2 or inner product metrics, interpret the similarity column differently
-    # Vector is embedded inline (not as parameter) because asyncpg can't convert strings to pgvector
     'get_orphan_candidates': """
         SELECT e.id, e.entity_name, e.content,
-               1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) AS similarity
+               1 - (e.content_vector {distance_op} $3) AS similarity
         FROM YAR_VDB_ENTITY e
         WHERE e.workspace = $1
           AND e.entity_name != $2
-          AND 1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) >= $3
-        ORDER BY e.content_vector {distance_op} '[{vector_str}]'::vector
-        LIMIT $4
+          AND 1 - (e.content_vector {distance_op} $3) >= $4
+        ORDER BY e.content_vector {distance_op} $3
+        LIMIT $5
         """,
     'get_connected_candidates': """
         SELECT e.id, e.entity_name, e.content,
-               1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) AS similarity
+               1 - (e.content_vector {distance_op} $3) AS similarity
         FROM YAR_VDB_ENTITY e
         WHERE e.workspace = $1
           AND e.entity_name != $2
-          AND 1 - (e.content_vector {distance_op} '[{vector_str}]'::vector) >= $3
+          AND 1 - (e.content_vector {distance_op} $3) >= $4
           AND EXISTS (
               SELECT 1 FROM YAR_VDB_RELATION r
               WHERE r.workspace = $1
                 AND (r.source_id = e.entity_name OR r.target_id = e.entity_name)
           )
-        ORDER BY e.content_vector {distance_op} '[{vector_str}]'::vector
-        LIMIT $4
+        ORDER BY e.content_vector {distance_op} $3
+        LIMIT $5
         """,
 }

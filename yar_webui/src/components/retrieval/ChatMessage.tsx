@@ -201,16 +201,17 @@ function TextWithCitations({
   return <>{parts}</>
 }
 
-// Restore original component definition and export
-export const ChatMessage = ({
-  message,
-  isTabActive = true,
-  onRetry,
-}: {
+interface ChatMessageProps {
   message: MessageWithError
   isTabActive?: boolean
   onRetry?: () => void
-}) => {
+}
+
+const ChatMessageComponent = ({
+  message,
+  isTabActive = true,
+  onRetry,
+}: ChatMessageProps) => {
   const { t } = useTranslation()
   const { theme } = useTheme()
   const [katexPlugin, setKatexPlugin] = useState<RehypeKatexPlugin | null>(null)
@@ -672,7 +673,13 @@ export const ChatMessage = ({
   )
 }
 
-// Remove the incorrect memo export line
+export const ChatMessage = memo(
+  ChatMessageComponent,
+  (prevProps, nextProps) =>
+    prevProps.message === nextProps.message &&
+    prevProps.isTabActive === nextProps.isTabActive &&
+    prevProps.onRetry === nextProps.onRetry,
+)
 
 interface CodeHighlightProps {
   inline?: boolean
