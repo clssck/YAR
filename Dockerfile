@@ -39,7 +39,6 @@ RUN mkdir -p /root/.local/share/uv
 
 # Copy project metadata and sources
 COPY pyproject.toml .
-COPY setup.py .
 COPY uv.lock .
 
 # Install base + API extras without the project to improve caching
@@ -87,7 +86,6 @@ COPY --from=builder /root/.local /root/.local
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/yar ./yar
 COPY pyproject.toml .
-COPY setup.py .
 COPY uv.lock .
 
 # Ensure the installed scripts are on PATH
