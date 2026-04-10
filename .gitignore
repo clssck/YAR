@@ -63,6 +63,9 @@ yar/evaluation/results/
 yar/evaluation/*_dataset*.json
 yar/evaluation/sanofi*.json
 
+yar/evaluation/extracted_docs/
+yar/evaluation/answers.md
+
 # Miscellaneous
 .DS_Store
 TODO.md
