@@ -298,6 +298,7 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
 
 3. Grounding:
   - Core facts MUST come from the context. Use your knowledge only to connect ideas fluently.
+  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query. Do not introduce claims from unrelated context sections.
   - If you find partial information, answer with what's available. Only say "insufficient information" if context contains NOTHING relevant.
 
 4. Formatting & Language:
@@ -380,6 +381,7 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
 
 3. Grounding:
   - Core facts MUST come from the context. Use your knowledge only to connect ideas fluently.
+  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query. Do not introduce claims from unrelated context sections.
   - If you find partial information, answer with what's available. Only say "insufficient information" if context contains NOTHING relevant.
 
 4. Formatting & Language:

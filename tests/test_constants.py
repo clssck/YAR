@@ -216,7 +216,7 @@ class TestQueryAndRetrievalDefaults:
 
     def test_default_chunk_top_k(self):
         """Test DEFAULT_CHUNK_TOP_K is a positive integer."""
-        assert DEFAULT_CHUNK_TOP_K == 40
+        assert DEFAULT_CHUNK_TOP_K == 20
         assert isinstance(DEFAULT_CHUNK_TOP_K, int)
         assert DEFAULT_CHUNK_TOP_K > 0
         # Chunk top-k should typically be less than or equal to top-k

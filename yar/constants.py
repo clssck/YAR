@@ -47,7 +47,7 @@ GRAPH_FIELD_SEP = '<SEP>'
 
 # Query and retrieval configuration defaults
 DEFAULT_TOP_K = 60
-DEFAULT_CHUNK_TOP_K = 40  # Increased from 30 to improve context recall
+DEFAULT_CHUNK_TOP_K = 20  # Balanced: sufficient recall without flooding context
 # Token limits increased for modern 128K+ context models (GPT-4o-mini, Claude, etc.)
 # Top-k already limits count; these are safety ceilings, not aggressive truncation targets
 DEFAULT_MAX_ENTITY_TOKENS = 16000
@@ -68,7 +68,7 @@ DEFAULT_MIN_RERANK_SCORE = None
 # Two-stage retrieval configuration
 # When reranking is enabled, retrieve more candidates than chunk_top_k to surface
 # hidden relevant chunks. The reranker then selects the best chunk_top_k results.
-# Example: chunk_top_k=40, multiplier=2 → retrieve 80 → rerank → return top 40
+# Example: chunk_top_k=20, multiplier=2 → retrieve 40 → rerank → return top 20
 # Note: Higher multipliers (2-3x) help when recall is low but can hurt precision
 # if the reranker isn't accurate enough. Set to 1 to disable two-stage retrieval.
 # Testing shows 1x (disabled) works best when baseline recall is already high (>95%).
