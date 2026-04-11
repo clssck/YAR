@@ -205,6 +205,28 @@ class TestRAGResponsePrompts:
         assert '{user_prompt}' in prompt
         assert '{content_data}' in prompt
 
+    def test_rag_response_defaults_keep_references_separate(self):
+        """Default answer prompts should not force inline citations or raw reference ids."""
+        rag_prompt = PROMPTS['rag_response']
+        naive_prompt = PROMPTS['naive_rag_response']
+
+        assert 'Do not add inline citations like [1]' in rag_prompt
+        assert 'Do not add inline citations like [1]' in naive_prompt
+        assert 'Do not mention raw field names, JSON keys, or internal ids such as `reference_id`' in rag_prompt
+        assert 'Do not mention raw field names, JSON keys, or internal ids such as `reference_id`' in naive_prompt
+        assert 'EVERY factual claim MUST have a citation' not in rag_prompt
+        assert 'EVERY factual claim MUST have a citation' not in naive_prompt
+
+    def test_rag_response_guides_temporal_and_multi_part_answers(self):
+        """Answer prompts should explicitly cover temporal and multi-part questions."""
+        rag_prompt = PROMPTS['rag_response']
+        naive_prompt = PROMPTS['naive_rag_response']
+
+        assert 'cover the starting state, major transitions, and later/current state' in rag_prompt
+        assert 'cover the starting state, major transitions, and later/current state' in naive_prompt
+        assert 'address each one briefly rather than stopping after the first relevant point' in rag_prompt
+        assert 'address each one briefly rather than stopping after the first relevant point' in naive_prompt
+
     def test_fail_response_exists(self):
         """Test fail response exists."""
         assert 'fail_response' in PROMPTS
@@ -223,7 +245,7 @@ class TestQueryContextPrompts:
         assert 'kg_query_context' in PROMPTS
 
     def test_kg_query_context_markdown_structure(self):
-        """Test KG query context uses markdown headings and list-friendly references."""
+        """Test KG query context uses markdown headings and treats ids as internal metadata."""
         prompt = PROMPTS['kg_query_context']
         rendered = prompt.format(
             entities_str='[]',
@@ -241,12 +263,14 @@ class TestQueryContextPrompts:
         assert '# Document Chunks' in prompt
         assert '# Reference Document List' in prompt
         assert prompt.count('```json') == 3
+        assert 'Treat any IDs or metadata as internal bookkeeping' in prompt
+        assert 'Each entry has a reference_id' not in prompt
         assert '```\n{reference_list_str}\n```' not in prompt
         assert '- [doc-1] Example document' in rendered
         assert '```\n- [doc-1] Example document\n```' not in rendered
 
     def test_naive_query_context_markdown_structure(self):
-        """Test naive query context uses markdown headings and list-friendly references."""
+        """Test naive query context uses markdown headings and treats ids as internal metadata."""
         prompt = PROMPTS['naive_query_context']
         rendered = prompt.format(
             text_chunks_str='[]',
@@ -258,6 +282,8 @@ class TestQueryContextPrompts:
         assert '# Document Chunks' in prompt
         assert '# Reference Document List' in prompt
         assert prompt.count('```json') == 1
+        assert 'Treat any IDs or metadata as internal bookkeeping' in prompt
+        assert 'Each entry has a reference_id' not in prompt
         assert '```\n{reference_list_str}\n```' not in prompt
         assert '- [doc-1] Example document' in rendered
         assert '```\n- [doc-1] Example document\n```' not in rendered

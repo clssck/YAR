@@ -48,6 +48,7 @@ __all__ = [
     'is_factual_sentence',
     'lazy_external_import',
     'logger',
+    'requests_inline_citations',
     'set_verbose_debug',
     'setup_logger',
     'sync_wrapper',
@@ -3568,6 +3569,22 @@ def has_citation(text: str) -> bool:
     """Check if text contains at least one citation marker [n]."""
     return bool(_CITATION_PATTERN.search(text))
 
+def requests_inline_citations(query: str | None, user_prompt: str | None = None) -> bool:
+    """Detect whether the caller explicitly asked for inline citations in prose."""
+    combined = '\n'.join(
+        part.strip()
+        for part in (query or '', user_prompt or '')
+        if isinstance(part, str) and part.strip()
+    )
+    if not combined:
+        return False
+    return bool(
+        re.search(
+            r'\b(cite|cites|citation|citations|cited|footnote|footnotes)\b',
+            combined,
+            flags=re.IGNORECASE,
+        )
+    )
 
 def is_factual_sentence(sentence: str) -> bool:
     """

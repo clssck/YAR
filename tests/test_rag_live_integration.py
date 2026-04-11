@@ -210,20 +210,17 @@ class TestQueryEndpoint:
             # Should have excerpt for context
             assert 'excerpt' in ref or 'document_title' in ref
 
-    def test_short_answer_has_inline_citation(self):
-        """Test that SHORT answers (1-2 sentences) have inline [n] citations.
-
-        This is a critical test for citation consistency - short answers were
-        the main failure mode where LLMs would skip inline citations.
-        """
+    def test_short_answer_keeps_references_separate(self):
+        """Short answers should stay concise and keep references out of the prose by default."""
         import re
 
         response = requests.post(
             f'{BASE_URL}/query',
             json={
-                'query': 'What is YAR?',  # Expects a concise answer
+                'query': 'What is YAR?',
                 'mode': 'naive',
-                'response_type': 'Single Paragraph',  # Encourage short response
+                'response_type': 'Single Paragraph',
+                'include_references': True,
             },
             headers=get_headers(),
             timeout=TIMEOUT,
@@ -233,17 +230,14 @@ class TestQueryEndpoint:
         data = response.json()
         assert 'response' in data
 
-        # Extract main text (before References section if present)
-        main_text = data['response'].split('### References')[0].strip()
-
-        # Skip if no content (empty database)
+        main_text = data['response'].strip()
         if not main_text or 'insufficient information' in main_text.lower():
             pytest.skip('No relevant data available for query')
 
-        # Check for at least one inline citation [n]
-        has_inline_citation = bool(re.search(r'\[\d+\]', main_text))
-
-        assert has_inline_citation, f'Short answer missing inline citation [n]. Response: {main_text[:200]}...'
+        assert '### References' not in main_text
+        assert not re.search(r'\[\d+\]', main_text), f'Short answer should not contain inline citations. Response: {main_text[:200]}...'
+        assert 'references' in data
+        assert isinstance(data['references'], list)
 
     def test_query_with_top_k_parameter(self):
         """Test query with custom top_k parameter."""

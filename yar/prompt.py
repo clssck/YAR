@@ -289,71 +289,36 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   - Use Knowledge Graph entities/relationships as your primary source for facts about entities, their attributes, and connections.
   - Use Document Chunks for detailed evidence, quotes, and supporting context.
   - Synthesize both sources into a coherent response.
+  - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
 
 2. Content Priority:
-  - FIRST: Answer the core question directly using available facts.
-  - SECOND: Provide supporting details and context.
-  - THIRD: Note any relevant gaps only if they significantly impact the answer.
-  - IMPORTANT: If the context contains ANY relevant information, you MUST answer. Do not refuse when relevant context exists.
+  - FIRST: Answer the core question directly using supported facts.
+  - SECOND: Add only the supporting details needed to make the answer clear.
+  - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
+  - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
+  - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
+  - Only say "insufficient information" when the context contains nothing relevant to the user's question.
 
 3. Grounding:
-  - Core facts MUST come from the context. Use your knowledge only to connect ideas fluently.
-  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query. Do not introduce claims from unrelated context sections.
-  - If you find partial information, answer with what's available. Only say "insufficient information" if context contains NOTHING relevant.
+  - Core facts MUST come from the context. Use your knowledge only to connect supported facts fluently.
+  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query.
+  - Do not introduce claims, examples, causes, consequences, or recommendations that are not directly supported by the relevant context.
+  - If retrieved context conflicts or mixes topics, ignore the unrelated portions instead of blending them into the answer.
 
 4. Formatting & Language:
   - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
-  - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
-  - The response should be presented in {response_type}.
+  - Format the response as {response_type}.
+  - Use Markdown only when it materially improves clarity.
+  - For `Single Paragraph`, return exactly one concise paragraph with no headings or bullet points.
+  - For `Bullet Points`, return bullets only and keep each bullet compact.
+  - For `Multiple Paragraphs`, keep the answer compact and avoid boilerplate.
 
-5. Inline Citations - CRITICAL REQUIREMENT:
-  - **EVERY factual claim MUST have a citation [n]**. This is non-negotiable.
-  - Place [n] immediately after the claim, before punctuation.
-  - Even single-sentence answers need citations.
+5. Citations and References:
+  - Do not add inline citations like [1] or a `### References` section unless the caller explicitly asks for them.
+  - Do not mention raw field names, JSON keys, or internal ids such as `reference_id` unless the caller explicitly asks for them.
+  - The system returns source references separately when needed.
 
-  EXAMPLES OF CORRECT CITATION USAGE:
-
-  Example 1 (Short Answer - IMPORTANT):
-  Query: "What storage does YAR use?"
-  Response: "YAR uses PostgreSQL for graph storage [1]."
-
-  Example 2 (Multi-Fact Answer):
-  Query: "What are YAR's key features?"
-  Response: "YAR provides dual-level retrieval combining local and global search [1].
-  It uses graph-based knowledge representation for enhanced accuracy [2]."
-
-  Example 3 (Single Source, Multiple Facts):
-  Response: "The system architecture has three layers [1]. It uses vector similarity
-  for retrieval and manages entity relationships through knowledge graphs [1]."
-
-  COMMON MISTAKES TO AVOID:
-  - ❌ "YAR is a RAG framework." (Missing citation)
-  - ✅ "YAR is a RAG framework [1]."
-  - ❌ "It uses PostgreSQL and supports graph queries." (No citations)
-  - ✅ "It uses PostgreSQL [1] and supports graph queries [2]."
-
-6. References Section Format:
-  - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `- [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
-  - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line.
-  - **IMPORTANT: Each document should appear ONLY ONCE in the references list. If the same document is cited multiple times in the response with the same [n], list it only once in references.**
-  - **IMPORTANT: EVERY citation [n] used in the response text MUST have a corresponding entry in the References list. Do not cite a document without listing it.**
-  - Provide maximum of 5 most relevant, unique citations.
-  - Do not generate footnotes section or any comment, summary, or explanation after the references.
-
-7. Reference Section Example:
-```
-### References
-
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
-```
-
-8. Additional Instructions: {user_prompt}
-
-
+{user_prompt}
 ---Context---
 
 {context_data}
@@ -371,72 +336,37 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
 
 1. Answer Strategy:
   - START with the direct answer. Do not begin with "Based on the context..." or similar preamble.
-  - Extract relevant facts from Document Chunks and synthesize into a coherent response.
+  - Extract relevant facts from Document Chunks and synthesize them into a coherent response.
+  - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
 
 2. Content Priority:
-  - FIRST: Answer the core question directly using available facts.
-  - SECOND: Provide supporting details and context.
-  - THIRD: Note any relevant gaps only if they significantly impact the answer.
-  - IMPORTANT: If the context contains ANY relevant information, you MUST answer. Do not refuse when relevant context exists.
+  - FIRST: Answer the core question directly using supported facts.
+  - SECOND: Add only the supporting details needed to make the answer clear.
+  - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
+  - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
+  - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
+  - Only say "insufficient information" when the context contains nothing relevant to the user's question.
 
 3. Grounding:
-  - Core facts MUST come from the context. Use your knowledge only to connect ideas fluently.
-  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query. Do not introduce claims from unrelated context sections.
-  - If you find partial information, answer with what's available. Only say "insufficient information" if context contains NOTHING relevant.
+  - Core facts MUST come from the context. Use your knowledge only to connect supported facts fluently.
+  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query.
+  - Do not introduce claims, examples, causes, consequences, or recommendations that are not directly supported by the relevant context.
+  - If retrieved context conflicts or mixes topics, ignore the unrelated portions instead of blending them into the answer.
 
 4. Formatting & Language:
   - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
-  - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
-  - The response should be presented in {response_type}.
+  - Format the response as {response_type}.
+  - Use Markdown only when it materially improves clarity.
+  - For `Single Paragraph`, return exactly one concise paragraph with no headings or bullet points.
+  - For `Bullet Points`, return bullets only and keep each bullet compact.
+  - For `Multiple Paragraphs`, keep the answer compact and avoid boilerplate.
 
-5. Inline Citations - CRITICAL REQUIREMENT:
-  - **EVERY factual claim MUST have a citation [n]**. This is non-negotiable.
-  - Place [n] immediately after the claim, before punctuation.
-  - Even single-sentence answers need citations.
+5. Citations and References:
+  - Do not add inline citations like [1] or a `### References` section unless the caller explicitly asks for them.
+  - Do not mention raw field names, JSON keys, or internal ids such as `reference_id` unless the caller explicitly asks for them.
+  - The system returns source references separately when needed.
 
-  EXAMPLES OF CORRECT CITATION USAGE:
-
-  Example 1 (Short Answer - IMPORTANT):
-  Query: "What storage does YAR use?"
-  Response: "YAR uses PostgreSQL for graph storage [1]."
-
-  Example 2 (Multi-Fact Answer):
-  Query: "What are YAR's key features?"
-  Response: "YAR provides dual-level retrieval combining local and global search [1].
-  It uses graph-based knowledge representation for enhanced accuracy [2]."
-
-  Example 3 (Single Source, Multiple Facts):
-  Response: "The system architecture has three layers [1]. It uses vector similarity
-  for retrieval and manages entity relationships through knowledge graphs [1]."
-
-  COMMON MISTAKES TO AVOID:
-  - ❌ "YAR is a RAG framework." (Missing citation)
-  - ✅ "YAR is a RAG framework [1]."
-  - ❌ "It uses PostgreSQL and supports graph queries." (No citations)
-  - ✅ "It uses PostgreSQL [1] and supports graph queries [2]."
-
-6. References Section Format:
-  - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `- [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
-  - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line.
-  - **IMPORTANT: Each document should appear ONLY ONCE in the references list. If the same document is cited multiple times in the response with the same [n], list it only once in references.**
-  - **IMPORTANT: EVERY citation [n] used in the response text MUST have a corresponding entry in the References list. Do not cite a document without listing it.**
-  - Provide maximum of 5 most relevant, unique citations.
-  - Do not generate footnotes section or any comment, summary, or explanation after the references.
-
-7. Reference Section Example:
-```
-### References
-
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
-```
-
-8. Additional Instructions: {user_prompt}
-
-
+{user_prompt}
 ---Context---
 
 {content_data}
@@ -457,7 +387,7 @@ PROMPTS['kg_query_context'] = """
 
 # Document Chunks
 
-Each entry has a reference_id refer to the `Reference Document List`.
+Use the chunk content below to answer the question. Treat any IDs or metadata as internal bookkeeping; do not mention raw field names or raw ids in the answer.
 
 ```json
 {text_chunks_str}
@@ -465,7 +395,7 @@ Each entry has a reference_id refer to the `Reference Document List`.
 
 # Reference Document List
 
-Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks.
+This source list is internal retrieval metadata. Only surface source identifiers when the caller explicitly asks for citations or raw reference ids.
 
 {reference_list_str}
 """
@@ -473,7 +403,7 @@ Each entry starts with a [reference_id] that corresponds to entries in the Docum
 PROMPTS['naive_query_context'] = """
 # Document Chunks
 
-Each entry has a reference_id refer to the `Reference Document List`.
+Use the chunk content below to answer the question. Treat any IDs or metadata as internal bookkeeping; do not mention raw field names or raw ids in the answer.
 
 ```json
 {text_chunks_str}
@@ -481,7 +411,7 @@ Each entry has a reference_id refer to the `Reference Document List`.
 
 # Reference Document List
 
-Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks.
+This source list is internal retrieval metadata. Only surface source identifiers when the caller explicitly asks for citations or raw reference ids.
 
 {reference_list_str}
 """

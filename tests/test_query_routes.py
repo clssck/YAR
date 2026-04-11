@@ -112,16 +112,27 @@ class TestHelperFunctions:
         assert result.count('[1] Document.pdf') == 1
         assert '[2] Another.pdf' in result
 
-    def test_normalize_query_response_text_preserves_reference_ids(self):
-        """Response cleanup should not renumber citation markers independently."""
+    def test_normalize_query_response_text_strips_inline_reference_ids_by_default(self):
+        """Response cleanup should strip inline IDs while removing embedded reference prose."""
         from yar.api.routers.query_routes import _normalize_query_response_text
 
-        text = 'See [2] and [5].\n\n### References\n- [2] Alpha.pdf\n- [2] Alpha.pdf\n- [5] Beta.pdf\n'
+        text = 'Alpha is supported [2], and beta is supported [5].\n\n### References\n- [2] Alpha.pdf\n- [2] Alpha.pdf\n- [5] Beta.pdf\n'
         result = _normalize_query_response_text(text)
 
-        assert 'See [2] and [5].' in result
-        assert result.count('[2] Alpha.pdf') == 1
-        assert '[5] Beta.pdf' in result
+        assert result == 'Alpha is supported, and beta is supported.'
+        assert '### References' not in result
+        assert '[2] Alpha.pdf' not in result
+        assert '[5] Beta.pdf' not in result
+
+    def test_normalize_query_response_text_keeps_inline_ids_when_requested(self):
+        """Response cleanup should preserve inline IDs when the caller explicitly asks for them."""
+        from yar.api.routers.query_routes import _normalize_query_response_text
+
+        text = 'Alpha is supported [2], and beta is supported [5].\n\n### References\n- [2] Alpha.pdf\n- [5] Beta.pdf\n'
+        result = _normalize_query_response_text(text, keep_inline_citations=True)
+
+        assert result == 'Alpha is supported [2], and beta is supported [5].'
+        assert '### References' not in result
 
     @pytest.mark.asyncio
     async def test_attach_presigned_urls_ignores_failures(self):
@@ -333,23 +344,75 @@ class TestQueryEndpoint:
         assert 'reasoning' not in data['response']
 
     @pytest.mark.asyncio
-    async def test_query_preserves_reference_ids_in_response_text(self, client, mock_rag):
-        """Route should keep response markers aligned with returned reference IDs."""
+    async def test_query_strips_inline_reference_ids_by_default(self, client, mock_rag):
+        """Route should keep references separate from prose unless citations were requested."""
         mock_rag.aquery_llm.return_value = {
-            'llm_response': {'content': 'See [2] and [5] for details.'},
+            'llm_response': {'content': 'Alpha is supported [2], and beta is supported [5].'},
             'data': {
                 'references': [
                     {'reference_id': '2', 'file_path': '/docs/alpha.pdf'},
                     {'reference_id': '5', 'file_path': '/docs/beta.pdf'},
                 ]
-            },
+            }
         }
 
         response = await client.post('/query', json={'query': 'Test query', 'include_references': True})
 
         assert response.status_code == 200
         body = response.json()
-        assert body['response'] == 'See [2] and [5] for details.'
+        assert body['response'] == 'Alpha is supported, and beta is supported.'
+        assert [ref['reference_id'] for ref in body['references']] == ['2', '5']
+
+    @pytest.mark.asyncio
+    async def test_query_preserves_inline_reference_ids_when_requested(self, client, mock_rag):
+        """Route should preserve inline markers when the caller explicitly requests citations."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'content': 'Alpha is supported [2], and beta is supported [5].'},
+            'data': {
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/alpha.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/beta.pdf'},
+                ]
+            }
+        }
+
+        response = await client.post(
+            '/query',
+            json={
+                'query': 'Please cite sources inline for this answer.',
+                'include_references': True,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['response'] == 'Alpha is supported [2], and beta is supported [5].'
+        assert [ref['reference_id'] for ref in body['references']] == ['2', '5']
+
+    @pytest.mark.asyncio
+    async def test_query_does_not_treat_ambiguous_sources_language_as_citation_request(self, client, mock_rag):
+        """Ambiguous domain words like 'sources' should not preserve inline markers by default."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'content': 'Solar and wind dominate [2], while hydro remains relevant [5].'},
+            'data': {
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/solar.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/hydro.pdf'},
+                ]
+            }
+        }
+
+        response = await client.post(
+            '/query',
+            json={
+                'query': 'What are the main renewable energy sources?',
+                'include_references': True,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['response'] == 'Solar and wind dominate, while hydro remains relevant.'
         assert [ref['reference_id'] for ref in body['references']] == ['2', '5']
 
     @pytest.mark.asyncio
@@ -665,8 +728,8 @@ class TestQueryStreamEndpoint:
         ]
         assert not any('citations_metadata' in line for line in lines)
     @pytest.mark.asyncio
-    async def test_non_stream_mode_preserves_reference_ids_in_response_text(self, client, mock_rag):
-        """Non-stream NDJSON mode should keep markers aligned with returned references."""
+    async def test_non_stream_mode_strips_inline_reference_ids_by_default(self, client, mock_rag):
+        """Non-stream NDJSON mode should keep references separate from prose by default."""
         mock_rag.aquery_llm.return_value = {
             'llm_response': {'is_streaming': False, 'content': 'Answer cites [2] then [5].'},
             'data': {
@@ -681,6 +744,41 @@ class TestQueryStreamEndpoint:
         response = await client.post(
             '/query/stream',
             json={'query': 'Test query', 'stream': False, 'include_references': True},
+        )
+
+        assert response.status_code == 200
+        lines = _ndjson_lines(response.text)
+        assert lines == [
+            {
+                'response': 'Answer cites then.',
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/a.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/b.pdf'},
+                ],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_non_stream_mode_preserves_inline_reference_ids_when_requested(self, client, mock_rag):
+        """Non-stream NDJSON mode should preserve inline markers when requested."""
+        mock_rag.aquery_llm.return_value = {
+            'llm_response': {'is_streaming': False, 'content': 'Answer cites [2] then [5].'},
+            'data': {
+                'references': [
+                    {'reference_id': '2', 'file_path': '/docs/a.pdf'},
+                    {'reference_id': '5', 'file_path': '/docs/b.pdf'},
+                ],
+                'chunks': [],
+            },
+        }
+
+        response = await client.post(
+            '/query/stream',
+            json={
+                'query': 'Please cite sources inline for this answer.',
+                'stream': False,
+                'include_references': True,
+            },
         )
 
         assert response.status_code == 200

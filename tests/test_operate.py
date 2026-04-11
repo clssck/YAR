@@ -23,9 +23,12 @@ from yar.constants import DEFAULT_MAX_FILE_PATHS, DEFAULT_SUMMARY_LANGUAGE, GRAP
 from yar.operate import (
     _build_query_context,
     _enrich_local_keywords,
+    _find_most_related_edges_from_entities,
     _get_node_data,
+    _merge_all_chunks,
     _perform_kg_search,
     _resolve_max_file_paths,
+    _should_validate_inline_citations,
     _split_keyword_terms,
     _truncate_entity_identifier,
     chunking_by_semantic,
@@ -34,6 +37,7 @@ from yar.operate import (
     get_keywords_from_query,
     kg_query,
 )
+from yar.prompt import PROMPTS
 
 # ============================================================================
 # Text Chunking Tests
@@ -1671,6 +1675,8 @@ class TestQueryCacheKeyInputs:
             'High',
             'Low',
             query_param.user_prompt or '',
+            PROMPTS['rag_response'],
+            640,
             query_param.enable_rerank,
             query_param.enable_bm25_fusion,
             query_param.enable_hyde,
@@ -1680,3 +1686,328 @@ class TestQueryCacheKeyInputs:
         saved_cache = save_mock.await_args.args[1]
         assert saved_cache.queryparam['enable_bm25_fusion'] is True
         assert saved_cache.queryparam['enable_hyde'] is True
+
+
+@pytest.mark.offline
+class TestResponseQualityControls:
+    """Tests for prompt/output and merge controls added for response quality."""
+
+    @pytest.mark.asyncio
+    async def test_kg_query_passes_default_single_paragraph_token_cap(self):
+        model_func = AsyncMock(return_value='Answer')
+        query_param = QueryParam(mode='mix', response_type='Single Paragraph', model_func=model_func)
+        global_config = {
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+        }
+        context_result = QueryContextResult(
+            context='Context block',
+            raw_data={'data': {'references': []}},
+        )
+
+        with (
+            patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['High'], ['Low']))),
+            patch('yar.operate._build_query_context', new=AsyncMock(return_value=context_result)),
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+        ):
+            result = await kg_query(
+                query='What is alpha therapy?',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(),
+                query_param=query_param,
+                global_config=global_config,
+            )
+
+        assert result is not None
+        assert model_func.await_args.kwargs['max_tokens'] == 260
+
+    @pytest.mark.asyncio
+    async def test_kg_query_expands_single_paragraph_token_cap_for_temporal_queries(self):
+        model_func = AsyncMock(return_value='Answer')
+        query_param = QueryParam(mode='mix', response_type='Single Paragraph', model_func=model_func)
+        global_config = {
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+        }
+        context_result = QueryContextResult(
+            context='Context block',
+            raw_data={'data': {'references': []}},
+        )
+
+        with (
+            patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['History'], ['Olympic Games']))),
+            patch('yar.operate._build_query_context', new=AsyncMock(return_value=context_result)),
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+        ):
+            result = await kg_query(
+                query='How have alpha systems evolved over time?',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(),
+                query_param=query_param,
+                global_config=global_config,
+            )
+
+        assert result is not None
+        assert model_func.await_args.kwargs['max_tokens'] == 640
+
+    @pytest.mark.asyncio
+    async def test_build_query_context_passes_topic_and_facet_terms_to_merge(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        search_result = {
+            'final_entities': [{'entity_name': 'Diabetes'}],
+            'final_relations': [],
+            'vector_chunks': [],
+            'chunk_tracking': {},
+            'query_embedding': None,
+        }
+        truncation_result = {
+            'filtered_entities': [{'entity_name': 'Diabetes'}],
+            'filtered_relations': [],
+            'entities_context': [],
+            'relations_context': [],
+            'entity_id_to_original': {},
+            'relation_id_to_original': {},
+        }
+        merge_mock = AsyncMock(
+            return_value=[
+                {
+                    'content': 'Complication summary',
+                    'file_path': 'medical_diabetes.md',
+                    'chunk_id': 'chunk-1',
+                    'source_type': 'vector',
+                }
+            ]
+        )
+
+        with (
+            patch('yar.operate._perform_kg_search', new=AsyncMock(return_value=search_result)),
+            patch('yar.operate._apply_token_truncation', new=AsyncMock(return_value=truncation_result)),
+            patch('yar.operate._merge_all_chunks', new=merge_mock),
+            patch(
+                'yar.operate._build_context_str',
+                new=AsyncMock(return_value=('Context block', {'data': {'chunks': []}, 'metadata': {}})),
+            ),
+        ):
+            result = await _build_query_context(
+                query='What are the long-term complications associated with diabetes?',
+                ll_keywords='diabetes',
+                hl_keywords='long-term complications, chronic conditions',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(global_config={}),
+                query_param=query_param,
+            )
+
+        assert result is not None
+        assert merge_mock.await_args.kwargs['topic_terms'] == ['diabetes']
+        assert merge_mock.await_args.kwargs['facet_terms'] == ['long-term complications', 'chronic conditions']
+
+    def test_should_validate_inline_citations_requires_explicit_request(self):
+        assert not _should_validate_inline_citations(
+            'What changed?',
+            None,
+            system_prompt=PROMPTS['rag_response'],
+        )
+        assert _should_validate_inline_citations(
+            'Please cite sources inline for this answer.',
+            None,
+            system_prompt=PROMPTS['rag_response'],
+        )
+
+    @pytest.mark.asyncio
+    async def test_kg_query_skips_citation_auto_fix_without_explicit_request(self):
+        model_func = AsyncMock(return_value='Answer [1].')
+        query_param = QueryParam(mode='mix', response_type='Single Paragraph', model_func=model_func)
+        global_config = {
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+        }
+        context_result = QueryContextResult(
+            context='Context block',
+            raw_data={'data': {'references': [{'reference_id': '1', 'file_path': 'alpha.md'}]}},
+        )
+
+        with (
+            patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['High'], ['Low']))),
+            patch('yar.operate._build_query_context', new=AsyncMock(return_value=context_result)),
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+            patch(
+                'yar.operate.validate_and_fix_citations',
+                new=Mock(side_effect=AssertionError('citation auto-fix should not run by default')),
+            ),
+        ):
+            result = await kg_query(
+                query='What changed?',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(),
+                query_param=query_param,
+                global_config=global_config,
+            )
+
+        assert result is not None
+        assert result.content == 'Answer [1].'
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_prefers_overlap_and_source_consensus(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        vector_chunks = [
+            {
+                'content': 'Generic medical overview unrelated to alpha therapy.',
+                'file_path': 'generic.md',
+                'chunk_id': 'weak-vector',
+                'source_type': 'vector',
+                'retrieval_score': 0.42,
+                'source_order': 1,
+            },
+            {
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 'alpha.md',
+                'chunk_id': 'shared',
+                'source_type': 'vector',
+                'retrieval_score': 0.41,
+                'source_order': 2,
+            },
+        ]
+        entity_chunks = [
+            {
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 'alpha.md',
+                'chunk_id': 'shared',
+                'source_type': 'entity',
+                'occurrence_count': 3,
+                'source_order': 1,
+            },
+        ]
+        relation_chunks = [
+            {
+                'content': 'Alpha therapy is linked to lower complication risk in the source graph.',
+                'file_path': 'alpha_rel.md',
+                'chunk_id': 'shared',
+                'source_type': 'relationship',
+                'occurrence_count': 2,
+                'source_order': 1,
+            },
+        ]
+
+        with (
+            patch('yar.operate._find_related_text_unit_from_entities', new=AsyncMock(return_value=entity_chunks)),
+            patch('yar.operate._find_related_text_unit_from_relations', new=AsyncMock(return_value=relation_chunks)),
+        ):
+            merged = await _merge_all_chunks(
+                filtered_entities=[{'entity_name': 'Alpha therapy'}],
+                filtered_relations=[{'src_id': 'Alpha', 'tgt_id': 'Complications'}],
+                vector_chunks=vector_chunks,
+                query='What does alpha therapy do?',
+                knowledge_graph_inst=MagicMock(),
+                text_chunks_db=MagicMock(),
+                query_param=query_param,
+            )
+
+        assert [chunk['chunk_id'] for chunk in merged[:2]] == ['shared', 'weak-vector']
+        assert merged[0]['source_type'] == 'entity+relationship+vector'
+        assert merged[0]['merge_score'] > merged[1]['merge_score']
+
+    @pytest.mark.asyncio
+    async def test_find_most_related_edges_filters_hub_edges_by_query_focus(self):
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_edges_batch = AsyncMock(
+            return_value={'Diabetes': [('Diabetes', 'COVID-19'), ('Diabetes', 'Diabetic foot')]}
+        )
+        knowledge_graph_inst.get_edges_batch = AsyncMock(
+            return_value={
+                ('COVID-19', 'Diabetes'): {
+                    'description': 'COVID-19 can co-occur with diabetes in some patients.',
+                    'keywords': 'comorbidity',
+                    'weight': 9.0,
+                },
+                ('Diabetes', 'Diabetic foot'): {
+                    'description': 'Diabetic foot complications can lead to ulcers and amputation.',
+                    'keywords': 'complications, ulcer',
+                    'weight': 3.0,
+                },
+            }
+        )
+        knowledge_graph_inst.edge_degrees_batch = AsyncMock(
+            return_value={('COVID-19', 'Diabetes'): 20, ('Diabetes', 'Diabetic foot'): 4}
+        )
+
+        edges = await _find_most_related_edges_from_entities(
+            [{'entity_name': 'Diabetes'}],
+            QueryParam(mode='local', top_k=5),
+            knowledge_graph_inst,
+            query='What are the long-term complications associated with diabetes?',
+        )
+
+        assert [edge['src_tgt'] for edge in edges] == [('Diabetes', 'Diabetic foot')]
+        assert edges[0]['query_focus_overlap'] > 0.0
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_prefers_evolution_chunks_over_generic_topic_matches(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': '=== Olympic marketing ===\nOlympic Games controversies include sponsorship deals, branding, and boycotts.',
+                    'file_path': 'sports_olympic_games.md',
+                    'chunk_id': 'generic-olympic',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.72,
+                    'source_order': 1,
+                },
+                {
+                    'content': '== Modern Games ==\nThe Games evolved from ancient Greek festivals into a modern revival with Winter and Paralympic events.',
+                    'file_path': 'sports_olympic_games.md',
+                    'chunk_id': 'evolution',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.68,
+                    'source_order': 2,
+                },
+            ],
+            query='How have the Olympic Games evolved since their ancient origins in Greece?',
+            topic_terms=['Olympic Games', 'Greece'],
+            facet_terms=['historical evolution', 'Olympic Games history', 'ancient origins'],
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged[:2]] == ['evolution', 'generic-olympic']
+        assert merged[0]['merge_score'] > merged[1]['merge_score']
+        assert merged[0]['body_relevance'] > 0.0
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_prefers_heading_matched_sections_over_incidental_mentions(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': '=== Diabetes in other animals ===\nDiabetic animals are more prone to infections, and the long-term complications recognized in humans are much rarer in animals.',
+                    'file_path': 'medical_diabetes.md',
+                    'chunk_id': 'animals',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.71,
+                    'source_order': 1,
+                },
+                {
+                    'content': '== Signs and symptoms ==\nCommon symptoms include thirst and urination changes.\n=== Long-term complications ===\nDiabetes can cause retinopathy, nephropathy, neuropathy, and diabetic foot problems.',
+                    'file_path': 'medical_diabetes.md',
+                    'chunk_id': 'long-term-complications',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.68,
+                    'source_order': 2,
+                },
+            ],
+            query='What are the long-term complications associated with diabetes?',
+            topic_terms=['diabetes'],
+            facet_terms=['long-term complications', 'chronic conditions', 'medical outcomes'],
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged] == ['long-term-complications']
+        assert merged[0]['heading_relevance'] > 0.0

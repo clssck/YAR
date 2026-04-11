@@ -14,7 +14,7 @@ from yar.api.utils_api import get_combined_auth_dependency
 from yar.base import QueryParam
 from yar.constants import DEFAULT_TOP_K
 from yar.storage.s3_client import S3Client
-from yar.utils import logger
+from yar.utils import logger, requests_inline_citations
 
 router = APIRouter(tags=['query'])
 
@@ -35,6 +35,11 @@ REFERENCES_SECTION_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Pattern to match inline numeric citation markers like [1] or [1,2]
+INLINE_CITATION_MARKER_PATTERN = re.compile(r'(?:\s*\[(?:\d+(?:\s*,\s*\d+)*)\])+')
+
+# Pattern to match raw reference_id leaks like `(reference_id 1)` or `reference_id 1`
+REFERENCE_ID_MARKER_PATTERN = re.compile(r'\s*\(?reference_id\s+\d+\)?', re.IGNORECASE)
 
 def deduplicate_references_section(text: str) -> str:
     """Remove duplicate reference entries from LLM-generated References section.
@@ -74,14 +79,43 @@ def deduplicate_references_section(text: str) -> str:
 
     return REFERENCES_SECTION_PATTERN.sub(dedupe_refs, text)
 
+def strip_embedded_references_section(text: str) -> str:
+    """Remove LLM-generated References sections from response prose.
 
-def _normalize_query_response_text(response_content: str) -> str:
-    """Apply non-stream response cleanup without rewriting reference IDs."""
+    The API returns structured references separately, so embedded reference prose only
+    adds verbosity and duplicates data already present in the response payload.
+    """
+    if not text:
+        return text
+    return REFERENCES_SECTION_PATTERN.sub('', text).strip()
+
+def strip_inline_citation_markers(text: str) -> str:
+    """Remove inline citation markers and raw reference_id leaks from response prose."""
+    if not text:
+        return text
+    text = INLINE_CITATION_MARKER_PATTERN.sub('', text)
+    text = REFERENCE_ID_MARKER_PATTERN.sub('', text)
+    text = re.sub(r'\s+([,.;:!?])', r'\1', text)
+    text = re.sub(r' +', ' ', text)
+    text = re.sub(r' *\n *', '\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+def _normalize_query_response_text(
+    response_content: str,
+    *,
+    keep_inline_citations: bool = False,
+) -> str:
+    """Apply non-stream response cleanup while optionally preserving inline IDs."""
     if not response_content:
         response_content = 'No relevant context found for the query.'
 
     response_content = strip_reasoning_tags(response_content)
-    return deduplicate_references_section(response_content)
+    response_content = deduplicate_references_section(response_content)
+    response_content = strip_embedded_references_section(response_content)
+    if not keep_inline_citations:
+        response_content = strip_inline_citation_markers(response_content)
+    return response_content
 
 
 def _attach_chunk_content(
@@ -826,7 +860,7 @@ def create_query_routes(
                 s3_client if request.include_references else None,
             )
 
-            response_content = _normalize_query_response_text(llm_response.get('content', ''))
+            response_content = _normalize_query_response_text(llm_response.get('content', ''), keep_inline_citations=requests_inline_citations(request.query, request.user_prompt))
 
             # Return response with or without references based on request
             if request.include_references:
@@ -1114,7 +1148,7 @@ def create_query_routes(
                             yield line
                 else:
                     # Non-streaming mode: send complete response in one message
-                    response_content = _normalize_query_response_text(llm_response.get('content', ''))
+                    response_content = _normalize_query_response_text(llm_response.get('content', ''), keep_inline_citations=requests_inline_citations(request.query, request.user_prompt))
 
                     # Create complete response object
                     complete_response: dict[str, Any] = {'response': response_content}

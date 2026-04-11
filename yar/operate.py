@@ -70,6 +70,7 @@ from yar.utils import (
     pick_by_weighted_polling,
     process_chunks_unified,
     remove_think_tags,
+    requests_inline_citations,
     safe_vdb_operation_with_exception,
     sanitize_and_normalize_extracted_text,
     save_to_cache,
@@ -3316,6 +3317,108 @@ def _enrich_local_keywords(
     return []
 
 
+def _normalize_response_type(response_type: str | None) -> str:
+    normalized = (response_type or '').strip()
+    return normalized or 'Multiple Paragraphs'
+
+
+def _format_additional_instructions(user_prompt: str | None) -> str:
+    normalized_prompt = (user_prompt or '').strip()
+    if not normalized_prompt:
+        return ''
+    return (
+        'Additional Instructions:\n'
+        'Follow any extra formatting or concision constraints below, but still answer every part of the question that the context supports.\n'
+        f'{normalized_prompt}\n\n'
+    )
+
+
+def _is_temporal_or_comparative_query(query: str) -> bool:
+    normalized_query = (query or '').casefold()
+    if not normalized_query:
+        return False
+    patterns = (
+        r'\bhow have\b',
+        r'\bhow has\b',
+        r'\bsince\b',
+        r'\bevolv(?:e|ed|ing)\b',
+        r'\bhistory\b',
+        r'\bhistorical\b',
+        r'\borigins?\b',
+        r'\bmodern\b',
+        r'\brevival\b',
+        r'\bcompare\b',
+        r'\bcomparison\b',
+        r'\bdifference\b',
+        r'\bchanged?\b',
+        r'\bover time\b',
+    )
+    return any(re.search(pattern, normalized_query) for pattern in patterns)
+
+
+def _requires_expanded_single_paragraph_budget(query: str) -> bool:
+    return _is_temporal_or_comparative_query(query)
+
+
+def _response_max_tokens(response_type: str, *, query: str = '') -> int:
+    normalized_type = response_type.casefold()
+    if normalized_type == 'single paragraph':
+        return 640 if _requires_expanded_single_paragraph_budget(query) else 260
+    response_type_caps = {
+        'short answer': 180,
+        'bullet points': 320,
+        'multiple paragraphs': 640,
+    }
+    return response_type_caps.get(normalized_type, 480)
+
+
+def _should_validate_inline_citations(
+    query: str,
+    user_prompt: str | None,
+    *,
+    system_prompt: str | None = None,
+) -> bool:
+    if requests_inline_citations(query, user_prompt):
+        return True
+    if not system_prompt:
+        return False
+    normalized_prompt = system_prompt.casefold()
+    positive_patterns = (
+        r'\bmust have (?:a|an)?\s*citation\b',
+        r'\b(?:include|add|provide)\s+inline citations\b',
+        r'\b(?:include|add)\s+a `### references` section\b',
+    )
+    negative_patterns = (
+        r'\bdo not\s+(?:include|add|provide)\s+inline citations\b',
+        r"\bdon't\s+(?:include|add|provide)\s+inline citations\b",
+        r'\bdo not\s+(?:include|add)\s+a `### references` section\b',
+        r"\bdon't\s+(?:include|add)\s+a `### references` section\b",
+    )
+    if any(re.search(pattern, normalized_prompt) for pattern in negative_patterns):
+        return False
+    return any(re.search(pattern, normalized_prompt) for pattern in positive_patterns)
+
+def _build_prompt_chunk_context(
+    chunks: list[dict[str, Any]],
+    reference_list: list[dict[str, Any]],
+    *,
+    include_reference_ids: bool,
+) -> tuple[list[dict[str, Any]], str, str]:
+    prompt_chunks: list[dict[str, Any]] = []
+    for chunk in chunks:
+        prompt_chunk = {'content': chunk['content']}
+        if include_reference_ids and chunk.get('reference_id'):
+            prompt_chunk['reference_id'] = chunk['reference_id']
+        prompt_chunks.append(prompt_chunk)
+
+    text_units_str = '\n'.join(json.dumps(text_unit, ensure_ascii=False) for text_unit in prompt_chunks)
+    reference_list_str = ''
+    if include_reference_ids:
+        reference_list_str = '\n'.join(
+            f'[{ref["reference_id"]}] {ref["file_path"]}' for ref in reference_list if ref['reference_id']
+        )
+    return prompt_chunks, text_units_str, reference_list_str
+
 async def kg_query(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -3415,8 +3518,9 @@ async def kg_query(
     if query_param.only_need_context and not query_param.only_need_prompt:
         return QueryResult(content=context_result.context, raw_data=context_result.raw_data)
 
-    user_prompt = f'\n\n{query_param.user_prompt}' if query_param.user_prompt else 'n/a'
-    response_type = query_param.response_type if query_param.response_type else 'Multiple Paragraphs'
+    user_prompt = _format_additional_instructions(query_param.user_prompt)
+    response_type = _normalize_response_type(query_param.response_type)
+    response_max_tokens = _response_max_tokens(response_type, query=query)
 
     # Build system prompt
     sys_prompt_temp = system_prompt if system_prompt else PROMPTS['rag_response']
@@ -3452,6 +3556,8 @@ async def kg_query(
         hl_keywords_str,
         ll_keywords_str,
         query_param.user_prompt or '',
+        sys_prompt_temp,
+        response_max_tokens,
         query_param.enable_rerank,
         query_param.enable_bm25_fusion,
         query_param.enable_hyde,
@@ -3473,6 +3579,7 @@ async def kg_query(
                 history_messages=query_param.conversation_history,
                 enable_cot=True,
                 stream=query_param.stream,
+                max_tokens=response_max_tokens,
             ),
         )
 
@@ -3518,9 +3625,9 @@ async def kg_query(
             # Strip Gemini-style role tags only at start of response
             response = re.sub(r'^(user|model)\s*', '', response, flags=re.IGNORECASE).strip()
 
-        # Validate and optionally fix citations
+        # Validate citations only when the prompt/response explicitly contains citation markup.
         available_refs = context_result.raw_data.get('data', {}).get('references', [])
-        if available_refs:
+        if available_refs and _should_validate_inline_citations(query, query_param.user_prompt, system_prompt=sys_prompt):
             response, was_fixed = validate_and_fix_citations(response, available_refs)
             if was_fixed:
                 logger.info(f'[kg_query] Auto-corrected citations for: {query[:50]}...')
@@ -3692,7 +3799,7 @@ async def _get_vector_context(
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Retrieve text chunks from the vector database without reranking or truncation.
 
@@ -3706,14 +3813,30 @@ async def _get_vector_context(
         query_embedding: Optional pre-computed query embedding to avoid redundant embedding calls
 
     Returns:
-        List of text chunks with metadata
+        List of text chunks with metadata and preserved retrieval scores
     """
+
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _normalize_retrieval_score(result: dict[str, Any]) -> float:
+        similarity_candidates = [
+            _safe_float(result.get('score')),
+            _safe_float(result.get('similarity')),
+            _safe_float(result.get('cosine_similarity')),
+        ]
+        if 'distance' in result:
+            distance = max(_safe_float(result.get('distance')), 0.0)
+            similarity_candidates.append(1.0 / (1.0 + distance))
+        return min(max(max(similarity_candidates), 0.0), 1.0)
+
     try:
-        # Use chunk_top_k if specified, otherwise fall back to top_k
         search_top_k = query_param.chunk_top_k or query_param.top_k
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
 
-        # Use BM25 fusion (vector + BM25 with RRF) if enabled and available
         try:
             hybrid_search = getattr(chunks_vdb, 'hybrid_search', None)
             if query_param.enable_bm25_fusion and hybrid_search is not None:
@@ -3734,18 +3857,21 @@ async def _get_vector_context(
             logger.info(f'Naive query: 0 chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})')
             return []
 
-        valid_chunks = []
-        for result in results:
-            if 'content' in result:
-                chunk_with_metadata = {
-                    'content': result['content'],
-                    'created_at': result.get('created_at', None),
-                    'file_path': result.get('file_path', 'unknown_source'),
-                    'source_type': result.get('source_type', 'vector'),  # Preserve source from hybrid search
-                    'chunk_id': result.get('id'),  # Add chunk_id for deduplication
-                    's3_key': result.get('s3_key'),  # Preserve S3 key for presigned URL generation
-                }
-                valid_chunks.append(chunk_with_metadata)
+        valid_chunks: list[dict[str, Any]] = []
+        for index, result in enumerate(results, start=1):
+            if 'content' not in result:
+                continue
+            chunk_with_metadata = {
+                'content': result['content'],
+                'created_at': result.get('created_at', None),
+                'file_path': result.get('file_path', 'unknown_source'),
+                'source_type': result.get('source_type', 'vector'),
+                'chunk_id': result.get('id'),
+                's3_key': result.get('s3_key'),
+                'retrieval_score': _normalize_retrieval_score(result),
+                'source_order': index,
+            }
+            valid_chunks.append(chunk_with_metadata)
 
         search_type = 'bm25_fusion' if query_param.enable_bm25_fusion else 'vector'
         logger.info(
@@ -3835,21 +3961,10 @@ async def _perform_kg_search(
 
     # Handle local and global modes
     if query_param.mode == 'local' and len(ll_keywords) > 0:
-        local_entities, local_relations = await _get_node_data(
-            ll_keywords,
-            knowledge_graph_inst,
-            entities_vdb,
-            query_param,
-            query_embedding=query_embedding if should_reuse_entity_embedding else None,
-        )
+        local_entities, local_relations = await _get_node_data(ll_keywords, knowledge_graph_inst, entities_vdb, query_param, query_embedding=query_embedding if should_reuse_entity_embedding else None, original_query=query)
 
     elif query_param.mode == 'global' and len(hl_keywords) > 0:
-        global_relations, global_entities = await _get_edge_data(
-            hl_keywords,
-            knowledge_graph_inst,
-            relationships_vdb,
-            query_param,
-        )
+        global_relations, global_entities = await _get_edge_data(hl_keywords, knowledge_graph_inst, relationships_vdb, query_param, query=query, excluded_terms=ll_search_terms)
 
     else:  # hybrid or mix mode
         if len(ll_keywords) > 0 and len(hl_keywords) > 0:
@@ -3857,36 +3972,14 @@ async def _perform_kg_search(
                 (local_entities, local_relations),
                 (global_relations, global_entities),
             ) = await asyncio.gather(
-                _get_node_data(
-                    ll_keywords,
-                    knowledge_graph_inst,
-                    entities_vdb,
-                    query_param,
-                    query_embedding=query_embedding if should_reuse_entity_embedding else None,
-                ),
-                _get_edge_data(
-                    hl_keywords,
-                    knowledge_graph_inst,
-                    relationships_vdb,
-                    query_param,
-                ),
+                _get_node_data(ll_keywords, knowledge_graph_inst, entities_vdb, query_param, query_embedding=query_embedding if should_reuse_entity_embedding else None, original_query=query),
+                _get_edge_data(hl_keywords, knowledge_graph_inst, relationships_vdb, query_param, query=query, excluded_terms=ll_search_terms),
             )
         else:
             if len(ll_keywords) > 0:
-                local_entities, local_relations = await _get_node_data(
-                    ll_keywords,
-                    knowledge_graph_inst,
-                    entities_vdb,
-                    query_param,
-                    query_embedding=query_embedding if should_reuse_entity_embedding else None,
-                )
+                local_entities, local_relations = await _get_node_data(ll_keywords, knowledge_graph_inst, entities_vdb, query_param, query_embedding=query_embedding if should_reuse_entity_embedding else None, original_query=query)
             if len(hl_keywords) > 0:
-                global_relations, global_entities = await _get_edge_data(
-                    hl_keywords,
-                    knowledge_graph_inst,
-                    relationships_vdb,
-                    query_param,
-                )
+                global_relations, global_entities = await _get_edge_data(hl_keywords, knowledge_graph_inst, relationships_vdb, query_param, query=query, excluded_terms=ll_search_terms)
 
         # Get vector chunks for mix mode
         if query_param.mode == 'mix' and chunks_vdb:
@@ -4201,107 +4294,285 @@ async def _apply_token_truncation(
 
 
 async def _merge_all_chunks(
-    filtered_entities: list[dict],
-    filtered_relations: list[dict],
-    vector_chunks: list[dict],
+    filtered_entities: list[dict[str, Any]],
+    filtered_relations: list[dict[str, Any]],
+    vector_chunks: list[dict[str, Any]],
     query: str = '',
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
     knowledge_graph_inst: BaseGraphStorage | None = None,
     text_chunks_db: BaseKVStorage | None = None,
     query_param: QueryParam | None = None,
     chunks_vdb: BaseVectorStorage | None = None,
-    chunk_tracking: dict | None = None,
+    chunk_tracking: dict[str, Any] | None = None,
     query_embedding: list[float] | None = None,
-) -> list[dict]:
-    """
-    Merge chunks from different sources: vector_chunks + entity_chunks + relation_chunks.
-    """
+) -> list[dict[str, Any]]:
+    """Merge chunks from different sources using query-intent-aware ordering."""
     if chunk_tracking is None:
         chunk_tracking = {}
 
-    # Get chunks from entities
-    entity_chunks: list[dict] = []
+    chunk_ranking_query = '\n'.join(part for part in [query, *(facet_terms or [])] if part)
+    entity_chunks: list[dict[str, Any]] = []
     if filtered_entities and text_chunks_db and query_param is not None and knowledge_graph_inst is not None:
         entity_chunks = await _find_related_text_unit_from_entities(
             filtered_entities,
             query_param,
             text_chunks_db,
             knowledge_graph_inst,
-            query,
+            chunk_ranking_query,
             chunks_vdb,
             chunk_tracking=chunk_tracking,
             query_embedding=query_embedding,
         )
 
-    # Get chunks from relations
-    relation_chunks: list[dict] = []
+    relation_chunks: list[dict[str, Any]] = []
     if filtered_relations and text_chunks_db and query_param is not None:
         relation_chunks = await _find_related_text_unit_from_relations(
             filtered_relations,
             query_param,
             text_chunks_db,
-            entity_chunks,  # For deduplication
-            query,
+            entity_chunks,
+            chunk_ranking_query,
             chunks_vdb,
             chunk_tracking=chunk_tracking,
             query_embedding=query_embedding,
         )
 
-    # Round-robin merge chunks from different sources with deduplication
-    merged_chunks = []
-    seen_chunk_ids = set()
-    max_len = max(len(vector_chunks), len(entity_chunks), len(relation_chunks))
     origin_len = len(vector_chunks) + len(entity_chunks) + len(relation_chunks)
+    if origin_len == 0:
+        return []
 
-    for i in range(max_len):
-        # Add from vector chunks first (Naive mode)
-        if i < len(vector_chunks):
-            chunk = vector_chunks[i]
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _saturating_score(value: Any, damping: float) -> float:
+        normalized_value = max(_safe_float(value), 0.0)
+        if normalized_value <= 0.0:
+            return 0.0
+        return normalized_value / (normalized_value + damping)
+
+    def _normalize_priority_terms(raw_terms: list[str] | None) -> list[str]:
+        normalized_terms: list[str] = []
+        seen_terms: set[str] = set()
+        for raw_term in raw_terms or []:
+            clean_term = _normalize_match_text(str(raw_term))
+            if len(clean_term) < 3 or clean_term in seen_terms:
+                continue
+            seen_terms.add(clean_term)
+            normalized_terms.append(clean_term)
+        return normalized_terms
+
+    normalized_topic_terms = _normalize_priority_terms(topic_terms)
+    normalized_facet_terms = _normalize_priority_terms(facet_terms)
+    query_terms = _extract_query_focus_terms(
+        query,
+        excluded_phrases=normalized_topic_terms,
+    )
+    if not query_terms:
+        query_terms = _tokenize_relevance_terms(query)
+    if not query_terms and not normalized_topic_terms and not normalized_facet_terms:
+        query_terms = _tokenize_relevance_terms(query)
+
+    temporal_query = _is_temporal_or_comparative_query(query)
+    normalized_top_k = max(
+        (
+            query_param.chunk_top_k
+            if query_param and query_param.chunk_top_k
+            else query_param.top_k if query_param else 10
+        ),
+        1,
+    )
+    source_code_map = {
+        'vector': 'C',
+        'bm25_fusion': 'C',
+        'entity': 'E',
+        'relationship': 'R',
+    }
+
+    aggregated: dict[str, dict[str, Any]] = {}
+    for source_chunks in (vector_chunks, entity_chunks, relation_chunks):
+        for chunk in source_chunks:
             chunk_id = chunk.get('chunk_id') or chunk.get('id')
-            if chunk_id and chunk_id not in seen_chunk_ids:
-                seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        'content': chunk['content'],
-                        'file_path': chunk.get('file_path', 'unknown_source'),
-                        'chunk_id': chunk_id,
-                        's3_key': chunk.get('s3_key'),
-                    }
-                )
+            if not chunk_id or 'content' not in chunk:
+                continue
+            source_type = str(chunk.get('source_type', 'vector'))
+            components = _chunk_relevance_components(
+                chunk,
+                query_terms,
+                topic_terms=normalized_topic_terms,
+                facet_terms=normalized_facet_terms,
+            )
+            entry = aggregated.setdefault(
+                chunk_id,
+                {
+                    'content': chunk['content'],
+                    'file_path': chunk.get('file_path', 'unknown_source'),
+                    'chunk_id': chunk_id,
+                    's3_key': chunk.get('s3_key'),
+                    'source_types': set(),
+                    'retrieval_score': 0.0,
+                    'occurrence_count': 0,
+                    'best_source_order': None,
+                    'heading_relevance': 0.0,
+                    'body_relevance': 0.0,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 0.0,
+                    'heading_facet_match': 0.0,
+                    'body_facet_match': 0.0,
+                    'heading_query_overlap': 0.0,
+                    'body_query_overlap': 0.0,
+                    'heading_temporal_signal': 0.0,
+                    'body_temporal_signal': 0.0,
+                },
+            )
+            entry['source_types'].add(source_type)
+            entry['retrieval_score'] = max(entry['retrieval_score'], min(max(_safe_float(chunk.get('retrieval_score')), 0.0), 1.0))
+            entry['occurrence_count'] = max(entry['occurrence_count'], _safe_int(chunk.get('occurrence_count'), 0))
+            source_order = _safe_int(chunk.get('source_order'), 0)
+            if source_order > 0 and (entry['best_source_order'] is None or source_order < entry['best_source_order']):
+                entry['best_source_order'] = source_order
+            for key, value in components.items():
+                entry[key] = max(_safe_float(entry.get(key), 0.0), value)
+            if entry['file_path'] == 'unknown_source' and chunk.get('file_path'):
+                entry['file_path'] = chunk.get('file_path', 'unknown_source')
+            if not entry['s3_key'] and chunk.get('s3_key'):
+                entry['s3_key'] = chunk.get('s3_key')
 
-        # Add from entity chunks (Local mode)
-        if i < len(entity_chunks):
-            chunk = entity_chunks[i]
-            chunk_id = chunk.get('chunk_id') or chunk.get('id')
-            if chunk_id and chunk_id not in seen_chunk_ids:
-                seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        'content': chunk['content'],
-                        'file_path': chunk.get('file_path', 'unknown_source'),
-                        'chunk_id': chunk_id,
-                        's3_key': chunk.get('s3_key'),
-                    }
-                )
+    def _merge_score(entry: dict[str, Any]) -> float:
+        source_count_score = len(entry['source_types']) / 3.0
+        occurrence_score = _saturating_score(entry['occurrence_count'], 2.0)
+        best_source_order = entry['best_source_order']
+        if isinstance(best_source_order, int) and best_source_order > 0:
+            order_score = max(normalized_top_k - min(best_source_order - 1, normalized_top_k - 1), 0) / normalized_top_k
+        else:
+            order_score = 0.0
+        facet_match = max(entry['heading_facet_match'], entry['body_facet_match'])
+        temporal_signal = max(entry.get('heading_temporal_signal', 0.0), entry.get('body_temporal_signal', 0.0)) if temporal_query else 0.0
+        return (
+            0.30 * entry['retrieval_score']
+            + 0.22 * entry['heading_relevance']
+            + 0.20 * entry['body_relevance']
+            + 0.10 * facet_match
+            + 0.10 * temporal_signal
+            + 0.05 * source_count_score
+            + 0.02 * occurrence_score
+            + 0.01 * order_score
+        )
 
-        # Add from relation chunks (Global mode)
-        if i < len(relation_chunks):
-            chunk = relation_chunks[i]
-            chunk_id = chunk.get('chunk_id') or chunk.get('id')
-            if chunk_id and chunk_id not in seen_chunk_ids:
-                seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        'content': chunk['content'],
-                        'file_path': chunk.get('file_path', 'unknown_source'),
-                        'chunk_id': chunk_id,
-                        's3_key': chunk.get('s3_key'),
-                    }
-                )
+    strong_heading_facet_files = {
+        entry['file_path']
+        for entry in aggregated.values()
+        if entry.get('file_path') and entry['heading_facet_match'] >= 0.8
+    }
+    strong_heading_facet_match_present = bool(strong_heading_facet_files)
 
-    logger.info(
-        f'Round-robin merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(merged_chunks)})'
+    sorted_entries = sorted(
+        aggregated.values(),
+        key=lambda entry: (
+            -_merge_score(entry),
+            -entry['heading_relevance'],
+            -entry['body_relevance'],
+            -entry['retrieval_score'],
+            -(len(entry['source_types'])),
+            entry['best_source_order'] if isinstance(entry['best_source_order'], int) else 10**9,
+        ),
     )
 
+    filtered_entries: list[dict[str, Any]] = []
+    filtered_out = 0
+    for entry in sorted_entries:
+        facet_match = max(entry['heading_facet_match'], entry['body_facet_match'])
+        temporal_signal = max(entry.get('heading_temporal_signal', 0.0), entry.get('body_temporal_signal', 0.0))
+        if (
+            strong_heading_facet_match_present
+            and entry['file_path'] in strong_heading_facet_files
+            and entry['heading_facet_match'] == 0.0
+            and entry['heading_query_overlap'] == 0.0
+            and entry['body_relevance'] < 0.55
+            and (not temporal_query or temporal_signal == 0.0)
+        ):
+            filtered_out += 1
+            continue
+        if (
+            strong_heading_facet_match_present
+            and facet_match < 0.34
+            and entry['heading_query_overlap'] == 0.0
+            and entry['body_relevance'] < 0.35
+            and (not temporal_query or temporal_signal == 0.0)
+        ):
+            filtered_out += 1
+            continue
+        if (
+            normalized_facet_terms
+            and entry['heading_relevance'] == 0.0
+            and facet_match < 0.34
+            and entry['body_query_overlap'] < 0.34
+            and entry['retrieval_score'] < 0.75
+            and len(entry['source_types']) <= 2
+        ):
+            filtered_out += 1
+            continue
+        if (
+            temporal_query
+            and temporal_signal == 0.0
+            and entry['body_relevance'] < 0.4
+            and entry['retrieval_score'] < 0.75
+            and len(entry['source_types']) == 1
+        ):
+            filtered_out += 1
+            continue
+        if (
+            query_terms
+            and entry['heading_relevance'] == 0.0
+            and entry['body_relevance'] == 0.0
+            and entry['retrieval_score'] < 0.65
+            and len(entry['source_types']) == 1
+        ):
+            filtered_out += 1
+            continue
+        filtered_entries.append(entry)
+
+    merged_chunks: list[dict[str, Any]] = []
+    for entry in filtered_entries:
+        merge_score = _merge_score(entry)
+        source_codes = ''.join(sorted(source_code_map.get(source_type, '?') for source_type in entry['source_types']))
+        chunk_tracking[entry['chunk_id']] = {
+            'source': source_codes,
+            'frequency': max(entry['occurrence_count'], 1 if 'C' in source_codes else 0),
+            'order': entry['best_source_order'] or 0,
+        }
+        merged_chunks.append(
+            {
+                'content': entry['content'],
+                'file_path': entry['file_path'],
+                'chunk_id': entry['chunk_id'],
+                's3_key': entry['s3_key'],
+                'source_type': '+'.join(sorted(entry['source_types'])),
+                'retrieval_score': entry['retrieval_score'],
+                'occurrence_count': entry['occurrence_count'],
+                'source_order': entry['best_source_order'],
+                'query_overlap': max(entry['heading_query_overlap'], entry['body_query_overlap']),
+                'priority_match': max(entry['heading_facet_match'], entry['body_facet_match']),
+                'heading_relevance': entry['heading_relevance'],
+                'body_relevance': entry['body_relevance'],
+                'merge_score': merge_score,
+            }
+        )
+
+    logger.info(
+        f'Score-aware merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(aggregated)})'
+    )
+    if filtered_out:
+        logger.info(f'Score-aware merge dropped {filtered_out} low-priority off-topic chunks')
     return merged_chunks
 
 
@@ -4348,8 +4619,8 @@ async def _build_context_str(
     sys_prompt_template = global_config.get('system_prompt_template', PROMPTS['rag_response'])
 
     kg_context_template = PROMPTS['kg_query_context']
-    user_prompt = query_param.user_prompt if query_param.user_prompt else ''
-    response_type = query_param.response_type if query_param.response_type else 'Multiple Paragraphs'
+    user_prompt = _format_additional_instructions(query_param.user_prompt)
+    response_type = _normalize_response_type(query_param.response_type)
 
     entities_str = '\n'.join(json.dumps(entity, ensure_ascii=False) for entity in entities_context)
     relations_str = '\n'.join(json.dumps(relation, ensure_ascii=False) for relation in relations_context)
@@ -4395,7 +4666,16 @@ async def _build_context_str(
 
     # Rebuild chunks_context with truncated chunks
     # The actual tokens may be slightly less than available_chunk_tokens due to deduplication logic
-    chunks_context = []
+    include_reference_ids = _should_validate_inline_citations(
+        query,
+        query_param.user_prompt,
+        system_prompt=sys_prompt_template,
+    )
+    chunks_context, text_units_str, reference_list_str = _build_prompt_chunk_context(
+        truncated_chunks,
+        reference_list,
+        include_reference_ids=include_reference_ids,
+    )
     for _i, chunk in enumerate(truncated_chunks):
         chunks_context.append(
             {
@@ -4573,6 +4853,8 @@ async def _build_query_context(
         filtered_relations=truncation_result['filtered_relations'],
         vector_chunks=search_result['vector_chunks'],
         query=query,
+        topic_terms=_split_keyword_terms(ll_keywords),
+        facet_terms=_split_keyword_terms(hl_keywords),
         knowledge_graph_inst=knowledge_graph_inst,
         text_chunks_db=text_chunks_db,
         query_param=query_param,
@@ -4650,6 +4932,250 @@ def _split_keyword_terms(query: str) -> list[str]:
     fallback_term = query.strip()
     return [fallback_term] if fallback_term else []
 
+_QUERY_RELEVANCE_STOPWORDS = {
+    'the',
+    'and',
+    'for',
+    'with',
+    'from',
+    'that',
+    'this',
+    'what',
+    'when',
+    'where',
+    'which',
+    'into',
+    'about',
+    'have',
+    'has',
+    'had',
+    'since',
+    'their',
+    'your',
+    'than',
+    'then',
+    'been',
+    'being',
+    'were',
+    'was',
+    'are',
+    'is',
+    'associated',
+    'regarding',
+    'over',
+    'under',
+    'after',
+    'before',
+    'during',
+    'long',
+    'term',
+}
+
+_TEMPORAL_PROGRESSION_TERMS = [
+    'ancient',
+    'modern',
+    'revival',
+    'revived',
+    'current',
+    'today',
+    'later',
+    'first',
+    'origins',
+    'history',
+    'historical',
+    'before',
+    'after',
+    'winter',
+    'paralympic',
+]
+
+def _normalize_match_text(text: str) -> str:
+    return re.sub(r'[^a-z0-9]+', ' ', text.casefold()).strip()
+
+
+def _extract_chunk_heading_text(chunk: dict[str, Any]) -> str:
+    content = str(chunk.get('content', ''))
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
+        return ''
+    heading_lines: list[str] = []
+    for line in lines:
+        if not re.match(r'^[#=\-*]{1,6}\s*.+', line):
+            continue
+        cleaned = re.sub(r'^[#=\-*\s>]+', '', line)
+        cleaned = re.sub(r'[#=\-*\s<]+$', '', cleaned).strip()
+        if cleaned:
+            heading_lines.append(cleaned)
+    if heading_lines:
+        return '\n'.join(dict.fromkeys(heading_lines))
+    first_line = lines[0]
+    stripped = re.sub(r'^[#=\-*\s>]+', '', first_line)
+    stripped = re.sub(r'[#=\-*\s<]+$', '', stripped).strip()
+    return stripped or first_line
+
+
+def _extract_chunk_body_text(chunk: dict[str, Any], *, limit: int = 800) -> str:
+    content = str(chunk.get('content', ''))
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
+        return ''
+    if len(lines) == 1:
+        return lines[0][:limit]
+    return '\n'.join(lines[1:])[:limit]
+
+
+def _best_phrase_overlap_score(text: str, phrases: list[str] | None) -> float:
+    if not phrases:
+        return 0.0
+    normalized_text = _normalize_match_text(text)
+    if not normalized_text:
+        return 0.0
+    text_terms = set(normalized_text.split())
+    best_score = 0.0
+    for phrase in phrases:
+        normalized_phrase = _normalize_match_text(str(phrase))
+        if not normalized_phrase:
+            continue
+        if normalized_phrase in normalized_text:
+            return 1.0
+        phrase_terms = set(normalized_phrase.split())
+        if not phrase_terms:
+            continue
+        best_score = max(best_score, len(text_terms & phrase_terms) / len(phrase_terms))
+    return best_score
+
+
+def _tokenize_relevance_terms(text: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r'[A-Za-z0-9][A-Za-z0-9_-]{2,}', text.casefold())
+        if term not in _QUERY_RELEVANCE_STOPWORDS
+    }
+
+
+def _extract_query_focus_terms(query: str, excluded_phrases: list[str] | tuple[str, ...] | set[str] | None = None) -> set[str]:
+    focus_terms = _tokenize_relevance_terms(query)
+    if not focus_terms:
+        return set()
+
+    excluded_terms: set[str] = set()
+    for phrase in excluded_phrases or []:
+        excluded_terms.update(_tokenize_relevance_terms(str(phrase)))
+    return focus_terms - excluded_terms
+
+
+def _text_focus_overlap(text: str, focus_terms: set[str]) -> float:
+    if not focus_terms:
+        return 0.0
+    text_terms = _tokenize_relevance_terms(text)
+    if not text_terms:
+        return 0.0
+    return len(focus_terms & text_terms) / len(focus_terms)
+
+
+def _rank_records_by_query_focus(
+    records: list[dict[str, Any]],
+    focus_terms: set[str],
+    sample_builder: Callable[[dict[str, Any]], str],
+    *,
+    drop_zero_overlap: bool = False,
+) -> list[dict[str, Any]]:
+    if not records or not focus_terms:
+        return records
+
+    scored_records: list[tuple[float, int, dict[str, Any]]] = []
+    positive_matches = 0
+    for index, record in enumerate(records):
+        overlap = _text_focus_overlap(sample_builder(record), focus_terms)
+        enriched_record = record.copy()
+        enriched_record['query_focus_overlap'] = overlap
+        scored_records.append((overlap, index, enriched_record))
+        if overlap > 0.0:
+            positive_matches += 1
+
+    if drop_zero_overlap and positive_matches:
+        scored_records = [item for item in scored_records if item[0] > 0.0]
+
+    return [item[2] for item in sorted(scored_records, key=lambda item: (-item[0], item[1]))]
+
+
+def _chunk_relevance_components(
+    chunk: dict[str, Any],
+    query_terms: set[str],
+    *,
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
+) -> dict[str, float]:
+    heading_text = _extract_chunk_heading_text(chunk)
+    body_text = _extract_chunk_body_text(chunk)
+    heading_topic_match = _best_phrase_overlap_score(heading_text, topic_terms)
+    body_topic_match = _best_phrase_overlap_score(body_text, topic_terms)
+    heading_facet_match = _best_phrase_overlap_score(heading_text, facet_terms)
+    body_facet_match = _best_phrase_overlap_score(body_text, facet_terms)
+    heading_query_overlap = _text_focus_overlap(heading_text, query_terms)
+    body_query_overlap = _text_focus_overlap(body_text, query_terms)
+    heading_temporal_signal = _best_phrase_overlap_score(heading_text, _TEMPORAL_PROGRESSION_TERMS)
+    body_temporal_signal = _best_phrase_overlap_score(body_text, _TEMPORAL_PROGRESSION_TERMS)
+    heading_relevance = max(heading_facet_match, heading_query_overlap, 0.20 * heading_topic_match)
+    body_relevance = max(body_facet_match, body_query_overlap, 0.10 * body_topic_match)
+    if facet_terms and heading_facet_match == 0.0 and heading_query_overlap == 0.0:
+        body_relevance *= 0.25
+    return {
+        'heading_topic_match': heading_topic_match,
+        'body_topic_match': body_topic_match,
+        'heading_facet_match': heading_facet_match,
+        'body_facet_match': body_facet_match,
+        'heading_query_overlap': heading_query_overlap,
+        'body_query_overlap': body_query_overlap,
+        'heading_temporal_signal': heading_temporal_signal,
+        'body_temporal_signal': body_temporal_signal,
+        'heading_relevance': heading_relevance,
+        'body_relevance': body_relevance,
+    }
+
+
+def _rank_chunks_by_query_intent(
+    chunks: list[dict[str, Any]],
+    query: str,
+    *,
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
+    drop_weak_matches: bool = False,
+) -> list[dict[str, Any]]:
+    if not chunks:
+        return chunks
+    excluded_phrases = [*(topic_terms or [])]
+    query_terms = _extract_query_focus_terms(query, excluded_phrases=excluded_phrases)
+    if not query_terms:
+        query_terms = _tokenize_relevance_terms(query)
+    if not query_terms and not topic_terms and not facet_terms:
+        return chunks
+
+    scored_chunks: list[tuple[float, int, dict[str, Any]]] = []
+    positive_matches = 0
+    for index, chunk in enumerate(chunks):
+        components = _chunk_relevance_components(
+            chunk,
+            query_terms,
+            topic_terms=topic_terms,
+            facet_terms=facet_terms,
+        )
+        relevance_score = 0.65 * components['heading_relevance'] + 0.35 * components['body_relevance']
+        enriched_chunk = chunk.copy()
+        enriched_chunk.update(components)
+        enriched_chunk['query_focus_overlap'] = max(
+            components['heading_query_overlap'],
+            components['body_query_overlap'],
+        )
+        enriched_chunk['intent_relevance'] = relevance_score
+        scored_chunks.append((relevance_score, index, enriched_chunk))
+        if relevance_score > 0.0:
+            positive_matches += 1
+
+    if drop_weak_matches and positive_matches:
+        scored_chunks = [item for item in scored_chunks if item[0] > 0.0]
+
+    return [item[2] for item in sorted(scored_chunks, key=lambda item: (-item[0], item[1]))]
 
 async def _query_entity_candidates(
     term: str,
@@ -4699,8 +5225,8 @@ async def _get_node_data(
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
- ):
-    # get similar entities
+    original_query: str | None = None,
+):
     logger.info(f'Query nodes: {query} (top_k:{query_param.top_k}, cosine:{entities_vdb.cosine_better_than_threshold})')
 
     search_terms = _split_keyword_terms(query)
@@ -4794,11 +5320,7 @@ async def _get_node_data(
         if n is not None
     ]
 
-    use_relations = await _find_most_related_edges_from_entities(
-        node_datas,
-        query_param,
-        knowledge_graph_inst,
-    )
+    use_relations = await _find_most_related_edges_from_entities(node_datas, query_param, knowledge_graph_inst, query=original_query or query)
 
     logger.info(f'Local query: {len(node_datas)} entites, {len(use_relations)} relations')
 
@@ -4811,6 +5333,7 @@ async def _find_most_related_edges_from_entities(
     node_datas: list[dict],
     query_param: QueryParam,
     knowledge_graph_inst: BaseGraphStorage,
+    query: str | None = None,
 ):
     node_names = [dp['entity_name'] for dp in node_datas]
     batch_edges_dict = await knowledge_graph_inst.get_nodes_edges_batch(node_names)
@@ -4861,6 +5384,22 @@ async def _find_most_related_edges_from_entities(
             all_edges_data.append(combined)
 
     all_edges_data = sorted(all_edges_data, key=lambda x: (x['rank'], x['weight']), reverse=True)
+    focus_terms = _extract_query_focus_terms(query or '', excluded_phrases=node_names)
+    if focus_terms:
+        all_edges_data = _rank_records_by_query_focus(
+            all_edges_data,
+            focus_terms,
+            sample_builder=lambda edge: ' '.join(
+                str(part)
+                for part in (
+                    edge.get('src_tgt', ('', ''))[0],
+                    edge.get('src_tgt', ('', ''))[1],
+                    edge.get('description', ''),
+                    edge.get('keywords', ''),
+                )
+            ),
+            drop_zero_overlap=True,
+        )
 
     return all_edges_data
 
@@ -4997,15 +5536,24 @@ async def _find_related_text_unit_from_entities(
             chunk_data_copy = chunk_data.copy()
             chunk_data_copy['source_type'] = 'entity'
             chunk_data_copy['chunk_id'] = chunk_id  # Add chunk_id for deduplication
+            chunk_data_copy['occurrence_count'] = chunk_occurrence_count.get(chunk_id, 1)
+            chunk_data_copy['source_order'] = i + 1
             result_chunks.append(chunk_data_copy)
 
-            # Update chunk tracking if provided
-            if chunk_tracking is not None:
-                chunk_tracking[chunk_id] = {
-                    'source': 'E',
-                    'frequency': chunk_occurrence_count.get(chunk_id, 1),
-                    'order': i + 1,  # 1-based order in final entity-related results
-                }
+    result_chunks = _rank_chunks_by_query_intent(
+        result_chunks,
+        query or '',
+        drop_weak_matches=True,
+    )
+
+    for index, chunk in enumerate(result_chunks, start=1):
+        chunk['source_order'] = index
+        if chunk_tracking is not None:
+            chunk_tracking[chunk['chunk_id']] = {
+                'source': 'E',
+                'frequency': chunk.get('occurrence_count', 1),
+                'order': index,
+            }
 
     return result_chunks
 
@@ -5015,6 +5563,8 @@ async def _get_edge_data(
     knowledge_graph_inst: BaseGraphStorage,
     relationships_vdb: BaseVectorStorage,
     query_param: QueryParam,
+    query: str | None = None,
+    excluded_terms: list[str] | None = None,
 ):
     logger.info(
         f'Query edges: {keywords} (top_k:{query_param.top_k}, cosine:{relationships_vdb.cosine_better_than_threshold})'
@@ -5053,7 +5603,23 @@ async def _get_edge_data(
             }
             edge_datas.append(combined)
 
-    # Relations maintain vector search order (sorted by similarity)
+    focus_terms = _extract_query_focus_terms(query or '', excluded_phrases=excluded_terms)
+    if focus_terms:
+        edge_datas = _rank_records_by_query_focus(
+            edge_datas,
+            focus_terms,
+            sample_builder=lambda edge: ' '.join(
+                str(part)
+                for part in (
+                    edge.get('src_id', ''),
+                    edge.get('tgt_id', ''),
+                    edge.get('description', ''),
+                    edge.get('keywords', ''),
+                )
+            ),
+        )
+
+    # Relations maintain vector search order, optionally refined by query focus.
 
     use_entities = await _find_most_related_entities_from_relationships(
         edge_datas,
@@ -5269,6 +5835,8 @@ async def _find_related_text_unit_from_relations(
             chunk_data_copy = chunk_data.copy()
             chunk_data_copy['source_type'] = 'relationship'
             chunk_data_copy['chunk_id'] = chunk_id  # Add chunk_id for deduplication
+            chunk_data_copy['occurrence_count'] = chunk_occurrence_count.get(chunk_id, 1)
+            chunk_data_copy['source_order'] = i + 1
             result_chunks.append(chunk_data_copy)
 
             # Update chunk tracking if provided
@@ -5278,6 +5846,21 @@ async def _find_related_text_unit_from_relations(
                     'frequency': chunk_occurrence_count.get(chunk_id, 1),
                     'order': i + 1,  # 1-based order in final relation-related results
                 }
+
+    result_chunks = _rank_chunks_by_query_intent(
+        result_chunks,
+        query or '',
+        drop_weak_matches=True,
+    )
+
+    for index, chunk in enumerate(result_chunks, start=1):
+        chunk['source_order'] = index
+        if chunk_tracking is not None:
+            chunk_tracking[chunk['chunk_id']] = {
+                'source': 'R',
+                'frequency': chunk.get('occurrence_count', 1),
+                'order': index,
+            }
 
     return result_chunks
 
@@ -5364,8 +5947,9 @@ async def naive_query(
     )
 
     # Calculate system prompt template tokens (excluding content_data)
-    user_prompt = f'\n\n{query_param.user_prompt}' if query_param.user_prompt else 'n/a'
-    response_type = query_param.response_type if query_param.response_type else 'Multiple Paragraphs'
+    user_prompt = _format_additional_instructions(query_param.user_prompt)
+    response_type = _normalize_response_type(query_param.response_type)
+    response_max_tokens = _response_max_tokens(response_type, query=query)
 
     # Use the provided system prompt or default
     sys_prompt_template = system_prompt if system_prompt else PROMPTS['naive_rag_response']
@@ -5423,19 +6007,16 @@ async def naive_query(
         'final_chunks_count': len(processed_chunks_with_ref_ids),
     }
 
-    # Build chunks_context from processed chunks with reference IDs
-    chunks_context = []
-    for _i, chunk in enumerate(processed_chunks_with_ref_ids):
-        chunks_context.append(
-            {
-                'reference_id': chunk['reference_id'],
-                'content': chunk['content'],
-            }
-        )
-
-    text_units_str = '\n'.join(json.dumps(text_unit, ensure_ascii=False) for text_unit in chunks_context)
-    reference_list_str = '\n'.join(
-        f'[{ref["reference_id"]}] {ref["file_path"]}' for ref in reference_list if ref['reference_id']
+    # Build prompt-facing chunk context, omitting raw reference ids unless citations are requested.
+    include_reference_ids = _should_validate_inline_citations(
+        query,
+        query_param.user_prompt,
+        system_prompt=sys_prompt_template,
+    )
+    _, text_units_str, reference_list_str = _build_prompt_chunk_context(
+        processed_chunks_with_ref_ids,
+        reference_list,
+        include_reference_ids=include_reference_ids,
     )
 
     naive_context_template = PROMPTS['naive_query_context']
@@ -5448,7 +6029,7 @@ async def naive_query(
         return QueryResult(content=context_content, raw_data=raw_data)
 
     sys_prompt = sys_prompt_template.format(
-        response_type=query_param.response_type,
+        response_type=response_type,
         user_prompt=user_prompt,
         content_data=context_content,
     )
@@ -5470,12 +6051,16 @@ async def naive_query(
         query_param.max_relation_tokens,
         query_param.max_total_tokens,
         query_param.user_prompt or '',
+        sys_prompt_template,
+        response_max_tokens,
         query_param.enable_rerank,
         query_param.enable_bm25_fusion,
         query_param.enable_hyde,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
+
     cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
+
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
         logger.info(' == LLM cache == Query cache hit, using cached response as query result')
@@ -5489,6 +6074,7 @@ async def naive_query(
                 history_messages=query_param.conversation_history,
                 enable_cot=True,
                 stream=query_param.stream,
+                max_tokens=response_max_tokens,
             ),
         )
 
@@ -5533,9 +6119,8 @@ async def naive_query(
             # Strip Gemini-style role tags only at start of response
             response = re.sub(r'^(user|model)\s*', '', response, flags=re.IGNORECASE).strip()
 
-        # Validate and optionally fix citations
         available_refs = raw_data.get('data', {}).get('references', [])
-        if available_refs:
+        if available_refs and _should_validate_inline_citations(query, query_param.user_prompt, system_prompt=sys_prompt):
             response, was_fixed = validate_and_fix_citations(response, available_refs)
             if was_fixed:
                 logger.info(f'[naive_query] Auto-corrected citations for: {query[:50]}...')
