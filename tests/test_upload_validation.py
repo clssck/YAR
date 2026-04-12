@@ -5,12 +5,17 @@ memory exhaustion from oversized file uploads.
 """
 
 import io
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Request, UploadFile
 
-from yar.api.utils_api import validate_text_payload_size, validate_upload_size
+from yar.api.utils_api import (
+    get_workspace_from_request,
+    validate_text_payload_size,
+    validate_upload_size,
+)
 
 
 class MockUploadFile:
@@ -28,6 +33,11 @@ class MockUploadFile:
         if size == -1:
             return self._stream.read()
         return self._stream.read(size)
+
+
+def make_request(headers: dict[str, str]) -> Request:
+    """Build a minimal request object for workspace header tests."""
+    return cast(Request, SimpleNamespace(headers=headers))
 
 
 @pytest.mark.offline
@@ -177,3 +187,21 @@ class TestValidateTextPayloadSize:
             validate_text_payload_size([text], 1)
 
         assert exc_info.value.status_code == 413
+
+
+@pytest.mark.offline
+class TestGetWorkspaceFromRequest:
+    """Test cases for get_workspace_from_request function."""
+
+    def test_returns_none_for_missing_or_blank_header(self):
+        assert get_workspace_from_request(make_request({})) is None
+        assert get_workspace_from_request(make_request({'YAR-WORKSPACE': '   '})) is None
+
+    def test_returns_validated_workspace_name(self):
+        request = make_request({'YAR-WORKSPACE': '  my_workspace  '})
+        assert get_workspace_from_request(request) == 'my_workspace'
+
+    def test_invalid_workspace_raises_value_error(self):
+        request = make_request({'YAR-WORKSPACE': 'my-workspace'})
+        with pytest.raises(ValueError, match='Invalid workspace name'):
+            get_workspace_from_request(request)

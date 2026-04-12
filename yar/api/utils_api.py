@@ -22,6 +22,7 @@ from yar import __version__ as core_version
 from yar.api import __api_version__ as api_version
 from yar.constants import DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE
 from yar.utils import logger
+from yar.validators import validate_workspace_name
 
 from .auth import auth_handler
 from .config import get_env_value
@@ -31,19 +32,25 @@ T = TypeVar('T')
 
 
 def get_workspace_from_request(request: Request) -> str | None:
-    """Extract workspace from request header.
+    """Extract and validate workspace from request header.
 
-    Reads the 'YAR-WORKSPACE' header to determine which workspace
-    to use for the request. Returns None if header is not present or empty.
+    Reads the 'YAR-WORKSPACE' header and validates it against allowed
+    characters (alphanumeric + underscore) to prevent injection attacks.
+    Returns None if header is not present or empty.
 
     Args:
         request: FastAPI Request object
 
     Returns:
-        Workspace name if provided, None otherwise
+        Validated workspace name if provided, None otherwise
+
+    Raises:
+        ValueError: If workspace name contains invalid characters
     """
     workspace = request.headers.get('YAR-WORKSPACE', '').strip()
-    return workspace if workspace else None
+    if not workspace:
+        return None
+    return validate_workspace_name(workspace)
 
 
 class QueryBuilder:
