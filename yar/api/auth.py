@@ -29,7 +29,13 @@ class AuthHandler:
             logger.warning('TOKEN_SECRET not set — using auto-generated secret (tokens will not survive restart)')
             import secrets
             self.secret = secrets.token_urlsafe(32)
-        self.algorithm = get_env_value('JWT_ALGORITHM', 'HS256')
+        algorithm = get_env_value('JWT_ALGORITHM', 'HS256')
+        if not algorithm or algorithm.lower() == 'none':
+            raise ValueError(
+                "JWT_ALGORITHM must be set to a secure algorithm (e.g. HS256). "
+                "The 'none' algorithm is not permitted."
+            )
+        self.algorithm = algorithm
         self.expire_hours = get_env_value('TOKEN_EXPIRE_HOURS', 48, int)
         self.guest_expire_hours = get_env_value('GUEST_TOKEN_EXPIRE_HOURS', 24, int)
         self.accounts = {}
@@ -85,6 +91,12 @@ class AuthHandler:
             HTTPException: If token is invalid or expired
         """
         try:
+            # Defense-in-depth: reject 'none' algorithm even if __init__ was bypassed
+            if self.algorithm.lower() == 'none':
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail='Insecure JWT algorithm configuration',
+                )
             payload = jwt.decode(token, self.secret, algorithms=[self.algorithm])
             expire_timestamp = payload['exp']
             expire_time = datetime.fromtimestamp(expire_timestamp, timezone.utc)
