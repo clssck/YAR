@@ -769,6 +769,39 @@ class TestContentSummarization:
         result = remove_think_tags(text)
         assert result == 'Output'
 
+    def test_remove_think_tags_mid_text(self):
+        """Bug: <think> tags in mid-text must not truncate surrounding content."""
+        text = 'Answer about xxx<think>reasoning</think>xxx more content'
+        result = remove_think_tags(text)
+        assert result == 'Answer about xxxxxx more content'
+
+
+    def test_remove_think_tags_multiple_blocks(self):
+        """Multiple <think> blocks are all removed."""
+        text = '<think>r1</think>Answer<think>r2</think> more'
+        result = remove_think_tags(text)
+        assert result == 'Answer more'
+
+
+    def test_remove_think_tags_orphan_with_angle_brackets(self):
+        """Orphaned </think> prefix containing '<' chars is still removed."""
+        text = '2 < 3 reasoning</think>final answer'
+        result = remove_think_tags(text)
+        assert result == 'final answer'
+
+
+    def test_remove_think_tags_empty_block(self):
+        """Empty think block is removed."""
+        text = '<think></think>Content.'
+        result = remove_think_tags(text)
+        assert result == 'Content.'
+
+
+    def test_remove_think_tags_only_think(self):
+        """Text that is only a think block returns empty string."""
+        text = '<think>only reasoning</think>'
+        result = remove_think_tags(text)
+        assert result == ''
 
 class TestTupleDelimiterFix:
     """Tests for tuple delimiter corruption fixing."""
