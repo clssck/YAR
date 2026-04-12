@@ -1660,7 +1660,7 @@ class YAR:
                                     logger.info(
                                         f'Trimming pipeline history from {len(pipeline_status["history_messages"])} to 5000 messages'
                                     )
-                                    pipeline_status['history_messages'] = pipeline_status['history_messages'][-5000:]
+                                    del pipeline_status['history_messages'][:-5000]
 
                             # Get document content from full_docs
                             content_data = await self.full_docs.get_by_id(doc_id)
