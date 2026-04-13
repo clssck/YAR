@@ -21,8 +21,17 @@ load_dotenv(REPO_ROOT / '.env', override=False)
 
 DEFAULT_YAR_API_URL = os.getenv('YAR_API_URL', 'http://localhost:9621')
 DEFAULT_YAR_API_KEY = os.getenv('YAR_API_KEY', '')
-DEFAULT_JUDGE_API_BASE = os.getenv('EVAL_LLM_BINDING_HOST') or os.getenv('LLM_BINDING_HOST') or 'https://openrouter.ai/api/v1'
-DEFAULT_JUDGE_API_KEY = os.getenv('EVAL_LLM_BINDING_API_KEY') or os.getenv('LLM_BINDING_API_KEY') or ''
+DEFAULT_JUDGE_API_BASE = (
+	os.getenv('EVAL_LLM_BINDING_HOST')
+	or os.getenv('LLM_BINDING_HOST')
+	or 'http://localhost:4000'
+)
+DEFAULT_JUDGE_API_KEY = (
+	os.getenv('EVAL_LLM_BINDING_API_KEY')
+	or os.getenv('LLM_BINDING_API_KEY')
+	or os.getenv('LITELLM_MASTER_KEY')
+	or ''
+)
 
 
 @dataclass(frozen=True)
