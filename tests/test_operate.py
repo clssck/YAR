@@ -21,12 +21,15 @@ import pytest
 from yar.base import QueryContextResult, QueryParam, TextChunkSchema
 from yar.constants import DEFAULT_MAX_FILE_PATHS, DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
 from yar.operate import (
+    _build_context_str,
+    _build_prompt_chunk_context,
     _build_query_context,
     _enrich_local_keywords,
     _find_most_related_edges_from_entities,
     _get_node_data,
     _merge_all_chunks,
     _perform_kg_search,
+    _prepare_visible_reference_payload,
     _resolve_max_file_paths,
     _should_validate_inline_citations,
     _split_keyword_terms,
@@ -2011,3 +2014,187 @@ class TestResponseQualityControls:
 
         assert [chunk['chunk_id'] for chunk in merged] == ['long-term-complications']
         assert merged[0]['heading_relevance'] > 0.0
+
+    @pytest.mark.asyncio
+    async def test_build_context_str_dedupes_visible_alias_references_without_changing_prompt_chunks(self):
+        query_param = QueryParam(mode='mix')
+        global_config = {'tokenizer': Mock(encode=Mock(return_value=[0] * 10))}
+        alias_chunks = [
+            {
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 's3://bucket/docs/alpha.md',
+                's3_key': 'docs/alpha.md',
+                'chunk_id': 'alpha-1',
+            },
+            {
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 'docs/alpha.md',
+                's3_key': 'docs/alpha.md',
+                'chunk_id': 'alpha-1',
+            },
+        ]
+
+        with (
+            patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=alias_chunks)),
+            patch('yar.operate._build_prompt_chunk_context', wraps=_build_prompt_chunk_context) as prompt_context_mock,
+        ):
+            _, raw_data = await _build_context_str(
+                entities_context=[],
+                relations_context=[],
+                merged_chunks=alias_chunks,
+                query='What changed?',
+                query_param=query_param,
+                global_config=global_config,
+            )
+
+        assert len(prompt_context_mock.call_args.args[0]) == 2
+        assert len(prompt_context_mock.call_args.args[1]) == 2
+        assert raw_data['data']['references'] == [
+            {
+                'reference_id': '1',
+                'file_path': 'docs/alpha.md',
+                'document_title': 'alpha.md',
+                's3_key': 'docs/alpha.md',
+                'excerpt': 'Alpha therapy reduces complications in carefully selected patients.',
+            }
+        ]
+        assert raw_data['data']['chunks'] == [
+            {
+                'reference_id': '1',
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 'docs/alpha.md',
+                'chunk_id': 'alpha-1',
+            }
+        ]
+
+    def test_prepare_visible_reference_payload_drops_weak_off_topic_doc_when_on_topic_doc_exists(self):
+        visible_references, visible_chunks = _prepare_visible_reference_payload(
+            [
+                {
+                    'reference_id': '1',
+                    'content': '== Signs and symptoms ==\n=== Long-term complications ===\nDiabetes can cause retinopathy, nephropathy, neuropathy, and diabetic foot problems.',
+                    'file_path': 'medical_diabetes.md',
+                    'chunk_id': 'diabetes-1',
+                    'intent_relevance': 0.82,
+                    'query_focus_overlap': 0.50,
+                    'heading_topic_match': 1.0,
+                    'body_topic_match': 1.0,
+                    'heading_facet_match': 1.0,
+                    'body_facet_match': 1.0,
+                },
+                {
+                    'reference_id': '2',
+                    'content': '=== Complications ===\nCOVID-19 complications may include pneumonia and multi-organ failure.',
+                    'file_path': 'medical_covid-19.md',
+                    'chunk_id': 'covid-1',
+                    'intent_relevance': 0.18,
+                    'query_focus_overlap': 0.20,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 0.0,
+                    'heading_facet_match': 0.0,
+                    'body_facet_match': 0.0,
+                },
+            ],
+            [
+                {'reference_id': '1', 'file_path': 'medical_diabetes.md'},
+                {'reference_id': '2', 'file_path': 'medical_covid-19.md'},
+            ],
+            'What are the long-term complications associated with diabetes?',
+            include_reference_ids=False,
+        )
+
+        assert [reference['file_path'] for reference in visible_references] == ['medical_diabetes.md']
+        assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1']
+
+    def test_prepare_visible_reference_payload_uses_best_chunk_per_document_group(self):
+        visible_references, visible_chunks = _prepare_visible_reference_payload(
+            [
+                {
+                    'reference_id': '1',
+                    'content': '=== Long-term complications ===\nDiabetes can cause retinopathy, nephropathy, neuropathy, and diabetic foot problems.',
+                    'file_path': 'medical_diabetes.md',
+                    'chunk_id': 'diabetes-1',
+                    'intent_relevance': 0.92,
+                    'query_focus_overlap': 1.0,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 1.0,
+                    'heading_facet_match': 1.0,
+                    'body_facet_match': 1.0,
+                },
+                {
+                    'reference_id': '2',
+                    'content': '=== Complications ===\nCOVID-19 complications may include pneumonia and multi-organ failure.',
+                    'file_path': 'medical_covid-19.md',
+                    'chunk_id': 'covid-top',
+                    'intent_relevance': 0.50,
+                    'query_focus_overlap': 0.50,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 0.0,
+                    'heading_facet_match': 0.333,
+                    'body_facet_match': 0.333,
+                },
+                {
+                    'reference_id': '2',
+                    'content': '=== Comorbidities ===\nPeople hospitalised with COVID-19 often have diabetes among other pre-existing conditions.',
+                    'file_path': 'medical_covid-19.md',
+                    'chunk_id': 'covid-lower',
+                    'intent_relevance': 0.08,
+                    'query_focus_overlap': 0.0,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 1.0,
+                    'heading_facet_match': 0.0,
+                    'body_facet_match': 0.0,
+                },
+            ],
+            [
+                {'reference_id': '1', 'file_path': 'medical_diabetes.md'},
+                {'reference_id': '2', 'file_path': 'medical_covid-19.md'},
+            ],
+            'What are the long-term complications associated with diabetes?',
+            include_reference_ids=False,
+            topic_terms=['diabetes'],
+            facet_terms=['long-term complications', 'chronic conditions', 'medical outcomes'],
+        )
+
+        assert [reference['file_path'] for reference in visible_references] == ['medical_diabetes.md']
+        assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1']
+
+    @pytest.mark.asyncio
+    async def test_build_context_str_keeps_full_raw_references_for_explicit_citation_requests(self):
+        query_param = QueryParam(mode='mix')
+        global_config = {'tokenizer': Mock(encode=Mock(return_value=[0] * 10))}
+        alias_chunks = [
+            {
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 's3://bucket/docs/alpha.md',
+                's3_key': 'docs/alpha.md',
+                'chunk_id': 'alpha-1',
+            },
+            {
+                'content': 'Alpha therapy reduces complications in carefully selected patients.',
+                'file_path': 'docs/alpha.md',
+                's3_key': 'docs/alpha.md',
+                'chunk_id': 'alpha-1',
+            },
+        ]
+
+        with (
+            patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=alias_chunks)),
+            patch('yar.operate._build_prompt_chunk_context', wraps=_build_prompt_chunk_context) as prompt_context_mock,
+        ):
+            _, raw_data = await _build_context_str(
+                entities_context=[],
+                relations_context=[],
+                merged_chunks=alias_chunks,
+                query='Please cite sources inline for this answer.',
+                query_param=query_param,
+                global_config=global_config,
+            )
+
+        assert len(prompt_context_mock.call_args.args[0]) == 2
+        assert len(prompt_context_mock.call_args.args[1]) == 2
+        assert [reference['file_path'] for reference in raw_data['data']['references']] == [
+            's3://bucket/docs/alpha.md',
+            'docs/alpha.md',
+        ]
+        assert len(raw_data['data']['chunks']) == 2

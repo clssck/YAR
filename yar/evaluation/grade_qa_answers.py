@@ -14,6 +14,7 @@ This defaults to:
 
 import argparse
 import csv
+import re
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,8 @@ KNOWN_PROVIDER_PREFIXES = (
 	'gemini/',
 	'ollama/',
 )
+
+INLINE_CITATION_PATTERN = re.compile(r'(?<![\w`])\[\d+\](?!\w)')
 
 SYSTEM_PROMPT = """You are grading a single QA evaluation row.
 
@@ -94,6 +97,11 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument('--yar-api-key', type=str, default=DEFAULT_YAR_API_KEY, help='Optional YAR API key for /health lookup')
 	parser.add_argument('--temperature', type=float, default=0.0, help='Judge sampling temperature')
 	parser.add_argument('--max-tokens', type=int, default=300, help='Judge max tokens')
+	parser.add_argument(
+		'--allow-inline-citations',
+		action='store_true',
+		help='Allow inline citation markers like [1] in actualResponse instead of failing before judge evaluation.',
+	)
 	return parser.parse_args()
 
 
@@ -115,6 +123,18 @@ def build_user_prompt(row: dict[str, str]) -> str:
 		f"ACTUAL RESPONSE:\n{row['actualResponse']}"
 	)
 
+def has_inline_citation_markers(text: str) -> bool:
+	return bool(INLINE_CITATION_PATTERN.search(text))
+
+
+def format_inline_citation_failure() -> dict[str, str]:
+	return {
+		'generalQuality': 'Fail',
+		'seemsRelevant': 'Fail',
+		'seemsComplete': 'Skipped',
+		'basedOnKnowledgeSources': 'Skipped',
+		'reason': 'Formatting violation: default answers must not include inline citation markers like [1].',
+	}
 
 def normalize_grade(payload: dict[str, Any]) -> dict[str, str]:
 	general_quality = str(payload.get('generalQuality', 'Fail'))
@@ -167,7 +187,11 @@ def grade_row(
 	judge_api_key: str,
 	temperature: float,
 	max_tokens: int,
+	allow_inline_citations: bool = False,
 ) -> dict[str, str]:
+	if not allow_inline_citations and has_inline_citation_markers(row.get('actualResponse', '')):
+		return format_inline_citation_failure()
+
 	model_name = normalize_litellm_model_name(judge_model, judge_api_base)
 	response = completion(
 		model=model_name,
@@ -228,6 +252,7 @@ def main() -> None:
 				judge_api_key=args.judge_api_key,
 				temperature=args.temperature,
 				max_tokens=args.max_tokens,
+				allow_inline_citations=args.allow_inline_citations,
 			)
 		except Exception as exc:
 			grades = {

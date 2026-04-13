@@ -4586,6 +4586,8 @@ async def _build_context_str(
     chunk_tracking: dict | None = None,
     entity_id_to_original: dict | None = None,
     relation_id_to_original: dict | None = None,
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Build the final LLM context string with token processing.
@@ -4732,15 +4734,24 @@ async def _build_context_str(
         reference_list_str=reference_list_str,
     )
 
+    visible_reference_list, visible_chunks = _prepare_visible_reference_payload(
+        truncated_chunks,
+        reference_list,
+        query,
+        include_reference_ids=include_reference_ids,
+        topic_terms=topic_terms,
+        facet_terms=facet_terms,
+    )
+
     # Always return both context and complete data structure (unified approach)
     logger.debug(
-        f'[_build_context_str] Converting to user format: {len(entities_context)} entities, {len(relations_context)} relations, {len(truncated_chunks)} chunks'
+        f'[_build_context_str] Converting to user format: {len(entities_context)} entities, {len(relations_context)} relations, {len(visible_chunks)} chunks'
     )
     final_data = convert_to_user_format(
         entities_context,
         relations_context,
-        truncated_chunks,
-        reference_list,
+        visible_chunks,
+        visible_reference_list,
         query_param.mode,
         entity_id_to_original,
         relation_id_to_original,
@@ -4868,17 +4879,7 @@ async def _build_query_context(
 
     # Stage 4: Build final LLM context with dynamic token processing
     # _build_context_str now always returns tuple[str, dict]
-    context, raw_data = await _build_context_str(
-        entities_context=truncation_result['entities_context'],
-        relations_context=truncation_result['relations_context'],
-        merged_chunks=merged_chunks,
-        query=query,
-        query_param=query_param,
-        global_config=cast(GlobalConfig, text_chunks_db.global_config),
-        chunk_tracking=search_result['chunk_tracking'],
-        entity_id_to_original=truncation_result['entity_id_to_original'],
-        relation_id_to_original=truncation_result['relation_id_to_original'],
-    )
+    context, raw_data = await _build_context_str(entities_context=truncation_result['entities_context'], relations_context=truncation_result['relations_context'], merged_chunks=merged_chunks, query=query, query_param=query_param, global_config=cast(GlobalConfig, text_chunks_db.global_config), chunk_tracking=search_result['chunk_tracking'], entity_id_to_original=truncation_result['entity_id_to_original'], relation_id_to_original=truncation_result['relation_id_to_original'], topic_terms=_split_keyword_terms(ll_keywords), facet_terms=_split_keyword_terms(hl_keywords))
 
     # Convert keywords strings to lists and add complete metadata to raw_data
     hl_keywords_list = hl_keywords.split(', ') if hl_keywords else []
@@ -5176,6 +5177,177 @@ def _rank_chunks_by_query_intent(
         scored_chunks = [item for item in scored_chunks if item[0] > 0.0]
 
     return [item[2] for item in sorted(scored_chunks, key=lambda item: (-item[0], item[1]))]
+def _visible_reference_group_key(chunk: dict[str, Any]) -> str:
+    s3_key = str(chunk.get('s3_key') or '').strip()
+    if s3_key:
+        return f's3:{s3_key}'
+    file_path = str(chunk.get('file_path') or '').strip()
+    if file_path and file_path != 'unknown_source':
+        return f'path:{file_path}'
+    chunk_id = str(chunk.get('chunk_id') or '').strip()
+    if chunk_id:
+        return f'chunk:{chunk_id}'
+    return f"content:{str(chunk.get('content') or '').strip()}"
+
+
+def _preferred_visible_file_path(chunks: list[dict[str, Any]]) -> str:
+    for chunk in chunks:
+        file_path = str(chunk.get('file_path') or '').strip()
+        if file_path and file_path != 'unknown_source' and not file_path.startswith('s3://'):
+            return file_path
+    for chunk in chunks:
+        file_path = str(chunk.get('file_path') or '').strip()
+        if file_path and file_path != 'unknown_source':
+            return file_path
+    return 'unknown_source'
+
+
+def _prepare_visible_reference_payload(
+    chunks: list[dict[str, Any]],
+    reference_list: list[dict[str, Any]],
+    query: str,
+    *,
+    include_reference_ids: bool,
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not chunks or include_reference_ids:
+        return reference_list, chunks
+
+    def _coerce_score(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    grouped_chunks: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    group_order: list[str] = []
+    for chunk in chunks:
+        group_key = _visible_reference_group_key(chunk)
+        if group_key not in grouped_chunks:
+            group_order.append(group_key)
+        grouped_chunks[group_key].append(chunk)
+
+    canonical_file_paths = {
+        group_key: _preferred_visible_file_path(group_chunks)
+        for group_key, group_chunks in grouped_chunks.items()
+    }
+
+    visible_chunks: list[dict[str, Any]] = []
+    seen_chunk_signatures: set[tuple[str, str, str]] = set()
+    for chunk in chunks:
+        group_key = _visible_reference_group_key(chunk)
+        visible_chunk = chunk.copy()
+        visible_chunk['file_path'] = canonical_file_paths[group_key]
+        chunk_id = str(visible_chunk.get('chunk_id') or '').strip()
+        normalized_content = str(visible_chunk.get('content') or '').strip()
+        signatures: list[tuple[str, str, str]] = []
+        if chunk_id:
+            signatures.append((group_key, 'chunk_id', chunk_id))
+        if normalized_content:
+            signatures.append((group_key, 'content', normalized_content))
+        if signatures and any(signature in seen_chunk_signatures for signature in signatures):
+            continue
+        seen_chunk_signatures.update(signatures)
+        visible_chunks.append(visible_chunk)
+
+    if len(grouped_chunks) <= 1:
+        return generate_reference_list_from_chunks(visible_chunks)
+
+    has_precomputed_relevance = any(
+        any(
+            key in chunk
+            for key in (
+                'intent_relevance',
+                'query_focus_overlap',
+                'heading_topic_match',
+                'body_topic_match',
+                'heading_facet_match',
+                'body_facet_match',
+            )
+        )
+        for chunk in visible_chunks
+    )
+    use_query_intent_ranking = bool(topic_terms or facet_terms) or not has_precomputed_relevance
+    ranked_visible_chunks = (
+        _rank_chunks_by_query_intent(
+            visible_chunks,
+            query,
+            topic_terms=topic_terms,
+            facet_terms=facet_terms,
+        )
+        if use_query_intent_ranking
+        else sorted(
+            (chunk.copy() for chunk in visible_chunks),
+            key=lambda chunk: (
+                -_coerce_score(chunk.get('intent_relevance'), 0.0),
+                -_coerce_score(chunk.get('query_focus_overlap'), 0.0),
+                str(chunk.get('chunk_id') or ''),
+            ),
+        )
+    )
+
+    group_scores: dict[str, dict[str, float]] = {}
+    for rank_index, chunk in enumerate(ranked_visible_chunks):
+        group_key = _visible_reference_group_key(chunk)
+        if group_key in group_scores:
+            continue
+        group_scores[group_key] = {
+            'best_score': _coerce_score(chunk.get('intent_relevance'), 0.0),
+            'best_overlap': _coerce_score(chunk.get('query_focus_overlap'), 0.0),
+            'best_topic_match': max(
+                _coerce_score(chunk.get('heading_topic_match'), 0.0),
+                _coerce_score(chunk.get('body_topic_match'), 0.0),
+            ),
+            'best_facet_match': max(
+                _coerce_score(chunk.get('heading_facet_match'), 0.0),
+                _coerce_score(chunk.get('body_facet_match'), 0.0),
+            ),
+            'best_rank': float(rank_index),
+        }
+
+    top_group_score = max((score['best_score'] for score in group_scores.values()), default=0.0)
+    if top_group_score <= 0.0:
+        return generate_reference_list_from_chunks(visible_chunks)
+
+    strong_group_threshold = max(0.20, top_group_score - 0.15)
+    has_topic_signal = any(score['best_topic_match'] > 0.0 for score in group_scores.values())
+    keep_group_keys: set[str] = set()
+    for group_key in group_order:
+        group_score = group_scores.get(
+            group_key,
+            {
+                'best_score': 0.0,
+                'best_overlap': 0.0,
+                'best_topic_match': 0.0,
+                'best_facet_match': 0.0,
+            },
+        )
+        is_strong = group_score['best_score'] >= strong_group_threshold
+        is_off_topic = (
+            group_score['best_overlap'] == 0.0
+            and group_score['best_topic_match'] == 0.0
+            and group_score['best_facet_match'] == 0.0
+        )
+        is_clearly_weaker = (
+            group_score['best_score'] < top_group_score * 0.5
+            and group_score['best_score'] < top_group_score - 0.15
+        )
+        near_best_without_topic = group_score['best_score'] >= max(top_group_score - 0.05, top_group_score * 0.85)
+        if has_topic_signal and group_score['best_topic_match'] == 0.0 and not near_best_without_topic:
+            continue
+        if is_strong or not ((group_score['best_score'] <= 0.0 or is_clearly_weaker) and is_off_topic):
+            keep_group_keys.add(group_key)
+
+    if not keep_group_keys or len(keep_group_keys) == len(group_scores):
+        return generate_reference_list_from_chunks(visible_chunks)
+
+    filtered_visible_chunks = [
+        chunk for chunk in visible_chunks if _visible_reference_group_key(chunk) in keep_group_keys
+    ]
+    if not filtered_visible_chunks:
+        filtered_visible_chunks = visible_chunks
+    return generate_reference_list_from_chunks(filtered_visible_chunks)
 
 async def _query_entity_candidates(
     term: str,
@@ -5986,12 +6158,31 @@ async def naive_query(
 
     logger.info(f'Final context: {len(processed_chunks_with_ref_ids)} chunks')
 
-    # Build raw data structure for naive mode using processed chunks with reference IDs
+    # Build prompt-facing chunk context, omitting raw reference ids unless citations are requested.
+    include_reference_ids = _should_validate_inline_citations(
+        query,
+        query_param.user_prompt,
+        system_prompt=sys_prompt_template,
+    )
+    _, text_units_str, reference_list_str = _build_prompt_chunk_context(
+        processed_chunks_with_ref_ids,
+        reference_list,
+        include_reference_ids=include_reference_ids,
+    )
+
+    visible_reference_list, visible_chunks = _prepare_visible_reference_payload(
+        processed_chunks_with_ref_ids,
+        reference_list,
+        query,
+        include_reference_ids=include_reference_ids,
+    )
+
+    # Build raw data structure for naive mode using user-visible chunks
     raw_data = convert_to_user_format(
         [],  # naive mode has no entities
         [],  # naive mode has no relationships
-        processed_chunks_with_ref_ids,
-        reference_list,
+        visible_chunks,
+        visible_reference_list,
         'naive',
     )
 
@@ -6004,20 +6195,8 @@ async def naive_query(
     }
     raw_data['metadata']['processing_info'] = {
         'total_chunks_found': len(chunks),
-        'final_chunks_count': len(processed_chunks_with_ref_ids),
+        'final_chunks_count': len(raw_data.get('data', {}).get('chunks', [])),
     }
-
-    # Build prompt-facing chunk context, omitting raw reference ids unless citations are requested.
-    include_reference_ids = _should_validate_inline_citations(
-        query,
-        query_param.user_prompt,
-        system_prompt=sys_prompt_template,
-    )
-    _, text_units_str, reference_list_str = _build_prompt_chunk_context(
-        processed_chunks_with_ref_ids,
-        reference_list,
-        include_reference_ids=include_reference_ids,
-    )
 
     naive_context_template = PROMPTS['naive_query_context']
     context_content = naive_context_template.format(
