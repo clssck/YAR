@@ -3363,11 +3363,11 @@ def _requires_expanded_single_paragraph_budget(query: str) -> bool:
 def _response_max_tokens(response_type: str, *, query: str = '') -> int:
     normalized_type = response_type.casefold()
     if normalized_type == 'single paragraph':
-        return 640 if _requires_expanded_single_paragraph_budget(query) else 260
+        return 800 if _requires_expanded_single_paragraph_budget(query) else 260
     response_type_caps = {
         'short answer': 180,
-        'bullet points': 320,
-        'multiple paragraphs': 640,
+        'bullet points': 480,
+        'multiple paragraphs': 1024,
     }
     return response_type_caps.get(normalized_type, 480)
 
@@ -3511,8 +3511,66 @@ async def kg_query(
     )
 
     if context_result is None:
-        logger.info('[kg_query] No query context could be built; returning no-result.')
-        return None
+        if chunks_vdb is not None:
+            logger.info('[kg_query] KG context empty, falling back to direct chunk retrieval')
+            fallback_chunks = await _get_vector_context(query, chunks_vdb, query_param)
+            if fallback_chunks:
+                # Process chunks through the standard pipeline
+                tokenizer = global_config.get('tokenizer')
+                if tokenizer:
+                    max_total_tokens = int(
+                        getattr(
+                            query_param,
+                            'max_total_tokens',
+                            global_config.get('max_total_tokens', DEFAULT_MAX_TOTAL_TOKENS),
+                        )
+                    )
+                    user_prompt = _format_additional_instructions(query_param.user_prompt)
+                    response_type = _normalize_response_type(query_param.response_type)
+                    sys_prompt_template = system_prompt if system_prompt else PROMPTS['rag_response']
+                    pre_sys_prompt = sys_prompt_template.format(
+                        context_data='',
+                        response_type=response_type,
+                        user_prompt=user_prompt,
+                    )
+                    sys_prompt_tokens = len(tokenizer.encode(pre_sys_prompt))
+                    query_tokens = len(tokenizer.encode(query))
+                    available_chunk_tokens = max_total_tokens - sys_prompt_tokens - query_tokens - 200
+
+                    processed_chunks = await process_chunks_unified(
+                        query=query,
+                        unique_chunks=fallback_chunks,
+                        query_param=query_param,
+                        global_config=global_config,
+                        source_type='vector',
+                        chunk_token_limit=available_chunk_tokens,
+                    )
+                    if processed_chunks:
+                        reference_list, processed_chunks = generate_reference_list_from_chunks(processed_chunks)
+                        include_reference_ids = _should_validate_inline_citations(
+                            query, query_param.user_prompt, system_prompt=sys_prompt_template,
+                        )
+                        _, text_units_str, reference_list_str = _build_prompt_chunk_context(
+                            processed_chunks, reference_list, include_reference_ids=include_reference_ids,
+                        )
+                        naive_context_template = PROMPTS['naive_query_context']
+                        context_content = naive_context_template.format(
+                            text_chunks_str=text_units_str,
+                            reference_list_str=reference_list_str,
+                        )
+                        visible_reference_list, visible_chunks = _prepare_visible_reference_payload(
+                            processed_chunks, reference_list, query,
+                            include_reference_ids=include_reference_ids,
+                        )
+                        raw_data = convert_to_user_format(
+                            [], [], visible_chunks, visible_reference_list, query_param.mode,
+                        )
+                        raw_data.setdefault('metadata', {})['fallback'] = 'direct_vector'
+                        context_result = QueryContextResult(context=context_content, raw_data=raw_data)
+                        logger.info(f'[kg_query] Fallback retrieved {len(processed_chunks)} chunks')
+        if context_result is None:
+            logger.info('[kg_query] No query context could be built; returning no-result.')
+            return None
 
     # Return different content based on query parameters
     if query_param.only_need_context and not query_param.only_need_prompt:
@@ -4677,18 +4735,6 @@ async def _build_context_str(
         truncated_chunks,
         reference_list,
         include_reference_ids=include_reference_ids,
-    )
-    for _i, chunk in enumerate(truncated_chunks):
-        chunks_context.append(
-            {
-                'reference_id': chunk['reference_id'],
-                'content': chunk['content'],
-            }
-        )
-
-    text_units_str = '\n'.join(json.dumps(text_unit, ensure_ascii=False) for text_unit in chunks_context)
-    reference_list_str = '\n'.join(
-        f'[{ref["reference_id"]}] {ref["file_path"]}' for ref in reference_list if ref['reference_id']
     )
 
     logger.info(

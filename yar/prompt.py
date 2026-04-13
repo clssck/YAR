@@ -290,11 +290,13 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   - Use Document Chunks for detailed evidence, quotes, and supporting context.
   - Synthesize both sources into a coherent response.
   - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
+  - When answering questions with multiple parts or sub-questions, address each part explicitly rather than giving a single blended answer.
 
 2. Content Priority:
   - FIRST: Answer the core question directly using supported facts.
   - SECOND: Add only the supporting details needed to make the answer clear.
   - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
+  - When the question asks for a list, count, or enumeration, include all items supported by the context rather than stopping after the first few.
   - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
   - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
   - Only say "insufficient information" when the context contains nothing relevant to the user's question.
@@ -304,6 +306,7 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query.
   - Do not introduce claims, examples, causes, consequences, or recommendations that are not directly supported by the relevant context.
   - If retrieved context conflicts or mixes topics, ignore the unrelated portions instead of blending them into the answer.
+  - Preserve specific numbers, dates, percentages, and measurements from the context exactly as stated. Do not round, paraphrase, or generalize quantitative information.
 
 4. Formatting & Language:
   - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.

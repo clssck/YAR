@@ -1679,7 +1679,7 @@ class TestQueryCacheKeyInputs:
             'Low',
             query_param.user_prompt or '',
             PROMPTS['rag_response'],
-            640,
+            1024,
             query_param.enable_rerank,
             query_param.enable_bm25_fusion,
             query_param.enable_hyde,
@@ -1753,7 +1753,7 @@ class TestResponseQualityControls:
             )
 
         assert result is not None
-        assert model_func.await_args.kwargs['max_tokens'] == 640
+        assert model_func.await_args.kwargs['max_tokens'] == 800
 
     @pytest.mark.asyncio
     async def test_build_query_context_passes_topic_and_facet_terms_to_merge(self):
