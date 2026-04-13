@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -163,8 +164,8 @@ def main() -> None:
             health = fetch_yar_health(args.yar_api_url, args.yar_api_key)
             judge_model = str(health['configuration']['llm_model'])
         except Exception:
-            judge_model = 'gpt-4.1-mini'
-            print(f'Could not reach YAR /health; defaulting to judge model: {judge_model}')
+            judge_model = os.getenv('LLM_MODEL', 'gpt-4.1-mini')
+            print(f'Could not reach YAR /health; using LLM_MODEL={judge_model}')
 
     if not args.judge_api_key:
         print('Error: no judge API key. Set EVAL_LLM_BINDING_API_KEY in .env or pass --judge-api-key.', file=sys.stderr)

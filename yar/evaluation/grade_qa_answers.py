@@ -14,6 +14,7 @@ This defaults to:
 
 import argparse
 import csv
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -175,9 +176,9 @@ def normalize_grade(payload: dict[str, Any]) -> dict[str, str]:
 def normalize_litellm_model_name(judge_model: str, judge_api_base: str) -> str:
 	if judge_model.startswith(KNOWN_PROVIDER_PREFIXES):
 		return judge_model
-	if 'openrouter.ai' in judge_api_base:
-		return f'openrouter/{judge_model}'
-	return f'openai/{judge_model}'
+	if judge_api_base:
+		return f'openai/{judge_model}'
+	return judge_model
 
 
 def grade_row(
@@ -234,8 +235,12 @@ def main() -> None:
 
 	judge_model = args.judge_model
 	if not judge_model:
-		health = fetch_yar_health(args.yar_api_url, args.yar_api_key)
-		judge_model = str(health['configuration']['llm_model'])
+		try:
+			health = fetch_yar_health(args.yar_api_url, args.yar_api_key)
+			judge_model = str(health['configuration']['llm_model'])
+		except Exception:
+			judge_model = os.getenv('LLM_MODEL', 'gpt-4.1-mini')
+			print(f'Could not reach YAR /health; using LLM_MODEL={judge_model}')
 
 	if not args.judge_api_key:
 		raise ValueError('No judge API key found. Set LLM_BINDING_API_KEY in .env or pass --judge-api-key.')
