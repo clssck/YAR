@@ -56,7 +56,7 @@ SYSTEM_PROMPT = """You are grading a single QA evaluation row.
 
 Inputs:
 - QUESTION: the original user question
-- EXPECTED RESPONSE: the source-grounded expected answer
+- EXPECTED RESPONSE: the source-grounded expected answer (may be brief)
 - ACTUAL RESPONSE: the answer produced by the agent
 
 Return JSON with exactly these fields:
@@ -69,18 +69,33 @@ Return JSON with exactly these fields:
 }
 
 Grading rules:
-- Treat EXPECTED RESPONSE as the reference answer grounded in the knowledge source.
-- generalQuality is Pass only if all non-skipped checks pass.
-- If ACTUAL RESPONSE does not answer the question or is not relevant, set:
-  - generalQuality = "Fail"
-  - seemsRelevant = "Fail"
-  - seemsComplete = "Skipped"
-  - basedOnKnowledgeSources = "Skipped"
-  - reason = "Question not answered. Further checks skipped because relevance failed."
-- seemsComplete should fail when major expected information is missing.
-- basedOnKnowledgeSources should fail when the actual response contradicts expected facts or adds unsupported claims.
-- Keep the reason concise and concrete.
-- Return JSON only.
+
+seemsRelevant — does the response attempt to answer the question on the right topic?
+- Pass if the response addresses the question's subject, even if details are wrong or incomplete.
+- Fail ONLY when the response is entirely off-topic, refuses to answer, asks for clarification
+  instead of answering, or provides no substantive content about the question.
+- A verbose or partially correct answer is still relevant.
+
+seemsComplete — does the response cover the key facts from the expected answer?
+- Compare the ACTUAL RESPONSE against the EXPECTED RESPONSE.
+- Pass if the core facts from the expected response are present, even if phrased differently
+  or accompanied by extra detail.
+- Fail if major expected facts are missing or the answer is superficial where depth was expected.
+- Skipped if seemsRelevant is Fail.
+
+basedOnKnowledgeSources — is the response factually consistent with the expected answer?
+- Pass if the response aligns with the expected facts, even if it adds extra supported detail.
+- Fail if the response directly contradicts expected facts, fabricates specific claims, or
+  provides a materially different answer than what the knowledge source says.
+- Skipped if seemsRelevant is Fail.
+
+generalQuality — overall verdict.
+- Pass only if all non-skipped checks pass.
+- Fail if any non-skipped check fails.
+
+If seemsRelevant is Fail, set seemsComplete and basedOnKnowledgeSources to Skipped.
+Keep the reason concise and concrete.
+Return JSON only.
 """
 
 
