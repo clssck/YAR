@@ -40,11 +40,12 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument('--api-url', type=str, default=DEFAULT_YAR_API_URL, help='YAR API base URL')
 	parser.add_argument('--api-key', type=str, default=DEFAULT_YAR_API_KEY, help='Optional YAR API key')
 	parser.add_argument('--mode', type=str, default='mix', help='YAR query mode to use')
-	parser.add_argument('--timeout', type=float, default=120.0, help='Per-question timeout in seconds')
+	parser.add_argument('--response-type', type=str, default='Multiple Paragraphs', help='Response type (default: Multiple Paragraphs)')
+	parser.add_argument('--timeout', type=float, default=300.0, help='Per-question timeout in seconds')
 	return parser.parse_args()
 
 
-def query_yar(client: httpx.Client, api_url: str, api_key: str, question: str, mode: str) -> str:
+def query_yar(client: httpx.Client, api_url: str, api_key: str, question: str, mode: str, response_type: str = 'Multiple Paragraphs') -> str:
 	response = client.post(
 		f'{api_url.rstrip("/")}/query',
 		json={
@@ -52,7 +53,7 @@ def query_yar(client: httpx.Client, api_url: str, api_key: str, question: str, m
 			'mode': mode,
 			'stream': False,
 			'include_references': False,
-			'response_type': 'Single Paragraph',
+			'response_type': response_type,
 			'user_prompt': 'Answer concisely using only facts from the provided context. Do not add information beyond what the context contains.',
 		},
 		headers=build_api_headers(api_key, {'Content-Type': 'application/json'}),
@@ -85,7 +86,7 @@ def main() -> None:
 		for index, test_case in enumerate(test_cases, start=1):
 			print(f'[{index}/{len(test_cases)}] {test_case.question[:90]}')
 			try:
-				actual_response = query_yar(client, args.api_url, args.api_key, test_case.question, args.mode)
+				actual_response = query_yar(client, args.api_url, args.api_key, test_case.question, args.mode, args.response_type)
 			except Exception as exc:
 				actual_response = f'ERROR: {exc}'
 			results.append(

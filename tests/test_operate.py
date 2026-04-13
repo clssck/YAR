@@ -1679,7 +1679,7 @@ class TestQueryCacheKeyInputs:
             'Low',
             query_param.user_prompt or '',
             PROMPTS['rag_response'],
-            1024,
+            8192,
             query_param.enable_rerank,
             query_param.enable_bm25_fusion,
             query_param.enable_hyde,
@@ -1723,7 +1723,7 @@ class TestResponseQualityControls:
             )
 
         assert result is not None
-        assert model_func.await_args.kwargs['max_tokens'] == 260
+        assert model_func.await_args.kwargs['max_tokens'] == 2048
 
     @pytest.mark.asyncio
     async def test_kg_query_expands_single_paragraph_token_cap_for_temporal_queries(self):
@@ -1753,7 +1753,7 @@ class TestResponseQualityControls:
             )
 
         assert result is not None
-        assert model_func.await_args.kwargs['max_tokens'] == 800
+        assert model_func.await_args.kwargs['max_tokens'] == 2048
 
     @pytest.mark.asyncio
     async def test_build_query_context_passes_topic_and_facet_terms_to_merge(self):
@@ -2198,3 +2198,92 @@ class TestResponseQualityControls:
             'docs/alpha.md',
         ]
         assert len(raw_data['data']['chunks']) == 2
+
+    @pytest.mark.asyncio
+    async def test_response_max_tokens_returns_correct_caps_per_type(self):
+        """Token caps are generous safety nets, not the primary length constraint."""
+        from yar.operate import _response_max_tokens
+
+        assert _response_max_tokens('Short Answer') == 1024
+        assert _response_max_tokens('Single Paragraph') == 2048
+        assert _response_max_tokens('Bullet Points') == 4096
+        assert _response_max_tokens('Multiple Paragraphs') == 8192
+        # Unknown types get generous default
+        assert _response_max_tokens('Custom Format') == 4096
+        # Case insensitive
+        assert _response_max_tokens('multiple paragraphs') == 8192
+        assert _response_max_tokens('BULLET POINTS') == 4096
+
+    @pytest.mark.asyncio
+    async def test_hyde_timeout_falls_back_to_original_query(self):
+        """HyDE gracefully degrades on timeout instead of failing the query."""
+        async def slow_llm(*args, **kwargs):
+            await asyncio.sleep(10)  # Will exceed timeout
+            return 'Hypothetical answer'
+
+        query_param = QueryParam(mode='mix', enable_hyde=True, model_func=AsyncMock(return_value='Answer'))
+        global_config = {
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+            'llm_model_func': slow_llm,
+            'llm_timeout': 0.1,  # 100ms timeout
+        }
+        context_result = QueryContextResult(
+            context='Context block',
+            raw_data={'data': {'references': []}},
+        )
+
+        with (
+            patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['High'], ['Low']))),
+            patch('yar.operate._build_query_context', new=AsyncMock(return_value=context_result)),
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+        ):
+            result = await kg_query(
+                query='What is alpha therapy?',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(global_config=global_config),
+                query_param=query_param,
+                global_config=global_config,
+            )
+
+        # Query still succeeds even though HyDE timed out
+        assert result is not None
+        assert result.content == 'Answer'
+
+    @pytest.mark.asyncio
+    async def test_kg_query_vector_fallback_when_kg_context_empty(self):
+        """When KG context is empty but chunks_vdb available, fall back to vector retrieval."""
+        model_func = AsyncMock(return_value='Fallback answer')
+        query_param = QueryParam(mode='mix', model_func=model_func)
+        global_config = {
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+        }
+        fallback_chunks = [
+            {'content': 'Relevant chunk', 'file_path': 'test.md', 'chunk_id': 'c1'},
+        ]
+
+        with (
+            patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['High'], ['Low']))),
+            patch('yar.operate._build_query_context', new=AsyncMock(return_value=None)),
+            patch('yar.operate._get_vector_context', new=AsyncMock(return_value=fallback_chunks)),
+            patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=fallback_chunks)),
+            patch('yar.operate.generate_reference_list_from_chunks', return_value=([], fallback_chunks)),
+            patch('yar.operate._build_prompt_chunk_context', return_value=([], 'chunk text', '')),
+            patch('yar.operate._prepare_visible_reference_payload', return_value=([], fallback_chunks)),
+            patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+        ):
+            result = await kg_query(
+                query='What is CSTD strategy?',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=MagicMock(global_config=global_config),
+                query_param=query_param,
+                global_config=global_config,
+                chunks_vdb=MagicMock(),
+            )
+
+        assert result is not None
+        assert result.content == 'Fallback answer'
+        assert result.raw_data['metadata']['fallback'] == 'direct_vector'

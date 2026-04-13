@@ -3355,21 +3355,21 @@ def _is_temporal_or_comparative_query(query: str) -> bool:
     )
     return any(re.search(pattern, normalized_query) for pattern in patterns)
 
-
-def _requires_expanded_single_paragraph_budget(query: str) -> bool:
-    return _is_temporal_or_comparative_query(query)
-
-
 def _response_max_tokens(response_type: str, *, query: str = '') -> int:
+    """Return a generous max_tokens safety net per response type.
+
+    The system prompt already instructs the LLM on format and length.
+    These caps only prevent runaway generation — they should never be
+    the reason an answer ends mid-sentence.
+    """
     normalized_type = response_type.casefold()
-    if normalized_type == 'single paragraph':
-        return 800 if _requires_expanded_single_paragraph_budget(query) else 260
     response_type_caps = {
-        'short answer': 180,
-        'bullet points': 480,
-        'multiple paragraphs': 1024,
+        'short answer': 1024,
+        'single paragraph': 2048,
+        'bullet points': 4096,
+        'multiple paragraphs': 8192,
     }
-    return response_type_caps.get(normalized_type, 480)
+    return response_type_caps.get(normalized_type, 4096)
 
 
 def _should_validate_inline_citations(
@@ -3992,7 +3992,8 @@ async def _perform_kg_search(
             use_model_func = cast(Callable[..., Awaitable[str]], query_param.model_func or text_chunks_db.global_config.get('llm_model_func'))
             if use_model_func:
                 hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
-                hypothetical_answer = cast(str, await use_model_func(hyde_prompt))
+                hyde_timeout = float(text_chunks_db.global_config.get('llm_timeout', 60))
+                hypothetical_answer = cast(str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=hyde_timeout))
                 normalized_hypothetical_answer = hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
                 hyde_answer_length = len(normalized_hypothetical_answer)
                 logger.debug(f'HyDE: Generated hypothetical answer length={hyde_answer_length}')
@@ -4003,6 +4004,8 @@ async def _perform_kg_search(
                     logger.warning('HyDE: Generated answer too short, using original query')
             else:
                 logger.warning('HyDE enabled but no LLM function available')
+        except asyncio.TimeoutError:
+            logger.warning(f'HyDE: Timed out after {hyde_timeout}s, falling back to original query')
         except Exception as e:
             logger.warning(f'HyDE: Failed to generate hypothetical answer: {e}, using original query')
 
@@ -6132,7 +6135,8 @@ async def naive_query(
     if query_param.enable_hyde:
         try:
             hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
-            hypothetical_answer = cast(str, await use_model_func(hyde_prompt))
+            hyde_timeout = float(global_config.get('llm_timeout', 60))
+            hypothetical_answer = cast(str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=hyde_timeout))
             normalized_hypothetical_answer = hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
             hyde_answer_length = len(normalized_hypothetical_answer)
             logger.debug(f'HyDE (naive): Generated hypothetical answer length={hyde_answer_length}')
@@ -6146,6 +6150,8 @@ async def naive_query(
                     logger.warning('HyDE: No embedding function available on chunks_vdb')
             else:
                 logger.warning('HyDE: Generated answer too short, using original query')
+        except asyncio.TimeoutError:
+            logger.warning(f'HyDE: Timed out after {hyde_timeout}s in naive_query, falling back to original query')
         except Exception as e:
             logger.warning(f'HyDE: Failed in naive_query: {e}, using original query')
 
