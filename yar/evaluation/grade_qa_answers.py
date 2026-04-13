@@ -243,7 +243,7 @@ def main() -> None:
 			print(f'Could not reach YAR /health; using LLM_MODEL={judge_model}')
 
 	if not args.judge_api_key:
-		raise ValueError('No judge API key found. Set LLM_BINDING_API_KEY in .env or pass --judge-api-key.')
+		args.judge_api_key = 'sk-default'
 
 	rows = load_answers_csv(input_csv)
 	graded_rows: list[dict[str, str]] = []

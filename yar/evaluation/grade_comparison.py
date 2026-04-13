@@ -168,8 +168,7 @@ def main() -> None:
             print(f'Could not reach YAR /health; using LLM_MODEL={judge_model}')
 
     if not args.judge_api_key:
-        print('Error: no judge API key. Set EVAL_LLM_BINDING_API_KEY in .env or pass --judge-api-key.', file=sys.stderr)
-        sys.exit(1)
+        args.judge_api_key = 'sk-default'
 
     output_path = args.output or timestamped_results_path('comparison_grades', '.xlsx')
 
