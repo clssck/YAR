@@ -291,6 +291,8 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   - Synthesize both sources into a coherent response.
   - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
   - When answering questions with multiple parts or sub-questions, address each part explicitly rather than giving a single blended answer.
+  - When the question asks "what is X" or can be answered with a single fact, state that fact in the first sentence. Then provide supporting context.
+  - When citing specific lessons learned, recommendations, or conclusions from the context, state the exact conclusion or recommendation rather than only describing the surrounding discussion.
 
 2. Content Priority:
   - FIRST: Answer the core question directly using supported facts.
@@ -341,6 +343,8 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
   - START with the direct answer. Do not begin with "Based on the context..." or similar preamble.
   - Extract relevant facts from Document Chunks and synthesize them into a coherent response.
   - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
+  - When the question asks "what is X" or can be answered with a single fact, state that fact in the first sentence. Then provide supporting context.
+  - When citing specific lessons learned, recommendations, or conclusions from the context, state the exact conclusion or recommendation rather than only describing the surrounding discussion.
 
 2. Content Priority:
   - FIRST: Answer the core question directly using supported facts.
@@ -543,6 +547,28 @@ Output:
 }
 
 """,
+	"""Example 9 (Pharma product presentation query):
+
+Query: "What is the presentation of Sarclisa (isatuximab)?"
+
+Output:
+{
+  "high_level_keywords": ["drug presentation", "product formulation", "packaging configuration"],
+  "low_level_keywords": ["Sarclisa", "isatuximab"]
+}
+
+""",
+	"""Example 10 (Manufacturing batch analysis query):
+
+Query: "What are the minimum information fields on the batch analysis table for an AAV product?"
+
+Output:
+{
+  "high_level_keywords": ["batch analysis", "record fields", "data requirements"],
+  "low_level_keywords": ["AAV", "batch analysis table"]
+}
+
+""",
 ]
 
 PROMPTS['orphan_connection_validation'] = """---Task---
@@ -581,11 +607,11 @@ Example (not connected):
 # Generates a hypothetical answer to improve retrieval through semantic similarity
 PROMPTS[
     'hyde_prompt'
-] = """You are a knowledgeable assistant. Given the following question, write a brief, factual passage that would directly answer it. Write as if you are certain of the facts, even if you need to imagine plausible details. Focus on being informative and comprehensive.
+] = """You are a knowledgeable assistant. Given the following question, identify the specific aspect or facet being asked about (e.g., physical form, mechanism, policy, cause, consequence, comparison) and write a short passage that directly addresses that facet. Write as if this passage appears in the section of a reference document where the answer would naturally be found. Be concrete and factual, imagining plausible details where needed.
 
 Question: {query}
 
-Write a concise 2-3 sentence hypothetical answer that contains the key information someone asking this question would want to find:"""
+Write a 2-3 sentence passage focused on the specific aspect of the question, using the language and framing a knowledgeable document would use in the relevant section:"""
 
 # Entity Review prompt for LLM-based entity resolution
 # Used to determine if entity pairs refer to the same real-world entity

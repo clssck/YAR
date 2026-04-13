@@ -5169,7 +5169,7 @@ def _chunk_relevance_components(
     heading_relevance = max(heading_facet_match, heading_query_overlap, 0.20 * heading_topic_match)
     body_relevance = max(body_facet_match, body_query_overlap, 0.10 * body_topic_match)
     if facet_terms and heading_facet_match == 0.0 and heading_query_overlap == 0.0:
-        body_relevance *= 0.25
+        body_relevance *= 0.50
     return {
         'heading_topic_match': heading_topic_match,
         'body_topic_match': body_topic_match,
