@@ -15,6 +15,8 @@ yar/evaluation/
   qa_eval_common.py           # Shared constants and helpers (Pipeline A)
   export_qa_answers.py        # Step 2: query YAR, record answers
   grade_qa_answers.py         # Step 3: LLM-judge grading
+  grade_comparison.py         # Grade multi-system comparison XLSX
+  inspect_grades.py           # Dump graded XLSX results to stdout
   ingest_test_docs.py         # Step 1: upload docs to YAR (both pipelines)
   eval_rag_quality.py         # RAGAS evaluator (Pipeline B)
   e2e_test_harness.py         # End-to-end RAGAS orchestrator
@@ -43,13 +45,13 @@ A three-step pipeline: ingest documents, export YAR's answers, grade them.
 Set these in `.env` at the repo root or export them in your shell:
 
 | Variable | Default | Used By |
-|----------|---------|---------|
+|----------|---------|---------- |
 | `YAR_API_URL` | `http://localhost:9621` | All scripts |
 | `YAR_API_KEY` | (empty) | All scripts |
-| `EVAL_LLM_BINDING_HOST` | `https://openrouter.ai/api/v1` | grade_qa_answers |
-| `EVAL_LLM_BINDING_API_KEY` | (empty, **required** for grading) | grade_qa_answers |
+| `EVAL_LLM_BINDING_HOST` | `http://localhost:4000` | grade_qa_answers, grade_comparison |
+| `EVAL_LLM_BINDING_API_KEY` | (empty, **required** for grading) | grade_qa_answers, grade_comparison |
 
-Fallbacks: `EVAL_LLM_BINDING_HOST` falls back to `LLM_BINDING_HOST`. `EVAL_LLM_BINDING_API_KEY` falls back to `LLM_BINDING_API_KEY`.
+Fallbacks: `EVAL_LLM_BINDING_HOST` falls back to `LLM_BINDING_HOST`, then `http://localhost:4000`. `EVAL_LLM_BINDING_API_KEY` falls back to `LLM_BINDING_API_KEY`, then `LITELLM_MASTER_KEY`.
 
 ### Step 1: Ingest Test Documents
 
@@ -157,11 +159,48 @@ All outputs are written to `yar/evaluation/results/` (gitignored):
 
 ```
 results/
-  qa_answers_20260413_103000.csv   # Step 2 output
-  qa_grades_20260413_103200.csv    # Step 3 output
+  qa_answers_20260413_103000.csv           # Step 2 output
+  qa_grades_20260413_103200.csv            # Step 3 output
+  comparison_grades_20260413_104311.xlsx   # grade_comparison.py output
 ```
 
 The grades CSV has columns: `question`, `actualResponse`, `expectedResponse`, `generalQuality`, `seemsRelevant`, `seemsComplete`, `basedOnKnowledgeSources`, `reason`.
+
+### Multi-System Comparison (grade_comparison.py)
+
+Grade answers from multiple systems side by side. Input is an XLSX workbook where each sheet represents a system (e.g., "cmc mindhub", "copilot studio", "concierge"). Each sheet must have columns: `question`, `expectedResponse`, `actualResponse`.
+
+```bash
+python yar/evaluation/grade_comparison.py --input eval.xlsx
+```
+
+The script grades every sheet with the same LLM judge rubric, appends grading columns, and writes an output XLSX with a summary table to stdout.
+
+Options:
+
+```
+--input, -i PATH              Input XLSX file (required)
+--output, -o PATH             Output XLSX (default: results/comparison_grades_<ts>.xlsx)
+--judge-api-base URL          Judge LLM endpoint (default: $EVAL_LLM_BINDING_HOST)
+--judge-api-key KEY           Judge LLM API key (default: $EVAL_LLM_BINDING_API_KEY)
+--judge-model MODEL           Judge model (default: auto-detected from YAR /health)
+--temperature FLOAT           Sampling temperature (default: 0.0)
+--max-tokens INT              Max response tokens (default: 300)
+--allow-inline-citations      Skip the [N] citation pre-check
+--sheets LIST                 Comma-separated sheet names to grade (default: all)
+```
+
+Sheets named "readme" (case-insensitive) are skipped automatically.
+
+### Inspecting Grades (inspect_grades.py)
+
+Dump graded results from an output XLSX to stdout for quick review:
+
+```bash
+python yar/evaluation/inspect_grades.py results/comparison_grades_*.xlsx
+```
+
+Shows each question's pass/fail status and the judge's reasoning per sheet.
 
 ---
 
