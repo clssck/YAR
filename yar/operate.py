@@ -4574,7 +4574,7 @@ async def _merge_all_chunks(
             and entry['heading_relevance'] == 0.0
             and facet_match < 0.34
             and entry['body_query_overlap'] < 0.34
-            and entry['retrieval_score'] < 0.75
+            and entry['retrieval_score'] < 0.60
             and len(entry['source_types']) <= 2
         ):
             filtered_out += 1
@@ -4592,7 +4592,7 @@ async def _merge_all_chunks(
             query_terms
             and entry['heading_relevance'] == 0.0
             and entry['body_relevance'] == 0.0
-            and entry['retrieval_score'] < 0.65
+            and entry['retrieval_score'] < 0.50
             and len(entry['source_types']) == 1
         ):
             filtered_out += 1

@@ -144,12 +144,13 @@ class QueryParam:
     Set RERANK_BY_DEFAULT=true or pass enable_rerank=True explicitly to enable it.
     """
 
-    enable_hyde: bool = os.getenv('ENABLE_HYDE', 'false').lower() == 'true'
+    enable_hyde: bool = os.getenv('ENABLE_HYDE', 'true').lower() == 'true'
     """Enable HyDE (Hypothetical Document Embedding) for improved retrieval.
     When enabled, generates a hypothetical answer to the query using LLM,
     then uses that hypothetical answer's embedding for vector search.
     This can improve retrieval for questions where the answer's semantic
     content differs significantly from the question's keywords.
+    Enabled by default. Set ENABLE_HYDE=false to disable.
     """
 
     enable_bm25_fusion: bool = os.getenv('ENABLE_BM25_FUSION', 'true').lower() == 'true'

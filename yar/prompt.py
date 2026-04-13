@@ -532,6 +532,17 @@ Output:
 }
 
 """,
+    """Example 8 (CMC/Pharma manufacturing query):
+
+Query: "What is the closed system drug transfer device (CSTD) strategy in Bio?"
+
+Output:
+{
+  "high_level_keywords": ["device strategy", "manufacturing process", "drug transfer"],
+  "low_level_keywords": ["CSTD", "closed system drug transfer device", "Bio"]
+}
+
+""",
 ]
 
 PROMPTS['orphan_connection_validation'] = """---Task---
