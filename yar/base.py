@@ -44,7 +44,7 @@ from .constants import (
     DEFAULT_MIN_RELATIONSHIP_DENSITY,
     DEFAULT_TOP_K,
 )
-from .types import KnowledgeGraph
+from .type_defs import KnowledgeGraph
 from .utils import EmbeddingFunc
 
 # use the .env that is inside the current folder

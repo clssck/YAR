@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from yar.types import (
+from yar.type_defs import (
     GPTKeywordExtractionFormat,
     KnowledgeGraph,
     KnowledgeGraphEdge,

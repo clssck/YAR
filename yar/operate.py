@@ -49,7 +49,7 @@ from yar.constants import (
 )
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
-from yar.types import GlobalConfig
+from yar.type_defs import GlobalConfig
 from yar.utils import (
     CacheData,
     Tokenizer,

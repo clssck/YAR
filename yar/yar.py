@@ -92,7 +92,7 @@ from yar.operate import (
     rebuild_knowledge_from_chunks,
 )
 from yar.prompt import PROMPTS
-from yar.types import GlobalConfig, KnowledgeGraph
+from yar.type_defs import GlobalConfig, KnowledgeGraph
 from yar.utils import (
     EmbeddingFunc,
     TiktokenTokenizer,

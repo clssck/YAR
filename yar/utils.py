@@ -66,7 +66,7 @@ from yar.constants import (
     VALID_SOURCE_IDS_LIMIT_METHODS,
 )
 from yar.exceptions import QueueFullError, WorkerTimeoutError
-from yar.types import GlobalConfig
+from yar.type_defs import GlobalConfig
 
 # Precompile regex pattern for JSON sanitization (module-level, compiled once)
 _SURROGATE_PATTERN = re.compile(r'[\uD800-\uDFFF\uFFFE\uFFFF]')

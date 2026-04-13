@@ -33,7 +33,7 @@ from yar.kg import (
     verify_storage_implementation,
 )
 from yar.kg.shared_storage import initialize_share_data
-from yar.types import KnowledgeGraph
+from yar.type_defs import KnowledgeGraph
 
 
 # Mock embedding function that returns deterministic vectors

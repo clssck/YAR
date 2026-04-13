@@ -39,7 +39,7 @@ from yar.base import (
 )
 from yar.kg.shared_storage import get_data_init_lock
 from yar.namespace import NameSpace, is_namespace
-from yar.types import KnowledgeGraph, KnowledgeGraphEdge, KnowledgeGraphNode
+from yar.type_defs import KnowledgeGraph, KnowledgeGraphEdge, KnowledgeGraphNode
 from yar.utils import logger
 from yar.validators import (
     PG_MAX_IDENTIFIER_LENGTH,

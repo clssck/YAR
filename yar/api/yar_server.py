@@ -66,7 +66,7 @@ from yar.kg.shared_storage import (
     get_namespace_data,
 )
 from yar.storage.s3_client import S3Client, S3Config
-from yar.types import GPTKeywordExtractionFormat
+from yar.type_defs import GPTKeywordExtractionFormat
 from yar.utils import EmbeddingFunc, get_env_value, logger, set_verbose_debug
 
 from .config import (

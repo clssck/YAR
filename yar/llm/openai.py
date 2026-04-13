@@ -21,7 +21,7 @@ from tenacity import (
 )
 
 from yar.api import __api_version__
-from yar.types import GPTKeywordExtractionFormat
+from yar.type_defs import GPTKeywordExtractionFormat
 from yar.utils import (
     VERBOSE_DEBUG,
     logger,
