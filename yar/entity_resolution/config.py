@@ -29,7 +29,7 @@ class EntityResolutionConfig:
 
     # Number of entities to review in a single LLM call
     # Larger = more efficient but may hit context limits
-    batch_size: int = 20
+    batch_size: int = 100
 
     # Number of VDB candidates to retrieve per entity for LLM review
     # More candidates = better recall but more tokens
@@ -59,21 +59,14 @@ class EntityResolutionConfig:
         if self.batch_size <= 0:
             raise ValueError(f'batch_size must be positive, got {self.batch_size}')
         if self.candidates_per_entity <= 0:
-            raise ValueError(
-                f'candidates_per_entity must be positive, got {self.candidates_per_entity}'
-            )
+            raise ValueError(f'candidates_per_entity must be positive, got {self.candidates_per_entity}')
         if not 0 <= self.min_confidence <= 1:
-            raise ValueError(
-                f'min_confidence must be between 0 and 1, got {self.min_confidence}'
-            )
+            raise ValueError(f'min_confidence must be between 0 and 1, got {self.min_confidence}')
         if not 0 <= self.soft_match_threshold <= 1:
-            raise ValueError(
-                f'soft_match_threshold must be between 0 and 1, got {self.soft_match_threshold}'
-            )
+            raise ValueError(f'soft_match_threshold must be between 0 and 1, got {self.soft_match_threshold}')
         if self.soft_match_threshold > self.min_confidence:
             raise ValueError(
-                f'soft_match_threshold ({self.soft_match_threshold}) must be <= '
-                f'min_confidence ({self.min_confidence})'
+                f'soft_match_threshold ({self.soft_match_threshold}) must be <= min_confidence ({self.min_confidence})'
             )
 
 

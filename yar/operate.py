@@ -2990,8 +2990,14 @@ async def extract_entities(
     # The LLM outputs [CHUNK: <id>] headers so we can attribute results per chunk.
     _BATCH_CHUNK_HEADER_RE = re.compile(r'\[CHUNK:\s*([^\]]+)\]')
 
-    # Budget: system prompt ~2-3k tokens, each chunk ~1000 tokens, leave room for output.
-    batch_size = int(global_config.get('entity_extract_batch_size', os.getenv('ENTITY_EXTRACT_BATCH_SIZE', '10')))
+    # Dynamic batch sizing: the binding constraint is output tokens, not input.
+    # Each chunk produces ~300 tokens of entity/relation output.
+    # Cap at max_output_tokens / 300, floored to leave headroom.
+    max_output_tokens = int(global_config.get('max_output_tokens', os.getenv('MAX_OUTPUT_TOKENS', '32000')))
+    output_per_chunk_estimate = 300
+    output_budget_limit = max(1, max_output_tokens * 3 // 4 // output_per_chunk_estimate)  # 75% of budget
+    env_override = os.getenv('ENTITY_EXTRACT_BATCH_SIZE')
+    batch_size = int(env_override) if env_override else min(output_budget_limit, total_chunks)
     if batch_size < 1:
         batch_size = 1
 
