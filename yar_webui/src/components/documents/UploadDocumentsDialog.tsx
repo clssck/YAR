@@ -10,6 +10,7 @@ import type { FileRejection } from 'react-dropzone'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { type ChunkingPreset, uploadDocument } from '@/api/yar'
+import { useBackendState } from '@/stores/state'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
@@ -114,7 +115,6 @@ export default function UploadDocumentsDialog({
     async (filesToUpload: File[]) => {
       setIsUploading(true)
       setUploadPhase('uploading')
-      let hasSuccessfulUpload = false
       let completedCount = 0
       let failedCount = 0
 
@@ -204,8 +204,13 @@ export default function UploadDocumentsDialog({
               }))
               failedCount++
             } else {
-              // Mark that we had at least one successful upload
-              hasSuccessfulUpload = true
+
+              // Refresh document list immediately so the doc appears as processing
+              onDocumentsUploaded?.().catch((err) => {
+                console.error('Error refreshing documents:', err)
+              })
+              // Kick health check so polling switches to fast interval
+              useBackendState.getState().resetHealthCheckTimerDelayed(500)
               completedCount++
             }
           } catch (err) {
@@ -260,16 +265,6 @@ export default function UploadDocumentsDialog({
           toast.success(t('documentPanel.uploadDocuments.batch.success'), {
             id: toastId,
           })
-        }
-
-        // Only update if at least one file was uploaded successfully
-        if (hasSuccessfulUpload) {
-          // Refresh document list
-          if (onDocumentsUploaded) {
-            onDocumentsUploaded().catch((err) => {
-              console.error('Error refreshing documents:', err)
-            })
-          }
         }
 
         // Set phase to complete so user can upload more or close

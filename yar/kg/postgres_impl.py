@@ -977,15 +977,15 @@ class PostgreSQLDB:
         """Validate that existing vector columns match EMBEDDING_DIM configuration.
 
         pgvector stores fixed-dimension vectors. If EMBEDDING_DIM changes (e.g.,
-        switching embedding models), existing data becomes incompatible. This
-        validation fails fast on startup rather than causing silent data corruption.
+        switching embedding models), existing data becomes incompatible.
+
+        When the table is empty, the column dimension is auto-migrated to match
+        the configured dimension. When data exists, a ValueError is raised so
+        the operator can decide how to proceed.
 
         Raises:
             ValueError: If database vector dimension doesn't match EMBEDDING_DIM
-
-        Note:
-            Only validates if vector tables already exist with data. New databases
-            are fine because tables will be created with the correct dimension.
+                and the table contains data.
         """
         if not self.enable_vector:
             logger.info('PostgreSQL, Skipping vector dimension validation (POSTGRES_ENABLE_VECTOR=false)')
@@ -993,7 +993,6 @@ class PostgreSQLDB:
 
         expected_dim = int(os.environ.get('EMBEDDING_DIM', 1024))
 
-        # Vector tables to check
         vector_tables = [
             ('yar_vdb_chunks', 'content_vector'),
             ('yar_vdb_entity', 'content_vector'),
@@ -1002,7 +1001,6 @@ class PostgreSQLDB:
 
         for table_name, column_name in vector_tables:
             try:
-                # Check if table exists first
                 table_exists = await self.query(
                     """SELECT EXISTS (
                         SELECT 1 FROM information_schema.tables
@@ -1012,10 +1010,8 @@ class PostgreSQLDB:
                 )
 
                 if not table_exists or not table_exists.get('exists'):
-                    continue  # Table doesn't exist yet, will be created with correct dim
+                    continue
 
-                # Get the vector column dimension from pg_attribute
-                # pgvector stores dimension directly in atttypmod (no offset)
                 dim_result = await self.query(
                     """SELECT atttypmod as dimension
                        FROM pg_attribute
@@ -1025,23 +1021,56 @@ class PostgreSQLDB:
                     [table_name, column_name],
                 )
 
-                if dim_result and dim_result.get('dimension'):
-                    actual_dim = dim_result['dimension']
-                    if actual_dim != expected_dim:
-                        raise ValueError(
-                            f"VECTOR DIMENSION MISMATCH: Table '{table_name}' has {actual_dim}D vectors, "
-                            f'but EMBEDDING_DIM={expected_dim}. '
-                            f'Options: (1) Set EMBEDDING_DIM={actual_dim} to match existing data, or '
-                            f'(2) Run a manual migration to alter column dimensions and rebuild indexes. '
-                            f'See docs/vector_migration.md for migration steps.'
-                        )
+                if not dim_result or not dim_result.get('dimension'):
+                    continue
+
+                actual_dim = dim_result['dimension']
+                if actual_dim == expected_dim:
                     logger.debug(f'PostgreSQL, Vector dimension validated: {table_name}.{column_name} = {actual_dim}D')
+                    continue
+
+                # Dimension mismatch — check if table is empty so we can auto-migrate
+                row_count = await self.query(
+                    f'SELECT COUNT(1) as count FROM {table_name}',
+                )
+                has_data = row_count and row_count.get('count', 0) > 0
+
+                if has_data:
+                    raise ValueError(
+                        f"VECTOR DIMENSION MISMATCH: Table '{table_name}' has {actual_dim}D vectors "
+                        f'with existing data, but EMBEDDING_DIM={expected_dim}. '
+                        f'Options: (1) Set EMBEDDING_DIM={actual_dim} to match existing data, or '
+                        f'(2) Clear documents and restart to rebuild with the new dimension.'
+                    )
+
+                # Table is empty — safe to auto-migrate the column dimension
+                logger.warning(
+                    f'PostgreSQL, Auto-migrating empty table {table_name}: '
+                    f'{actual_dim}D -> {expected_dim}D'
+                )
+                # Drop existing vector indexes before altering column type
+                indexes = await self.query(
+                    """SELECT indexname FROM pg_indexes
+                       WHERE tablename = $1
+                       AND indexdef LIKE '%content_vector%'""",
+                    [table_name],
+                    multirows=True,
+                )
+                if indexes:
+                    for idx in indexes:
+                        idx_name = idx['indexname']
+                        validate_sql_identifier(idx_name, 'index_name')
+                        await self.execute(f'DROP INDEX IF EXISTS {idx_name}')
+                        logger.info(f'PostgreSQL, Dropped stale vector index {idx_name}')
+
+                validate_sql_identifier(table_name, 'table_name')
+                alter_sql = f'ALTER TABLE {table_name} ALTER COLUMN {column_name} TYPE VECTOR({expected_dim})'
+                await self.execute(alter_sql)
+                logger.info(f'PostgreSQL, Altered {table_name}.{column_name} to VECTOR({expected_dim})')
 
             except ValueError:
-                # Re-raise dimension mismatch errors
                 raise
             except Exception as e:
-                # Log but don't fail on inspection errors (table might not exist yet)
                 logger.debug(f'PostgreSQL, Could not validate {table_name} dimensions: {e}')
 
         logger.info(f'PostgreSQL, Vector dimensions validated: EMBEDDING_DIM={expected_dim}')
