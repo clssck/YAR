@@ -110,7 +110,7 @@ def _build_heading_hierarchies(sections: list[Section]) -> None:
 def _build_heading_prefix(section: Section) -> str:
     if section.level == 0:
         return ''
-    return f"{'#' * section.level} {section.heading}"
+    return f'{"#" * section.level} {section.heading}'
 
 
 def _section_full_text(section: Section) -> str:
@@ -145,14 +145,12 @@ def _has_compatible_branch(pred: Section, section: Section) -> bool:
 def _can_merge(pred: Section, section: Section, join_threshold: int) -> bool:
     if not _has_compatible_branch(pred, section):
         return False
-    combined_tokens = _estimate_tokens(_section_full_text(pred)) + _estimate_tokens(
-        _section_full_text(section)
-    )
+    combined_tokens = _estimate_tokens(_section_full_text(pred)) + _estimate_tokens(_section_full_text(section))
     return combined_tokens < join_threshold
 
 
 def _merge_into(pred: Section, section: Section) -> None:
-    append_text = f"{'#' * section.level} {section.heading}\n\n{section.body}"
+    append_text = f'{"#" * section.level} {section.heading}\n\n{section.body}'
     pred.body = f'{pred.body}\n\n{append_text}' if pred.body else append_text
 
 
@@ -170,6 +168,35 @@ def _merge_at_level(sections: list[Section], level: int, join_threshold: int) ->
     return merged
 
 
+_TINY_SECTION_THRESHOLD = 100
+
+
+def _absorb_tiny_sections(sections: list[Section], join_threshold: int) -> list[Section]:
+    """Merge sections smaller than *_TINY_SECTION_THRESHOLD* tokens into their predecessor.
+
+    The level-based merge only merges siblings at the same heading depth.
+    This pass catches short child sections (e.g. a 3-line ``### IMPACTS``
+    under a ``## Topic 5``) that would otherwise become isolated chunks
+    with no semantic link to the surrounding context.
+
+    Only absorbs into a predecessor that already carries meaningful content,
+    preventing cascading absorption of uniformly tiny sections.
+    """
+    if not sections:
+        return sections
+    result: list[Section] = [sections[0]]
+    for section in sections[1:]:
+        tokens = _estimate_tokens(_section_full_text(section))
+        pred_tokens = _estimate_tokens(_section_full_text(result[-1]))
+        if tokens < _TINY_SECTION_THRESHOLD and pred_tokens >= _TINY_SECTION_THRESHOLD:
+            combined = pred_tokens + tokens
+            if combined < join_threshold:
+                _merge_into(result[-1], section)
+                continue
+        result.append(section)
+    return result
+
+
 def _merge_sections(sections: list[Section], join_threshold: int) -> list[Section]:
     max_level = 0
     for section in sections:
@@ -178,6 +205,11 @@ def _merge_sections(sections: list[Section], join_threshold: int) -> list[Sectio
     merged = sections
     for level in range(max_level, 0, -1):
         merged = _merge_at_level(merged, level, join_threshold)
+    # Absorb tiny child sections into their predecessor regardless of level.
+    # Without this, a short "### IMPACTS:" section (level 3) remains isolated
+    # from its parent "## Topic 5" section (level 2) and lacks the semantic
+    # context that embeddings need for retrieval.
+    merged = _absorb_tiny_sections(merged, join_threshold)
     return merged
 
 
@@ -209,7 +241,7 @@ def _attach_standalone_page_markers(units: list[str], separator: str) -> list[st
             pending_markers.append(_trim(unit))
             continue
         if pending_markers:
-            combined.append(_trim(f"{separator.join(pending_markers)}{separator}{unit}"))
+            combined.append(_trim(f'{separator.join(pending_markers)}{separator}{unit}'))
             pending_markers = []
             continue
         combined.append(unit)
@@ -217,7 +249,7 @@ def _attach_standalone_page_markers(units: list[str], separator: str) -> list[st
         if not combined:
             combined.append(separator.join(pending_markers))
         else:
-            combined[-1] = _trim(f"{combined[-1]}{separator}{separator.join(pending_markers)}")
+            combined[-1] = _trim(f'{combined[-1]}{separator}{separator.join(pending_markers)}')
     return combined
 
 
