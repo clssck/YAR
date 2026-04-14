@@ -181,7 +181,6 @@ class YAR:
     max_total_tokens: int = field(default=get_env_value('MAX_TOTAL_TOKENS', DEFAULT_MAX_TOTAL_TOKENS, int))
     """Maximum total tokens in context (including system prompt, entities, relations and chunks)."""
 
-
     related_chunk_number: int = field(default=get_env_value('RELATED_CHUNK_NUMBER', DEFAULT_RELATED_CHUNK_NUMBER, int))
     """Number of related chunks to grab from single entity or relation."""
 
@@ -429,7 +428,9 @@ class YAR:
     # Storages Management
     # ---
 
-    cosine_better_than_threshold: float = field(default=get_env_value('COSINE_THRESHOLD', DEFAULT_COSINE_THRESHOLD, float))
+    cosine_better_than_threshold: float = field(
+        default=get_env_value('COSINE_THRESHOLD', DEFAULT_COSINE_THRESHOLD, float)
+    )
 
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
 
@@ -1194,7 +1195,8 @@ class YAR:
         new_docs: dict[str, Any] = {
             id_: {
                 'status': DocStatus.PENDING,
-                'content_summary': os.path.splitext(os.path.basename(content_data.get('file_path', '')))[0] or get_content_summary(content_data['content']),
+                'content_summary': os.path.splitext(os.path.basename(content_data.get('file_path', '')))[0]
+                or get_content_summary(content_data['content']),
                 'content_length': len(content_data['content']),
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat(),
@@ -1360,37 +1362,18 @@ class YAR:
         pipeline_status: dict,
         pipeline_status_lock: Any,
     ) -> dict[str, DocProcessingStatus]:
-        """Validate and fix document data consistency by deleting inconsistent entries, but preserve failed documents"""
+        """Validate and fix document data consistency by deleting inconsistent entries"""
         inconsistent_docs = []
-        failed_docs_to_preserve = []
         successful_deletions = 0
 
         # Check each document's data consistency
-        for doc_id, status_doc in to_process_docs.items():
+        for doc_id in to_process_docs:
             # Check if corresponding content exists in full_docs
             content_data = await self.full_docs.get_by_id(doc_id)
             if not content_data:
-                # Check if this is a failed document that should be preserved
-                if hasattr(status_doc, 'status') and status_doc.status == DocStatus.FAILED:
-                    failed_docs_to_preserve.append(doc_id)
-                else:
-                    inconsistent_docs.append(doc_id)
+                inconsistent_docs.append(doc_id)
 
-        # Log information about failed documents that will be preserved
-        if failed_docs_to_preserve:
-            async with pipeline_status_lock:
-                preserve_message = (
-                    f'Preserving {len(failed_docs_to_preserve)} failed document entries for manual review'
-                )
-                logger.info(preserve_message)
-                pipeline_status['latest_message'] = preserve_message
-                pipeline_status['history_messages'].append(preserve_message)
-
-            # Remove failed documents from processing list but keep them in doc_status
-            for doc_id in failed_docs_to_preserve:
-                to_process_docs.pop(doc_id, None)
-
-        # Delete inconsistent document entries(excluding failed documents)
+        # Delete inconsistent document entries
         if inconsistent_docs:
             async with pipeline_status_lock:
                 summary_message = f'Inconsistent document entries found: {len(inconsistent_docs)}'
@@ -1425,13 +1408,6 @@ class YAR:
                         logger.error(error_message)
                         pipeline_status['latest_message'] = error_message
                         pipeline_status['history_messages'].append(error_message)
-
-        # Final summary log
-        # async with pipeline_status_lock:
-        #     final_message = f"Successfully deleted {successful_deletions} inconsistent entries, preserved {len(failed_docs_to_preserve)} failed documents"
-        #     logger.info(final_message)
-        #     pipeline_status["latest_message"] = final_message
-        #     pipeline_status["history_messages"].append(final_message)
 
         # Reset PROCESSING and FAILED documents that pass consistency checks to PENDING status
         docs_to_reset = {}
@@ -3459,7 +3435,6 @@ class YAR:
                     pipeline_status['latest_message'] = completion_msg
                     pipeline_status['history_messages'].append(completion_msg)
 
-
     async def adelete_by_entity(self, entity_name: str) -> DeletionResult:
         """Asynchronously delete an entity and all its relationships.
 
@@ -4207,7 +4182,6 @@ class YAR:
                                             continue
                                         llm_callable = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
                                         llm_response = await llm_callable(validation_prompt)
-
 
                                         json_match = re.search(r'\{[^{}]*\}', llm_response, re.DOTALL)
                                         if not json_match:

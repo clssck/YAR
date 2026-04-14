@@ -2797,7 +2797,7 @@ def create_document_routes(
     class DeleteDocByIdResponse(BaseModel):
         """Response model for single document deletion operation."""
 
-        status: Literal['deletion_started', 'busy', 'not_allowed'] = Field(
+        status: Literal['deletion_started', 'busy', 'not_allowed', 'success'] = Field(
             description='Status of the deletion operation'
         )
         message: str = Field(description='Message describing the operation result')
@@ -2819,7 +2819,8 @@ def create_document_routes(
         Deletes specific documents and all their associated data, including their status,
         text chunks, vector embeddings, and any related graph data. When requested,
         cached LLM extraction responses are removed after graph deletion/rebuild completes.
-        The deletion process runs in the background to avoid blocking the client connection.
+        Orphaned error entries and failed documents without stored content are deleted
+        immediately because they do not require graph cleanup or a pipeline lock.
 
         This operation is irreversible and will interact with the pipeline status.
 
@@ -2831,6 +2832,7 @@ def create_document_routes(
             DeleteDocByIdResponse: The result of the deletion operation.
                 - status="deletion_started": The document deletion has been initiated in the background.
                 - status="busy": The pipeline is busy with another operation.
+                - status="success": Orphaned document entries were deleted immediately.
 
         Raises:
             HTTPException:
@@ -2846,6 +2848,105 @@ def create_document_routes(
 
             pipeline_status = await get_namespace_data(NS_PIPELINE_STATUS, workspace=rag.workspace)
             pipeline_status_lock = get_namespace_lock(NS_PIPELINE_STATUS, workspace=rag.workspace)
+
+            lightweight_ids: list[str] = []
+            heavyweight_ids: list[str] = []
+            lightweight_status_docs: dict[str, dict[str, Any] | None] = {}
+
+            for doc_id in doc_ids:
+                if doc_id.startswith('error-'):
+                    lightweight_ids.append(doc_id)
+                    if delete_request.delete_file and s3_client:
+                        try:
+                            lightweight_status_docs[doc_id] = await rag.doc_status.get_by_id(doc_id)
+                        except Exception as status_error:
+                            logger.warning(
+                                f'Failed to load doc_status for lightweight error entry {doc_id}: {status_error!s}'
+                            )
+                    continue
+
+                try:
+                    status_doc = await rag.doc_status.get_by_id(doc_id)
+                except Exception as status_error:
+                    logger.warning(
+                        f'Failed to load doc_status for {doc_id}; leaving it in background deletion path: {status_error!s}'
+                    )
+                    heavyweight_ids.append(doc_id)
+                    continue
+
+                if not status_doc:
+                    heavyweight_ids.append(doc_id)
+                    continue
+
+                raw_status = status_doc.get('status')
+                try:
+                    is_failed_status = DocStatus(raw_status) == DocStatus.FAILED
+                except (ValueError, TypeError):
+                    is_failed_status = str(raw_status).split('.')[-1].lower() == DocStatus.FAILED.value
+
+                if is_failed_status:
+                    try:
+                        content_data = await rag.full_docs.get_by_id(doc_id)
+                    except Exception as content_error:
+                        logger.warning(
+                            f'Failed to load full_docs content for failed document {doc_id}; leaving it in background deletion path: {content_error!s}'
+                        )
+                        heavyweight_ids.append(doc_id)
+                        continue
+
+                    if not content_data:
+                        lightweight_ids.append(doc_id)
+                        lightweight_status_docs[doc_id] = status_doc
+                        continue
+
+                heavyweight_ids.append(doc_id)
+
+            if lightweight_ids:
+                await rag.doc_status.delete(lightweight_ids)
+                logger.info(
+                    f'Deleted {len(lightweight_ids)} lightweight orphaned document entries: {", ".join(lightweight_ids)}'
+                )
+
+                if delete_request.delete_file and s3_client:
+                    configured_bucket = getattr(getattr(s3_client, 'config', None), 'bucket_name', None)
+                    for doc_id in lightweight_ids:
+                        status_doc = lightweight_status_docs.get(doc_id)
+                        if not status_doc:
+                            continue
+
+                        metadata = status_doc.get('metadata') or {}
+                        s3_key = status_doc.get('s3_key') or metadata.get('s3_key')
+                        file_path = status_doc.get('file_path')
+
+                        if not s3_key and isinstance(file_path, str) and file_path.startswith('s3://'):
+                            s3_location = file_path.removeprefix('s3://')
+                            bucket_name, _, inferred_key = s3_location.partition('/')
+                            if inferred_key and (configured_bucket is None or not bucket_name or bucket_name == configured_bucket):
+                                s3_key = inferred_key
+                            elif inferred_key:
+                                logger.warning(
+                                    f'Skipping S3 cleanup for {doc_id}; bucket mismatch in file_path: {file_path}'
+                                )
+
+                        if not s3_key:
+                            continue
+
+                        try:
+                            await s3_client.delete_object(s3_key)
+                            logger.info(f'Deleted S3 object for lightweight document {doc_id}: {s3_key}')
+                        except Exception as cleanup_error:
+                            logger.warning(
+                                f'Failed to delete S3 object {s3_key} for lightweight document {doc_id}: {cleanup_error!s}'
+                            )
+
+                doc_ids = heavyweight_ids
+
+            if not doc_ids:
+                return DeleteDocByIdResponse(
+                    status='success',
+                    message=f'Deleted {len(lightweight_ids)} orphaned document entries.',
+                    doc_id=', '.join(delete_request.doc_ids),
+                )
 
             # Check if pipeline is busy with proper lock
             async with pipeline_status_lock:

@@ -34,6 +34,9 @@ def mock_rag():
     rag.doc_status.get_doc_by_file_path = AsyncMock(return_value=None)
     rag.doc_status.get_by_id = AsyncMock(return_value=None)
     rag.doc_status.get_status_counts = AsyncMock(return_value={})
+    rag.doc_status.delete = AsyncMock()
+    rag.full_docs = MagicMock()
+    rag.full_docs.get_by_id = AsyncMock(return_value=None)
     rag.workspace = 'default'
     rag.text_chunks = MagicMock()
     rag.ainsert = AsyncMock(return_value='track_123')
@@ -481,6 +484,98 @@ class TestPipelineStatusEndpoint:
         assert 'busy' in data
         assert isinstance(data['busy'], bool)
 
+@pytest.mark.offline
+class TestDeleteDocumentEndpoint:
+    """Tests for POST /documents/delete_document endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_delete_document_deletes_error_entry_while_pipeline_busy(self, client, mock_rag):
+        with (
+            patch(
+                'yar.kg.shared_storage.get_namespace_data',
+                new_callable=AsyncMock,
+                return_value={'busy': True},
+            ),
+            patch(
+                'yar.kg.shared_storage.get_namespace_lock',
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ),
+        ):
+            response = await client.post('/documents/delete_document', json={'doc_ids': ['error-123']})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            'status': 'success',
+            'message': 'Deleted 1 orphaned document entries.',
+            'doc_id': 'error-123',
+        }
+        mock_rag.doc_status.delete.assert_awaited_once_with(['error-123'])
+        mock_rag.full_docs.get_by_id.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_document_deletes_failed_entry_without_content_while_pipeline_busy(
+        self, client, mock_rag
+    ):
+        from yar.base import DocStatus
+
+        mock_rag.doc_status.get_by_id.return_value = {'status': DocStatus.FAILED, 'file_path': 'failed.txt'}
+        mock_rag.full_docs.get_by_id.return_value = None
+
+        with (
+            patch(
+                'yar.kg.shared_storage.get_namespace_data',
+                new_callable=AsyncMock,
+                return_value={'busy': True},
+            ),
+            patch(
+                'yar.kg.shared_storage.get_namespace_lock',
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ),
+        ):
+            response = await client.post('/documents/delete_document', json={'doc_ids': ['failed-123']})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            'status': 'success',
+            'message': 'Deleted 1 orphaned document entries.',
+            'doc_id': 'failed-123',
+        }
+        mock_rag.doc_status.delete.assert_awaited_once_with(['failed-123'])
+        mock_rag.full_docs.get_by_id.assert_awaited_once_with('failed-123')
+
+    @pytest.mark.asyncio
+    async def test_delete_document_only_blocks_remaining_heavy_docs_when_pipeline_busy(
+        self, client, mock_rag
+    ):
+        from yar.base import DocStatus
+
+        mock_rag.doc_status.get_by_id.return_value = {'status': DocStatus.FAILED, 'file_path': 'failed.txt'}
+        mock_rag.full_docs.get_by_id.return_value = {'content': 'still present'}
+
+        with (
+            patch(
+                'yar.kg.shared_storage.get_namespace_data',
+                new_callable=AsyncMock,
+                return_value={'busy': True},
+            ),
+            patch(
+                'yar.kg.shared_storage.get_namespace_lock',
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ),
+        ):
+            response = await client.post(
+                '/documents/delete_document',
+                json={'doc_ids': ['error-123', 'failed-123']},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            'status': 'busy',
+            'message': 'Cannot delete documents while pipeline is busy',
+            'doc_id': 'failed-123',
+        }
+        mock_rag.doc_status.delete.assert_awaited_once_with(['error-123'])
+        mock_rag.full_docs.get_by_id.assert_awaited_once_with('failed-123')
 
 # =============================================================================
 # Integration-like Tests

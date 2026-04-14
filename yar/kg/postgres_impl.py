@@ -1714,6 +1714,13 @@ class PostgreSQLDB:
                 'new_type': 'TEXT',
                 'description': 'file_path to TEXT NULL',
             },
+            {
+                'table': 'YAR_DOC_STATUS',
+                'column': 'content_summary',
+                'old_type': 'character varying(255)',
+                'new_type': 'TEXT',
+                'description': 'content_summary from VARCHAR(255) to TEXT',
+            },
         ]
 
         try:
@@ -1758,6 +1765,7 @@ class PostgreSQLDB:
                         (migration['column'] == 'entity_name' and current_length == 255)
                         or (migration['column'] in ['source_id', 'target_id'] and current_length == 256)
                         or (migration['column'] == 'file_path' and current_type == 'character varying')
+                        or (migration['column'] == 'content_summary' and current_type == 'character varying')
                     ):
                         needs_migration = True
 
