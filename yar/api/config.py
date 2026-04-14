@@ -235,6 +235,7 @@ def parse_args() -> argparse.Namespace:
 
     # Inject model configuration
     args.llm_model = get_env_value('LLM_MODEL', 'mistral-nemo:latest')
+    args.vision_model = get_env_value('VISION_MODEL', 'salmon')
     # EMBEDDING_MODEL defaults to None - uses binding default (e.g., "text-embedding-3-small" for OpenAI)
     args.embedding_model = get_env_value('EMBEDDING_MODEL', None, special_none=True)
     # EMBEDDING_DIM defaults to None - each binding will use its own default dimension

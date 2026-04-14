@@ -7,8 +7,8 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -33,6 +33,11 @@ from yar.api.utils_api import (
 )
 from yar.base import DeletionResult, DocStatus
 from yar.constants import NS_PIPELINE_STATUS
+from yar.document.vision_adapter import (
+    VISION_SUPPORTED_EXTENSIONS,
+    extract_document_with_vision,
+    is_vision_document,
+)
 from yar.utils import (
     compute_mdhash_id,
     generate_track_id,
@@ -44,24 +49,6 @@ from yar.validators import validate_doc_id
 
 if TYPE_CHECKING:
     from yar.storage.s3_client import S3Client
-
-
-@lru_cache(maxsize=1)
-def _is_kreuzberg_available() -> bool:
-    """Check if kreuzberg is available (cached check).
-
-    Kreuzberg is a high-performance document processing engine with Rust core,
-    supporting 56+ document formats with built-in OCR and RAG chunking.
-
-    Returns:
-        bool: True if kreuzberg is available, False otherwise
-    """
-    try:
-        import kreuzberg  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
 
 
 # Function to format datetime to ISO format string with timezone information
@@ -681,54 +668,16 @@ class DocumentManager:
         self,
         input_dir: str,
         workspace: str = '',  # New parameter for workspace isolation
-        supported_extensions: tuple = (
-            # Office documents
-            '.pdf',
-            '.docx',
-            '.doc',
-            '.xlsx',
-            '.xls',
-            '.pptx',
-            '.ppsx',  # PowerPoint Show (same structure as PPTX)
-            '.ppt',
-            '.odt',
-            '.ods',
-            '.odp',
-            '.rtf',
-            # Ebooks
-            '.epub',
-            '.mobi',
-            # Markup
-            '.html',
-            '.htm',
-            '.md',
-            '.rst',
-            '.tex',
-            '.asciidoc',
-            # Data
-            '.json',
-            '.xml',
-            '.yaml',
-            '.yml',
-            '.csv',
-            '.tsv',
-            # Email
-            '.eml',
-            '.msg',
-        ),
+        supported_extensions: tuple[str, ...] | None = None,
     ):
         # Store the base input directory and workspace
         self.base_input_dir = Path(input_dir)
         self.workspace = workspace
-        self.supported_extensions = supported_extensions
+        self.supported_extensions = supported_extensions or SUPPORTED_DOCUMENT_EXTENSIONS
         self.indexed_files = set()
 
-        # Create workspace-specific input directory
-        # If workspace is provided, create a subdirectory for data isolation
-        if workspace:
-            self.input_dir = self.base_input_dir / workspace
-        else:
-            self.input_dir = self.base_input_dir
+        # Create workspace-specific input directory if workspace is provided
+        self.input_dir = self.base_input_dir / workspace if workspace else self.base_input_dir
 
         # Create input directory if it doesn't exist
         self.input_dir.mkdir(parents=True, exist_ok=True)
@@ -832,43 +781,27 @@ def get_unique_filename_in_enqueued(target_dir: Path, original_name: str) -> str
     return f'{base_name}_{timestamp}{extension}'
 
 
-# Formats supported by Kreuzberg for one-pass extraction+chunking
-# Code files (.py, .js, etc.) are NOT in this list - they use simple UTF-8 read
-KREUZBERG_SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+# Plain-text formats should be decoded directly instead of going through heavyweight extractors.
+TEXT_DOCUMENT_EXTENSIONS: frozenset[str] = frozenset(
     {
-        # Documents
-        '.pdf',
-        '.docx',
-        '.doc',
-        '.odt',
-        '.rtf',
         '.txt',
         '.md',
         '.markdown',
-        # Presentations
-        '.pptx',
-        '.ppsx',  # PowerPoint Show
-        '.ppt',
-        '.odp',
-        # Spreadsheets
-        '.xlsx',
-        '.xls',
-        '.ods',
-        '.csv',
-        # E-books
-        '.epub',
-        '.mobi',
-        # Web/Data
+        '.rst',
+        '.tex',
+        '.asciidoc',
         '.html',
         '.htm',
-        '.xml',
         '.json',
-        # Email
-        '.eml',
+        '.xml',
+        '.yaml',
+        '.yml',
+        '.csv',
+        '.tsv',
     }
 )
 
-# Code/config files - simple UTF-8 read, no Kreuzberg processing
+# Code/config files - simple UTF-8 read, no heavyweight extraction.
 CODE_EXTENSIONS: frozenset[str] = frozenset(
     {
         '.py',
@@ -908,96 +841,198 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 
-
-def _extract_and_chunk_with_kreuzberg(
-    file_path: Path,
-    chunk_token_size: int = 1200,
-    chunk_overlap_token_size: int = 100,
-    chunking_preset: str | None = 'semantic',
-    enable_ocr: bool = True,
-    ocr_language: str = 'eng',
-) -> tuple[str, list[dict[str, Any]]]:
-    """One-pass document extraction and chunking using Kreuzberg (synchronous).
-
-    Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
-    This preserves document structure for better semantic chunk boundaries.
-
-    Args:
-        enable_ocr: Enable OCR for images/scanned content (default: True)
-        ocr_language: Language code for OCR (e.g., 'eng' for English)
-    """
-    from yar.document import OcrOptions, chunks_to_yar_format, extract_and_chunk_sync
-
-    # Build OCR options if enabled
-    ocr_options = None
-    if enable_ocr:
-        ocr_options = OcrOptions(language=ocr_language)
-
-    result = extract_and_chunk_sync(
-        file_path,
-        chunk_token_size=chunk_token_size,
-        chunk_overlap_token_size=chunk_overlap_token_size,
-        chunking_preset=chunking_preset,
-        ocr_options=ocr_options,
-    )
-
-    chunks = chunks_to_yar_format(result)
-    return result.content, chunks
+TEXT_LIKE_EXTENSIONS: frozenset[str] = TEXT_DOCUMENT_EXTENSIONS | CODE_EXTENSIONS
+TEXT_LIKE_MIME_TYPES: frozenset[str] = frozenset(
+    {
+        'application/json',
+        'application/xml',
+        'application/x-yaml',
+        'application/yaml',
+        'text/csv',
+        'text/html',
+        'text/markdown',
+        'text/tab-separated-values',
+        'text/xml',
+        'text/yaml',
+    }
+)
+SUPPORTED_DOCUMENT_EXTENSIONS: tuple[str, ...] = (
+    *sorted(VISION_SUPPORTED_EXTENSIONS),
+    *sorted(TEXT_LIKE_EXTENSIONS),
+)
 
 
-def _extract_and_chunk_bytes_with_kreuzberg(
-    data: bytes,
+@dataclass(slots=True)
+class DocumentExtractionResult:
+    content: str
+    pre_chunks: list[dict[str, Any]] | None = None
+    tables: list[Any] | None = None
+    extractor: Literal['vision', 'text'] = 'text'
+    metadata: dict[str, Any] | None = None
+
+
+class DocumentExtractionError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        error_description: str,
+        original_error: str,
+        log_message: str,
+        log_level: Literal['error', 'warning'] = 'error',
+    ):
+        super().__init__(original_error)
+        self.error_description = error_description
+        self.original_error = original_error
+        self.log_message = log_message
+        self.log_level = log_level
+
+
+def _normalize_dispatch_mime_type(mime_type: str | None) -> str:
+    return (mime_type or '').split(';', 1)[0].strip().lower()
+
+
+def _extension_label(filename: str, mime_type: str | None) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext:
+        return ext.upper()[1:]
+    normalized_mime = _normalize_dispatch_mime_type(mime_type)
+    return normalized_mime.upper() if normalized_mime else 'DOCUMENT'
+
+
+async def _extract_document_with_vision_bytes(
+    file_content: bytes,
+    *,
+    filename: str,
     mime_type: str,
-    chunk_token_size: int = 1200,
-    chunk_overlap_token_size: int = 100,
-    chunking_preset: str | None = 'semantic',
-    enable_ocr: bool = True,
-    ocr_language: str = 'eng',
-) -> tuple[str, list[dict[str, Any]], list[Any] | None]:
-    """One-pass document extraction and chunking from bytes using Kreuzberg (synchronous).
-
-    This extracts text directly from bytes without writing to disk. Used for
-    S3-based workflows where we want to avoid local file storage.
-
-    Runs in thread pool via asyncio.to_thread() to avoid blocking the event loop.
-
-    Args:
-        enable_ocr: Enable OCR for images/scanned content (default: True)
-        ocr_language: Language code for OCR (e.g., 'eng' for English)
-
-    Returns:
-        Tuple of (content, chunks, tables) where tables can be used for Markdown output.
-    """
-    from yar.document import (
-        ChunkingOptions,
-        ExtractionOptions,
-        OcrOptions,
-        chunks_to_yar_format,
-        extract_bytes_with_kreuzberg_sync,
-        tokens_to_chars,
+) -> DocumentExtractionResult:
+    result = await extract_document_with_vision(
+        file_content,
+        filename=filename,
+        mime_type=mime_type,
+        model=getattr(global_args, 'vision_model', 'salmon'),
+        base_url=getattr(global_args, 'llm_binding_host', None),
+        api_key=getattr(global_args, 'llm_binding_api_key', None),
+        pdf_password=getattr(global_args, 'pdf_decrypt_password', None),
+    )
+    return DocumentExtractionResult(
+        content=result.content,
+        pre_chunks=result.pre_chunks,
+        tables=result.tables,
+        extractor='vision',
+        metadata=result.metadata,
     )
 
-    max_chars = tokens_to_chars(chunk_token_size)
-    max_overlap = tokens_to_chars(chunk_overlap_token_size)
 
-    chunking_options = ChunkingOptions(
-        enabled=True,
-        max_chars=max_chars,
-        max_overlap=max_overlap,
-        preset=chunking_preset,
+def _decode_text_document_bytes(
+    file_content: bytes,
+    *,
+    filename: str,
+    error_prefix: str,
+) -> DocumentExtractionResult:
+    try:
+        content = file_content.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        error_description = (
+            f'{error_prefix}UTF-8 encoding error'
+            if error_prefix == '[Bytes Extraction]'
+            else f'{error_prefix}UTF-8 encoding error, please convert it to UTF-8 before processing'
+        )
+        raise DocumentExtractionError(
+            error_description=error_description,
+            original_error=f'File is not valid UTF-8 encoded text: {exc!s}',
+            log_message=(
+                f'{error_prefix}File {filename} is not valid UTF-8 encoded text.'
+                if error_prefix == '[Bytes Extraction]'
+                else f'{error_prefix}File {filename} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
+            ),
+        ) from exc
+
+    if not content or len(content.strip()) == 0:
+        raise DocumentExtractionError(
+            error_description=f'{error_prefix}Empty file content',
+            original_error='File contains no content or only whitespace',
+            log_message=f'{error_prefix}Empty content in file: {filename}',
+        )
+
+    if content.startswith("b'") or content.startswith('b"'):
+        raise DocumentExtractionError(
+            error_description=f'{error_prefix}Binary data in text file',
+            original_error='File appears to contain binary data representation instead of text',
+            log_message=f'{error_prefix}File {filename} appears to contain binary data representation instead of text',
+        )
+
+    return DocumentExtractionResult(content=content, extractor='text')
+
+
+async def _dispatch_document_extraction(
+    *,
+    file_content: bytes,
+    filename: str,
+    mime_type: str,
+    error_prefix: str,
+) -> DocumentExtractionResult:
+    normalized_mime = _normalize_dispatch_mime_type(mime_type)
+    ext = Path(filename).suffix.lower()
+
+    if is_vision_document(filename=filename, mime_type=normalized_mime):
+        try:
+            result = await _extract_document_with_vision_bytes(
+                file_content,
+                filename=filename,
+                mime_type=normalized_mime or mime_type,
+            )
+        except Exception as exc:
+            raise DocumentExtractionError(
+                error_description=f'{error_prefix}{_extension_label(filename, normalized_mime)} processing error',
+                original_error=f'Failed to extract text: {exc!s}',
+                log_message=f'{error_prefix}Error processing {filename}: {exc!s}',
+            ) from exc
+
+        page_count = result.metadata.get('page_count') if result.metadata else None
+        logger.info(
+            '%s Vision extraction: %s -> %s pages (model=%s)',
+            error_prefix,
+            filename,
+            page_count if page_count is not None else '?',
+            getattr(global_args, 'vision_model', 'salmon'),
+        )
+        return result
+
+    if ext in TEXT_LIKE_EXTENSIONS or normalized_mime.startswith('text/') or normalized_mime in TEXT_LIKE_MIME_TYPES:
+        result = _decode_text_document_bytes(
+            file_content,
+            filename=filename,
+            error_prefix=error_prefix,
+        )
+        logger.info('%s UTF-8 decode: %s -> %s characters', error_prefix, filename, len(result.content))
+        return result
+
+    raise DocumentExtractionError(
+        error_description=f'{error_prefix}Unsupported file type: {ext}',
+        original_error=f'File extension {ext} is not supported',
+        log_message=f'{error_prefix}Unsupported file type: {filename} (extension {ext})',
     )
 
-    # Build OCR options if enabled
-    ocr_options = None
-    if enable_ocr:
-        ocr_options = OcrOptions(language=ocr_language)
 
-    options = ExtractionOptions(chunking=chunking_options, ocr=ocr_options)
-
-    # Fallback for PPTX txBody errors is handled in kreuzberg_adapter
-    result = extract_bytes_with_kreuzberg_sync(data, mime_type, options)
-    chunks = chunks_to_yar_format(result)
-    return result.content, chunks, result.tables
+async def _enqueue_document_extraction_error(
+    rag: YAR,
+    *,
+    track_id: str,
+    filename: str,
+    file_size: int,
+    error: DocumentExtractionError,
+) -> None:
+    error_files = [
+        {
+            'file_path': filename,
+            'error_description': error.error_description,
+            'original_error': error.original_error,
+            'file_size': file_size,
+        }
+    ]
+    await rag.apipeline_enqueue_error_documents(error_files, track_id)
+    log_method = logger.warning if error.log_level == 'warning' else logger.error
+    log_method(error.log_message)
 
 
 async def pipeline_enqueue_file(
@@ -1009,10 +1044,10 @@ async def pipeline_enqueue_file(
     chunk_overlap_token_size: int | None = None,
     chunking_preset: str | None = None,
 ) -> tuple[bool, str]:
-    """Add a file to the queue for processing with one-pass extraction+chunking.
+    """Add a file to the queue after shared document extraction dispatch.
 
-    For PDF/DOCX files, this performs extraction and chunking in a single pass
-    using Kreuzberg, preserving document structure for better chunk boundaries.
+    PDFs, images, and supported Office documents use the vision adapter.
+    Plain UTF-8 text/code is decoded directly.
 
     Args:
         rag: YAR instance
@@ -1038,7 +1073,7 @@ async def pipeline_enqueue_file(
     try:
         content = ''
         pre_chunks: list[dict[str, Any]] | None = None
-        ext = file_path.suffix.lower()
+
         file_size = 0
 
         # Get file size for error reporting
@@ -1090,105 +1125,22 @@ async def pipeline_enqueue_file(
 
         # Process based on file type
         try:
-            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
-                try:
-                    content, pre_chunks = await asyncio.to_thread(
-                        _extract_and_chunk_with_kreuzberg,
-                        file_path,
-                        effective_chunk_size,
-                        effective_overlap,
-                        effective_preset,
-                        getattr(global_args, 'enable_ocr', True),
-                        getattr(global_args, 'ocr_language', 'eng'),
-                    )
-                    logger.info(
-                        f'[File Extraction] One-pass extraction: {file_path.name} -> '
-                        f'{len(pre_chunks)} chunks (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
-                    )
-                except Exception as e:
-                    error_files = [
-                        {
-                            'file_path': str(file_path.name),
-                            'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
-                            'original_error': f'Failed to extract text: {e!s}',
-                            'file_size': file_size,
-                        }
-                    ]
-                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
-                    return False, track_id
-
-            elif ext in CODE_EXTENSIONS:
-                try:
-                    content = file.decode('utf-8')
-
-                    if not content or len(content.strip()) == 0:
-                        error_files = [
-                            {
-                                'file_path': str(file_path.name),
-                                'error_description': '[File Extraction]Empty file content',
-                                'original_error': 'File contains no content or only whitespace',
-                                'file_size': file_size,
-                            }
-                        ]
-                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                        logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
-                        return False, track_id
-
-                    if content.startswith("b'") or content.startswith('b"'):
-                        error_files = [
-                            {
-                                'file_path': str(file_path.name),
-                                'error_description': '[File Extraction]Binary data in text file',
-                                'original_error': 'File appears to contain binary data representation instead of text',
-                                'file_size': file_size,
-                            }
-                        ]
-                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                        logger.error(
-                            f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
-                        )
-                        return False, track_id
-
-                except UnicodeDecodeError as e:
-                    error_files = [
-                        {
-                            'file_path': str(file_path.name),
-                            'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
-                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
-                            'file_size': file_size,
-                        }
-                    ]
-                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(
-                        f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
-                    )
-                    return False, track_id
-
-            else:
-                error_files = [
-                    {
-                        'file_path': str(file_path.name),
-                        'error_description': f'[File Extraction]Unsupported file type: {ext}',
-                        'original_error': f'File extension {ext} is not supported',
-                        'file_size': file_size,
-                    }
-                ]
-                await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
-                return False, track_id
-
-        except Exception as e:
-            error_files = [
-                {
-                    'file_path': str(file_path.name),
-                    'error_description': '[File Extraction]File format processing error',
-                    'original_error': f'Unexpected error during file extracting: {e!s}',
-                    'file_size': file_size,
-                }
-            ]
-            await rag.apipeline_enqueue_error_documents(error_files, track_id)
-            logger.error(f'[File Extraction]Unexpected error during {file_path.name} extracting: {e!s}')
+            extracted = await _dispatch_document_extraction(
+                file_content=file,
+                filename=file_path.name,
+                mime_type=mimetypes.guess_type(file_path.name)[0] or 'application/octet-stream',
+                error_prefix='[File Extraction]',
+            )
+            content = extracted.content
+            pre_chunks = extracted.pre_chunks
+        except DocumentExtractionError as e:
+            await _enqueue_document_extraction_error(
+                rag,
+                track_id=track_id,
+                filename=str(file_path.name),
+                file_size=file_size,
+                error=e,
+            )
             return False, track_id
 
         # Insert into the RAG queue
@@ -1341,7 +1293,7 @@ async def pipeline_enqueue_file_with_s3(
     try:
         content = ''
         pre_chunks: list[dict[str, Any]] | None = None
-        ext = file_path.suffix.lower()
+
         file_size = 0
 
         # Get file size for error reporting
@@ -1393,105 +1345,22 @@ async def pipeline_enqueue_file_with_s3(
 
         # Process based on file type
         try:
-            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
-                try:
-                    content, pre_chunks = await asyncio.to_thread(
-                        _extract_and_chunk_with_kreuzberg,
-                        file_path,
-                        effective_chunk_size,
-                        effective_overlap,
-                        effective_preset,
-                        getattr(global_args, 'enable_ocr', True),
-                        getattr(global_args, 'ocr_language', 'eng'),
-                    )
-                    logger.info(
-                        f'[File Extraction] One-pass extraction: {file_path.name} -> '
-                        f'{len(pre_chunks)} chunks (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
-                    )
-                except Exception as e:
-                    error_files = [
-                        {
-                            'file_path': str(file_path.name),
-                            'error_description': f'[File Extraction]{ext.upper()[1:]} processing error',
-                            'original_error': f'Failed to extract text: {e!s}',
-                            'file_size': file_size,
-                        }
-                    ]
-                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(f'[File Extraction]Error processing {file_path.name}: {e!s}')
-                    return (None, None)
-
-            elif ext in CODE_EXTENSIONS:
-                try:
-                    content = file.decode('utf-8')
-
-                    if not content or len(content.strip()) == 0:
-                        error_files = [
-                            {
-                                'file_path': str(file_path.name),
-                                'error_description': '[File Extraction]Empty file content',
-                                'original_error': 'File contains no content or only whitespace',
-                                'file_size': file_size,
-                            }
-                        ]
-                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                        logger.error(f'[File Extraction]Empty content in file: {file_path.name}')
-                        return (None, None)
-
-                    if content.startswith("b'") or content.startswith('b"'):
-                        error_files = [
-                            {
-                                'file_path': str(file_path.name),
-                                'error_description': '[File Extraction]Binary data in text file',
-                                'original_error': 'File appears to contain binary data representation instead of text',
-                                'file_size': file_size,
-                            }
-                        ]
-                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                        logger.error(
-                            f'[File Extraction]File {file_path.name} appears to contain binary data representation instead of text'
-                        )
-                        return (None, None)
-
-                except UnicodeDecodeError as e:
-                    error_files = [
-                        {
-                            'file_path': str(file_path.name),
-                            'error_description': '[File Extraction]UTF-8 encoding error, please convert it to UTF-8 before processing',
-                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
-                            'file_size': file_size,
-                        }
-                    ]
-                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(
-                        f'[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing.'
-                    )
-                    return (None, None)
-
-            else:
-                error_files = [
-                    {
-                        'file_path': str(file_path.name),
-                        'error_description': f'[File Extraction]Unsupported file type: {ext}',
-                        'original_error': f'File extension {ext} is not supported',
-                        'file_size': file_size,
-                    }
-                ]
-                await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                logger.error(f'[File Extraction]Unsupported file type: {file_path.name} (extension {ext})')
-                return (None, None)
-
-        except Exception as e:
-            error_files = [
-                {
-                    'file_path': str(file_path.name),
-                    'error_description': '[File Extraction]File format processing error',
-                    'original_error': f'Unexpected error during file extracting: {e!s}',
-                    'file_size': file_size,
-                }
-            ]
-            await rag.apipeline_enqueue_error_documents(error_files, track_id)
-            logger.error(f'[File Extraction]Unexpected error during {file_path.name} extracting: {e!s}')
+            extracted = await _dispatch_document_extraction(
+                file_content=file,
+                filename=file_path.name,
+                mime_type=mimetypes.guess_type(file_path.name)[0] or 'application/octet-stream',
+                error_prefix='[File Extraction]',
+            )
+            content = extracted.content
+            pre_chunks = extracted.pre_chunks
+        except DocumentExtractionError as e:
+            await _enqueue_document_extraction_error(
+                rag,
+                track_id=track_id,
+                filename=str(file_path.name),
+                file_size=file_size,
+                error=e,
+            )
             return (None, None)
 
         # Upload processed text to S3 if extraction succeeded
@@ -1667,95 +1536,25 @@ async def pipeline_process_bytes_with_s3(
     try:
         content = ''
         pre_chunks: list[dict[str, Any]] | None = None
-        ext = Path(filename).suffix.lower()
 
         tables: list[Any] | None = None
 
         # Process based on file type
         try:
-            if ext in KREUZBERG_SUPPORTED_EXTENSIONS:
-                try:
-                    content, pre_chunks, tables = await asyncio.to_thread(
-                        _extract_and_chunk_bytes_with_kreuzberg,
-                        file_content,
-                        mime_type,
-                        effective_chunk_size,
-                        effective_overlap,
-                        effective_preset,
-                        getattr(global_args, 'enable_ocr', True),
-                        getattr(global_args, 'ocr_language', 'eng'),
-                    )
-                    logger.info(
-                        f'[Bytes Extraction] One-pass extraction: {filename} -> '
-                        f'{len(pre_chunks)} chunks, {len(tables) if tables else 0} tables (preset={effective_preset}, ocr={getattr(global_args, "enable_ocr", True)})'
-                    )
-                except Exception as e:
-                    error_files = [
-                        {
-                            'file_path': filename,
-                            'error_description': f'[Bytes Extraction]{ext.upper()[1:]} processing error',
-                            'original_error': f'Failed to extract text: {e!s}',
-                            'file_size': file_size,
-                        }
-                    ]
-                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(f'[Bytes Extraction]Error processing {filename}: {e!s}')
-                    return None
-
-            elif ext in CODE_EXTENSIONS:
-                try:
-                    content = file_content.decode('utf-8')
-
-                    if not content or len(content.strip()) == 0:
-                        error_files = [
-                            {
-                                'file_path': filename,
-                                'error_description': '[Bytes Extraction]Empty file content',
-                                'original_error': 'File contains no content or only whitespace',
-                                'file_size': file_size,
-                            }
-                        ]
-                        await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                        logger.error(f'[Bytes Extraction]Empty content in file: {filename}')
-                        return None
-
-                except UnicodeDecodeError as e:
-                    error_files = [
-                        {
-                            'file_path': filename,
-                            'error_description': '[Bytes Extraction]UTF-8 encoding error',
-                            'original_error': f'File is not valid UTF-8 encoded text: {e!s}',
-                            'file_size': file_size,
-                        }
-                    ]
-                    await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                    logger.error(f'[Bytes Extraction]File {filename} is not valid UTF-8 encoded text.')
-                    return None
-
-            else:
-                error_files = [
-                    {
-                        'file_path': filename,
-                        'error_description': f'[Bytes Extraction]Unsupported file type: {ext}',
-                        'original_error': f'File extension {ext} is not supported',
-                        'file_size': file_size,
-                    }
-                ]
-                await rag.apipeline_enqueue_error_documents(error_files, track_id)
-                logger.error(f'[Bytes Extraction]Unsupported file type: {filename} (extension {ext})')
-                return None
-
-        except Exception as e:
-            error_files = [
-                {
-                    'file_path': filename,
-                    'error_description': '[Bytes Extraction]File format processing error',
-                    'original_error': f'Unexpected error during extraction: {e!s}',
-                    'file_size': file_size,
-                }
-            ]
-            await rag.apipeline_enqueue_error_documents(error_files, track_id)
-            logger.error(f'[Bytes Extraction]Unexpected error during {filename} extraction: {e!s}')
+            extracted = await _dispatch_document_extraction(
+                file_content=file_content, filename=filename, mime_type=mime_type, error_prefix='[Bytes Extraction]'
+            )
+            content = extracted.content
+            pre_chunks = extracted.pre_chunks
+            tables = extracted.tables
+        except DocumentExtractionError as e:
+            await _enqueue_document_extraction_error(
+                rag,
+                track_id=track_id,
+                filename=filename,
+                file_size=file_size,
+                error=e,
+            )
             return None
 
         # Upload processed text to S3
@@ -2010,8 +1809,8 @@ async def _upload_processed_text_to_s3(
         s3_client: S3Client instance (required, S3 is mandatory)
         workspace: Current workspace name
         doc_id: Document ID (same as original file)
-        extracted_text: The extracted text content from kreuzberg
-        tables: Optional list of extracted tables with .markdown property
+        extracted_text: The extracted text content from document processing
+        tables: Optional list of extracted tables with a `.markdown` property
 
     Returns:
         S3 key where the processed Markdown was uploaded
@@ -2026,7 +1825,7 @@ async def _upload_processed_text_to_s3(
     if tables:
         table_markdowns = []
         for table in tables:
-            # Tables from kreuzberg have a .markdown property
+            # Some extractors expose table markdown via a `.markdown` property.
             table_md = getattr(table, 'markdown', None)
             if table_md:
                 table_markdowns.append(table_md)

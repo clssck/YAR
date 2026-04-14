@@ -58,9 +58,7 @@ def app(mock_rag, mock_doc_manager):
     app = FastAPI()
     with patch('yar.api.routers.document_routes.global_args') as mock_global_args:
         mock_global_args.max_upload_size_mb = 100
-        router = create_document_routes(
-            rag=mock_rag, doc_manager=mock_doc_manager, api_key=None
-        )
+        router = create_document_routes(rag=mock_rag, doc_manager=mock_doc_manager, api_key=None)
     app.include_router(router)
     return app
 
@@ -450,26 +448,30 @@ class TestPipelineStatusEndpoint:
     @pytest.mark.asyncio
     async def test_pipeline_status_returns_data(self, client):
         """Test that pipeline status returns expected fields."""
-        with patch(
-            'yar.kg.shared_storage.get_namespace_data',
-            new_callable=AsyncMock,
-            return_value={
-                'autoscanned': True,
-                'busy': False,
-                'job_name': '',
-                'docs': 0,
-                'batches': 0,
-                'cur_batch': 0,
-                'request_pending': False,
-                'latest_message': '',
-            },
-        ), patch(
-            'yar.kg.shared_storage.get_namespace_lock',
-            return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
-        ), patch(
-            'yar.kg.shared_storage.get_all_update_flags_status',
-            new_callable=AsyncMock,
-            return_value={},
+        with (
+            patch(
+                'yar.kg.shared_storage.get_namespace_data',
+                new_callable=AsyncMock,
+                return_value={
+                    'autoscanned': True,
+                    'busy': False,
+                    'job_name': '',
+                    'docs': 0,
+                    'batches': 0,
+                    'cur_batch': 0,
+                    'request_pending': False,
+                    'latest_message': '',
+                },
+            ),
+            patch(
+                'yar.kg.shared_storage.get_namespace_lock',
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ),
+            patch(
+                'yar.kg.shared_storage.get_all_update_flags_status',
+                new_callable=AsyncMock,
+                return_value={},
+            ),
         ):
             response = await client.get('/documents/pipeline_status')
 
@@ -532,3 +534,90 @@ class TestDocumentIntegration:
         assert response.status_code == 200
         data = response.json()
         assert data['status'] == 'success'
+
+
+@pytest.mark.offline
+class TestDocumentExtractionDispatch:
+    """Tests for shared document extraction dispatch."""
+
+    def test_document_manager_supports_vision_documents(self, tmp_path):
+        from yar.api.routers.document_routes import DocumentManager
+
+        manager = DocumentManager(str(tmp_path))
+        assert manager.is_supported_file('scan.png') is True
+        assert manager.is_supported_file('slides.docx') is True
+        assert manager.is_supported_file('deck.PPSX') is True
+        assert manager.is_supported_file('notes.odt') is True
+        assert manager.is_supported_file('archive.zip') is False
+
+    @pytest.mark.asyncio
+    async def test_dispatch_routes_pdf_to_vision(self):
+        from yar.api.routers import document_routes as routes
+
+        vision_result = routes.DocumentExtractionResult(content='vision markdown', extractor='vision')
+        with (
+            patch.object(
+                routes, '_extract_document_with_vision_bytes', AsyncMock(return_value=vision_result)
+            ) as vision_mock,
+            patch.object(routes, '_decode_text_document_bytes') as decode_mock,
+        ):
+            result = await routes._dispatch_document_extraction(
+                file_content=b'%PDF-1.7',
+                filename='report.pdf',
+                mime_type='application/pdf',
+                error_prefix='[Bytes Extraction]',
+            )
+
+        assert result is vision_result
+        vision_mock.assert_awaited_once()
+        decode_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_routes_text_to_utf8_decode(self):
+        from yar.api.routers import document_routes as routes
+
+        text_result = routes.DocumentExtractionResult(content='plain text', extractor='text')
+        with (
+            patch.object(routes, '_extract_document_with_vision_bytes', AsyncMock()) as vision_mock,
+            patch.object(routes, '_decode_text_document_bytes', return_value=text_result) as decode_mock,
+        ):
+            result = await routes._dispatch_document_extraction(
+                file_content=b'hello',
+                filename='notes.txt',
+                mime_type='text/plain',
+                error_prefix='[Bytes Extraction]',
+            )
+
+        assert result is text_result
+        decode_mock.assert_called_once_with(
+            b'hello',
+            filename='notes.txt',
+            error_prefix='[Bytes Extraction]',
+        )
+        vision_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_routes_office_docs_to_vision(self):
+        from yar.api.routers import document_routes as routes
+
+        vision_result = routes.DocumentExtractionResult(content='office markdown', extractor='vision')
+        with (
+            patch.object(
+                routes, '_extract_document_with_vision_bytes', AsyncMock(return_value=vision_result)
+            ) as vision_mock,
+            patch.object(routes, '_decode_text_document_bytes') as decode_mock,
+        ):
+            result = await routes._dispatch_document_extraction(
+                file_content=b'docx-bytes',
+                filename='slides.DOCX',
+                mime_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                error_prefix='[Bytes Extraction]',
+            )
+
+        assert result is vision_result
+        vision_mock.assert_awaited_once_with(
+            b'docx-bytes',
+            filename='slides.DOCX',
+            mime_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        )
+        decode_mock.assert_not_called()
