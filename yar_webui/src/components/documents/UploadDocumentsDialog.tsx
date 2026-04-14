@@ -211,6 +211,7 @@ export default function UploadDocumentsDialog({
               })
               // Kick health check so polling switches to fast interval
               useBackendState.getState().resetHealthCheckTimerDelayed(500)
+              useBackendState.getState().invalidateDocumentList()
               completedCount++
             }
           } catch (err) {

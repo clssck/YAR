@@ -367,6 +367,7 @@ export default function DocumentManager() {
   const { t } = useTranslation()
   const health = useBackendState.use.health()
   const pipelineBusy = useBackendState.use.pipelineBusy()
+  const documentListVersion = useBackendState.use.documentListVersion()
 
   // Legacy state for backward compatibility
   const [docs, setDocs] = useState<DocsStatusesResponse | null>(null)
@@ -1525,6 +1526,7 @@ export default function DocumentManager() {
     sortField,
     sortDirection,
     fetchPaginatedDocuments,
+    documentListVersion,
   ])
 
   return (

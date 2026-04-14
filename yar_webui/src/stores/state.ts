@@ -16,6 +16,7 @@ interface BackendState {
   healthCheckIntervalId: ReturnType<typeof setInterval> | null
   healthCheckFunction: (() => void) | null
   healthCheckIntervalValue: number
+  documentListVersion: number
 
   check: () => Promise<boolean>
   clear: () => void
@@ -25,6 +26,7 @@ interface BackendState {
   resetHealthCheckTimer: () => void
   resetHealthCheckTimerDelayed: (delayMs: number) => void
   clearHealthCheckTimer: () => void
+  invalidateDocumentList: () => void
 }
 
 interface AuthState {
@@ -62,6 +64,7 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
   healthCheckIntervalId: null,
   healthCheckFunction: null,
   healthCheckIntervalValue: healthCheckInterval * 1000, // Use constant from lib/constants
+  documentListVersion: 0,
 
   check: async () => {
     const health = await checkHealth()
@@ -186,6 +189,8 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
       set({ healthCheckIntervalId: null })
     }
   },
+  invalidateDocumentList: () =>
+    set((state) => ({ documentListVersion: state.documentListVersion + 1 })),
 }))
 
 const useBackendState = createSelectors(useBackendStateStoreBase)
