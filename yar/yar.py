@@ -1194,7 +1194,7 @@ class YAR:
         new_docs: dict[str, Any] = {
             id_: {
                 'status': DocStatus.PENDING,
-                'content_summary': get_content_summary(content_data['content']),
+                'content_summary': os.path.splitext(os.path.basename(content_data.get('file_path', '')))[0] or get_content_summary(content_data['content']),
                 'content_length': len(content_data['content']),
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat(),
@@ -1870,6 +1870,24 @@ class YAR:
 
                                 # Record processing end time
                                 processing_end_time = int(time.time())
+                                # Generate LLM document summary (falls back to filename)
+                                doc_summary = status_doc.content_summary
+                                if self.llm_model_func and content:
+                                    try:
+                                        excerpt = content[:3000].strip()
+                                        summary_prompt = (
+                                            'Summarize this document in 1-2 concise sentences. '
+                                            'State the main topic and key subjects. '
+                                            'Output ONLY the summary text, no preamble.\n\n'
+                                            f'{excerpt}'
+                                        )
+                                        llm_fn = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
+                                        raw_summary = await llm_fn(summary_prompt)
+                                        generated = raw_summary.strip()
+                                        if generated:
+                                            doc_summary = generated[:500]
+                                    except Exception as e:
+                                        logger.debug('Document summary generation failed: %s', e)
 
                                 await self.doc_status.upsert(
                                     {
@@ -1877,7 +1895,7 @@ class YAR:
                                             'status': DocStatus.PROCESSED,
                                             'chunks_count': len(chunks),
                                             'chunks_list': list(chunks.keys()),
-                                            'content_summary': status_doc.content_summary,
+                                            'content_summary': doc_summary,
                                             'content_length': status_doc.content_length,
                                             'created_at': status_doc.created_at,
                                             'updated_at': datetime.now(timezone.utc).isoformat(),

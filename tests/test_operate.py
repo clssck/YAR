@@ -793,7 +793,7 @@ class TestExtractEntities:
 
         # Test that function signature accepts pipeline status parameters
         # Complex extraction testing is out of scope - we just verify the params work
-        pipeline_status = {'status': 'processing'}
+        pipeline_status = {'status': 'processing', 'history_messages': [], 'latest_message': ''}
         pipeline_lock = asyncio.Lock()
 
         chunks: dict[str, TextChunkSchema] = {
