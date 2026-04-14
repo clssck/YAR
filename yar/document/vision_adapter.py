@@ -40,6 +40,8 @@ def _get_vision_semaphore() -> asyncio.Semaphore:
         _vision_semaphore = asyncio.Semaphore(limit)
         logger.info('Vision extraction concurrency limit: %d', limit)
     return _vision_semaphore
+
+
 REQUEST_TIMEOUT_SECONDS = 120.0
 MAX_TOKENS_PER_PAGE = 4096
 PAGE_SPLIT_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
@@ -316,6 +318,7 @@ def should_split_batch(
 ) -> bool:
     return expected_page_count > 1 and (finish_reason == 'length' or marker_mode != 'full')
 
+
 async def _extract_batch(
     client: Any,
     model: str,
@@ -372,7 +375,7 @@ async def _extract_batch_with_retry(
         except Exception as exc:
             last_exc = exc
             if attempt < VISION_MAX_RETRIES - 1:
-                delay = RETRY_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 1)
+                delay = RETRY_DELAY_SECONDS * (2**attempt) + random.uniform(0, 1)
                 logger.warning(
                     'Vision extraction retrying batch %s (attempt %d/%d, %.1fs backoff) after error: %s',
                     _page_range_label(pages),
@@ -619,6 +622,7 @@ def _convert_office_document_to_pdf(
         command = [
             *shlex.split(soffice_command),
             '--headless',
+            f'-env:UserInstallation=file://{tmp_path}/user',
             '--convert-to',
             'pdf',
             '--outdir',
