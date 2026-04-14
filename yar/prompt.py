@@ -138,6 +138,24 @@ Extract entities and relationships from the input text in Data to be Processed b
 <Output>
 """
 
+PROMPTS['entity_extraction_batch_user_prompt'] = """---Task---
+Extract entities and relationships from EACH of the input text chunks below.
+
+---Instructions---
+1.  **Strict Adherence to Format:** Strictly adhere to all format requirements for entity and relationship lists, including output order, field delimiters, and proper noun handling, as specified in the system prompt.
+2.  **Per-Chunk Output:** For EACH chunk, output a chunk header line `[CHUNK: <chunk_id>]` followed by the extracted entities and relationships for that chunk, then `{completion_delimiter}`. Process chunks in the order given.
+3.  **Output Content Only:** Output *only* chunk headers and extracted entities/relationships. No introductory or concluding remarks.
+4.  **Output Language:** Ensure the output language is {language}. Proper nouns must be kept in their original language.
+
+---Data to be Processed---
+<Entity_types>
+[{entity_types}]
+
+{batch_input_texts}
+
+<Output>
+"""
+
 PROMPTS['entity_continue_extraction_user_prompt'] = """---Task---
 Based on the last extraction task, identify and extract any **missed or incorrectly formatted** entities and relationships from the input text.
 

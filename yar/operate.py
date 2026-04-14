@@ -2985,37 +2985,63 @@ async def extract_entities(
     processed_chunks = 0
     total_chunks = len(ordered_chunks)
 
+    # --- Batched extraction ---
+    # Pack multiple chunks into a single LLM call to reduce HTTP round-trips.
+    # The LLM outputs [CHUNK: <id>] headers so we can attribute results per chunk.
+    _BATCH_CHUNK_HEADER_RE = re.compile(r'\[CHUNK:\s*([^\]]+)\]')
+
+    # Budget: system prompt ~2-3k tokens, each chunk ~1000 tokens, leave room for output.
+    batch_size = int(global_config.get('entity_extract_batch_size', os.getenv('ENTITY_EXTRACT_BATCH_SIZE', '10')))
+    if batch_size < 1:
+        batch_size = 1
+
+    entity_extraction_system_prompt = PROMPTS['entity_extraction_system_prompt'].format(**context_base)
+
+    def _build_batch_input_texts(
+        batch: list[tuple[str, TextChunkSchema]],
+    ) -> str:
+        """Format multiple chunks into a single prompt payload with chunk markers."""
+        parts = []
+        for chunk_key, chunk_dp in batch:
+            content = _truncate_extract_input_content(chunk_dp.get('content', ''), global_config, chunk_key)
+            parts.append(f'[CHUNK: {chunk_key}]\n```\n{content}\n```')
+        return '\n\n'.join(parts)
+
+    def _split_batch_output(
+        raw_output: str,
+        batch: list[tuple[str, TextChunkSchema]],
+    ) -> dict[str, str]:
+        """Split LLM output into per-chunk sections using [CHUNK: id] headers."""
+        sections: dict[str, str] = {}
+        markers = list(_BATCH_CHUNK_HEADER_RE.finditer(raw_output))
+        if not markers:
+            return sections
+
+        expected_keys = {ck for ck, _ in batch}
+        for i, match in enumerate(markers):
+            chunk_id = match.group(1).strip()
+            start = match.end()
+            end = markers[i + 1].start() if i + 1 < len(markers) else len(raw_output)
+            if chunk_id in expected_keys:
+                sections[chunk_id] = raw_output[start:end]
+        return sections
+
     async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
-        """Process a single chunk
-        Args:
-            chunk_key_dp (tuple[str, TextChunkSchema]):
-                ("chunk-xxxxxx", {"tokens": int, "content": str, "full_doc_id": str, "chunk_order_index": int})
-        Returns:
-            tuple: (maybe_nodes, maybe_edges) containing extracted entities and relationships
-        """
+        """Process a single chunk (used as fallback for batch parse failures)."""
         nonlocal processed_chunks
         chunk_key = chunk_key_dp[0]
         chunk_dp = chunk_key_dp[1]
         content = _truncate_extract_input_content(chunk_dp.get('content', ''), global_config, chunk_key)
-        # Get file path from chunk data or use default
         file_path = chunk_dp.get('file_path', 'unknown_source')
 
-        # Create cache keys collector for batch processing
-        cache_keys_collector = []
+        cache_keys_collector: list[str] = []
 
-        # Get initial extraction
-        # Format system prompt without input_text for each chunk (enables OpenAI prompt caching across chunks)
-        entity_extraction_system_prompt = PROMPTS['entity_extraction_system_prompt'].format(**context_base)
-        # Format user prompts with input_text for each chunk
-        entity_extraction_user_prompt = PROMPTS['entity_extraction_user_prompt'].format(
-            **{**context_base, 'input_text': content}
-        )
-        entity_continue_extraction_user_prompt = PROMPTS['entity_continue_extraction_user_prompt'].format(
+        user_prompt = PROMPTS['entity_extraction_user_prompt'].format(
             **{**context_base, 'input_text': content}
         )
 
         final_result, timestamp = await use_llm_func_with_cache(
-            entity_extraction_user_prompt,
+            user_prompt,
             use_llm_func,
             system_prompt=entity_extraction_system_prompt,
             llm_response_cache=llm_response_cache,
@@ -3024,9 +3050,6 @@ async def extract_entities(
             cache_keys_collector=cache_keys_collector,
         )
 
-        history = pack_user_ass_to_openai_messages(entity_extraction_user_prompt, final_result)
-
-        # Process initial extraction with file path
         maybe_nodes, maybe_edges = await _process_extraction_result(
             final_result,
             chunk_key,
@@ -3036,10 +3059,14 @@ async def extract_entities(
             completion_delimiter=context_base['completion_delimiter'],
         )
 
-        # Process additional gleaning results only 1 time when entity_extract_max_gleaning is greater than zero.
+        # Gleaning support
         if entity_extract_max_gleaning > 0:
+            history = pack_user_ass_to_openai_messages(user_prompt, final_result)
+            continue_prompt = PROMPTS['entity_continue_extraction_user_prompt'].format(
+                **{**context_base, 'input_text': content}
+            )
             glean_result, timestamp = await use_llm_func_with_cache(
-                entity_continue_extraction_user_prompt,
+                continue_prompt,
                 use_llm_func,
                 system_prompt=entity_extraction_system_prompt,
                 llm_response_cache=llm_response_cache,
@@ -3048,8 +3075,6 @@ async def extract_entities(
                 chunk_id=chunk_key,
                 cache_keys_collector=cache_keys_collector,
             )
-
-            # Process gleaning result separately with file path
             glean_nodes, glean_edges = await _process_extraction_result(
                 glean_result,
                 chunk_key,
@@ -3058,79 +3083,153 @@ async def extract_entities(
                 tuple_delimiter=context_base['tuple_delimiter'],
                 completion_delimiter=context_base['completion_delimiter'],
             )
-
-            # Merge results - compare description lengths to choose better version
             for entity_name, glean_entities in glean_nodes.items():
                 if entity_name in maybe_nodes:
-                    # Compare description lengths and keep the better one
-                    original_desc_len = len(maybe_nodes[entity_name][0].get('description', '') or '')
-                    glean_desc_len = len(glean_entities[0].get('description', '') or '')
-
-                    if glean_desc_len > original_desc_len:
+                    if len(glean_entities[0].get('description', '') or '') > len(
+                        maybe_nodes[entity_name][0].get('description', '') or ''
+                    ):
                         maybe_nodes[entity_name] = list(glean_entities)
-                    # Otherwise keep original version
                 else:
-                    # New entity from gleaning stage
                     maybe_nodes[entity_name] = list(glean_entities)
-
             for edge_key, glean_edge_list in glean_edges.items():
                 if edge_key in maybe_edges:
-                    # Compare description lengths and keep the better one
-                    original_desc_len = len(maybe_edges[edge_key][0].get('description', '') or '')
-                    glean_desc_len = len(glean_edge_list[0].get('description', '') or '')
-
-                    if glean_desc_len > original_desc_len:
+                    if len(glean_edge_list[0].get('description', '') or '') > len(
+                        maybe_edges[edge_key][0].get('description', '') or ''
+                    ):
                         maybe_edges[edge_key] = list(glean_edge_list)
-                    # Otherwise keep original version
                 else:
-                    # New edge from gleaning stage
                     maybe_edges[edge_key] = list(glean_edge_list)
 
-        # Batch update chunk's llm_cache_list with all collected cache keys
         if cache_keys_collector and text_chunks_storage:
-            await update_chunk_cache_list(
-                chunk_key,
-                text_chunks_storage,
-                cache_keys_collector,
-                'entity_extraction',
-            )
+            await update_chunk_cache_list(chunk_key, text_chunks_storage, cache_keys_collector, 'entity_extraction')
 
         processed_chunks += 1
-        entities_count = len(maybe_nodes)
-        relations_count = len(maybe_edges)
-        log_message = f'Chunk {processed_chunks} of {total_chunks} extracted {entities_count} Ent + {relations_count} Rel {chunk_key}'
+        log_message = (
+            f'Chunk {processed_chunks} of {total_chunks} extracted '
+            f'{len(maybe_nodes)} Ent + {len(maybe_edges)} Rel {chunk_key}'
+        )
         logger.info(log_message)
         await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
 
-        # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
 
-    # Get max async tasks limit from global_config
-    chunk_max_async = global_config.get('llm_model_max_async', 4)
-    semaphore = asyncio.Semaphore(chunk_max_async)
+    async def _process_batch(
+        batch: list[tuple[str, TextChunkSchema]],
+    ) -> list[tuple[dict, dict]]:
+        """Process a batch of chunks in a single LLM call.
 
-    async def _process_with_semaphore(chunk):
-        async with semaphore:
-            # Check for cancellation before processing chunk
-            await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'chunk processing')
+        Returns a list of (nodes, edges) tuples, one per chunk in the batch.
+        On parse failure for individual chunks, falls back to single-chunk processing.
+        """
+        nonlocal processed_chunks
+
+        await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'batch extraction')
+
+        # Single-chunk batches use the original prompt (better for cache hits, gleaning support)
+        if len(batch) == 1:
+            result = await _process_single_content(batch[0])
+            return [result] if result is not None else []
+
+        batch_input_texts = _build_batch_input_texts(batch)
+        batch_user_prompt = PROMPTS['entity_extraction_batch_user_prompt'].format(
+            **{**context_base, 'batch_input_texts': batch_input_texts}
+        )
+
+        cache_keys_collector: list[str] = []
+        raw_result, timestamp = await use_llm_func_with_cache(
+            batch_user_prompt,
+            use_llm_func,
+            system_prompt=entity_extraction_system_prompt,
+            llm_response_cache=llm_response_cache,
+            cache_type='extract',
+            chunk_id=batch[0][0],
+            cache_keys_collector=cache_keys_collector,
+        )
+
+        # Split output by chunk headers
+        sections = _split_batch_output(raw_result, batch)
+
+        results: list[tuple[dict, dict]] = []
+        fallback_chunks: list[tuple[str, TextChunkSchema]] = []
+
+        for chunk_key, chunk_dp in batch:
+            if chunk_key in sections:
+                section_text = sections[chunk_key]
+                file_path = chunk_dp.get('file_path', 'unknown_source')
+                try:
+                    nodes, edges = await _process_extraction_result(
+                        section_text,
+                        chunk_key,
+                        timestamp,
+                        file_path or 'unknown_source',
+                        tuple_delimiter=context_base['tuple_delimiter'],
+                        completion_delimiter=context_base['completion_delimiter'],
+                    )
+                    results.append((nodes, edges))
+                    processed_chunks += 1
+                    log_message = (
+                        f'Chunk {processed_chunks} of {total_chunks} extracted '
+                        f'{len(nodes)} Ent + {len(edges)} Rel {chunk_key}'
+                    )
+                    logger.info(log_message)
+                    await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
+
+                    if cache_keys_collector and text_chunks_storage:
+                        await update_chunk_cache_list(
+                            chunk_key, text_chunks_storage, cache_keys_collector, 'entity_extraction'
+                        )
+                    continue
+                except Exception as e:
+                    logger.warning(f'Batch parse failed for {chunk_key}, falling back to single: {e}')
+                    fallback_chunks.append((chunk_key, chunk_dp))
+            else:
+                logger.warning(f'Batch output missing chunk {chunk_key}, falling back to single')
+                fallback_chunks.append((chunk_key, chunk_dp))
+
+        # Fallback: process missing/failed chunks individually
+        for chunk_key, chunk_dp in fallback_chunks:
             try:
-                return await _process_single_content(chunk)
+                single_result = await _process_single_content((chunk_key, chunk_dp))
+                if single_result is not None:
+                    results.append(single_result)
             except PipelineCancelledException:
                 raise
             except Exception as e:
-                chunk_id = chunk[0]
-                logger.warning(f'Chunk {chunk_id} failed: {e!s}')
+                logger.warning(f'Single-chunk fallback failed for {chunk_key}: {e}')
+
+        return results
+
+    # --- Dispatch: group chunks into batches and process concurrently ---
+    chunk_max_async = global_config.get('llm_model_max_async', 4)
+    semaphore = asyncio.Semaphore(chunk_max_async)
+
+    batches: list[list[tuple[str, TextChunkSchema]]] = []
+    for i in range(0, len(ordered_chunks), batch_size):
+        batches.append(ordered_chunks[i : i + batch_size])
+
+    log_msg = (
+        f'Entity extraction: {total_chunks} chunks in {len(batches)} batches '
+        f'(batch_size={batch_size}, async={chunk_max_async})'
+    )
+    logger.info(log_msg)
+    await update_pipeline_status(pipeline_status, pipeline_status_lock, log_msg)
+
+    async def _process_batch_with_semaphore(batch: list[tuple[str, TextChunkSchema]]):
+        async with semaphore:
+            await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'batch processing')
+            try:
+                return await _process_batch(batch)
+            except PipelineCancelledException:
+                raise
+            except Exception as e:
+                chunk_ids = [ck for ck, _ in batch]
+                logger.warning(f'Batch {chunk_ids[0]}..{chunk_ids[-1]} failed: {e}')
                 return None
 
-    tasks = []
-    for c in ordered_chunks:
-        task = asyncio.create_task(_process_with_semaphore(c))
-        tasks.append(task)
-
-    # Wait for all chunks to complete so partial successes survive individual failures
+    tasks = [asyncio.create_task(_process_batch_with_semaphore(b)) for b in batches]
     done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
-    chunk_results = []
+    chunk_results: list[tuple[dict, dict]] = []
     failed_count = 0
     cancellation_error = None
 
@@ -3145,7 +3244,7 @@ async def extract_entities(
             else:
                 result = task.result()
                 if result is not None:
-                    chunk_results.append(result)
+                    chunk_results.extend(result)
                 else:
                     failed_count += 1
         except Exception:
@@ -3158,7 +3257,7 @@ async def extract_entities(
         raise RuntimeError(f'All {total_chunks} chunks failed during entity extraction')
 
     if failed_count > 0:
-        log_msg = f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, {failed_count} failed'
+        log_msg = f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, {failed_count} batch(es) failed'
         logger.warning(log_msg)
         await update_pipeline_status(pipeline_status, pipeline_status_lock, log_msg)
 
