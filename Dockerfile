@@ -1,18 +1,27 @@
 # syntax=docker/dockerfile:1
 
-# Frontend build stage
-FROM oven/bun:latest AS frontend-builder
+# Frontend dependency stage
+FROM oven/bun:latest AS frontend-deps
 
 WORKDIR /app
 
 # Copy frontend source code
 COPY yar_webui/ ./yar_webui/
 
-# Build frontend assets for inclusion in the API package
+# Install frontend dependencies with Bun
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd yar_webui \
-    && bun install --frozen-lockfile \
-    && bun run build
+    && bun install --frozen-lockfile
+
+# Frontend build stage
+FROM node:22-bookworm-slim AS frontend-builder
+
+WORKDIR /app
+
+COPY --from=frontend-deps /app/yar_webui ./yar_webui
+
+# Build frontend assets with Node/Vite to avoid Bun build OOMs
+RUN cd yar_webui && node ./node_modules/vite/bin/vite.js build --emptyOutDir
 
 # Python build stage - using uv for faster package installation
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
@@ -71,9 +80,17 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Add curl for runtime healthchecks and simple diagnostics
+# Runtime tools: curl for healthchecks, poppler for PDF rasterization, and LibreOffice for office->PDF conversion
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        curl \
+        poppler-utils \
+        libreoffice-common \
+        libreoffice-core \
+        libreoffice-writer \
+        libreoffice-impress \
+        fonts-dejavu-core \
+        fonts-liberation2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for package management

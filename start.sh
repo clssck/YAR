@@ -1,10 +1,10 @@
 #!/bin/bash
-# Start YAR API server (dev mode via uv)
+# Start YAR API server via LiteLLM-backed providers
 # Requires: ./setup.sh to be run first (starts infra containers)
 #
 # Usage:
-#   ./start.sh          # Dev profile (direct OpenRouter/OpenAI)
-#   ./start.sh --work   # Work profile (AWS Bedrock via LiteLLM)
+#   ./start.sh          # Dev profile (LiteLLM with lower concurrency)
+#   ./start.sh --work   # Work profile (LiteLLM with higher concurrency)
 
 set -e
 
@@ -64,10 +64,15 @@ else
     SERVICE_HOST="localhost"
 fi
 
-# Check if infra is running
 if ! docker compose ps --format "{{.Service}}" 2>/dev/null | grep -q "postgres"; then
     echo -e "${RED}Error: Infrastructure not running${NC}"
-    echo -e "Run ${BLUE}./setup.sh${NC} first to start PostgreSQL and RustFS"
+    echo -e "Run ${BLUE}./setup.sh${NC} first to start PostgreSQL, RustFS, and LiteLLM"
+    exit 1
+fi
+
+if ! docker compose ps --format "{{.Service}}" 2>/dev/null | grep -q "litellm"; then
+    echo -e "${RED}Error: LiteLLM is not running${NC}"
+    echo -e "Run ${BLUE}./setup.sh${NC} first to start PostgreSQL, RustFS, and LiteLLM"
     exit 1
 fi
 
@@ -114,26 +119,33 @@ export WORKING_DIR="${WORKING_DIR:-./data/rag_storage}"
 export INPUT_DIR="${INPUT_DIR:-./data/inputs}"
 mkdir -p "$WORKING_DIR" "$INPUT_DIR"
 
+write_litellm_config() {
+    ./scripts/generate_litellm_config.sh "$PROFILE"
+    echo -e "  ${GREEN}LiteLLM config refreshed${NC}"
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Profile-specific environment
 # ══════════════════════════════════════════════════════════════════════════════
 
+write_litellm_config
+
 if [ "$PROFILE" = "dev" ]; then
-    # ── Dev: direct API calls to OpenRouter (LLM) and OpenAI (embeddings) ──
-    export LLM_BINDING="${LLM_BINDING:-openai}"
-    export LLM_MODEL="${LLM_MODEL:-x-ai/grok-4.1-fast}"
-    export LLM_BINDING_HOST="${LLM_BINDING_HOST:-https://openrouter.ai/api/v1}"
+    # ── Dev: LiteLLM proxy with lower concurrency ──
+    export LLM_BINDING="openai"
+    export LLM_MODEL="tuna"
+    export LLM_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
+    export LLM_BINDING_API_KEY="${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
     export LLM_TIMEOUT="${LLM_TIMEOUT:-300}"
     export OPENAI_LLM_MAX_COMPLETION_TOKENS="${OPENAI_LLM_MAX_COMPLETION_TOKENS:-9000}"
-    # LLM_BINDING_API_KEY must be set in .env
 
-    export EMBEDDING_BINDING="${EMBEDDING_BINDING:-openai}"
-    export EMBEDDING_MODEL="${EMBEDDING_MODEL:-text-embedding-3-small}"
-    export EMBEDDING_DIM="${EMBEDDING_DIM:-1532}"
-    export EMBEDDING_SEND_DIM="${EMBEDDING_SEND_DIM:-true}"
+    export EMBEDDING_BINDING="openai"
+    export EMBEDDING_MODEL="shrimp"
+    export EMBEDDING_DIM="1024"
+    export EMBEDDING_SEND_DIM="false"
     export EMBEDDING_TOKEN_LIMIT="${EMBEDDING_TOKEN_LIMIT:-8192}"
-    export EMBEDDING_BINDING_HOST="${EMBEDDING_BINDING_HOST:-https://api.openai.com/v1}"
-    # EMBEDDING_BINDING_API_KEY must be set in .env
+    export EMBEDDING_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
+    export EMBEDDING_BINDING_API_KEY="${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
     export RERANK_BINDING="${RERANK_BINDING:-deepinfra}"
     export RERANK_MODEL="${RERANK_MODEL:-Qwen/Qwen3-Reranker-8B}"
@@ -143,20 +155,21 @@ if [ "$PROFILE" = "dev" ]; then
     export MAX_ASYNC="${MAX_ASYNC:-4}"
     export MAX_PARALLEL_INSERT="${MAX_PARALLEL_INSERT:-2}"
 
-    echo -e "  LLM: ${GREEN}$LLM_MODEL${NC}  Embed: ${GREEN}$EMBEDDING_MODEL${NC}  Rerank: ${GREEN}$RERANK_MODEL${NC}"
-
+    echo -e "  LLM: ${GREEN}$LLM_MODEL${NC}  Embed: ${GREEN}$EMBEDDING_MODEL${NC}  via LiteLLM @ ${SERVICE_HOST}:4000"
 else
-    # ── Work: LiteLLM proxy for LLM + embeddings (AWS Bedrock) ──
-    export LLM_BINDING="${LLM_BINDING:-openai}"
-    export LLM_MODEL="${LLM_MODEL:-beepboop}"
-    export LLM_BINDING_HOST="${LLM_BINDING_HOST:-http://${SERVICE_HOST}:4000/v1}"
-    export LLM_BINDING_API_KEY="${LLM_BINDING_API_KEY:-${LITELLM_MASTER_KEY:-sk-litellm-master-key}}"
+    # ── Work: LiteLLM proxy with higher concurrency ──
+    export LLM_BINDING="openai"
+    export LLM_MODEL="tuna"
+    export LLM_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
+    export LLM_BINDING_API_KEY="${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
-    export EMBEDDING_BINDING="${EMBEDDING_BINDING:-openai}"
-    export EMBEDDING_MODEL="${EMBEDDING_MODEL:-titan-embed}"
-    export EMBEDDING_DIM="${EMBEDDING_DIM:-1024}"
-    export EMBEDDING_BINDING_HOST="${EMBEDDING_BINDING_HOST:-http://${SERVICE_HOST}:4000/v1}"
-    export EMBEDDING_BINDING_API_KEY="${EMBEDDING_BINDING_API_KEY:-${LITELLM_MASTER_KEY:-sk-litellm-master-key}}"
+    export EMBEDDING_BINDING="openai"
+    export EMBEDDING_MODEL="shrimp"
+    export EMBEDDING_DIM="1532"
+    export EMBEDDING_SEND_DIM="true"
+    export EMBEDDING_TOKEN_LIMIT="${EMBEDDING_TOKEN_LIMIT:-8192}"
+    export EMBEDDING_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
+    export EMBEDDING_BINDING_API_KEY="${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
     export CHUNKING_PRESET="${CHUNKING_PRESET:-semantic}"
     export CHUNK_SIZE="${CHUNK_SIZE:-1600}"
