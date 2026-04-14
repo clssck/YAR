@@ -463,6 +463,8 @@ async def llm_review_entities_batch(
     reviewed_entities = set()
 
     for item in parsed_results:
+        if not isinstance(item, dict):
+            continue
         new_entity = item.get('new_entity', '')
         if not new_entity:
             continue

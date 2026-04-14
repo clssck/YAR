@@ -1027,37 +1027,28 @@ async def rebuild_knowledge_from_chunks(
     logger.info(status_message)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, status_message)
 
-    # Execute all tasks in parallel with semaphore control and early failure detection
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+    # Execute all tasks in parallel, tolerating partial failures
+    done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
-    # Check if any task raised an exception and ensure all exceptions are retrieved
-    first_exception = None
-
+    failed_count = 0
     for task in done:
         try:
-            exception = task.exception()
-            if exception is not None:
-                if first_exception is None:
-                    first_exception = exception
-            else:
-                # Task completed successfully, retrieve result to mark as processed
-                task.result()
-        except Exception as e:
-            if first_exception is None:
-                first_exception = e
+            exc = task.exception()
+            if exc is not None:
+                if isinstance(exc, PipelineCancelledException):
+                    raise exc
+                failed_count += 1
+                logger.warning(f'Rebuild task failed: {exc!s}')
+        except PipelineCancelledException:
+            raise
+        except Exception:
+            failed_count += 1
 
-    # If any task failed, cancel all pending tasks and raise the first exception
-    if first_exception is not None:
-        # Cancel all pending tasks
-        for pending_task in pending:
-            pending_task.cancel()
-
-        # Wait for cancellation to complete
-        if pending:
-            await asyncio.wait(pending)
-
-        # Re-raise the first exception to notify the caller
-        raise first_exception
+    if failed_count > 0:
+        logger.warning(
+            f'KG rebuild: {len(tasks) - failed_count}/{len(tasks)} tasks succeeded, '
+            f'{failed_count} failed'
+        )
 
     # Final status report
     status_message = f'KG rebuild completed: {rebuilt_entities_count} entities and {rebuilt_relationships_count} relationships rebuilt successfully.'
@@ -2774,33 +2765,25 @@ async def merge_nodes_and_edges(
     # Execute entity tasks with error handling
     processed_entities = []
     if entity_tasks:
-        done, pending = await asyncio.wait(entity_tasks, return_when=asyncio.FIRST_EXCEPTION)
+        done, _ = await asyncio.wait(entity_tasks, return_when=asyncio.ALL_COMPLETED)
 
-        first_exception = None
-        processed_entities = []
-
+        entity_failed = 0
         for task in done:
             try:
                 result = task.result()
+            except PipelineCancelledException:
+                raise
             except BaseException as e:
-                if first_exception is None:
-                    first_exception = e
+                entity_failed += 1
+                logger.warning(f'Entity merge failed: {e!s}')
             else:
                 processed_entities.append(result)
 
-        if pending:
-            for task in pending:
-                task.cancel()
-            pending_results = await asyncio.gather(*pending, return_exceptions=True)
-            for result in pending_results:
-                if isinstance(result, BaseException):
-                    if first_exception is None:
-                        first_exception = result
-                else:
-                    processed_entities.append(result)
-
-        if first_exception is not None:
-            raise first_exception
+        if entity_failed > 0:
+            logger.warning(
+                f'Entity merge: {len(processed_entities)}/{len(entity_tasks)} succeeded, '
+                f'{entity_failed} failed'
+            )
 
     # ===== Phase 2: Process all relationships concurrently =====
     log_message = f'Phase 2: Processing {total_relations_count} relations from {doc_id} (async: {graph_max_async})'
@@ -2871,37 +2854,27 @@ async def merge_nodes_and_edges(
     all_added_entities = []
 
     if edge_tasks:
-        done, pending = await asyncio.wait(edge_tasks, return_when=asyncio.FIRST_EXCEPTION)
+        done, _ = await asyncio.wait(edge_tasks, return_when=asyncio.ALL_COMPLETED)
 
-        first_exception = None
-
+        edge_failed = 0
         for task in done:
             try:
                 edge_data, added_entities = task.result()
+            except PipelineCancelledException:
+                raise
             except BaseException as e:
-                if first_exception is None:
-                    first_exception = e
+                edge_failed += 1
+                logger.warning(f'Edge merge failed: {e!s}')
             else:
                 if edge_data is not None:
                     processed_edges.append(edge_data)
                 all_added_entities.extend(added_entities)
 
-        if pending:
-            for task in pending:
-                task.cancel()
-            pending_results = await asyncio.gather(*pending, return_exceptions=True)
-            for result in pending_results:
-                if isinstance(result, BaseException):
-                    if first_exception is None:
-                        first_exception = result
-                else:
-                    edge_data, added_entities = result
-                    if edge_data is not None:
-                        processed_edges.append(edge_data)
-                    all_added_entities.extend(added_entities)
-
-        if first_exception is not None:
-            raise first_exception
+        if edge_failed > 0:
+            logger.warning(
+                f'Edge merge: {len(processed_edges)}/{len(edge_tasks)} succeeded, '
+                f'{edge_failed} failed'
+            )
 
     # ===== Phase 2.5: Batch infer types for UNKNOWN entities =====
     if all_added_entities:
