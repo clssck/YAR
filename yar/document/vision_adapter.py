@@ -206,30 +206,54 @@ async def extract_document_with_vision(
     """Extract document text by sending page images to an OpenAI-compatible vision model."""
     from yar.document.semantic_chunker import chunk_markdown
 
-    pages = await asyncio.to_thread(
-        partial(
-            _load_document_pages,
-            document_bytes,
-            filename=filename,
-            mime_type=mime_type,
+    is_pdf_document = _is_pdf_document(filename=filename, mime_type=mime_type)
+    is_office_document = _is_office_document(filename=filename, mime_type=mime_type)
+
+    if is_pdf_document or is_office_document:
+        pdf_bytes = document_bytes
+        if is_office_document:
+            pdf_bytes = await asyncio.to_thread(
+                partial(
+                    _convert_office_document_to_pdf,
+                    document_bytes,
+                    filename=filename,
+                    mime_type=mime_type,
+                )
+            )
+        page_results, warnings, total_pages = await _extract_pdf_streaming(
+            pdf_bytes,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
             pdf_password=pdf_password,
+            filename=filename,
         )
-    )
-    if not pages:
-        raise VisionExtractionError('Document produced no renderable pages for vision extraction')
+    else:
+        pages = await asyncio.to_thread(
+            partial(
+                _load_document_pages,
+                document_bytes,
+                filename=filename,
+                mime_type=mime_type,
+                pdf_password=pdf_password,
+            )
+        )
+        if not pages:
+            raise VisionExtractionError('Document produced no renderable pages for vision extraction')
 
-    logger.info(
-        'Vision extraction starting for %s: %s pages via %s',
-        filename or 'document',
-        len(pages),
-        model,
-    )
+        total_pages = len(pages)
+        logger.info(
+            'Vision extraction starting for %s: %s pages via %s',
+            filename or 'document',
+            total_pages,
+            model,
+        )
 
-    client = create_openai_async_client(api_key=api_key, base_url=base_url)
-    try:
-        page_results, warnings = await _process_all_pages(client, model, pages)
-    finally:
-        await client.close()
+        client = create_openai_async_client(api_key=api_key, base_url=base_url)
+        try:
+            page_results, warnings = await _process_all_pages(client, model, pages)
+        finally:
+            await client.close()
 
     content, collected_warnings = stitch_extracted_pages(page_results, warnings)
     if not content:
@@ -265,17 +289,85 @@ async def extract_document_with_vision(
 
     return VisionExtractionResult(
         content=content,
-        page_count=len(pages),
+        page_count=total_pages,
         warnings=collected_warnings,
         pre_chunks=pre_chunks,
         metadata={
             'extractor': 'vision',
             'model': model,
-            'page_count': len(pages),
+            'page_count': total_pages,
             'warning_count': len(collected_warnings),
             'chunk_count': len(pre_chunks) if pre_chunks else 0,
         },
     )
+
+
+async def _extract_pdf_streaming(
+    pdf_bytes: bytes,
+    *,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    pdf_password: str | None,
+    filename: str | None,
+) -> tuple[list[PageResult], list[ExtractionWarning], int]:
+    with tempfile.TemporaryDirectory(prefix='yar-vision-pdf-stream-') as tmp_dir:
+        pdf_path = Path(tmp_dir) / 'input.pdf'
+        pdf_path.write_bytes(pdf_bytes)
+
+        total_pages = _get_pdf_page_count(pdf_path, pdf_password=pdf_password)
+        client = create_openai_async_client(api_key=api_key, base_url=base_url)
+        try:
+            if total_pages == 0:
+                pages = await asyncio.to_thread(partial(_render_pdf_pages, pdf_bytes, pdf_password=pdf_password))
+                total_pages = len(pages)
+                logger.info(
+                    'Vision extraction starting for %s: %s pages via %s',
+                    filename or 'document',
+                    total_pages,
+                    model,
+                )
+                page_results, warnings = await _process_all_pages(client, model, pages)
+                return page_results, warnings, total_pages
+
+            pages_per_call = _compute_pages_per_call()
+            wave_size = pages_per_call * CONCURRENCY
+            logger.info(
+                'Vision extraction starting for %s: %s pages via %s',
+                filename or 'document',
+                total_pages,
+                model,
+            )
+            logger.info(
+                'Vision streaming extraction: %d pages, wave_size=%d (%d pages/call × %d concurrent)',
+                total_pages,
+                wave_size,
+                pages_per_call,
+                CONCURRENCY,
+            )
+
+            all_results: list[PageResult] = []
+            all_warnings: list[ExtractionWarning] = []
+            for wave_start in range(1, total_pages + 1, wave_size):
+                wave_end = min(wave_start + wave_size - 1, total_pages)
+                wave_pages = await asyncio.to_thread(
+                    partial(
+                        _render_pdf_page_range,
+                        pdf_path,
+                        wave_start,
+                        wave_end,
+                        total_pages,
+                        pdf_password=pdf_password,
+                    )
+                )
+                wave_results, wave_warnings = await _process_all_pages(client, model, wave_pages)
+                all_results.extend(wave_results)
+                all_warnings.extend(wave_warnings)
+
+            all_results.sort(key=lambda result: result.page_number)
+            return all_results, all_warnings, total_pages
+        finally:
+            await client.close()
 
 
 def split_batch_response(raw: str, expected_pages: list[int]) -> tuple[list[PageResult], str]:
@@ -584,6 +676,98 @@ def _load_document_pages(
     )
 
 
+def _get_pdf_page_count(pdf_path: Path, pdf_password: str | None = None) -> int:
+    command = ['pdfinfo']
+    if pdf_password:
+        command.extend(['-upw', pdf_password])
+    command.append(str(pdf_path))
+
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return 0
+
+    if completed.returncode != 0:
+        return 0
+
+    match = re.search(r'^Pages:\s+(\d+)\s*$', completed.stdout, flags=re.MULTILINE)
+    if match is None:
+        return 0
+
+    page_count = int(match.group(1))
+    return page_count if page_count > 0 else 0
+
+
+def _render_pdf_page_range(
+    pdf_path: Path,
+    first_page: int,
+    last_page: int,
+    total_pages: int,
+    *,
+    pdf_password: str | None = None,
+) -> list[RenderedPage]:
+    pdftoppm_command = os.environ.get(PDFTOPPM_COMMAND_ENV, 'pdftoppm').strip() or 'pdftoppm'
+
+    with tempfile.TemporaryDirectory(prefix='yar-vision-pdf-range-') as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        output_prefix = tmp_path / 'page'
+
+        command = [
+            *shlex.split(pdftoppm_command),
+            '-jpeg',
+            '-jpegopt',
+            'quality=80',
+            '-scale-to',
+            '1500',
+            '-f',
+            str(first_page),
+            '-l',
+            str(last_page),
+        ]
+        if pdf_password:
+            command.extend(['-upw', pdf_password])
+        command.extend([str(pdf_path), str(output_prefix)])
+
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise VisionExtractionError(f'PDF vision extraction requires {pdftoppm_command!r} to be installed') from exc
+
+        if completed.returncode != 0:
+            stderr = completed.stderr.strip() or completed.stdout.strip() or f'exit status {completed.returncode}'
+            raise VisionExtractionError(f'Failed to rasterize PDF for vision extraction: {stderr}')
+
+        numbered_page_paths = sorted(
+            (
+                (int(page_path.stem.rsplit('-', maxsplit=1)[-1]), page_path)
+                for page_path in tmp_path.glob('page-*.jpg')
+            ),
+            key=lambda item: item[0],
+        )
+        if not numbered_page_paths:
+            raise VisionExtractionError('PDF produced no renderable pages')
+
+        return [
+            RenderedPage(
+                page_number=page_number,
+                total_pages=total_pages,
+                media_type='image/jpeg',
+                image_bytes=page_path.read_bytes(),
+            )
+            for page_number, page_path in numbered_page_paths
+        ]
+
+
 def _render_pdf_pages(document_bytes: bytes, *, pdf_password: str | None = None) -> list[RenderedPage]:
     pdftoppm_command = os.environ.get(PDFTOPPM_COMMAND_ENV, 'pdftoppm').strip() or 'pdftoppm'
 
@@ -619,19 +803,25 @@ def _render_pdf_pages(document_bytes: bytes, *, pdf_password: str | None = None)
             stderr = completed.stderr.strip() or completed.stdout.strip() or f'exit status {completed.returncode}'
             raise VisionExtractionError(f'Failed to rasterize PDF for vision extraction: {stderr}')
 
-        page_paths = sorted(tmp_path.glob('page-*.jpg'))
-        if not page_paths:
+        numbered_page_paths = sorted(
+            (
+                (int(page_path.stem.rsplit('-', maxsplit=1)[-1]), page_path)
+                for page_path in tmp_path.glob('page-*.jpg')
+            ),
+            key=lambda item: item[0],
+        )
+        if not numbered_page_paths:
             raise VisionExtractionError('PDF produced no renderable pages')
 
-        total_pages = len(page_paths)
+        total_pages = len(numbered_page_paths)
         return [
             RenderedPage(
-                page_number=index + 1,
+                page_number=page_number,
                 total_pages=total_pages,
                 media_type='image/jpeg',
                 image_bytes=page_path.read_bytes(),
             )
-            for index, page_path in enumerate(page_paths)
+            for page_number, page_path in numbered_page_paths
         ]
 
 

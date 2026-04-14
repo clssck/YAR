@@ -2631,6 +2631,7 @@ async def merge_nodes_and_edges(
     full_entities_storage: BaseKVStorage | None = None,
     full_relations_storage: BaseKVStorage | None = None,
     doc_id: str | None = None,
+    doc_chunk_map: dict[str, set[str]] | None = None,
     pipeline_status: dict[str, Any] | None = None,
     pipeline_status_lock: asyncio.Lock | Any | None = None,
     llm_response_cache: BaseKVStorage | None = None,
@@ -2645,7 +2646,7 @@ async def merge_nodes_and_edges(
     This approach ensures data consistency by:
     1. Phase 1: Process all entities concurrently
     2. Phase 2: Process all relationships concurrently (may add missing entities)
-    3. Phase 3: Update full_entities and full_relations storage with final results
+    3. Phase 3: Update per-document entity/relation indices with final results
 
     Args:
         chunk_results: List of tuples (maybe_nodes, maybe_edges) containing extracted entities and relationships
@@ -2655,7 +2656,9 @@ async def merge_nodes_and_edges(
         global_config: Global configuration
         full_entities_storage: Storage for document entity lists
         full_relations_storage: Storage for document relation lists
-        doc_id: Document ID for storage indexing
+        doc_id: Document ID for single-document storage indexing
+        doc_chunk_map: Optional mapping of document IDs to source chunk IDs
+            for multi-document storage indexing
         pipeline_status: Pipeline status dictionary
         pipeline_status_lock: Lock for pipeline status
         llm_response_cache: LLM response cache
@@ -2879,64 +2882,131 @@ async def merge_nodes_and_edges(
                 knowledge_graph_inst=knowledge_graph_inst,
                 entity_vdb=entity_vdb,
             )
-
-    # ===== Phase 3: Update full_entities and full_relations storage =====
-    if full_entities_storage and full_relations_storage and doc_id:
+    # ===== Phase 3: Update per-document entity/relation indices =====
+    if full_entities_storage and full_relations_storage and (doc_chunk_map or doc_id):
         try:
-            # Merge all entities: original entities + entities added during edge processing
-            final_entity_names = set()
-
-            # Add original processed entities
+            all_entity_names = set()
             for entity_data in processed_entities:
                 if entity_data and entity_data.get('entity_name'):
-                    final_entity_names.add(entity_data['entity_name'])
+                    all_entity_names.add(entity_data['entity_name'])
 
-            # Add entities that were added during relationship processing
             for added_entity in all_added_entities:
                 if added_entity and added_entity.get('entity_name'):
-                    final_entity_names.add(added_entity['entity_name'])
+                    all_entity_names.add(added_entity['entity_name'])
 
-            # Collect all relation pairs
-            final_relation_pairs = set()
+            all_relation_pairs = set()
             for edge_data in processed_edges:
                 if edge_data:
                     src_id = edge_data.get('src_id')
                     tgt_id = edge_data.get('tgt_id')
                     if src_id and tgt_id:
                         relation_pair = tuple(sorted([src_id, tgt_id]))
-                        final_relation_pairs.add(relation_pair)
+                        all_relation_pairs.add(relation_pair)
 
-            log_message = f'Phase 3: Updating final {len(final_entity_names)}({len(processed_entities)}+{len(all_added_entities)}) entities and  {len(final_relation_pairs)} relations from {doc_id}'
-            logger.info(log_message)
-            await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
+            if doc_chunk_map:
+                entity_source_chunks: dict[str, set[str]] = defaultdict(set)
+                for entity_name, entity_data_list in all_nodes.items():
+                    for entry in entity_data_list:
+                        source_id = entry.get('source_id', '')
+                        if source_id:
+                            entity_source_chunks[entity_name].update(
+                                chunk_id for chunk_id in source_id.split(GRAPH_FIELD_SEP) if chunk_id
+                            )
 
-            # Update storage
-            if final_entity_names:
-                await full_entities_storage.upsert(
-                    {
-                        doc_id: {
-                            'entity_names': list(final_entity_names),
-                            'count': len(final_entity_names),
-                        }
+                relation_source_chunks: dict[tuple[str, str], set[str]] = defaultdict(set)
+                for edge_key, edge_data_list in all_edges.items():
+                    for entry in edge_data_list:
+                        source_id = entry.get('source_id', '')
+                        if source_id:
+                            relation_source_chunks[edge_key].update(
+                                chunk_id for chunk_id in source_id.split(GRAPH_FIELD_SEP) if chunk_id
+                            )
+
+                for this_doc_id, chunk_keys in doc_chunk_map.items():
+                    doc_entity_names = {
+                        name
+                        for name in all_entity_names
+                        if entity_source_chunks.get(name, set()) & chunk_keys
                     }
-                )
-
-            if final_relation_pairs:
-                await full_relations_storage.upsert(
-                    {
-                        doc_id: {
-                            'relation_pairs': [list(pair) for pair in final_relation_pairs],
-                            'count': len(final_relation_pairs),
-                        }
+                    doc_relation_pairs = {
+                        edge_key
+                        for edge_key in all_relation_pairs
+                        if relation_source_chunks.get(edge_key, set()) & chunk_keys
                     }
-                )
 
-            logger.debug(
-                f'Updated entity-relation index for document {doc_id}: {len(final_entity_names)} entities (original: {len(processed_entities)}, added: {len(all_added_entities)}), {len(final_relation_pairs)} relations'
-            )
+                    log_message = (
+                        f'Phase 3: Updating {len(doc_entity_names)} entities and '
+                        f'{len(doc_relation_pairs)} relations for doc {this_doc_id}'
+                    )
+                    logger.info(log_message)
+                    await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
+
+                    if doc_entity_names:
+                        await full_entities_storage.upsert(
+                            {
+                                this_doc_id: {
+                                    'entity_names': list(doc_entity_names),
+                                    'count': len(doc_entity_names),
+                                }
+                            }
+                        )
+
+                    if doc_relation_pairs:
+                        await full_relations_storage.upsert(
+                            {
+                                this_doc_id: {
+                                    'relation_pairs': [list(pair) for pair in doc_relation_pairs],
+                                    'count': len(doc_relation_pairs),
+                                }
+                            }
+                        )
+
+                    logger.debug(
+                        f'Updated entity-relation index for document {this_doc_id}: '
+                        f'{len(doc_entity_names)} entities, {len(doc_relation_pairs)} relations'
+                    )
+
+            elif doc_id:
+                log_message = (
+                    f'Phase 3: Updating final {len(all_entity_names)}'
+                    f'({len(processed_entities)}+{len(all_added_entities)}) entities and  '
+                    f'{len(all_relation_pairs)} relations from {doc_id}'
+                )
+                logger.info(log_message)
+                await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
+
+                if all_entity_names:
+                    await full_entities_storage.upsert(
+                        {
+                            doc_id: {
+                                'entity_names': list(all_entity_names),
+                                'count': len(all_entity_names),
+                            }
+                        }
+                    )
+
+                if all_relation_pairs:
+                    await full_relations_storage.upsert(
+                        {
+                            doc_id: {
+                                'relation_pairs': [list(pair) for pair in all_relation_pairs],
+                                'count': len(all_relation_pairs),
+                            }
+                        }
+                    )
+
+                logger.debug(
+                    f'Updated entity-relation index for document {doc_id}: '
+                    f'{len(all_entity_names)} entities '
+                    f'(original: {len(processed_entities)}, added: {len(all_added_entities)}), '
+                    f'{len(all_relation_pairs)} relations'
+                )
 
         except Exception as e:
-            logger.error(f'Failed to update entity-relation index for document {doc_id}: {e}')
+            if doc_chunk_map:
+                logger.error(f'Failed to update entity-relation index for multi-document merge: {e}')
+            else:
+                logger.error(f'Failed to update entity-relation index for document {doc_id}: {e}')
             # Don't raise exception to avoid affecting main flow
 
     log_message = f'Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations'

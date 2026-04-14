@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import yar.document.vision_adapter as vision
+from yar.document.vision_adapter import _get_pdf_page_count, _render_pdf_page_range
 
 
 def _make_chat_response(content: str, finish_reason: str = 'stop') -> SimpleNamespace:
@@ -212,3 +213,63 @@ class TestVisionAdapter:
 
         result_without = vision._content_with_context(chunk_without_ctx)
         assert result_without == chunk_without_ctx.content
+
+@pytest.mark.offline
+class TestStreamingPageRendering:
+    def test_get_pdf_page_count_parses_pdfinfo_output(self):
+        with patch.object(
+            vision.subprocess,
+            'run',
+            return_value=SimpleNamespace(returncode=0, stdout='Pages:          28\n', stderr=''),
+        ):
+            assert _get_pdf_page_count(Path('report.pdf')) == 28
+
+    def test_get_pdf_page_count_returns_0_when_pdfinfo_not_found(self):
+        with patch.object(vision.subprocess, 'run', side_effect=FileNotFoundError):
+            assert _get_pdf_page_count(Path('report.pdf')) == 0
+
+    def test_get_pdf_page_count_returns_0_on_parse_failure(self):
+        with patch.object(
+            vision.subprocess,
+            'run',
+            return_value=SimpleNamespace(returncode=0, stdout='Title: Example PDF\n', stderr=''),
+        ):
+            assert _get_pdf_page_count(Path('report.pdf')) == 0
+
+    def test_render_pdf_page_range_uses_f_and_l_flags(self, monkeypatch, tmp_path):
+        pdf_path = tmp_path / 'input.pdf'
+        pdf_path.write_bytes(b'%PDF-1.7')
+        monkeypatch.setenv(vision.PDFTOPPM_COMMAND_ENV, '/usr/bin/pdftoppm')
+
+        def fake_run(command, **_kwargs):
+            _ = _kwargs
+            assert command[0] == '/usr/bin/pdftoppm'
+            assert command[command.index('-f') + 1] == '2'
+            assert command[command.index('-l') + 1] == '3'
+            assert Path(command[-2]) == pdf_path
+            output_prefix = Path(command[-1])
+            (output_prefix.parent / 'page-2.jpg').write_bytes(b'jpg-two')
+            (output_prefix.parent / 'page-3.jpg').write_bytes(b'jpg-three')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+        with patch.object(vision.subprocess, 'run', side_effect=fake_run) as run_mock:
+            pages = _render_pdf_page_range(pdf_path, 2, 3, total_pages=8)
+
+        run_mock.assert_called_once()
+        assert [page.page_number for page in pages] == [2, 3]
+        assert [page.total_pages for page in pages] == [8, 8]
+        assert all(page.media_type == 'image/jpeg' for page in pages)
+        assert [page.image_bytes for page in pages] == [b'jpg-two', b'jpg-three']
+
+    def test_render_pdf_page_range_raises_on_no_output(self, monkeypatch, tmp_path):
+        pdf_path = tmp_path / 'input.pdf'
+        pdf_path.write_bytes(b'%PDF-1.7')
+        monkeypatch.setenv(vision.PDFTOPPM_COMMAND_ENV, '/usr/bin/pdftoppm')
+
+        with patch.object(
+            vision.subprocess,
+            'run',
+            return_value=SimpleNamespace(returncode=0, stdout='', stderr=''),
+        ):
+            with pytest.raises(vision.VisionExtractionError, match='PDF produced no renderable pages'):
+                _render_pdf_page_range(pdf_path, 4, 5, total_pages=9)
