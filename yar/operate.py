@@ -1767,7 +1767,6 @@ async def _merge_nodes_then_upsert(
     entity_name: str,
     nodes_data: list[dict],
     knowledge_graph_inst: BaseGraphStorage,
-    entity_vdb: BaseVectorStorage | None,
     global_config: GlobalConfig,
     pipeline_status: dict[str, Any] | None = None,
     pipeline_status_lock: asyncio.Lock | Any | None = None,
@@ -1982,26 +1981,19 @@ async def _merge_nodes_then_upsert(
         node_data=node_data,
     )
     node_data['entity_name'] = entity_name
-    if entity_vdb is not None:
-        entity_vdb_id = compute_mdhash_id(str(entity_name), prefix='ent-')
-        entity_content = f'{entity_name}\n{description}'
-        data_for_vdb = {
-            entity_vdb_id: {
-                'entity_name': entity_name,
-                'entity_type': entity_type,
-                'content': entity_content,
-                'source_id': source_id,
-                'file_path': file_path,
-            }
+    # Build VDB payload for batch upsert by caller
+    entity_vdb_id = compute_mdhash_id(str(entity_name), prefix='ent-')
+    entity_content = f'{entity_name}\n{description}'
+    vdb_payload = {
+        entity_vdb_id: {
+            'entity_name': entity_name,
+            'entity_type': entity_type,
+            'content': entity_content,
+            'source_id': source_id,
+            'file_path': file_path,
         }
-        await safe_vdb_operation_with_exception(
-            operation=lambda payload=data_for_vdb: entity_vdb.upsert(payload),
-            operation_name='entity_upsert',
-            entity_name=entity_name,
-            max_retries=3,
-            retry_delay=0.1,
-        )
-    return node_data
+    }
+    return node_data, vdb_payload
 
 
 async def _merge_edges_then_upsert(
@@ -2009,8 +2001,6 @@ async def _merge_edges_then_upsert(
     tgt_id: str,
     edges_data: list[dict],
     knowledge_graph_inst: BaseGraphStorage,
-    relationships_vdb: BaseVectorStorage | None,
-    entity_vdb: BaseVectorStorage | None,
     global_config: GlobalConfig,
     pipeline_status: dict[str, Any] | None = None,
     pipeline_status_lock: asyncio.Lock | Any | None = None,
@@ -2020,7 +2010,8 @@ async def _merge_edges_then_upsert(
     entity_chunks_storage: BaseKVStorage | None = None,
 ):
     if src_id == tgt_id:
-        return None
+        return None, {}, {}, []
+    entity_vdb_payloads: dict[str, dict[str, Any]] = {}
 
     already_edge = None
     already_weights = []
@@ -2281,25 +2272,15 @@ async def _merge_edges_then_upsert(
                         }
                     )
 
-            if entity_vdb is not None:
-                entity_vdb_id = compute_mdhash_id(need_insert_id, prefix='ent-')
-                entity_content = f'{need_insert_id}\n{description}'
-                vdb_data = {
-                    entity_vdb_id: {
-                        'content': entity_content,
-                        'entity_name': need_insert_id,
-                        'source_id': source_id,
-                        'entity_type': 'UNKNOWN',
-                        'file_path': file_path,
-                    }
-                }
-                await safe_vdb_operation_with_exception(
-                    operation=lambda payload=vdb_data: entity_vdb.upsert(payload),
-                    operation_name='added_entity_upsert',
-                    entity_name=need_insert_id,
-                    max_retries=3,
-                    retry_delay=0.1,
-                )
+            entity_vdb_id = compute_mdhash_id(need_insert_id, prefix='ent-')
+            entity_content = f'{need_insert_id}\n{description}'
+            entity_vdb_payloads[entity_vdb_id] = {
+                'content': entity_content,
+                'entity_name': need_insert_id,
+                'source_id': source_id,
+                'entity_type': 'UNKNOWN',
+                'file_path': file_path,
+            }
 
             # Track entities added during edge processing
             if added_entities is not None:
@@ -2364,26 +2345,16 @@ async def _merge_edges_then_upsert(
                 }
                 await knowledge_graph_inst.upsert_node(need_insert_id, node_data=updated_node_data)
 
-                # Update vector database
-                if entity_vdb is not None:
-                    entity_vdb_id = compute_mdhash_id(need_insert_id, prefix='ent-')
-                    entity_content = f'{need_insert_id}\n{existing_node.get("description", "")}'
-                    vdb_data = {
-                        entity_vdb_id: {
-                            'content': entity_content,
-                            'entity_name': need_insert_id,
-                            'source_id': limited_source_id_str,
-                            'entity_type': existing_node.get('entity_type', 'UNKNOWN'),
-                            'file_path': existing_node.get('file_path', 'unknown_source'),
-                        }
-                    }
-                    await safe_vdb_operation_with_exception(
-                        operation=lambda payload=vdb_data: entity_vdb.upsert(payload),
-                        operation_name='existing_entity_update',
-                        entity_name=need_insert_id,
-                        max_retries=3,
-                        retry_delay=0.1,
-                    )
+                # Collect entity VDB payload for batch upsert
+                entity_vdb_id = compute_mdhash_id(need_insert_id, prefix='ent-')
+                entity_content = f'{need_insert_id}\n{existing_node.get("description", "")}'
+                entity_vdb_payloads[entity_vdb_id] = {
+                    'content': entity_content,
+                    'entity_name': need_insert_id,
+                    'source_id': limited_source_id_str,
+                    'entity_type': existing_node.get('entity_type', 'UNKNOWN'),
+                    'file_path': existing_node.get('file_path', 'unknown_source'),
+                }
 
             # 6. Log once at the end if any update occurred
             if updated:
@@ -2422,35 +2393,23 @@ async def _merge_edges_then_upsert(
     if src_id > tgt_id:
         src_id, tgt_id = tgt_id, src_id
 
-    if relationships_vdb is not None:
-        rel_vdb_id = compute_mdhash_id(src_id + tgt_id, prefix='rel-')
-        rel_vdb_id_reverse = compute_mdhash_id(tgt_id + src_id, prefix='rel-')
-        try:
-            await relationships_vdb.delete([rel_vdb_id, rel_vdb_id_reverse])
-        except Exception as e:
-            logger.debug(f'Could not delete old relationship vector records {rel_vdb_id}, {rel_vdb_id_reverse}: {e}')
-        rel_content = f'{keywords}\t{src_id}\n{tgt_id}\n{description}'
-        vdb_data = {
-            rel_vdb_id: {
-                'src_id': src_id,
-                'tgt_id': tgt_id,
-                'source_id': source_id,
-                'content': rel_content,
-                'keywords': keywords,
-                'description': description,
-                'weight': weight,
-                'file_path': file_path,
-            }
+    rel_vdb_id = compute_mdhash_id(src_id + tgt_id, prefix='rel-')
+    rel_vdb_id_reverse = compute_mdhash_id(tgt_id + src_id, prefix='rel-')
+    rel_delete_ids = [rel_vdb_id, rel_vdb_id_reverse]
+    rel_content = f'{keywords}\t{src_id}\n{tgt_id}\n{description}'
+    rel_vdb_payload = {
+        rel_vdb_id: {
+            'src_id': src_id,
+            'tgt_id': tgt_id,
+            'source_id': source_id,
+            'content': rel_content,
+            'keywords': keywords,
+            'description': description,
+            'weight': weight,
+            'file_path': file_path,
         }
-        await safe_vdb_operation_with_exception(
-            operation=lambda payload=vdb_data: relationships_vdb.upsert(payload),
-            operation_name='relationship_upsert',
-            entity_name=f'{src_id}-{tgt_id}',
-            max_retries=3,
-            retry_delay=0.2,
-        )
-
-    return edge_data
+    }
+    return edge_data, entity_vdb_payloads, rel_vdb_payload, rel_delete_ids
 
 
 async def _resolve_entity_aliases_for_batch(
@@ -2631,7 +2590,6 @@ async def merge_nodes_and_edges(
     full_entities_storage: BaseKVStorage | None = None,
     full_relations_storage: BaseKVStorage | None = None,
     doc_id: str | None = None,
-    doc_chunk_map: dict[str, set[str]] | None = None,
     pipeline_status: dict[str, Any] | None = None,
     pipeline_status_lock: asyncio.Lock | Any | None = None,
     llm_response_cache: BaseKVStorage | None = None,
@@ -2646,7 +2604,7 @@ async def merge_nodes_and_edges(
     This approach ensures data consistency by:
     1. Phase 1: Process all entities concurrently
     2. Phase 2: Process all relationships concurrently (may add missing entities)
-    3. Phase 3: Update per-document entity/relation indices with final results
+    3. Phase 3: Update full_entities and full_relations storage with final results
 
     Args:
         chunk_results: List of tuples (maybe_nodes, maybe_edges) containing extracted entities and relationships
@@ -2656,9 +2614,7 @@ async def merge_nodes_and_edges(
         global_config: Global configuration
         full_entities_storage: Storage for document entity lists
         full_relations_storage: Storage for document relation lists
-        doc_id: Document ID for single-document storage indexing
-        doc_chunk_map: Optional mapping of document IDs to source chunk IDs
-            for multi-document storage indexing
+        doc_id: Document ID for storage indexing
         pipeline_status: Pipeline status dictionary
         pipeline_status_lock: Lock for pipeline status
         llm_response_cache: LLM response cache
@@ -2704,7 +2660,6 @@ async def merge_nodes_and_edges(
     log_message = f'Merging stage {current_file_number}/{total_files}: {file_path}'
     logger.info(log_message)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
-
     # Get max async tasks limit from global_config for semaphore control
     graph_max_async = int(global_config.get('llm_model_max_async', 4)) * 2
     semaphore = asyncio.Semaphore(graph_max_async)
@@ -2724,11 +2679,10 @@ async def merge_nodes_and_edges(
             async with get_storage_keyed_lock([entity_name], namespace=namespace, enable_logging=False):
                 try:
                     logger.debug(f'Processing entity {entity_name}')
-                    entity_data = await _merge_nodes_then_upsert(
+                    entity_data, vdb_payload = await _merge_nodes_then_upsert(
                         entity_name,
                         entities,
                         knowledge_graph_inst,
-                        entity_vdb,
                         global_config,
                         pipeline_status,
                         pipeline_status_lock,
@@ -2736,7 +2690,7 @@ async def merge_nodes_and_edges(
                         entity_chunks_storage,
                     )
 
-                    return entity_data
+                    return entity_data, vdb_payload
 
                 except Exception as e:
                     error_msg = f'Error processing entity `{entity_name}`: {e}'
@@ -2760,25 +2714,38 @@ async def merge_nodes_and_edges(
 
     # Execute entity tasks with error handling
     processed_entities = []
+    all_entity_vdb_data: dict[str, dict[str, Any]] = {}
     if entity_tasks:
         done, _ = await asyncio.wait(entity_tasks, return_when=asyncio.ALL_COMPLETED)
 
         entity_failed = 0
         for task in done:
             try:
-                result = task.result()
+                entity_data, vdb_payload = task.result()
             except PipelineCancelledException:
                 raise
             except BaseException as e:
                 entity_failed += 1
                 logger.warning(f'Entity merge failed: {e!s}')
             else:
-                processed_entities.append(result)
+                processed_entities.append(entity_data)
+                all_entity_vdb_data.update(vdb_payload)
 
         if entity_failed > 0:
             logger.warning(
                 f'Entity merge: {len(processed_entities)}/{len(entity_tasks)} succeeded, {entity_failed} failed'
             )
+
+    if entity_vdb is not None and all_entity_vdb_data:
+        t0 = time.perf_counter()
+        await safe_vdb_operation_with_exception(
+            operation=lambda: entity_vdb.upsert(all_entity_vdb_data),
+            operation_name='batch_entity_upsert',
+            entity_name=f'{len(all_entity_vdb_data)} entities',
+            max_retries=3,
+            retry_delay=0.5,
+        )
+        logger.info(f'Batch entity VDB upsert: {len(all_entity_vdb_data)} items in {time.perf_counter() - t0:.2f}s')
 
     # ===== Phase 2: Process all relationships concurrently =====
     log_message = f'Phase 2: Processing {total_relations_count} relations from {doc_id} (async: {graph_max_async})'
@@ -2803,26 +2770,24 @@ async def merge_nodes_and_edges(
                     added_entities = []  # Track entities added during edge processing
 
                     logger.debug(f'Processing relation {sorted_edge_key}')
-                    edge_data = await _merge_edges_then_upsert(
+                    edge_data, ent_vdb, rel_vdb, rel_del = await _merge_edges_then_upsert(
                         edge_key[0],
                         edge_key[1],
                         edges,
                         knowledge_graph_inst,
-                        relationships_vdb,
-                        entity_vdb,
                         global_config,
                         pipeline_status,
                         pipeline_status_lock,
                         llm_response_cache,
-                        added_entities,  # Pass list to collect added entities
+                        added_entities,
                         relation_chunks_storage,
-                        entity_chunks_storage,  # Add entity_chunks_storage parameter
+                        entity_chunks_storage,
                     )
 
                     if edge_data is None:
-                        return None, []
+                        return None, [], {}, {}, []
 
-                    return edge_data, added_entities
+                    return edge_data, added_entities, ent_vdb, rel_vdb, rel_del
 
                 except Exception as e:
                     error_msg = f'Error processing relation `{sorted_edge_key}`: {e}'
@@ -2847,6 +2812,9 @@ async def merge_nodes_and_edges(
     # Execute relationship tasks with error handling
     processed_edges = []
     all_added_entities = []
+    all_edge_entity_vdb_data: dict[str, dict[str, Any]] = {}
+    all_relationship_vdb_data: dict[str, dict[str, Any]] = {}
+    all_relationship_delete_ids: list[str] = []
 
     if edge_tasks:
         done, _ = await asyncio.wait(edge_tasks, return_when=asyncio.ALL_COMPLETED)
@@ -2854,7 +2822,7 @@ async def merge_nodes_and_edges(
         edge_failed = 0
         for task in done:
             try:
-                edge_data, added_entities = task.result()
+                edge_data, added_entities, ent_vdb, rel_vdb, rel_del = task.result()
             except PipelineCancelledException:
                 raise
             except BaseException as e:
@@ -2864,9 +2832,43 @@ async def merge_nodes_and_edges(
                 if edge_data is not None:
                     processed_edges.append(edge_data)
                 all_added_entities.extend(added_entities)
+                all_edge_entity_vdb_data.update(ent_vdb)
+                all_relationship_vdb_data.update(rel_vdb)
+                all_relationship_delete_ids.extend(rel_del)
 
         if edge_failed > 0:
             logger.warning(f'Edge merge: {len(processed_edges)}/{len(edge_tasks)} succeeded, {edge_failed} failed')
+
+    if relationships_vdb is not None and all_relationship_vdb_data:
+        unique_relationship_delete_ids = list(dict.fromkeys(all_relationship_delete_ids))
+        t0 = time.perf_counter()
+        if unique_relationship_delete_ids:
+            try:
+                await relationships_vdb.delete(unique_relationship_delete_ids)
+            except Exception as e:
+                logger.debug(f'Could not delete old relationship vector records {unique_relationship_delete_ids}: {e}')
+        await safe_vdb_operation_with_exception(
+            operation=lambda: relationships_vdb.upsert(all_relationship_vdb_data),
+            operation_name='batch_relationship_upsert',
+            entity_name=f'{len(all_relationship_vdb_data)} relationships',
+            max_retries=3,
+            retry_delay=0.5,
+        )
+        logger.info(
+            f'Batch relationship VDB upsert: {len(all_relationship_vdb_data)} items in '
+            f'{time.perf_counter() - t0:.2f}s'
+        )
+
+    if entity_vdb is not None and all_edge_entity_vdb_data:
+        t0 = time.perf_counter()
+        await safe_vdb_operation_with_exception(
+            operation=lambda: entity_vdb.upsert(all_edge_entity_vdb_data),
+            operation_name='batch_entity_upsert',
+            entity_name=f'{len(all_edge_entity_vdb_data)} entities',
+            max_retries=3,
+            retry_delay=0.5,
+        )
+        logger.info(f'Batch entity VDB upsert: {len(all_edge_entity_vdb_data)} items in {time.perf_counter() - t0:.2f}s')
 
     # ===== Phase 2.5: Batch infer types for UNKNOWN entities =====
     if all_added_entities:
@@ -2882,136 +2884,70 @@ async def merge_nodes_and_edges(
                 knowledge_graph_inst=knowledge_graph_inst,
                 entity_vdb=entity_vdb,
             )
-    # ===== Phase 3: Update per-document entity/relation indices =====
-    if full_entities_storage and full_relations_storage and (doc_chunk_map or doc_id):
+
+    # ===== Phase 3: Update full_entities and full_relations storage =====
+    if full_entities_storage and full_relations_storage and doc_id:
         try:
-            all_entity_names = set()
+            # Merge all entities: original entities + entities added during edge processing
+            final_entity_names = set()
+
+            # Add original processed entities
             for entity_data in processed_entities:
                 if entity_data and entity_data.get('entity_name'):
-                    all_entity_names.add(entity_data['entity_name'])
+                    final_entity_names.add(entity_data['entity_name'])
 
+            # Add entities that were added during relationship processing
             for added_entity in all_added_entities:
                 if added_entity and added_entity.get('entity_name'):
-                    all_entity_names.add(added_entity['entity_name'])
+                    final_entity_names.add(added_entity['entity_name'])
 
-            all_relation_pairs = set()
+            # Collect all relation pairs
+            final_relation_pairs = set()
             for edge_data in processed_edges:
                 if edge_data:
                     src_id = edge_data.get('src_id')
                     tgt_id = edge_data.get('tgt_id')
                     if src_id and tgt_id:
                         relation_pair = tuple(sorted([src_id, tgt_id]))
-                        all_relation_pairs.add(relation_pair)
+                        final_relation_pairs.add(relation_pair)
 
-            if doc_chunk_map:
-                entity_source_chunks: dict[str, set[str]] = defaultdict(set)
-                for entity_name, entity_data_list in all_nodes.items():
-                    for entry in entity_data_list:
-                        source_id = entry.get('source_id', '')
-                        if source_id:
-                            entity_source_chunks[entity_name].update(
-                                chunk_id for chunk_id in source_id.split(GRAPH_FIELD_SEP) if chunk_id
-                            )
+            log_message = f'Phase 3: Updating final {len(final_entity_names)}({len(processed_entities)}+{len(all_added_entities)}) entities and  {len(final_relation_pairs)} relations from {doc_id}'
+            logger.info(log_message)
+            await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
 
-                relation_source_chunks: dict[tuple[str, str], set[str]] = defaultdict(set)
-                for edge_key, edge_data_list in all_edges.items():
-                    for entry in edge_data_list:
-                        source_id = entry.get('source_id', '')
-                        if source_id:
-                            relation_source_chunks[edge_key].update(
-                                chunk_id for chunk_id in source_id.split(GRAPH_FIELD_SEP) if chunk_id
-                            )
-
-                for this_doc_id, chunk_keys in doc_chunk_map.items():
-                    doc_entity_names = {
-                        name
-                        for name in all_entity_names
-                        if entity_source_chunks.get(name, set()) & chunk_keys
-                    }
-                    doc_relation_pairs = {
-                        edge_key
-                        for edge_key in all_relation_pairs
-                        if relation_source_chunks.get(edge_key, set()) & chunk_keys
-                    }
-
-                    log_message = (
-                        f'Phase 3: Updating {len(doc_entity_names)} entities and '
-                        f'{len(doc_relation_pairs)} relations for doc {this_doc_id}'
-                    )
-                    logger.info(log_message)
-                    await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
-
-                    if doc_entity_names:
-                        await full_entities_storage.upsert(
-                            {
-                                this_doc_id: {
-                                    'entity_names': list(doc_entity_names),
-                                    'count': len(doc_entity_names),
-                                }
-                            }
-                        )
-
-                    if doc_relation_pairs:
-                        await full_relations_storage.upsert(
-                            {
-                                this_doc_id: {
-                                    'relation_pairs': [list(pair) for pair in doc_relation_pairs],
-                                    'count': len(doc_relation_pairs),
-                                }
-                            }
-                        )
-
-                    logger.debug(
-                        f'Updated entity-relation index for document {this_doc_id}: '
-                        f'{len(doc_entity_names)} entities, {len(doc_relation_pairs)} relations'
-                    )
-
-            elif doc_id:
-                log_message = (
-                    f'Phase 3: Updating final {len(all_entity_names)}'
-                    f'({len(processed_entities)}+{len(all_added_entities)}) entities and  '
-                    f'{len(all_relation_pairs)} relations from {doc_id}'
-                )
-                logger.info(log_message)
-                await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
-
-                if all_entity_names:
-                    await full_entities_storage.upsert(
-                        {
-                            doc_id: {
-                                'entity_names': list(all_entity_names),
-                                'count': len(all_entity_names),
-                            }
+            # Update storage
+            if final_entity_names:
+                await full_entities_storage.upsert(
+                    {
+                        doc_id: {
+                            'entity_names': list(final_entity_names),
+                            'count': len(final_entity_names),
                         }
-                    )
-
-                if all_relation_pairs:
-                    await full_relations_storage.upsert(
-                        {
-                            doc_id: {
-                                'relation_pairs': [list(pair) for pair in all_relation_pairs],
-                                'count': len(all_relation_pairs),
-                            }
-                        }
-                    )
-
-                logger.debug(
-                    f'Updated entity-relation index for document {doc_id}: '
-                    f'{len(all_entity_names)} entities '
-                    f'(original: {len(processed_entities)}, added: {len(all_added_entities)}), '
-                    f'{len(all_relation_pairs)} relations'
+                    }
                 )
+
+            if final_relation_pairs:
+                await full_relations_storage.upsert(
+                    {
+                        doc_id: {
+                            'relation_pairs': [list(pair) for pair in final_relation_pairs],
+                            'count': len(final_relation_pairs),
+                        }
+                    }
+                )
+
+            logger.debug(
+                f'Updated entity-relation index for document {doc_id}: {len(final_entity_names)} entities (original: {len(processed_entities)}, added: {len(all_added_entities)}), {len(final_relation_pairs)} relations'
+            )
 
         except Exception as e:
-            if doc_chunk_map:
-                logger.error(f'Failed to update entity-relation index for multi-document merge: {e}')
-            else:
-                logger.error(f'Failed to update entity-relation index for document {doc_id}: {e}')
+            logger.error(f'Failed to update entity-relation index for document {doc_id}: {e}')
             # Don't raise exception to avoid affecting main flow
 
     log_message = f'Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations'
     logger.info(log_message)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
+
 
 
 async def extract_entities(
