@@ -3,8 +3,8 @@
 # Sets up Docker services, environment variables, and starts the stack
 #
 # Usage:
-#   ./setup.sh              # Dev profile (direct OpenRouter/OpenAI APIs)
-#   ./setup.sh --work       # Work profile (AWS Bedrock via LiteLLM proxy)
+#   ./setup.sh              # Dev profile (LiteLLM with lower concurrency)
+#   ./setup.sh --work       # Work profile (LiteLLM with higher concurrency)
 #   ./setup.sh --proxy      # Also start HonoHub proxy after stack is up
 
 set -e
@@ -71,57 +71,36 @@ echo ""
 
 echo -e "${YELLOW}Detecting environment...${NC}"
 
-if [ "$PROFILE" = "work" ]; then
-    if [ -n "${AWS_WEB_IDENTITY_TOKEN_FILE}" ] || [ -n "${AWS_ROLE_ARN}" ]; then
-        echo -e "${GREEN}* AWS credentials detected (IRSA/IAM Role)${NC}"
-        AWS_ENV=true
-    elif [ -n "${AWS_ACCESS_KEY_ID}" ]; then
-        echo -e "${GREEN}* AWS credentials detected (Access Keys)${NC}"
-        AWS_ENV=true
-    else
-        echo -e "${RED}! No AWS credentials found${NC}"
-        echo -e "  Work profile requires AWS Bedrock credentials."
-        echo -e "  Set AWS_WEB_IDENTITY_TOKEN_FILE/AWS_ROLE_ARN or AWS_ACCESS_KEY_ID."
-        echo ""
-        read -p "Continue anyway? [y/N]: " CONTINUE
-        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
-            echo "Exiting."
-            exit 1
-        fi
-        AWS_ENV=false
+if [ -f .env ]; then
+    source .env 2>/dev/null
+fi
+
+MISSING_KEYS=()
+if [ -z "${OPENROUTER_API_KEY}" ]; then
+    MISSING_KEYS+=("OPENROUTER_API_KEY")
+fi
+if [ -z "${OPENAI_API_KEY}" ]; then
+    MISSING_KEYS+=("OPENAI_API_KEY")
+fi
+
+echo -e "${GREEN}* ${PROFILE} profile: routing LLM and embeddings through LiteLLM${NC}"
+
+if [ ${#MISSING_KEYS[@]} -gt 0 ]; then
+    echo ""
+    echo -e "${YELLOW}! Missing API keys in .env:${NC}"
+    for key in "${MISSING_KEYS[@]}"; do
+        echo -e "    - $key"
+    done
+    echo ""
+    echo -e "  Add them to ${BLUE}.env${NC} before running ${BLUE}./start.sh${NC}"
+    echo ""
+    read -p "Continue setup anyway? [Y/n]: " CONTINUE
+    if [[ "$CONTINUE" =~ ^[Nn]$ ]]; then
+        echo "Exiting. Add your API keys to .env and re-run."
+        exit 1
     fi
 else
-    echo -e "${GREEN}* Dev profile: using direct API keys (no AWS needed)${NC}"
-    AWS_ENV=false
-
-    # Check if API keys are configured
-    MISSING_KEYS=()
-    if [ -f .env ]; then
-        source .env 2>/dev/null
-    fi
-    if [ -z "${LLM_BINDING_API_KEY}" ]; then
-        MISSING_KEYS+=("LLM_BINDING_API_KEY (OpenRouter)")
-    fi
-    if [ -z "${EMBEDDING_BINDING_API_KEY}" ]; then
-        MISSING_KEYS+=("EMBEDDING_BINDING_API_KEY (OpenAI)")
-    fi
-    if [ ${#MISSING_KEYS[@]} -gt 0 ]; then
-        echo ""
-        echo -e "${YELLOW}! Missing API keys in .env:${NC}"
-        for key in "${MISSING_KEYS[@]}"; do
-            echo -e "    - $key"
-        done
-        echo ""
-        echo -e "  Add them to ${BLUE}.env${NC} before running ${BLUE}./start.sh${NC}"
-        echo ""
-        read -p "Continue setup anyway? [Y/n]: " CONTINUE
-        if [[ "$CONTINUE" =~ ^[Nn]$ ]]; then
-            echo "Exiting. Add your API keys to .env and re-run."
-            exit 1
-        fi
-    else
-        echo -e "${GREEN}* API keys found in .env${NC}"
-    fi
+    echo -e "${GREEN}* API keys found in .env${NC}"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -165,7 +144,11 @@ set_env() {
     local key="$1"
     local value="$2"
     if grep -q "^${key}=" .env 2>/dev/null; then
-        sed -i "s|^${key}=.*|${key}=${value}|" .env
+        if [[ "$OSTYPE" == darwin* ]]; then
+            sed -i '' "s|^${key}=.*|${key}=${value}|" .env
+        else
+            sed -i "s|^${key}=.*|${key}=${value}|" .env
+        fi
     else
         echo "${key}=${value}" >> .env
     fi
@@ -191,18 +174,22 @@ set_env "WORKSPACE" "${WORKSPACE:-default}"
 # Logging
 set_env "LOG_LEVEL" "${LOG_LEVEL:-INFO}"
 
+set_env "LITELLM_MASTER_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
+
 if [ "$PROFILE" = "dev" ]; then
-    # ── Dev profile: direct API calls, lower concurrency ──
+    # ── Dev profile: LiteLLM proxy with lower concurrency ──
     set_env "LLM_BINDING" "openai"
-    set_env "LLM_MODEL" "x-ai/grok-4.1-fast"
-    set_env "LLM_BINDING_HOST" "https://openrouter.ai/api/v1"
+    set_env "LLM_MODEL" "tuna"
+    set_env "LLM_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
+    set_env "LLM_BINDING_API_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
     set_env "EMBEDDING_BINDING" "openai"
-    set_env "EMBEDDING_MODEL" "text-embedding-3-small"
-    set_env "EMBEDDING_DIM" "1532"
-    set_env "EMBEDDING_SEND_DIM" "true"
+    set_env "EMBEDDING_MODEL" "shrimp"
+    set_env "EMBEDDING_DIM" "1024"
+    set_env "EMBEDDING_SEND_DIM" "false"
     set_env "EMBEDDING_TOKEN_LIMIT" "8192"
-    set_env "EMBEDDING_BINDING_HOST" "https://api.openai.com/v1"
+    set_env "EMBEDDING_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
+    set_env "EMBEDDING_BINDING_API_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
     set_env "RERANK_BINDING" "deepinfra"
     set_env "RERANK_MODEL" "Qwen/Qwen3-Reranker-8B"
@@ -212,23 +199,20 @@ if [ "$PROFILE" = "dev" ]; then
     set_env "MAX_PARALLEL_INSERT" "${MAX_PARALLEL_INSERT:-2}"
     set_env "LLM_TIMEOUT" "300"
     set_env "OPENAI_LLM_MAX_COMPLETION_TOKENS" "9000"
-
 else
-    # ── Work profile: AWS Bedrock via LiteLLM proxy ──
-    set_env "AWS_REGION" "${AWS_REGION:-us-east-1}"
-    set_env "AWS_DEFAULT_REGION" "${AWS_DEFAULT_REGION:-us-east-1}"
-    set_env "LITELLM_MASTER_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
-
-    if [ -n "${AWS_ROLE_ARN}" ]; then
-        set_env "AWS_ROLE_ARN" "${AWS_ROLE_ARN}"
-        echo -e "  ${GREEN}*${NC} Captured AWS_ROLE_ARN for Docker containers"
-    fi
-
+    # ── Work profile: LiteLLM proxy with higher concurrency ──
     set_env "LLM_BINDING" "openai"
-    set_env "LLM_MODEL" "beepboop"
+    set_env "LLM_MODEL" "tuna"
+    set_env "LLM_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
+    set_env "LLM_BINDING_API_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
-    set_env "EMBEDDING_MODEL" "titan-embed"
-    set_env "EMBEDDING_DIM" "1024"
+    set_env "EMBEDDING_BINDING" "openai"
+    set_env "EMBEDDING_MODEL" "shrimp"
+    set_env "EMBEDDING_DIM" "1532"
+    set_env "EMBEDDING_SEND_DIM" "true"
+    set_env "EMBEDDING_TOKEN_LIMIT" "8192"
+    set_env "EMBEDDING_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
+    set_env "EMBEDDING_BINDING_API_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
     set_env "CHUNKING_PRESET" "semantic"
     set_env "CHUNK_SIZE" "1600"
@@ -238,54 +222,10 @@ else
 
     # Reverse proxy path prefix (for K8s/code-server environments)
     set_env "ROOT_PATH" "${ROOT_PATH:-/oneai-rnd-transformerscmc-genai/janos/proxy/9621}"
-
-    # Generate LiteLLM config for Bedrock routing
-    cat > services/litellm/config.yaml <<'LITELLM_EOF'
-# LiteLLM Unified Config for AWS Bedrock (Work Profile)
-# Auto-generated by setup.sh --work
-#
-# YAR uses:
-#   - LLM_MODEL=beepboop           → Claude Sonnet 4.6 (via Bedrock)
-#   - EMBEDDING_MODEL=titan-embed  → Titan Embed Text v2 (1024 dims)
-
-model_list:
-  # LLM - Claude Sonnet 4.6 via Bedrock
-  - model_name: beepboop
-    litellm_params:
-      model: bedrock/us.anthropic.claude-sonnet-4-6
-      aws_region_name: us-east-1
-    model_info:
-      max_tokens: 200000
-      mode: chat
-      supports_function_calling: true
-
-  # Embedding - Bedrock Titan Embed Text v2 (1024 dims, 8192 token limit)
-  - model_name: titan-embed
-    litellm_params:
-      model: bedrock/amazon.titan-embed-text-v2:0
-      aws_region_name: us-east-1
-
-general_settings:
-  master_key: ${LITELLM_MASTER_KEY}
-  complete_response_logging: false
-  allow_requests_on_db_unavailable: true
-  disable_spend_logs: true
-  disable_error_logs: true
-
-litellm_settings:
-  drop_params: true
-  set_verbose: false
-  ssl_verify: false
-  cache: false
-  json_logs: false
-  num_retries: 3
-  request_timeout: 120
-  stream_options: { 'include_usage': true }
-  default_litellm_params:
-    encoding_format: float
-LITELLM_EOF
-    echo -e "  ${GREEN}*${NC} Generated LiteLLM config (Bedrock)"
 fi
+
+./scripts/generate_litellm_config.sh "$PROFILE"
+echo -e "  ${GREEN}*${NC} Generated LiteLLM config"
 
 echo -e "${GREEN}* Environment configured${NC}"
 
@@ -338,10 +278,7 @@ fi
 echo ""
 echo -e "${GREEN}Profile:${NC} $PROFILE  ${GREEN}Gateway:${NC} $GATEWAY_IP"
 
-SERVICES_LIST="postgres, rustfs"
-if [ "$PROFILE" = "work" ]; then
-    SERVICES_LIST="postgres, rustfs, litellm"
-fi
+SERVICES_LIST="postgres, rustfs, litellm"
 echo -e "${GREEN}Services:${NC} $SERVICES_LIST"
 echo ""
 
@@ -395,13 +332,8 @@ echo ""
 echo -e "${YELLOW}[Step 3/3] Waiting for services to be healthy...${NC}"
 echo ""
 
-if [ "$PROFILE" = "work" ]; then
-    SERVICES=("postgres" "rustfs" "litellm")
-    REQUIRED_HEALTHY=3
-else
-    SERVICES=("postgres" "rustfs")
-    REQUIRED_HEALTHY=2
-fi
+SERVICES=("postgres" "rustfs" "litellm")
+REQUIRED_HEALTHY=3
 
 get_service_status() {
     local service=$1

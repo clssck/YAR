@@ -1,16 +1,13 @@
 # YAR Stack - Infrastructure Services
 # Usage: ./setup.sh && ./start.sh
 #
-# Services (always):
+# Services:
 #   - postgres:  PostgreSQL + pgvector + AGE (port 5432)
 #   - rustfs:    S3-compatible document storage (ports 9100, 9101)
+#   - litellm:   Unified LLM/embedding proxy (port 4000)
 #
-# Services (work profile only):
-#   - litellm:   Unified LLM/Embedding proxy for AWS Bedrock (port 4000)
-#
-# Profiles:
-#   docker compose up -d                    # dev: postgres + rustfs only
-#   docker compose --profile work up -d     # work: + litellm proxy
+# Startup:
+#   docker compose up -d
 
 name: yar-stack
 
@@ -98,7 +95,6 @@ services:
   # Only starts with: docker compose --profile work up -d
   # ══════════════════════════════════════════════════════════════════════════════
   litellm:
-    profiles: [work]
     container_name: yar-litellm
     build:
       context: ./services/litellm
@@ -106,21 +102,11 @@ services:
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:4000:4000'
     environment:
-      # AWS credentials for IRSA (EKS Web Identity)
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
-      # Explicitly set token path since we mount it at this location
-      - AWS_WEB_IDENTITY_TOKEN_FILE=/var/run/secrets/eks.amazonaws.com/serviceaccount/token
-      - AWS_ROLE_ARN=${AWS_ROLE_ARN}
-      # Fallback for static credentials
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_SESSION_TOKEN
-      # LiteLLM config
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master-key}
     volumes:
-      # Mount EKS IRSA token for AWS Bedrock authentication
-      - /var/run/secrets/eks.amazonaws.com/serviceaccount:/var/run/secrets/eks.amazonaws.com/serviceaccount:ro
+      - ./services/litellm/config.yaml:/app/config.yaml:ro
     healthcheck:
       test: ['CMD', 'python', '-c', 'import socket; s=socket.socket(); s.settimeout(2); s.connect(("localhost",4000)); s.close()']
       interval: 10s
