@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import os
+from unittest.mock import patch
 
 import pytest
 
@@ -9,6 +11,7 @@ from yar.document.vision_adapter import (
 	PageResult,
 	RenderedPage,
 	_build_batch_vision_messages,
+    _compute_pages_per_call,
 	_has_usable_content,
 	_summarize_extraction_quality,
 	stitch_extracted_pages,
@@ -199,3 +202,62 @@ class TestBuildBatchVisionMessages:
 
 		assert content[1]['image_url']['url'] == 'data:image/png;base64,' + base64.b64encode(b'page-one').decode()
 		assert content[2]['image_url']['url'] == 'data:image/png;base64,' + base64.b64encode(b'page-two').decode()
+
+@pytest.mark.offline
+class TestComputePagesPerCall:
+    @staticmethod
+    def _clear_batching_env(monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv('VISION_PAGES_PER_CALL', raising=False)
+        monkeypatch.delenv('VISION_MAX_OUTPUT_TOKENS', raising=False)
+
+    def test_default_returns_12_pages_per_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {}, clear=False):
+            assert _compute_pages_per_call() == 12
+
+    def test_explicit_override_via_vision_pages_per_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {'VISION_PAGES_PER_CALL': '8'}, clear=False):
+            assert _compute_pages_per_call() == 8
+
+    def test_explicit_override_of_1_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {'VISION_PAGES_PER_CALL': '1'}, clear=False):
+            assert _compute_pages_per_call() == 1
+
+    def test_explicit_override_of_0_clamps_to_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {'VISION_PAGES_PER_CALL': '0'}, clear=False):
+            assert _compute_pages_per_call() == 1
+
+    def test_small_output_budget_yields_1_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {'VISION_MAX_OUTPUT_TOKENS': '4096'}, clear=False):
+            assert _compute_pages_per_call() == 1
+
+    def test_large_output_budget_caps_at_default_maximum(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {'VISION_MAX_OUTPUT_TOKENS': '999999'}, clear=False):
+            assert _compute_pages_per_call() == 15
+
+    def test_custom_output_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(os.environ, {'VISION_MAX_OUTPUT_TOKENS': '32000'}, clear=False):
+            assert _compute_pages_per_call() == 5
+
+    def test_explicit_override_takes_precedence_over_output_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_batching_env(monkeypatch)
+
+        with patch.dict(
+            os.environ,
+            {'VISION_PAGES_PER_CALL': '3', 'VISION_MAX_OUTPUT_TOKENS': '999999'},
+            clear=False,
+        ):
+            assert _compute_pages_per_call() == 3

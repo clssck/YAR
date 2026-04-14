@@ -29,12 +29,12 @@ class EntityResolutionConfig:
 
     # Number of entities to review in a single LLM call
     # Larger = more efficient but may hit context limits
-    batch_size: int = 100
+    batch_size: int = 200
 
     # Number of VDB candidates to retrieve per entity for LLM review
     # More candidates = better recall but more tokens
-    # Increased from 5 to 10 to catch abbreviation-expansion pairs
-    candidates_per_entity: int = 10
+    # Increased from 5 to 15 to improve recall in larger review batches
+    candidates_per_entity: int = 15
 
     # Minimum confidence for LLM to auto-apply an alias
     # Below this: alias is suggested but not auto-applied

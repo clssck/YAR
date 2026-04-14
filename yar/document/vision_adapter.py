@@ -24,7 +24,8 @@ PDF_MIME_TYPE = 'application/pdf'
 PDFTOPPM_COMMAND_ENV = 'PDFTOPPM_COMMAND'
 SOFFICE_COMMAND_ENV = 'SOFFICE_COMMAND'
 NO_TEXT_DETECTED_SENTINEL = '[NO_TEXT_DETECTED]'
-PAGES_PER_CALL = 4
+VISION_MAX_OUTPUT_TOKENS_DEFAULT = 65536
+VISION_PAGES_PER_CALL_DEFAULT = 15
 CONCURRENCY = 10
 RETRY_DELAY_SECONDS = 2.0
 VISION_CONCURRENCY_DEFAULT = 4
@@ -44,6 +45,28 @@ def _get_vision_semaphore() -> asyncio.Semaphore:
 
 REQUEST_TIMEOUT_SECONDS = 120.0
 MAX_TOKENS_PER_PAGE = 4096
+
+
+def _compute_pages_per_call() -> int:
+    env_override = os.getenv('VISION_PAGES_PER_CALL')
+    if env_override:
+        pages_per_call = max(1, int(env_override))
+        max_output_tokens = pages_per_call * MAX_TOKENS_PER_PAGE
+    else:
+        max_output_tokens = int(
+            os.getenv('VISION_MAX_OUTPUT_TOKENS', str(VISION_MAX_OUTPUT_TOKENS_DEFAULT))
+        )
+        pages_per_call = min(
+            max(1, max_output_tokens * 3 // 4 // MAX_TOKENS_PER_PAGE),
+            VISION_PAGES_PER_CALL_DEFAULT,
+        )
+    logger.info(
+        'Vision batch sizing: %d pages/call (max_output_tokens=%d)',
+        pages_per_call,
+        max_output_tokens,
+    )
+    return pages_per_call
+
 PAGE_SPLIT_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
 BATCH_EXTRACTION_PROMPT = (
     'You will see document pages. Extract all text and data from EACH page as clean markdown.\n'
@@ -447,7 +470,14 @@ async def _process_all_pages(
     if not pages:
         return [], []
 
-    batches = [pages[index : index + PAGES_PER_CALL] for index in range(0, len(pages), PAGES_PER_CALL)]
+    pages_per_call = _compute_pages_per_call()
+    batches = [pages[index : index + pages_per_call] for index in range(0, len(pages), pages_per_call)]
+    logger.info(
+        'Vision extraction: %d pages in %d batches (%d pages/call)',
+        len(pages),
+        len(batches),
+        pages_per_call,
+    )
     all_results: list[PageResult] = []
     all_warnings: list[ExtractionWarning] = []
 

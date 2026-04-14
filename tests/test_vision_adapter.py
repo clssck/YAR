@@ -112,10 +112,14 @@ class TestVisionAdapter:
 
         def fake_run(command, **_kwargs):
             _ = _kwargs
-            assert command[:4] == ['/usr/bin/soffice', '--headless', '--convert-to', 'pdf']
-            assert command[4] == '--outdir'
-            outdir = Path(command[5])
-            input_path = Path(command[6])
+            assert command[0] == '/usr/bin/soffice'
+            assert '--headless' in command
+            assert '-env:UserInstallation=file://' in ' '.join(command)
+            convert_idx = command.index('--convert-to')
+            assert command[convert_idx + 1] == 'pdf'
+            outdir_idx = command.index('--outdir')
+            outdir = Path(command[outdir_idx + 1])
+            input_path = Path(command[-1])
             assert input_path.suffix == '.docx'
             assert input_path.read_bytes() == b'office-bytes'
             (outdir / f'{input_path.stem}.pdf').write_bytes(b'%PDF-converted')
