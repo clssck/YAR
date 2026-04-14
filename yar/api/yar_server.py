@@ -518,13 +518,11 @@ def create_app(args):
         # Step 2: Apply priority (user config > provider default)
         # For max_token_size: explicit env var > provider default > None
         final_max_token_size = args.embedding_token_limit or provider_max_token_size
-        # For embedding_dim: user config (always has value) takes priority
-        # Only use provider default if user config is explicitly None (which shouldn't happen)
-        final_embedding_dim = args.embedding_dim or provider_embedding_dim or 1536
+        # For embedding_dim: explicit user config > provider default > None (auto-detect)
+        final_embedding_dim = args.embedding_dim or provider_embedding_dim
 
         # Step 3: Create optimized embedding function (calls underlying function directly)
-        # Note: When model is None, each binding will use its own default model
-        async def optimized_embedding_function(texts, embedding_dim=None):
+        async def optimized_embedding_function(texts):
             from yar.llm.openai import openai_embed
 
             actual_func = openai_embed.func if isinstance(openai_embed, EmbeddingFunc) else openai_embed
@@ -533,7 +531,6 @@ def create_app(args):
                 'texts': texts,
                 'base_url': host,
                 'api_key': api_key,
-                'embedding_dim': embedding_dim,
             }
             if model:
                 kwargs['model'] = model
