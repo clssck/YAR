@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import html
 import math
 import mimetypes
 import os
@@ -10,6 +9,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import unicodedata
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -424,12 +424,23 @@ async def _process_all_pages(
 
 
 def _has_usable_content(content: str) -> bool:
-    normalized_content = PAGE_SPLIT_RE.sub(' ', content)
-    normalized_content = normalized_content.replace(NO_TEXT_DETECTED_SENTINEL, ' ')
-    normalized_content = re.sub(r'<!--[\s\S]*?-->', ' ', normalized_content)
-    normalized_content = re.sub(r'<[^>]+>', ' ', normalized_content)
-    normalized_content = html.unescape(normalized_content)
-    return any(character.isalnum() for character in normalized_content)
+    """Check whether extracted page content contains any semantic text.
+
+    Strips all HTML/XML artifacts (page markers, comments, processing
+    instructions, DOCTYPE, CDATA sections, markup declarations, tags,
+    entities) and punctuation/symbols/whitespace/control characters,
+    then returns True if anything remains.
+    """
+    normalized = PAGE_SPLIT_RE.sub(' ', content)
+    normalized = re.sub(r'<!--[\s\S]*?-->', ' ', normalized)
+    normalized = re.sub(r'<\?[\s\S]*?\?>', ' ', normalized)
+    normalized = re.sub(r'<!DOCTYPE[\s\S]*?>', ' ', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r'<!\[CDATA\[([\s\S]*?)\]\]>', r'\1', normalized)
+    normalized = re.sub(r'<!(?!--|\[CDATA\[|DOCTYPE\b)[\s\S]*?>', ' ', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r'</?[\w:-]+\b[^>]*>', ' ', normalized)
+    normalized = re.sub(r'&(?:#\d+|#x[\da-f]+|[\w][\w:-]*);', ' ', normalized, flags=re.IGNORECASE)
+    # Semantic content = any letter or digit (Unicode categories L, N)
+    return any(unicodedata.category(ch)[0] in ('L', 'N') for ch in normalized)
 
 
 def _summarize_extraction_quality(
