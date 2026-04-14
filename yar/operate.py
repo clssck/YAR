@@ -1045,10 +1045,7 @@ async def rebuild_knowledge_from_chunks(
             failed_count += 1
 
     if failed_count > 0:
-        logger.warning(
-            f'KG rebuild: {len(tasks) - failed_count}/{len(tasks)} tasks succeeded, '
-            f'{failed_count} failed'
-        )
+        logger.warning(f'KG rebuild: {len(tasks) - failed_count}/{len(tasks)} tasks succeeded, {failed_count} failed')
 
     # Final status report
     status_message = f'KG rebuild completed: {rebuilt_entities_count} entities and {rebuilt_relationships_count} relationships rebuilt successfully.'
@@ -1858,11 +1855,7 @@ async def _merge_nodes_then_upsert(
 
     # 6.2 Finalize entity type by highest count
     all_types = [dp['entity_type'] for dp in nodes_data] + already_entity_types
-    entity_type = (
-        sorted(Counter(all_types).items(), key=lambda x: x[1], reverse=True)[0][0]
-        if all_types
-        else 'UNKNOWN'
-    )
+    entity_type = sorted(Counter(all_types).items(), key=lambda x: x[1], reverse=True)[0][0] if all_types else 'UNKNOWN'
 
     # 7. Deduplicate nodes by description, keeping first occurrence in the same document
     unique_nodes = {}
@@ -2781,8 +2774,7 @@ async def merge_nodes_and_edges(
 
         if entity_failed > 0:
             logger.warning(
-                f'Entity merge: {len(processed_entities)}/{len(entity_tasks)} succeeded, '
-                f'{entity_failed} failed'
+                f'Entity merge: {len(processed_entities)}/{len(entity_tasks)} succeeded, {entity_failed} failed'
             )
 
     # ===== Phase 2: Process all relationships concurrently =====
@@ -2871,10 +2863,7 @@ async def merge_nodes_and_edges(
                 all_added_entities.extend(added_entities)
 
         if edge_failed > 0:
-            logger.warning(
-                f'Edge merge: {len(processed_edges)}/{len(edge_tasks)} succeeded, '
-                f'{edge_failed} failed'
-            )
+            logger.warning(f'Edge merge: {len(processed_edges)}/{len(edge_tasks)} succeeded, {edge_failed} failed')
 
     # ===== Phase 2.5: Batch infer types for UNKNOWN entities =====
     if all_added_entities:
@@ -3169,10 +3158,7 @@ async def extract_entities(
         raise RuntimeError(f'All {total_chunks} chunks failed during entity extraction')
 
     if failed_count > 0:
-        log_msg = (
-            f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, '
-            f'{failed_count} failed'
-        )
+        log_msg = f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, {failed_count} failed'
         logger.warning(log_msg)
         await update_pipeline_status(pipeline_status, pipeline_status_lock, log_msg)
 
@@ -3329,6 +3315,7 @@ def _is_temporal_or_comparative_query(query: str) -> bool:
     )
     return any(re.search(pattern, normalized_query) for pattern in patterns)
 
+
 def _response_max_tokens(response_type: str, *, query: str = '') -> int:
     """Return a generous max_tokens safety net per response type.
 
@@ -3372,6 +3359,7 @@ def _should_validate_inline_citations(
         return False
     return any(re.search(pattern, normalized_prompt) for pattern in positive_patterns)
 
+
 def _build_prompt_chunk_context(
     chunks: list[dict[str, Any]],
     reference_list: list[dict[str, Any]],
@@ -3392,6 +3380,7 @@ def _build_prompt_chunk_context(
             f'[{ref["reference_id"]}] {ref["file_path"]}' for ref in reference_list if ref['reference_id']
         )
     return prompt_chunks, text_units_str, reference_list_str
+
 
 async def kg_query(
     query: str,
@@ -3522,10 +3511,14 @@ async def kg_query(
                     if processed_chunks:
                         reference_list, processed_chunks = generate_reference_list_from_chunks(processed_chunks)
                         include_reference_ids = _should_validate_inline_citations(
-                            query, query_param.user_prompt, system_prompt=sys_prompt_template,
+                            query,
+                            query_param.user_prompt,
+                            system_prompt=sys_prompt_template,
                         )
                         _, text_units_str, reference_list_str = _build_prompt_chunk_context(
-                            processed_chunks, reference_list, include_reference_ids=include_reference_ids,
+                            processed_chunks,
+                            reference_list,
+                            include_reference_ids=include_reference_ids,
                         )
                         naive_context_template = PROMPTS['naive_query_context']
                         context_content = naive_context_template.format(
@@ -3533,11 +3526,17 @@ async def kg_query(
                             reference_list_str=reference_list_str,
                         )
                         visible_reference_list, visible_chunks = _prepare_visible_reference_payload(
-                            processed_chunks, reference_list, query,
+                            processed_chunks,
+                            reference_list,
+                            query,
                             include_reference_ids=include_reference_ids,
                         )
                         raw_data = convert_to_user_format(
-                            [], [], visible_chunks, visible_reference_list, query_param.mode,
+                            [],
+                            [],
+                            visible_chunks,
+                            visible_reference_list,
+                            query_param.mode,
                         )
                         raw_data.setdefault('metadata', {})['fallback'] = 'direct_vector'
                         context_result = QueryContextResult(context=context_content, raw_data=raw_data)
@@ -3659,7 +3658,9 @@ async def kg_query(
 
         # Validate citations only when the prompt/response explicitly contains citation markup.
         available_refs = context_result.raw_data.get('data', {}).get('references', [])
-        if available_refs and _should_validate_inline_citations(query, query_param.user_prompt, system_prompt=sys_prompt):
+        if available_refs and _should_validate_inline_citations(
+            query, query_param.user_prompt, system_prompt=sys_prompt
+        ):
             response, was_fixed = validate_and_fix_citations(response, available_refs)
             if was_fixed:
                 logger.info(f'[kg_query] Auto-corrected citations for: {query[:50]}...')
@@ -3831,6 +3832,7 @@ async def _get_vector_context(
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
+    original_query_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve text chunks from the vector database without reranking or truncation.
@@ -3843,6 +3845,7 @@ async def _get_vector_context(
         chunks_vdb: Vector database containing document chunks
         query_param: Query parameters including chunk_top_k and ids
         query_embedding: Optional pre-computed query embedding to avoid redundant embedding calls
+        original_query_embedding: Optional original query embedding for dual-query HyDE fallback in hybrid search
 
     Returns:
         List of text chunks with metadata and preserved retrieval scores
@@ -3877,6 +3880,7 @@ async def _get_vector_context(
                     query,
                     top_k=search_top_k,
                     query_embedding=query_embedding,
+                    original_query_embedding=original_query_embedding,
                     bm25_weight=query_param.bm25_weight,
                 )
             else:
@@ -3947,6 +3951,7 @@ async def _perform_kg_search(
     # Pre-compute query embedding once for all vector operations
     kg_chunk_pick_method = text_chunks_db.global_config.get('kg_chunk_pick_method', DEFAULT_KG_CHUNK_PICK_METHOD)
     query_embedding = None
+    original_query_embedding = None
     embedding_query_text = query  # Text to embed (query or hypothetical answer for HyDE)
     ll_search_terms = _split_keyword_terms(ll_keywords)
     normalized_query = query.strip()
@@ -3954,21 +3959,25 @@ async def _perform_kg_search(
         normalized_query
         and ll_search_terms
         and len(ll_search_terms) == 1
-        and (
-            query_param.enable_hyde
-            or ll_search_terms[0].casefold() == normalized_query.casefold()
-        )
+        and (query_param.enable_hyde or ll_search_terms[0].casefold() == normalized_query.casefold())
     )
 
     # HyDE: Generate hypothetical answer if enabled
     if query and query_param.enable_hyde:
         try:
-            use_model_func = cast(Callable[..., Awaitable[str]], query_param.model_func or text_chunks_db.global_config.get('llm_model_func'))
+            use_model_func = cast(
+                Callable[..., Awaitable[str]],
+                query_param.model_func or text_chunks_db.global_config.get('llm_model_func'),
+            )
             if use_model_func:
                 hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
                 hyde_timeout = float(text_chunks_db.global_config.get('llm_timeout', 60))
-                hypothetical_answer = cast(str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=hyde_timeout))
-                normalized_hypothetical_answer = hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
+                hypothetical_answer = cast(
+                    str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=hyde_timeout)
+                )
+                normalized_hypothetical_answer = (
+                    hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
+                )
                 hyde_answer_length = len(normalized_hypothetical_answer)
                 logger.debug(f'HyDE: Generated hypothetical answer length={hyde_answer_length}')
                 if hyde_answer_length >= 10:
@@ -3989,17 +3998,34 @@ async def _perform_kg_search(
             try:
                 query_embedding = await actual_embedding_func([embedding_query_text])
                 query_embedding = query_embedding[0]  # Extract first embedding from batch result
+                if embedding_query_text != query and chunks_vdb is not None:
+                    original_query_embedding = (await actual_embedding_func([query]))[0]
                 logger.debug('Pre-computed query embedding for all vector operations')
             except Exception as e:
                 logger.warning(f'Failed to pre-compute query embedding: {e}')
                 query_embedding = None
+                original_query_embedding = None
 
     # Handle local and global modes
     if query_param.mode == 'local' and len(ll_keywords) > 0:
-        local_entities, local_relations = await _get_node_data(ll_keywords, knowledge_graph_inst, entities_vdb, query_param, query_embedding=query_embedding if should_reuse_entity_embedding else None, original_query=query)
+        local_entities, local_relations = await _get_node_data(
+            ll_keywords,
+            knowledge_graph_inst,
+            entities_vdb,
+            query_param,
+            query_embedding=query_embedding if should_reuse_entity_embedding else None,
+            original_query=query,
+        )
 
     elif query_param.mode == 'global' and len(hl_keywords) > 0:
-        global_relations, global_entities = await _get_edge_data(hl_keywords, knowledge_graph_inst, relationships_vdb, query_param, query=query, excluded_terms=ll_search_terms)
+        global_relations, global_entities = await _get_edge_data(
+            hl_keywords,
+            knowledge_graph_inst,
+            relationships_vdb,
+            query_param,
+            query=query,
+            excluded_terms=ll_search_terms,
+        )
 
     else:  # hybrid or mix mode
         if len(ll_keywords) > 0 and len(hl_keywords) > 0:
@@ -4007,14 +4033,42 @@ async def _perform_kg_search(
                 (local_entities, local_relations),
                 (global_relations, global_entities),
             ) = await asyncio.gather(
-                _get_node_data(ll_keywords, knowledge_graph_inst, entities_vdb, query_param, query_embedding=query_embedding if should_reuse_entity_embedding else None, original_query=query),
-                _get_edge_data(hl_keywords, knowledge_graph_inst, relationships_vdb, query_param, query=query, excluded_terms=ll_search_terms),
+                _get_node_data(
+                    ll_keywords,
+                    knowledge_graph_inst,
+                    entities_vdb,
+                    query_param,
+                    query_embedding=query_embedding if should_reuse_entity_embedding else None,
+                    original_query=query,
+                ),
+                _get_edge_data(
+                    hl_keywords,
+                    knowledge_graph_inst,
+                    relationships_vdb,
+                    query_param,
+                    query=query,
+                    excluded_terms=ll_search_terms,
+                ),
             )
         else:
             if len(ll_keywords) > 0:
-                local_entities, local_relations = await _get_node_data(ll_keywords, knowledge_graph_inst, entities_vdb, query_param, query_embedding=query_embedding if should_reuse_entity_embedding else None, original_query=query)
+                local_entities, local_relations = await _get_node_data(
+                    ll_keywords,
+                    knowledge_graph_inst,
+                    entities_vdb,
+                    query_param,
+                    query_embedding=query_embedding if should_reuse_entity_embedding else None,
+                    original_query=query,
+                )
             if len(hl_keywords) > 0:
-                global_relations, global_entities = await _get_edge_data(hl_keywords, knowledge_graph_inst, relationships_vdb, query_param, query=query, excluded_terms=ll_search_terms)
+                global_relations, global_entities = await _get_edge_data(
+                    hl_keywords,
+                    knowledge_graph_inst,
+                    relationships_vdb,
+                    query_param,
+                    query=query,
+                    excluded_terms=ll_search_terms,
+                )
 
         # Get vector chunks for mix mode
         if query_param.mode == 'mix' and chunks_vdb:
@@ -4023,6 +4077,7 @@ async def _perform_kg_search(
                 chunks_vdb,
                 query_param,
                 query_embedding,
+                original_query_embedding,
             )
             # Track vector chunks with source metadata
             for i, chunk in enumerate(vector_chunks):
@@ -4056,12 +4111,7 @@ async def _perform_kg_search(
     merge_degree_weight = max(_safe_float(merge_score_config.get('kg_merge_degree_weight'), 0.15), 0.0)
     merge_weight_weight = max(_safe_float(merge_score_config.get('kg_merge_weight_weight'), 0.15), 0.0)
     merge_position_weight = max(_safe_float(merge_score_config.get('kg_merge_position_weight'), 0.2), 0.0)
-    merge_weight_total = (
-        merge_similarity_weight
-        + merge_degree_weight
-        + merge_weight_weight
-        + merge_position_weight
-    )
+    merge_weight_total = merge_similarity_weight + merge_degree_weight + merge_weight_weight + merge_position_weight
     if merge_weight_total <= 0.0:
         merge_similarity_weight = 0.5
         merge_degree_weight = 0.15
@@ -4422,7 +4472,9 @@ async def _merge_all_chunks(
         (
             query_param.chunk_top_k
             if query_param and query_param.chunk_top_k
-            else query_param.top_k if query_param else 10
+            else query_param.top_k
+            if query_param
+            else 10
         ),
         1,
     )
@@ -4470,7 +4522,9 @@ async def _merge_all_chunks(
                 },
             )
             entry['source_types'].add(source_type)
-            entry['retrieval_score'] = max(entry['retrieval_score'], min(max(_safe_float(chunk.get('retrieval_score')), 0.0), 1.0))
+            entry['retrieval_score'] = max(
+                entry['retrieval_score'], min(max(_safe_float(chunk.get('retrieval_score')), 0.0), 1.0)
+            )
             entry['occurrence_count'] = max(entry['occurrence_count'], _safe_int(chunk.get('occurrence_count'), 0))
             source_order = _safe_int(chunk.get('source_order'), 0)
             if source_order > 0 and (entry['best_source_order'] is None or source_order < entry['best_source_order']):
@@ -4491,7 +4545,11 @@ async def _merge_all_chunks(
         else:
             order_score = 0.0
         facet_match = max(entry['heading_facet_match'], entry['body_facet_match'])
-        temporal_signal = max(entry.get('heading_temporal_signal', 0.0), entry.get('body_temporal_signal', 0.0)) if temporal_query else 0.0
+        temporal_signal = (
+            max(entry.get('heading_temporal_signal', 0.0), entry.get('body_temporal_signal', 0.0))
+            if temporal_query
+            else 0.0
+        )
         return (
             0.30 * entry['retrieval_score']
             + 0.22 * entry['heading_relevance']
@@ -4902,7 +4960,19 @@ async def _build_query_context(
 
     # Stage 4: Build final LLM context with dynamic token processing
     # _build_context_str now always returns tuple[str, dict]
-    context, raw_data = await _build_context_str(entities_context=truncation_result['entities_context'], relations_context=truncation_result['relations_context'], merged_chunks=merged_chunks, query=query, query_param=query_param, global_config=cast(GlobalConfig, text_chunks_db.global_config), chunk_tracking=search_result['chunk_tracking'], entity_id_to_original=truncation_result['entity_id_to_original'], relation_id_to_original=truncation_result['relation_id_to_original'], topic_terms=_split_keyword_terms(ll_keywords), facet_terms=_split_keyword_terms(hl_keywords))
+    context, raw_data = await _build_context_str(
+        entities_context=truncation_result['entities_context'],
+        relations_context=truncation_result['relations_context'],
+        merged_chunks=merged_chunks,
+        query=query,
+        query_param=query_param,
+        global_config=cast(GlobalConfig, text_chunks_db.global_config),
+        chunk_tracking=search_result['chunk_tracking'],
+        entity_id_to_original=truncation_result['entity_id_to_original'],
+        relation_id_to_original=truncation_result['relation_id_to_original'],
+        topic_terms=_split_keyword_terms(ll_keywords),
+        facet_terms=_split_keyword_terms(hl_keywords),
+    )
 
     # Convert keywords strings to lists and add complete metadata to raw_data
     hl_keywords_list = hl_keywords.split(', ') if hl_keywords else []
@@ -4955,6 +5025,7 @@ def _split_keyword_terms(query: str) -> list[str]:
 
     fallback_term = query.strip()
     return [fallback_term] if fallback_term else []
+
 
 _QUERY_RELEVANCE_STOPWORDS = {
     'the',
@@ -5012,6 +5083,7 @@ _TEMPORAL_PROGRESSION_TERMS = [
     'winter',
     'paralympic',
 ]
+
 
 def _normalize_match_text(text: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', text.casefold()).strip()
@@ -5077,7 +5149,9 @@ def _tokenize_relevance_terms(text: str) -> set[str]:
     }
 
 
-def _extract_query_focus_terms(query: str, excluded_phrases: list[str] | tuple[str, ...] | set[str] | None = None) -> set[str]:
+def _extract_query_focus_terms(
+    query: str, excluded_phrases: list[str] | tuple[str, ...] | set[str] | None = None
+) -> set[str]:
     focus_terms = _tokenize_relevance_terms(query)
     if not focus_terms:
         return set()
@@ -5200,6 +5274,8 @@ def _rank_chunks_by_query_intent(
         scored_chunks = [item for item in scored_chunks if item[0] > 0.0]
 
     return [item[2] for item in sorted(scored_chunks, key=lambda item: (-item[0], item[1]))]
+
+
 def _visible_reference_group_key(chunk: dict[str, Any]) -> str:
     s3_key = str(chunk.get('s3_key') or '').strip()
     if s3_key:
@@ -5210,7 +5286,7 @@ def _visible_reference_group_key(chunk: dict[str, Any]) -> str:
     chunk_id = str(chunk.get('chunk_id') or '').strip()
     if chunk_id:
         return f'chunk:{chunk_id}'
-    return f"content:{str(chunk.get('content') or '').strip()}"
+    return f'content:{str(chunk.get("content") or "").strip()}'
 
 
 def _preferred_visible_file_path(chunks: list[dict[str, Any]]) -> str:
@@ -5252,8 +5328,7 @@ def _prepare_visible_reference_payload(
         grouped_chunks[group_key].append(chunk)
 
     canonical_file_paths = {
-        group_key: _preferred_visible_file_path(group_chunks)
-        for group_key, group_chunks in grouped_chunks.items()
+        group_key: _preferred_visible_file_path(group_chunks) for group_key, group_chunks in grouped_chunks.items()
     }
 
     visible_chunks: list[dict[str, Any]] = []
@@ -5353,8 +5428,7 @@ def _prepare_visible_reference_payload(
             and group_score['best_facet_match'] == 0.0
         )
         is_clearly_weaker = (
-            group_score['best_score'] < top_group_score * 0.5
-            and group_score['best_score'] < top_group_score - 0.15
+            group_score['best_score'] < top_group_score * 0.5 and group_score['best_score'] < top_group_score - 0.15
         )
         near_best_without_topic = group_score['best_score'] >= max(top_group_score - 0.05, top_group_score * 0.85)
         if has_topic_signal and group_score['best_topic_match'] == 0.0 and not near_best_without_topic:
@@ -5372,12 +5446,13 @@ def _prepare_visible_reference_payload(
         filtered_visible_chunks = visible_chunks
     return generate_reference_list_from_chunks(filtered_visible_chunks)
 
+
 async def _query_entity_candidates(
     term: str,
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
- ) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Query entity candidates for a single term.
 
     Uses hybrid entity search when supported by the storage backend (vector + trigram),
@@ -5515,7 +5590,9 @@ async def _get_node_data(
         if n is not None
     ]
 
-    use_relations = await _find_most_related_edges_from_entities(node_datas, query_param, knowledge_graph_inst, query=original_query or query)
+    use_relations = await _find_most_related_edges_from_entities(
+        node_datas, query_param, knowledge_graph_inst, query=original_query or query
+    )
 
     logger.info(f'Local query: {len(node_datas)} entites, {len(use_relations)} relations')
 
@@ -6060,7 +6137,6 @@ async def _find_related_text_unit_from_relations(
     return result_chunks
 
 
-
 async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
@@ -6325,7 +6401,9 @@ async def naive_query(
             response = re.sub(r'^(user|model)\s*', '', response, flags=re.IGNORECASE).strip()
 
         available_refs = raw_data.get('data', {}).get('references', [])
-        if available_refs and _should_validate_inline_citations(query, query_param.user_prompt, system_prompt=sys_prompt):
+        if available_refs and _should_validate_inline_citations(
+            query, query_param.user_prompt, system_prompt=sys_prompt
+        ):
             response, was_fixed = validate_and_fix_citations(response, available_refs)
             if was_fixed:
                 logger.info(f'[naive_query] Auto-corrected citations for: {query[:50]}...')

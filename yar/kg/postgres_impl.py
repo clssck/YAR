@@ -60,13 +60,13 @@ T = TypeVar('T')
 AGE_MAX_UNWIND_BATCH_SIZE = 5000
 
 # Hybrid search (BM25 + vector) configuration
-# RRF_K: Reciprocal Rank Fusion constant (standard: 60, lower = more weight to top ranks)
-RRF_K = int(os.getenv('YAR_RRF_K', '60'))
+# RRF_K: Reciprocal Rank Fusion constant (standard: 60, default: 40, lower = more weight to top ranks)
+RRF_K = int(os.getenv('YAR_RRF_K', '40'))
 # TS_RANK_CD_FLAG: PostgreSQL ts_rank_cd normalization flags (32 = normalize by document length)
 TS_RANK_CD_FLAG = int(os.getenv('YAR_TS_RANK_FLAG', '32'))
 # Fetch multipliers for hybrid search (fetch more than top_k to allow RRF fusion)
 VECTOR_FETCH_MULTIPLIER = float(os.getenv('YAR_VECTOR_FETCH_MULT', '2.0'))
-BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('YAR_BM25_FETCH_MULT', '1.0'))
+BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('YAR_BM25_FETCH_MULT', '2.0'))
 
 # Default batch size for executemany operations
 # Adjust based on your data size and database resources
@@ -104,23 +104,47 @@ if VECTOR_DISTANCE_METRIC not in VECTOR_OPS_CLASS:
 # Patterns for sensitive parameter keys that should be masked in logs
 _SENSITIVE_KEY_PATTERNS = frozenset({'password', 'secret', 'token', 'key', 'credential', 'auth'})
 _VECTOR_TABLE_NAMES = frozenset({'YAR_VDB_CHUNKS', 'YAR_VDB_ENTITY', 'YAR_VDB_RELATION'})
-_VALID_FTS_LANGUAGES = frozenset({
-    'simple', 'arabic', 'armenian', 'basque', 'catalan', 'danish', 'dutch',
-    'english', 'finnish', 'french', 'german', 'greek', 'hindi', 'hungarian',
-    'indonesian', 'irish', 'italian', 'lithuanian', 'nepali', 'norwegian',
-    'portuguese', 'romanian', 'russian', 'serbian', 'spanish', 'swedish',
-    'tamil', 'turkish', 'yiddish',
-})
+_VALID_FTS_LANGUAGES = frozenset(
+    {
+        'simple',
+        'arabic',
+        'armenian',
+        'basque',
+        'catalan',
+        'danish',
+        'dutch',
+        'english',
+        'finnish',
+        'french',
+        'german',
+        'greek',
+        'hindi',
+        'hungarian',
+        'indonesian',
+        'irish',
+        'italian',
+        'lithuanian',
+        'nepali',
+        'norwegian',
+        'portuguese',
+        'romanian',
+        'russian',
+        'serbian',
+        'spanish',
+        'swedish',
+        'tamil',
+        'turkish',
+        'yiddish',
+    }
+)
 
 
 def _validate_fts_language(language: str) -> str:
     """Validate FTS language against PostgreSQL built-in text search configs."""
     if language not in _VALID_FTS_LANGUAGES:
-        raise ValueError(
-            f"Invalid FTS language: {language!r}. "
-            f"Must be one of: {sorted(_VALID_FTS_LANGUAGES)}"
-        )
+        raise ValueError(f'Invalid FTS language: {language!r}. Must be one of: {sorted(_VALID_FTS_LANGUAGES)}')
     return language
+
 
 def normalize_vector_param(vector: Any, *, field_name: str = 'Embedding vector') -> list[float]:
     """Normalize pgvector inputs to a parameterizable list of finite floats."""
@@ -142,7 +166,6 @@ def normalize_vector_param(vector: Any, *, field_name: str = 'Embedding vector')
         raise ValueError(f'{field_name} contains NaN or Inf values')
 
     return normalized
-
 
 
 def _parse_bool_config(value: Any, *, default: bool, key_name: str) -> bool:
@@ -849,7 +872,6 @@ class PostgreSQLDB:
     # Schema Migration Tracking (Production Hardening)
     # ========================================================================
 
-
     @asynccontextmanager
     async def _advisory_lock(self, lock_name: str = 'schema_migration'):
         """Acquire PostgreSQL advisory lock for coordinating schema operations.
@@ -1044,10 +1066,7 @@ class PostgreSQLDB:
                     )
 
                 # Table is empty — safe to auto-migrate the column dimension
-                logger.warning(
-                    f'PostgreSQL, Auto-migrating empty table {table_name}: '
-                    f'{actual_dim}D -> {expected_dim}D'
-                )
+                logger.warning(f'PostgreSQL, Auto-migrating empty table {table_name}: {actual_dim}D -> {expected_dim}D')
                 # Drop existing vector indexes before altering column type
                 indexes = await self.query(
                     """SELECT indexname FROM pg_indexes
@@ -3682,6 +3701,7 @@ class PGVectorStorage(BaseVectorStorage):
         query: str,
         top_k: int,
         query_embedding: list[float] | None = None,
+        original_query_embedding: list[float] | None = None,
         bm25_weight: float = 0.3,
         language: str = 'english',
     ) -> list[dict[str, Any]]:
@@ -3697,6 +3717,7 @@ class PGVectorStorage(BaseVectorStorage):
             query: Search query string
             top_k: Number of final results to return
             query_embedding: Optional pre-computed query embedding
+            original_query_embedding: Optional original query embedding for dual-query HyDE fallback
             bm25_weight: Weight for BM25 results (0.0-1.0). Higher = more BM25 influence.
                         Note: RRF naturally handles ranking, this affects how many BM25
                         results to retrieve (more weight = retrieve more BM25 results).
@@ -3746,7 +3767,7 @@ class PGVectorStorage(BaseVectorStorage):
             LIMIT $3
         """
 
-        # Run vector search and BM25 search in parallel for better performance
+        # Run vector searches and BM25 search in parallel for better performance
         db = self._db_required()
 
         async def run_bm25() -> list[dict[str, Any]]:
@@ -3757,28 +3778,43 @@ class PGVectorStorage(BaseVectorStorage):
             )
             return results if results else []
 
-        vector_results, bm25_results = await asyncio.gather(
-            self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
-            run_bm25(),
-        )
+        original_vector_results: list[dict[str, Any]] = []
+        if original_query_embedding is None:
+            vector_results, bm25_results = await asyncio.gather(
+                self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
+                run_bm25(),
+            )
+        else:
+            vector_results, original_vector_results, bm25_results = await asyncio.gather(
+                self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
+                self.query(query, top_k=vector_fetch_k, query_embedding=original_query_embedding),
+                run_bm25(),
+            )
 
         # Mark source type for debugging
         for r in vector_results:
             r['source_type'] = 'vector'
+        for r in original_vector_results:
+            r['source_type'] = 'vector_original'
         for r in bm25_results:
             r['source_type'] = 'bm25'
 
         # 3. Combine using Reciprocal Rank Fusion
+        result_lists: list[list[dict[str, Any]]] = [vector_results]
+        if original_query_embedding is not None:
+            result_lists.append(original_vector_results)
+        result_lists.append(bm25_results)
         fused_results = reciprocal_rank_fusion(
-            [vector_results, bm25_results],
+            result_lists,
             id_key='id',
             k=RRF_K,  # Configurable via YAR_RRF_K env var
         )
 
-        logger.debug(
-            f'[{self.workspace}] Hybrid search: {len(vector_results)} vector + '
-            f'{len(bm25_results)} BM25 → {len(fused_results[:top_k])} fused'
-        )
+        source_counts = f'{len(vector_results)} vector'
+        if original_query_embedding is not None:
+            source_counts += f' + {len(original_vector_results)} vector_original'
+        source_counts += f' + {len(bm25_results)} BM25'
+        logger.debug(f'[{self.workspace}] Hybrid search: {source_counts} → {len(fused_results[:top_k])} fused')
 
         return fused_results[:top_k]
 
