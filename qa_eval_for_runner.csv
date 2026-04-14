@@ -1,0 +1,14 @@
+question,expectedResponse
+Can PMG green light be given for Fitusiran based on the 2024-02-21 PMG Green Light Presentation?,yes
+Would you agree to change the storage condition on short notice prior to NDA submission for Fitusiran?,yes
+"In case of a CMC technology issue on one specific project, what is the first recommended step?","Organize an ad hoc meeting with the CMC team (internal only in case of collaboration), with extension to Subject Matter Expert contributors."
+"Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?",Due to ... the risk ... could impact ...
+What are the 3 categories of lessons learned about SERD SAR439589?,"Governance, Capabilities/Culture, Organization"
+What is the presentation of Sarclisa (isatuximab)?,Two single-use vials: 500 mg/25 mL and 100 mg/5 mL.
+"After US and EU submission of Sarclisa, what were the consequences of including an additional physical flow in the Netherlands in the manufacture?",Tax optimisation reflected Sanofi Genzyme as a new legal entity and resulted in mock-ups with the wrong logo. Shipping validation protocol and container were questioned and the NDC code was wrong. Batches were shipped back and needed to be re-labeled.
+What is the lesson learned about regulatory strategy related to pre-IND and IND from the Sustained API Release Platform (SARP)?,"Strategy of an early pre-IND should be targeted, or IND should be submitted without pre-IND."
+Which article of Japanese GMP covers the MOU?,Article 11
+What are the Japan-specific activities for iCMC Operations Managers?,"Foreign Manufacturer Accreditation (FMA) management for manufacturing sites; analytical method transfer to Japanese labs; shipping validation between US and Japan; J-CTD (Japanese Common Technical Document) preparation managed by CDDC and R-CMC; cross-functional topics like filter selection for clinical use, stability, and sales limits."
+What are the minimum information fields to keep on the batch analysis table for an AAV product?,"Batch number, batch size, manufacturing site, manufacturing date, with batch yield expressed by total vgs."
+What is the dose-ranging recommended by the MABEL approach?,3-4 log
+What is the standard duration of shipment to depot?,1 to 3 months

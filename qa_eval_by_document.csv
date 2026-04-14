@@ -1,0 +1,56 @@
+question,expectedResponse,actualResponse,fullResponse,fileName
+Can PMG green light be given for Fitusiran based on the 2024-02-21 PMG Green Light Presentation?,yes,"Yes.
+The PAI Task Force proposes issuance of Green Light for the Fitusiran submission following readiness assessments. The PMG Committee is asked to accept this proposal during the 21 Feb 2024 PMG Gre","Yes.
+The PAI Task Force proposes issuance of Green Light for the Fitusiran submission following readiness assessments. The PMG Committee is asked to accept this proposal during the 21 Feb 2024 PMG Green Light Conference.",2024-02-21_Fitusiran PMG Green Light Presentation.pdf
+Would you agree to change the storage condition on short notice prior to NDA submission for Fitusiran?,yes,"Yes
+
+The CMC team has already initiated and is proceeding with implementing the change to the storage condition and shelf-life for the Fitusiran prefilled pen (PFP) prior to the NDA submission. Feed A","Yes
+
+The CMC team has already initiated and is proceeding with implementing the change to the storage condition and shelf-life for the Fitusiran prefilled pen (PFP) prior to the NDA submission. Feed A 15March2024",Escalation meeting_Fitusiran_8-March-2024_FINAL.pdf
+"In case of a CMC technology issue on one specific project, what is the first recommended step?","Organize an ad hoc meeting with the CMC team (internal only in case of collaboration), with extension to Subject Matter Expert contributors.",Ad hoc meeting with the iCMC team (internal only in case of collaboration) with extension to Subject Matter Expert contributors.,Ad hoc meeting with the iCMC team (internal only in case of collaboration) with extension to Subject Matter Expert contributors.,16-05-31-LLsession07-TechnologyIssueQuickSharing-RAW DATA.pdf
+"Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?",Due to ... the risk ... could impact ...,Due to... the risk... could impact....,Due to... the risk... could impact....,17-LLsession-01-Risk Review CIR 15 march 2017.pdf
+What are the 3 categories of lessons learned about SERD SAR439589?,"Governance, Capabilities/Culture, Organization","SERD SAR439859 lessons learned fall into three categories: Governance, Capabilities/Culture, and Organization.
+
+- Governance: DWG decision making, PCS developability and IND route decisions, IDCC late","SERD SAR439859 lessons learned fall into three categories: Governance, Capabilities/Culture, and Organization.
+
+- Governance: DWG decision making, PCS developability and IND route decisions, IDCC late max plan decision, NDA route accountability.
+- Capabilities/Culture: Chemistry capabilities, confidence in research, preclinical dose prediction.
+- Organization: iCMC NPP Cluster Set-up.",SAR439589 SERD Lesson Learnt final.pdf
+What is the presentation of Sarclisa (isatuximab)?,Two single-use vials: 500 mg/25 mL and 100 mg/5 mL.,"Sarclisa (isatuximab) is available as a **Concentrate for solution for infusion** with a strength of **20 mg/ml**.
+
+This presentation is supplied in two single-use vial formats:
+- 500 mg/25 mL
+- 100 m","Sarclisa (isatuximab) is available as a **Concentrate for solution for infusion** with a strength of **20 mg/ml**.
+
+This presentation is supplied in two single-use vial formats:
+- 500 mg/25 mL
+- 100 mg/5 mL",03_Isatuximab_LL_Apr2020-final.pdf
+"After US and EU submission of Sarclisa, what were the consequences of including an additional physical flow in the Netherlands in the manufacture?",Tax optimisation reflected Sanofi Genzyme as a new legal entity and resulted in mock-ups with the wrong logo. Shipping validation protocol and container were questioned and the NDC code was wrong. Batches were shipped back and needed to be re-labeled.,"After the US and EU submission of Sarclisa, routing physical and financial flows through the Netherlands introduced several consequences:
+
+- Shipping validation protocols and containers were questione","After the US and EU submission of Sarclisa, routing physical and financial flows through the Netherlands introduced several consequences:
+
+- Shipping validation protocols and containers were questioned because they contained the wrong logo.
+- The National Drug Code (NDC) on labels was incorrect, requiring returned batches to be re-labeled.
+- Mock-ups were produced incorrectly due to the changed legal entity branding.
+- Adjustments were needed to align physical logistics and labeling with the Sanofi legal entity change from Sanofi Genzyme to Sanofi during the review process.",03_Isatuximab_LL_Apr2020-final (1).pdf
+What is the lesson learned about regulatory strategy related to pre-IND and IND from the Sustained API Release Platform (SARP)?,"Strategy of an early pre-IND should be targeted, or IND should be submitted without pre-IND.",A consistent lesson learned from SARP’s regulatory journey is that aligning with agency expectations **as early as possible** in pre‑IND (via a briefing package and timely Agency advice) enables imple,"A consistent lesson learned from SARP’s regulatory journey is that aligning with agency expectations **as early as possible** in pre‑IND (via a briefing package and timely Agency advice) enables implementation of guidance before IND submission. Over time, teams shifted toward **“as late as possible”** pre‑IND strategies (just weeks prior to IND), driven by missing data, insufficiently described processes, and uncertainty about the right questions. This often led to the removal of data from the briefing package, with the final content being too incomplete to act on at the time of handover. The resulting **conclusion** is that strategies should target either a robust early pre‑IND engagement (including sufficient time to implement advice) or proceed directly to an IND submission without relying on a late pre‑IND outcome.
+
+In parallel, lessons from SARP projects like SARPone and SARPtwo emphasize that **early Agency engagement** and **development of a CMC development plan** aligned with regulatory expectations can provide flexibility in development confirmed by the Agency in later submissions, reinforcing that clarity and completeness in pre‑IND are critical to avoid unnecessary hurdles in IND preparation.",2020-05-06 SARP lessons learned at CMC cross-sharing ver06.pdf
+Which article of Japanese GMP covers the MOU?,Article 11,Article 11 of the Japanese GMP Ministerial Ordinance.,Article 11 of the Japanese GMP Ministerial Ordinance.,Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf
+What are the Japan-specific activities for iCMC Operations Managers?,"Foreign Manufacturer Accreditation (FMA) management for manufacturing sites; analytical method transfer to Japanese labs; shipping validation between US and Japan; J-CTD (Japanese Common Technical Document) preparation managed by CDDC and R-CMC; cross-functional topics like filter selection for clinical use, stability, and sales limits.","iCMC Operations Managers (J-OM) in Japan lead Japan-specific activities centered on submission readiness, launch execution, and cross-functional coordination.
+
+Japan-specific activities include:
+- Lea","iCMC Operations Managers (J-OM) in Japan lead Japan-specific activities centered on submission readiness, launch execution, and cross-functional coordination.
+
+Japan-specific activities include:
+- Leading the Japan Submission Task Force (JSTF) and its sub‑teams (CMC dossier sub‑team and GMP inspection sub‑team) during the JSTF period.
+- Managing all CMC/IA activities to meet the target submission date for Japanese dossiers.
+- Promoting communication between sub‑teams, including GMP inspection sub‑teams, during both dossier preparation and PAI readiness.
+- Overseeing project management and logistics (for example, FMA and shipping validation) across Japan and globally, including coordinating between development sites such as PPD (ALNY’s CRO) and Kawagoe.
+- Participating in internal and international Obeya meetings to track launch readiness activities, typically starting 8–9 months before the target launch date.
+- Preparing for the first launch in Japan, which triggers the transition of iCMC's role to global IA; J-OM coordinates handover discussions with iCMC PL/OM and continues involvement for new presentations or dosages not yet launched in Japan.
+- Conducting lessons learned sessions after the first launch to capture best practices and document conclusions for future teams, including discussions on topics such as preparation history (for example, digital Obeya review for Kevzara), key risks, and success factors.
+- Facilitating regulatory interactions such as PMDA consultations for unique modalities (for example, siRNA/LNP programs like Patisiran), often serving as the single point of contact for CMC/IA topics in Japan.",Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf
+What are the minimum information fields to keep on the batch analysis table for an AAV product?,"Batch number, batch size, manufacturing site, manufacturing date, with batch yield expressed by total vgs.","The minimum information fields to keep on the batch analysis table for an AAV product are: batch number, batch size, manufacturing site, manufacturing date, control methods, acceptance criteria, and t","The minimum information fields to keep on the batch analysis table for an AAV product are: batch number, batch size, manufacturing site, manufacturing date, control methods, acceptance criteria, and the test results (with batch yield reported in total viral genomes).",2023_09_07_PKU IND CMC Dossier Lessons Learned .pdf
+What is the dose-ranging recommended by the MABEL approach?,3-4 log,The MABEL approach recommends a 3–4 log dose-ranging span during dose selection studies.,The MABEL approach recommends a 3–4 log dose-ranging span during dose selection studies.,2023_07_11_Clinical Development and CMC Interdependency & Partnership.pdf
+What is the standard duration of shipment to depot?,1 to 3 months,Shipment to depot lasts 1–3 months.,Shipment to depot lasts 1–3 months.,2023_06_06_Awareness of product usage within R&D.pdf
