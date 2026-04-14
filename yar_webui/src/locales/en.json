@@ -154,7 +154,7 @@
         "fileName": "File Name",
         "summary": "Summary",
         "status": "Status",
-        "length": "Length",
+        "length": "Tokens",
         "chunks": "Chunks",
         "created": "Created",
         "updated": "Updated",

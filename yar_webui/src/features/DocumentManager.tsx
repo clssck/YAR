@@ -1859,7 +1859,7 @@ export default function DocumentManager() {
                           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                             {doc.content_length != null && (
                               <span>
-                                {doc.content_length.toLocaleString()} chars
+																{doc.content_length.toLocaleString()} tokens
                               </span>
                             )}
                             {doc.chunks_count != null && (
