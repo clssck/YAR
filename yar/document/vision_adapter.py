@@ -34,6 +34,8 @@ BATCH_EXTRACTION_PROMPT = (
     "Separate each page's content with a <!-- PAGE {N} --> marker where N is the page number.\n"
     'For tables, use HTML <table> tags with proper <thead> and <tbody>.\n'
     'For lists, use markdown lists.\n'
+    'For diagrams, timelines, flow charts, and infographics, describe all visible labels, '
+    'numeric values, durations, arrows, and stage names as a structured markdown list.\n'
     'Preserve heading hierarchy with # marks.\n'
     'Be thorough and accurate.'
 )
