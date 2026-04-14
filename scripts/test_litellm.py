@@ -34,9 +34,9 @@ def main():
     success = True
 
     # Test embedding
-    print('\n1. Embedding (titan-embed):')
+    print('\n1. Embedding (shrimp):')
     try:
-        resp = client.embeddings.create(model='titan-embed', input='hello world')
+        resp = client.embeddings.create(model='shrimp', input='hello world')
         dims = len(resp.data[0].embedding)
         print(f'   ✓ Success: {dims} dimensions')
         print(f'   First 5 values: {resp.data[0].embedding[:5]}')
@@ -53,13 +53,33 @@ def main():
         print(f'   ✗ Unexpected error: {e}')
         success = False
 
-    # Test chat
-    print('\n2. Chat (beepboop / Claude 3.5 Sonnet):')
+    # Test primary chat alias
+    print('\n2. Chat (tuna):')
     try:
         resp = client.chat.completions.create(
-            model='beepboop',
-            messages=[{'role': 'user', 'content': 'Say hello in exactly 5 words.'}],
-            max_tokens=50
+            model='tuna', messages=[{'role': 'user', 'content': 'Say hello in exactly 5 words.'}], max_tokens=50
+        )
+        content = resp.choices[0].message.content
+        print(f'   ✓ Success: "{content}"')
+        print(f'   Tokens: {resp.usage.prompt_tokens} prompt, {resp.usage.completion_tokens} completion')
+    except openai.AuthenticationError as e:
+        print(f'   ✗ Authentication failed: {e}')
+        success = False
+    except openai.APIConnectionError as e:
+        print(f'   ✗ Connection failed: {e}')
+        success = False
+    except openai.APIError as e:
+        print(f'   ✗ API error: {e}')
+        success = False
+    except Exception as e:
+        print(f'   ✗ Unexpected error: {e}')
+        success = False
+
+    # Test secondary chat alias
+    print('\n3. Chat (salmon):')
+    try:
+        resp = client.chat.completions.create(
+            model='salmon', messages=[{'role': 'user', 'content': 'Say hello in exactly 5 words.'}], max_tokens=50
         )
         content = resp.choices[0].message.content
         print(f'   ✓ Success: "{content}"')
@@ -83,6 +103,7 @@ def main():
     else:
         print('✗ Some tests failed')
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()
