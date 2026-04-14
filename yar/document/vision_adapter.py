@@ -5,6 +5,7 @@ import base64
 import math
 import mimetypes
 import os
+import random
 import re
 import shlex
 import subprocess
@@ -26,6 +27,19 @@ NO_TEXT_DETECTED_SENTINEL = '[NO_TEXT_DETECTED]'
 PAGES_PER_CALL = 4
 CONCURRENCY = 10
 RETRY_DELAY_SECONDS = 2.0
+VISION_CONCURRENCY_DEFAULT = 4
+VISION_MAX_RETRIES = 4
+_vision_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_vision_semaphore() -> asyncio.Semaphore:
+    """Return a global semaphore limiting concurrent vision API calls across all documents."""
+    global _vision_semaphore
+    if _vision_semaphore is None:
+        limit = int(os.environ.get('VISION_CONCURRENCY', str(VISION_CONCURRENCY_DEFAULT)))
+        _vision_semaphore = asyncio.Semaphore(limit)
+        logger.info('Vision extraction concurrency limit: %d', limit)
+    return _vision_semaphore
 REQUEST_TIMEOUT_SECONDS = 120.0
 MAX_TOKENS_PER_PAGE = 4096
 PAGE_SPLIT_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
@@ -302,21 +316,23 @@ def should_split_batch(
 ) -> bool:
     return expected_page_count > 1 and (finish_reason == 'length' or marker_mode != 'full')
 
-
 async def _extract_batch(
     client: Any,
     model: str,
     pages: list[RenderedPage],
 ) -> tuple[list[PageResult], list[ExtractionWarning], bool]:
-    response = await asyncio.wait_for(
-        client.chat.completions.create(
-            model=model,
-            messages=cast(Any, _build_batch_vision_messages(pages)),
-            temperature=0,
-            max_tokens=MAX_TOKENS_PER_PAGE * len(pages),
-        ),
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    )
+    """Send a page batch to the vision model, gated by a global concurrency semaphore."""
+    sem = _get_vision_semaphore()
+    async with sem:
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model,
+                messages=cast(Any, _build_batch_vision_messages(pages)),
+                temperature=0,
+                max_tokens=MAX_TOKENS_PER_PAGE * len(pages),
+            ),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
     raw_text = _extract_response_text(response).strip()
 
     choices = getattr(response, 'choices', None) or []
@@ -348,34 +364,41 @@ async def _extract_batch_with_retry(
     model: str,
     pages: list[RenderedPage],
 ) -> tuple[list[PageResult], list[ExtractionWarning], bool]:
-    try:
-        return await _extract_batch(client, model, pages)
-    except Exception as exc:  # pragma: no cover - exercised through wrapper behavior
-        logger.warning(
-            'Vision extraction retrying batch %s after error: %s',
-            _page_range_label(pages),
-            _format_exception_message(exc),
-        )
-        await asyncio.sleep(RETRY_DELAY_SECONDS)
+    """Try up to VISION_MAX_RETRIES times with exponential backoff + jitter."""
+    last_exc: Exception | None = None
+    for attempt in range(VISION_MAX_RETRIES):
+        try:
+            return await _extract_batch(client, model, pages)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < VISION_MAX_RETRIES - 1:
+                delay = RETRY_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 1)
+                logger.warning(
+                    'Vision extraction retrying batch %s (attempt %d/%d, %.1fs backoff) after error: %s',
+                    _page_range_label(pages),
+                    attempt + 2,
+                    VISION_MAX_RETRIES,
+                    delay,
+                    _format_exception_message(exc),
+                )
+                await asyncio.sleep(delay)
 
-    try:
-        return await _extract_batch(client, model, pages)
-    except Exception as exc:  # pragma: no cover - exercised through wrapper behavior
-        detail = _format_exception_message(exc)
-        logger.warning(
-            'Vision extraction failed batch %s after retry: %s',
-            _page_range_label(pages),
-            detail,
+    detail = _format_exception_message(last_exc)
+    logger.warning(
+        'Vision extraction failed batch %s after %d attempts: %s',
+        _page_range_label(pages),
+        VISION_MAX_RETRIES,
+        detail,
+    )
+    warnings = [
+        ExtractionWarning(
+            source='vision_batch_failure',
+            message=f'Vision extraction failed for page {page.page_number}: {detail}',
         )
-        warnings = [
-            ExtractionWarning(
-                source='vision_batch_failure',
-                message=f'Vision extraction failed for page {page.page_number}: {detail}',
-            )
-            for page in pages
-        ]
-        page_results = [PageResult(page_number=page.page_number, content='') for page in pages]
-        return page_results, warnings, False
+        for page in pages
+    ]
+    page_results = [PageResult(page_number=page.page_number, content='') for page in pages]
+    return page_results, warnings, False
 
 
 async def _extract_batch_adaptively(
