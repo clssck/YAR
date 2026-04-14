@@ -218,7 +218,6 @@ async def detect_embedding_dim(
         response = await client.embeddings.create(
             model=api_model,
             input=['dimension test'],
-            encoding_format='base64',
         )
 
         # Decode the base64 embedding and get its dimension
@@ -848,11 +847,11 @@ async def openai_embed(
         # Make API call
         if embedding_dim is not None:
             response = await openai_async_client.embeddings.create(
-                model=api_model, input=texts, encoding_format='base64', dimensions=embedding_dim
+                model=api_model, input=texts, dimensions=embedding_dim
             )
         else:
             response = await openai_async_client.embeddings.create(
-                model=api_model, input=texts, encoding_format='base64'
+                model=api_model, input=texts
             )
 
         if token_tracker and hasattr(response, 'usage'):
