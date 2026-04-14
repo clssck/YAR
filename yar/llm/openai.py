@@ -33,7 +33,7 @@ from yar.utils import (
 # Try to import Langfuse for LLM observability (optional)
 # Falls back to standard OpenAI client if not available
 # Langfuse requires proper configuration to work correctly
-LANGFUSE_ENABLED = False
+_langfuse_enabled = False
 try:
     # Check if required Langfuse environment variables are set
     langfuse_public_key = os.environ.get('LANGFUSE_PUBLIC_KEY')
@@ -43,7 +43,7 @@ try:
     if langfuse_public_key and langfuse_secret_key:
         from langfuse.openai import AsyncOpenAI
 
-        LANGFUSE_ENABLED = True
+        _langfuse_enabled = True
         logger.info('Langfuse observability enabled for OpenAI client')
     else:
         from openai import AsyncOpenAI
@@ -57,7 +57,7 @@ except ImportError:
 # use the .env that is inside the current folder
 # allows to use different .env file for each yar instance
 # the OS environment variables take precedence over the .env file
-load_dotenv(dotenv_path='.env', override=False)
+_ = load_dotenv(dotenv_path='.env', override=False)
 
 
 class InvalidResponseError(Exception):
@@ -67,10 +67,10 @@ class InvalidResponseError(Exception):
 
 
 # Module-level cache for tiktoken encodings
-_TIKTOKEN_ENCODING_CACHE: dict[str, Any] = {}
+_TIKTOKEN_ENCODING_CACHE: dict[str, tiktoken.Encoding] = {}
 
 
-def _get_tiktoken_encoding_for_model(model: str) -> Any:
+def _get_tiktoken_encoding_for_model(model: str) -> tiktoken.Encoding:
     """Get tiktoken encoding for the specified model with caching.
 
     Args:
@@ -219,14 +219,9 @@ async def detect_embedding_dim(
             model=api_model,
             input=['dimension test'],
         )
+        embedding = response.data[0].embedding
+        dim = len(embedding)
 
-        # Decode the base64 embedding and get its dimension
-        embedding_b64 = response.data[0].embedding
-        if isinstance(embedding_b64, list):
-            dim = len(embedding_b64)
-        else:
-            embedding_array = np.frombuffer(base64.b64decode(embedding_b64), dtype=np.float32)
-            dim = len(embedding_array)
 
         _EMBEDDING_DIM_CACHE[cache_key] = dim
         logger.info(f'Auto-detected embedding dimension: {model} -> {dim}D')
@@ -652,11 +647,11 @@ async def openai_complete_if_cache(
 
 
 async def openai_complete(
-    prompt,
-    system_prompt=None,
-    history_messages=None,
-    keyword_extraction=False,
-    **kwargs,
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list[dict[str, Any]] | None = None,
+    keyword_extraction: bool = False,
+    **kwargs: Any,
 ) -> str | AsyncIterator[str]:
     if history_messages is None:
         history_messages = []
@@ -672,12 +667,12 @@ async def openai_complete(
 
 
 async def gpt_4o_complete(
-    prompt,
-    system_prompt=None,
-    history_messages=None,
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list[dict[str, Any]] | None = None,
     enable_cot: bool = False,
-    keyword_extraction=False,
-    **kwargs,
+    keyword_extraction: bool = False,
+    **kwargs: Any,
 ) -> str | AsyncIterator[str]:
     if history_messages is None:
         history_messages = []
@@ -693,12 +688,12 @@ async def gpt_4o_complete(
 
 
 async def gpt_4o_mini_complete(
-    prompt,
-    system_prompt=None,
-    history_messages=None,
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list[dict[str, Any]] | None = None,
     enable_cot: bool = False,
-    keyword_extraction=False,
-    **kwargs,
+    keyword_extraction: bool = False,
+    **kwargs: Any,
 ) -> str | AsyncIterator[str]:
     if history_messages is None:
         history_messages = []
@@ -714,12 +709,12 @@ async def gpt_4o_mini_complete(
 
 
 async def nvidia_openai_complete(
-    prompt,
-    system_prompt=None,
-    history_messages=None,
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list[dict[str, Any]] | None = None,
     enable_cot: bool = False,
-    keyword_extraction=False,
-    **kwargs,
+    keyword_extraction: bool = False,
+    **kwargs: Any,
 ) -> str | AsyncIterator[str]:
     if history_messages is None:
         history_messages = []
@@ -874,7 +869,7 @@ async def openai_embed(
 # Azure OpenAI wrapper functions for backward compatibility
 async def azure_openai_complete_if_cache(
     model: str | None,
-    prompt,
+    prompt: str,
     system_prompt: str | None = None,
     history_messages: list[dict[str, Any]] | None = None,
     enable_cot: bool = False,
@@ -885,7 +880,7 @@ async def azure_openai_complete_if_cache(
     timeout: int | None = None,
     api_version: str | None = None,
     keyword_extraction: bool = False,
-    **kwargs,
+    **kwargs: Any,
 ) -> str | AsyncIterator[str]:
     """Azure OpenAI completion wrapper function.
 
@@ -924,11 +919,11 @@ async def azure_openai_complete_if_cache(
 
 
 async def azure_openai_complete(
-    prompt,
-    system_prompt=None,
-    history_messages=None,
-    keyword_extraction=False,
-    **kwargs,
+    prompt: str,
+    system_prompt: str | None = None,
+    history_messages: list[dict[str, Any]] | None = None,
+    keyword_extraction: bool = False,
+    **kwargs: Any,
 ) -> str | AsyncIterator[str]:
     """Azure OpenAI complete wrapper function.
 
