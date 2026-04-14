@@ -188,3 +188,23 @@ class TestVisionAdapter:
         assert [page.page_number for page in pages] == [1, 2]
         assert all(page.media_type == 'image/jpeg' for page in pages)
         assert [page.image_bytes for page in pages] == [b'jpg-one', b'jpg-two']
+
+    def test_content_with_context_prepends_heading_hierarchy(self):
+        """heading_context must be prepended to chunk content for richer embeddings."""
+        from types import SimpleNamespace
+
+        chunk_with_ctx = SimpleNamespace(
+            content='### IMPACTS:\n\n1. Wrong logo',
+            heading_context='Topic 5: financial flow',
+        )
+        chunk_without_ctx = SimpleNamespace(
+            content='# Top level heading\n\nSome body text.',
+            heading_context=None,
+        )
+
+        result_with = vision._content_with_context(chunk_with_ctx)
+        assert result_with.startswith('Topic 5: financial flow')
+        assert '### IMPACTS:' in result_with
+
+        result_without = vision._content_with_context(chunk_without_ctx)
+        assert result_without == chunk_without_ctx.content

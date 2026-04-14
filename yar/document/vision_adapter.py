@@ -139,6 +139,19 @@ def is_vision_document(*, filename: str | None = None, mime_type: str | None = N
     )
 
 
+def _content_with_context(chunk: Any) -> str:
+    """Prepend heading hierarchy to chunk content for richer embeddings.
+
+    Without this, a chunk like ``### IMPACTS: 1. Wrong logo ...`` has no
+    semantic link to its parent section (e.g. *Topic 5: financial flow*).
+    Prepending the breadcrumb ensures the embedding captures the full
+    context.
+    """
+    if chunk.heading_context:
+        return f'{chunk.heading_context}\n\n{chunk.content}'
+    return chunk.content
+
+
 async def extract_document_with_vision(
     document_bytes: bytes,
     *,
@@ -195,8 +208,8 @@ async def extract_document_with_vision(
     if chunks:
         pre_chunks = [
             {
-                'tokens': math.ceil(len(chunk.content) / 4),
-                'content': chunk.content,
+                'tokens': math.ceil(len(_content_with_context(chunk)) / 4),
+                'content': _content_with_context(chunk),
                 'chunk_order_index': chunk.chunk_index,
                 'page_number': chunk.page_number,
                 'heading_context': chunk.heading_context,
