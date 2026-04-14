@@ -191,7 +191,6 @@ if [ "$PROFILE" = "dev" ]; then
     set_env "EMBEDDING_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
     set_env "EMBEDDING_BINDING_API_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
-    set_env "RERANK_BINDING" "deepinfra"
     set_env "RERANK_MODEL" "Qwen/Qwen3-Reranker-8B"
 
     set_env "CHUNK_SIZE" "1000"
@@ -200,7 +199,7 @@ if [ "$PROFILE" = "dev" ]; then
     set_env "LLM_TIMEOUT" "300"
     set_env "OPENAI_LLM_MAX_COMPLETION_TOKENS" "9000"
 else
-    # ── Work profile: LiteLLM proxy with higher concurrency ──
+    # ── Work profile: Bedrock via LiteLLM proxy ──
     set_env "LLM_BINDING" "openai"
     set_env "LLM_MODEL" "tuna"
     set_env "LLM_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
@@ -208,8 +207,8 @@ else
 
     set_env "EMBEDDING_BINDING" "openai"
     set_env "EMBEDDING_MODEL" "shrimp"
-    set_env "EMBEDDING_DIM" "1532"
-    set_env "EMBEDDING_SEND_DIM" "true"
+    set_env "EMBEDDING_DIM" "1024"
+    set_env "EMBEDDING_SEND_DIM" "false"
     set_env "EMBEDDING_TOKEN_LIMIT" "8192"
     set_env "EMBEDDING_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
     set_env "EMBEDDING_BINDING_API_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
