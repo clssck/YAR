@@ -47,6 +47,7 @@ from yar.constants import (
     SOURCE_IDS_LIMIT_METHOD_FIFO,
     SOURCE_IDS_LIMIT_METHOD_KEEP,
 )
+from yar.exceptions import PipelineCancelledException
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
 from yar.type_defs import GlobalConfig
@@ -3150,58 +3151,58 @@ async def extract_entities(
         async with semaphore:
             # Check for cancellation before processing chunk
             await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'chunk processing')
-
             try:
                 return await _process_single_content(chunk)
+            except PipelineCancelledException:
+                raise
             except Exception as e:
-                chunk_id = chunk[0]  # Extract chunk_id from chunk[0]
-                prefixed_exception = create_prefixed_exception(e, chunk_id)
-                raise prefixed_exception from e
+                chunk_id = chunk[0]
+                logger.warning(f'Chunk {chunk_id} failed: {e!s}')
+                return None
 
     tasks = []
     for c in ordered_chunks:
         task = asyncio.create_task(_process_with_semaphore(c))
         tasks.append(task)
 
-    # Wait for tasks to complete or for the first exception to occur
-    # This allows us to cancel remaining tasks if any task fails
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+    # Wait for all chunks to complete so partial successes survive individual failures
+    done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
-    # Check if any task raised an exception and ensure all exceptions are retrieved
-    first_exception = None
     chunk_results = []
+    failed_count = 0
+    cancellation_error = None
 
     for task in done:
         try:
-            exception = task.exception()
-            if exception is not None:
-                if first_exception is None:
-                    first_exception = exception
+            exc = task.exception()
+            if exc is not None:
+                if isinstance(exc, PipelineCancelledException):
+                    cancellation_error = exc
+                else:
+                    failed_count += 1
             else:
-                chunk_results.append(task.result())
-        except Exception as e:
-            if first_exception is None:
-                first_exception = e
+                result = task.result()
+                if result is not None:
+                    chunk_results.append(result)
+                else:
+                    failed_count += 1
+        except Exception:
+            failed_count += 1
 
-    # If any task failed, cancel all pending tasks and raise the first exception
-    if first_exception is not None:
-        # Cancel all pending tasks
-        for pending_task in pending:
-            pending_task.cancel()
+    if cancellation_error is not None:
+        raise cancellation_error
 
-        # Wait for cancellation to complete
-        if pending:
-            await asyncio.wait(pending)
+    if not chunk_results:
+        raise RuntimeError(f'All {total_chunks} chunks failed during entity extraction')
 
-        # Add progress prefix to the exception message
-        progress_prefix = f'C[{processed_chunks + 1}/{total_chunks}]'
+    if failed_count > 0:
+        log_msg = (
+            f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, '
+            f'{failed_count} failed'
+        )
+        logger.warning(log_msg)
+        await update_pipeline_status(pipeline_status, pipeline_status_lock, log_msg)
 
-        # Re-raise the original exception with a prefix
-        prefixed_exception = create_prefixed_exception(first_exception, progress_prefix)
-        raise prefixed_exception from first_exception
-
-    # If all tasks completed successfully, chunk_results already contains the results
-    # Return the chunk_results for later processing in merge_nodes_and_edges
     return chunk_results
 
 
