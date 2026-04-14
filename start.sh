@@ -165,8 +165,8 @@ else
 
     export EMBEDDING_BINDING="openai"
     export EMBEDDING_MODEL="shrimp"
-    export EMBEDDING_DIM="1532"
-    export EMBEDDING_SEND_DIM="true"
+    export EMBEDDING_DIM="${EMBEDDING_DIM:-1024}"
+    export EMBEDDING_SEND_DIM="${EMBEDDING_SEND_DIM:-false}"
     export EMBEDDING_TOKEN_LIMIT="${EMBEDDING_TOKEN_LIMIT:-8192}"
     export EMBEDDING_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
     export EMBEDDING_BINDING_API_KEY="${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
@@ -195,6 +195,13 @@ echo ""
 echo -e "  ${BLUE}Installing dependencies...${NC}"
 uv sync --extra api --quiet
 
+# Build web UI if bun is available
+if command -v bun &>/dev/null; then
+    echo -e "  ${BLUE}Building web UI...${NC}"
+    (cd yar_webui && bun install --frozen-lockfile --silent && bun run build) 2>&1 | tail -1
+else
+    echo -e "  ${YELLOW}Skipping web UI build (bun not found)${NC}"
+fi
 
 # Start YAR
 echo ""
