@@ -350,11 +350,13 @@ async def _handle_entity_relation_summary(
     """Handle entity relation description summary using map-reduce approach.
 
     This function summarizes a list of descriptions using a map-reduce strategy:
-    1. If total tokens < summary_context_size and len(description_list) < force_llm_summary_on_merge, no need to summarize
+    1. If total tokens < summary_context_size and len(description_list)
+       < force_llm_summary_on_merge, no need to summarize
     2. If total tokens < summary_max_tokens, summarize with LLM directly
     3. Otherwise, split descriptions into chunks that fit within token limits
     4. Summarize each chunk, then recursively process the summaries
-    5. Continue until we get a final summary within token limits or num of descriptions is less than force_llm_summary_on_merge
+    5. Continue until we get a final summary within token limits
+       or num of descriptions < force_llm_summary_on_merge
 
     Args:
         entity_or_relation_name: Name of the entity or relation being summarized
@@ -699,7 +701,9 @@ async def _handle_single_entity_extraction(
     if len(record_attributes) != 4 or 'entity' not in record_attributes[0]:
         if len(record_attributes) > 1 and 'entity' in record_attributes[0]:
             logger.warning(
-                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/4 fields on ENTITY `{record_attributes[1]}` @ `{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
+                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/4 '
+                f'fields on ENTITY `{record_attributes[1]}` @ '
+                f'`{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
             )
             logger.debug(record_attributes)
         return None
@@ -759,7 +763,9 @@ async def _handle_single_relationship_extraction(
     ):  # treat "relationship" and "relation" interchangeable
         if len(record_attributes) > 1 and 'relation' in record_attributes[0]:
             logger.warning(
-                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on RELATION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
+                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/5 '
+                f'fields on RELATION `{record_attributes[1]}`~'
+                f'`{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
             )
             logger.debug(record_attributes)
         return None
@@ -865,7 +871,8 @@ async def rebuild_knowledge_from_chunks(
     await update_pipeline_status(pipeline_status, pipeline_status_lock, status_message)
 
     # Get cached extraction results for these chunks using storage
-    # cached_results： chunk_id -> [list of (extraction_result, create_time) from LLM cache sorted by create_time of the first extraction_result]
+    # cached_results： chunk_id -> [list of (extraction_result, create_time)
+    # from LLM cache sorted by create_time of the first extraction_result]
     cached_results = await _get_cached_extraction_results(
         llm_response_cache,
         all_referenced_chunk_ids,
@@ -1023,7 +1030,10 @@ async def rebuild_knowledge_from_chunks(
         tasks.append(task)
 
     # Log parallel processing start
-    status_message = f'Starting parallel rebuild of {len(entities_to_rebuild)} entities and {len(relationships_to_rebuild)} relationships (async: {graph_max_async})'
+    status_message = (
+        f'Starting parallel rebuild of {len(entities_to_rebuild)} entities and '
+        f'{len(relationships_to_rebuild)} relationships (async: {graph_max_async})'
+    )
     logger.info(status_message)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, status_message)
 
@@ -1048,7 +1058,10 @@ async def rebuild_knowledge_from_chunks(
         logger.warning(f'KG rebuild: {len(tasks) - failed_count}/{len(tasks)} tasks succeeded, {failed_count} failed')
 
     # Final status report
-    status_message = f'KG rebuild completed: {rebuilt_entities_count} entities and {rebuilt_relationships_count} relationships rebuilt successfully.'
+    status_message = (
+        f'KG rebuild completed: {rebuilt_entities_count} entities and '
+        f'{rebuilt_relationships_count} relationships rebuilt successfully.'
+    )
     if failed_entities_count > 0 or failed_relationships_count > 0:
         status_message += f' Failed: {failed_entities_count} entities, {failed_relationships_count} relationships.'
 
@@ -1196,7 +1209,8 @@ async def _process_extraction_result(
 
     if len(fixed_records) != len(records):
         logger.warning(
-            f'{chunk_key}: LLM output format error; find LLM use {tuple_delimiter} as record separators instead new-line'
+            f'{chunk_key}: LLM output format error; find LLM use {tuple_delimiter} '
+            f'as record separators instead new-line'
         )
 
     for record in fixed_records:
@@ -2614,7 +2628,8 @@ async def merge_nodes_and_edges(
         global_config: Global configuration
         full_entities_storage: Storage for document entity lists
         full_relations_storage: Storage for document relation lists
-        doc_id: Document ID for storage indexing
+        doc_id: Document ID for storage indexing (single-doc mode)
+
         pipeline_status: Pipeline status dictionary
         pipeline_status_lock: Lock for pipeline status
         llm_response_cache: LLM response cache
@@ -2665,7 +2680,7 @@ async def merge_nodes_and_edges(
     semaphore = asyncio.Semaphore(graph_max_async)
 
     # ===== Phase 1: Process all entities concurrently =====
-    log_message = f'Phase 1: Processing {total_entities_count} entities from {doc_id} (async: {graph_max_async})'
+    log_message = f'Phase 1: Processing {total_entities_count} entities from {file_path} (async: {graph_max_async})'
     logger.info(log_message)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
 
@@ -2855,8 +2870,7 @@ async def merge_nodes_and_edges(
             retry_delay=0.5,
         )
         logger.info(
-            f'Batch relationship VDB upsert: {len(all_relationship_vdb_data)} items in '
-            f'{time.perf_counter() - t0:.2f}s'
+            f'Batch relationship VDB upsert: {len(all_relationship_vdb_data)} items in {time.perf_counter() - t0:.2f}s'
         )
 
     if entity_vdb is not None and all_edge_entity_vdb_data:
@@ -2868,7 +2882,9 @@ async def merge_nodes_and_edges(
             max_retries=3,
             retry_delay=0.5,
         )
-        logger.info(f'Batch entity VDB upsert: {len(all_edge_entity_vdb_data)} items in {time.perf_counter() - t0:.2f}s')
+        logger.info(
+            f'Batch entity VDB upsert: {len(all_edge_entity_vdb_data)} items in {time.perf_counter() - t0:.2f}s'
+        )
 
     # ===== Phase 2.5: Batch infer types for UNKNOWN entities =====
     if all_added_entities:
@@ -2911,7 +2927,11 @@ async def merge_nodes_and_edges(
                         relation_pair = tuple(sorted([src_id, tgt_id]))
                         final_relation_pairs.add(relation_pair)
 
-            log_message = f'Phase 3: Updating final {len(final_entity_names)}({len(processed_entities)}+{len(all_added_entities)}) entities and  {len(final_relation_pairs)} relations from {doc_id}'
+            log_message = (
+                f'Phase 3: Updating final {len(final_entity_names)}'
+                f'({len(processed_entities)}+{len(all_added_entities)}) entities and '
+                f'{len(final_relation_pairs)} relations from {doc_id}'
+            )
             logger.info(log_message)
             await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
 
@@ -2937,17 +2957,21 @@ async def merge_nodes_and_edges(
                 )
 
             logger.debug(
-                f'Updated entity-relation index for document {doc_id}: {len(final_entity_names)} entities (original: {len(processed_entities)}, added: {len(all_added_entities)}), {len(final_relation_pairs)} relations'
+                f'Updated entity-relation index for document {doc_id}: '
+                f'{len(final_entity_names)} entities (original: {len(processed_entities)}, '
+                f'added: {len(all_added_entities)}), {len(final_relation_pairs)} relations'
             )
 
         except Exception as e:
             logger.error(f'Failed to update entity-relation index for document {doc_id}: {e}')
             # Don't raise exception to avoid affecting main flow
 
-    log_message = f'Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations'
+    log_message = (
+        f'Completed merging: {len(processed_entities)} entities, '
+        f'{len(all_added_entities)} extra entities, {len(processed_edges)} relations'
+    )
     logger.info(log_message)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
-
 
 
 async def extract_entities(
@@ -3048,9 +3072,7 @@ async def extract_entities(
 
         cache_keys_collector: list[str] = []
 
-        user_prompt = PROMPTS['entity_extraction_user_prompt'].format(
-            **{**context_base, 'input_text': content}
-        )
+        user_prompt = PROMPTS['entity_extraction_user_prompt'].format(**{**context_base, 'input_text': content})
 
         final_result, timestamp = await use_llm_func_with_cache(
             user_prompt,
@@ -3269,7 +3291,9 @@ async def extract_entities(
         raise RuntimeError(f'All {total_chunks} chunks failed during entity extraction')
 
     if failed_count > 0:
-        log_msg = f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, {failed_count} batch(es) failed'
+        log_msg = (
+            f'Entity extraction: {len(chunk_results)}/{total_chunks} chunks succeeded, {failed_count} batch(es) failed'
+        )
         logger.warning(log_msg)
         await update_pipeline_status(pipeline_status, pipeline_status_lock, log_msg)
 
@@ -3399,7 +3423,8 @@ def _format_additional_instructions(user_prompt: str | None) -> str:
         return ''
     return (
         'Additional Instructions:\n'
-        'Follow any extra formatting or concision constraints below, but still answer every part of the question that the context supports.\n'
+        'Follow any extra formatting or concision constraints below, but still '
+        'answer every part of the question that the context supports.\n'
         f'{normalized_prompt}\n\n'
     )
 
@@ -3682,7 +3707,9 @@ async def kg_query(
     tokenizer = global_config['tokenizer']
     len_of_prompts = len(tokenizer.encode(query + sys_prompt))
     logger.debug(
-        f'[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})'
+        f'[kg_query] Sending to LLM: {len_of_prompts:,} tokens '
+        f'(Query: {len(tokenizer.encode(query))}, '
+        f'System: {len(tokenizer.encode(sys_prompt))})'
     )
 
     # Handle cache
@@ -4022,7 +4049,8 @@ async def _get_vector_context(
 
         search_type = 'bm25_fusion' if query_param.enable_bm25_fusion else 'vector'
         logger.info(
-            f'Naive query ({search_type}): {len(valid_chunks)} chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})'
+            f'Naive query ({search_type}): {len(valid_chunks)} chunks '
+            f'(chunk_top_k:{search_top_k} cosine:{cosine_threshold})'
         )
         return valid_chunks
 
@@ -4314,7 +4342,8 @@ async def _perform_kg_search(
         )
     ]
     logger.info(
-        f'Raw search results: {len(final_entities)} entities, {len(final_relations)} relations, {len(vector_chunks)} vector chunks'
+        f'Raw search results: {len(final_entities)} entities, '
+        f'{len(final_relations)} relations, {len(vector_chunks)} vector chunks'
     )
 
     return {
@@ -4854,7 +4883,9 @@ async def _build_context_str(
     available_chunk_tokens = max_total_tokens - (sys_prompt_tokens + kg_context_tokens + query_tokens + buffer_tokens)
 
     logger.debug(
-        f'Token allocation - Total: {max_total_tokens}, SysPrompt: {sys_prompt_tokens}, Query: {query_tokens}, KG: {kg_context_tokens}, Buffer: {buffer_tokens}, Available for chunks: {available_chunk_tokens}'
+        f'Token allocation - Total: {max_total_tokens}, SysPrompt: {sys_prompt_tokens}, '
+        f'Query: {query_tokens}, KG: {kg_context_tokens}, Buffer: {buffer_tokens}, '
+        f'Available for chunks: {available_chunk_tokens}'
     )
 
     # Apply token truncation to chunks using the dynamic limit
@@ -4884,7 +4915,8 @@ async def _build_context_str(
     )
 
     logger.info(
-        f'Final context: {len(entities_context)} entities, {len(relations_context)} relations, {len(chunks_context)} chunks'
+        f'Final context: {len(entities_context)} entities, '
+        f'{len(relations_context)} relations, {len(chunks_context)} chunks'
     )
 
     # not necessary to use LLM to generate a response
@@ -4937,7 +4969,9 @@ async def _build_context_str(
 
     # Always return both context and complete data structure (unified approach)
     logger.debug(
-        f'[_build_context_str] Converting to user format: {len(entities_context)} entities, {len(relations_context)} relations, {len(visible_chunks)} chunks'
+        f'[_build_context_str] Converting to user format: '
+        f'{len(entities_context)} entities, {len(relations_context)} relations, '
+        f'{len(visible_chunks)} chunks'
     )
     final_data = convert_to_user_format(
         entities_context,
@@ -4949,7 +4983,10 @@ async def _build_context_str(
         relation_id_to_original,
     )
     logger.debug(
-        f'[_build_context_str] Final data after conversion: {len(final_data.get("entities", []))} entities, {len(final_data.get("relationships", []))} relationships, {len(final_data.get("chunks", []))} chunks'
+        f'[_build_context_str] Final data after conversion: '
+        f'{len(final_data.get("entities", []))} entities, '
+        f'{len(final_data.get("relationships", []))} relationships, '
+        f'{len(final_data.get("chunks", []))} chunks'
     )
     return result, final_data
 
@@ -5109,7 +5146,10 @@ async def _build_query_context(
 
     logger.debug(f'[_build_query_context] Context length: {len(context) if context else 0}')
     logger.debug(
-        f'[_build_query_context] Raw data entities: {len(raw_data.get("data", {}).get("entities", []))}, relationships: {len(raw_data.get("data", {}).get("relationships", []))}, chunks: {len(raw_data.get("data", {}).get("chunks", []))}'
+        f'[_build_query_context] Raw data entities: '
+        f'{len(raw_data.get("data", {}).get("entities", []))}, '
+        f'relationships: {len(raw_data.get("data", {}).get("relationships", []))}, '
+        f'chunks: {len(raw_data.get("data", {}).get("chunks", []))}'
     )
 
     return QueryContextResult(context=context, raw_data=raw_data)
@@ -5889,7 +5929,8 @@ async def _find_related_text_unit_from_entities(
                     )
                 else:
                     logger.info(
-                        f'Selecting {len(selected_chunk_ids)} from {total_entity_chunks} entity-related chunks by vector similarity'
+                        f'Selecting {len(selected_chunk_ids)} from {total_entity_chunks} '
+                        f'entity-related chunks by vector similarity'
                     )
 
             except Exception as e:
@@ -6152,7 +6193,8 @@ async def _find_related_text_unit_from_relations(
         total_relation_chunks += len(sorted_chunks)
 
     logger.info(
-        f'Find {total_relation_chunks} additional chunks in {len(relations_with_chunks)} relations (deduplicated {len(removed_entity_chunk_ids)})'
+        f'Find {total_relation_chunks} additional chunks in {len(relations_with_chunks)} '
+        f'relations (deduplicated {len(removed_entity_chunk_ids)})'
     )
 
     # Step 4: Apply the selected chunk selection algorithm
@@ -6185,7 +6227,8 @@ async def _find_related_text_unit_from_relations(
                     )
                 else:
                     logger.info(
-                        f'Selecting {len(selected_chunk_ids)} from {total_relation_chunks} relation-related chunks by vector similarity'
+                        f'Selecting {len(selected_chunk_ids)} from {total_relation_chunks} '
+                        f'relation-related chunks by vector similarity'
                     )
 
             except Exception as e:
@@ -6197,11 +6240,13 @@ async def _find_related_text_unit_from_relations(
         selected_chunk_ids = pick_by_weighted_polling(relations_with_chunks, max_related_chunks, min_related_chunks=1)
 
         logger.info(
-            f'Selecting {len(selected_chunk_ids)} from {total_relation_chunks} relation-related chunks by weighted polling'
+            f'Selecting {len(selected_chunk_ids)} from {total_relation_chunks} '
+            f'relation-related chunks by weighted polling'
         )
 
     logger.debug(
-        f'KG related chunks: {len(entity_chunks) if entity_chunks else 0} from entitys, {len(selected_chunk_ids)} from relations'
+        f'KG related chunks: {len(entity_chunks) if entity_chunks else 0} from entitys, '
+        f'{len(selected_chunk_ids)} from relations'
     )
 
     if not selected_chunk_ids:
@@ -6353,7 +6398,9 @@ async def naive_query(
     available_chunk_tokens = max_total_tokens - (sys_prompt_tokens + query_tokens + buffer_tokens)
 
     logger.debug(
-        f'Naive query token allocation - Total: {max_total_tokens}, SysPrompt: {sys_prompt_tokens}, Query: {query_tokens}, Buffer: {buffer_tokens}, Available for chunks: {available_chunk_tokens}'
+        f'Naive query token allocation - Total: {max_total_tokens}, '
+        f'SysPrompt: {sys_prompt_tokens}, Query: {query_tokens}, Buffer: {buffer_tokens}, '
+        f'Available for chunks: {available_chunk_tokens}'
     )
 
     # Process chunks using unified processing with dynamic token limit

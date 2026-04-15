@@ -22,14 +22,14 @@ class TestEntityResolutionConfigDefaults:
         assert config.auto_resolve_on_extraction is True
 
     def test_default_batch_size(self):
-        """Default batch size should be 20."""
+        """Default batch size should be 200."""
         config = EntityResolutionConfig()
-        assert config.batch_size == 20
+        assert config.batch_size == 200
 
     def test_default_candidates_per_entity(self):
-        """Default candidates per entity should be 10 (increased to catch abbreviations)."""
+        """Default candidates per entity should be 15."""
         config = EntityResolutionConfig()
-        assert config.candidates_per_entity == 10
+        assert config.candidates_per_entity == 15
 
     def test_default_min_confidence(self):
         """Default min confidence should be 0.80 (lowered to catch more abbreviations)."""

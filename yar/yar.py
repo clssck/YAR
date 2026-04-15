@@ -1954,44 +1954,31 @@ class YAR:
                                 )
 
                 pipeline_mutated = True
-                # Route: phased pipeline for multi-doc, per-doc pipeline for single doc
-                if len(to_process_docs) > 1:
-                    try:
-                        await self._process_documents_phased(
-                            to_process_docs,
-                            split_by_character,
-                            split_by_character_only,
-                            pipeline_status,
-                            pipeline_status_lock,
-                        )
-                    except PipelineCancelledException:
-                        return
-                else:
-                    # Single document: use existing per-doc pipeline
-                    doc_tasks = []
-                    for doc_id, status_doc in to_process_docs.items():
-                        doc_tasks.append(
-                            asyncio.create_task(
-                                process_document(
-                                    doc_id,
-                                    status_doc,
-                                    split_by_character,
-                                    split_by_character_only,
-                                    pipeline_status,
-                                    pipeline_status_lock,
-                                    semaphore,
-                                )
+                # Process all documents through per-doc pipeline with semaphore concurrency
+                doc_tasks = []
+                for doc_id, status_doc in to_process_docs.items():
+                    doc_tasks.append(
+                        asyncio.create_task(
+                            process_document(
+                                doc_id,
+                                status_doc,
+                                split_by_character,
+                                split_by_character_only,
+                                pipeline_status,
+                                pipeline_status_lock,
+                                semaphore,
                             )
                         )
+                    )
 
-                    try:
-                        await asyncio.gather(*doc_tasks)
-                    except PipelineCancelledException:
-                        for task in doc_tasks:
-                            if not task.done():
-                                task.cancel()
-                        await asyncio.wait(doc_tasks, return_when=asyncio.ALL_COMPLETED)
-                        return
+                try:
+                    await asyncio.gather(*doc_tasks)
+                except PipelineCancelledException:
+                    for task in doc_tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.wait(doc_tasks, return_when=asyncio.ALL_COMPLETED)
+                    return
 
                 # Check if there's a pending request to process more documents (with lock)
                 has_pending_request = False
@@ -2033,267 +2020,6 @@ class YAR:
 
             if pipeline_mutated:
                 await self._invalidate_fts_cache('document processing pipeline')
-
-    async def _process_documents_phased(
-        self,
-        to_process_docs: dict[str, DocProcessingStatus],
-        split_by_character: str | None,
-        split_by_character_only: bool,
-        pipeline_status: dict,
-        pipeline_status_lock: Any,
-    ) -> None:
-        """Process multiple documents in global phases instead of per-doc serial pipeline.
-
-        Phase 1: Chunk all documents (parallel, no LLM)
-        Phase 2: Extract entities from ALL chunks in a single batched call
-        Phase 3: Merge ALL results with global entity resolution
-        Phase 4: Per-document bookkeeping (summary, status update)
-        """
-        # --- Phase 1: Chunk all documents ---
-        log_message = f'Phased pipeline: chunking {len(to_process_docs)} documents'
-        logger.info(log_message)
-        async with pipeline_status_lock:
-            pipeline_status['latest_message'] = log_message
-            pipeline_status['history_messages'].append(log_message)
-
-        doc_data: dict[str, dict[str, Any]] = {}  # doc_id -> {chunks, content, status_doc, file_path, metadata}
-
-        for doc_id, status_doc in to_process_docs.items():
-            async with pipeline_status_lock:
-                if pipeline_status.get('cancellation_requested', False):
-                    raise PipelineCancelledException('User cancelled')
-
-            file_path = getattr(status_doc, 'file_path', 'unknown_source') or 'unknown_source'
-            try:
-                content_data = await self.full_docs.get_by_id(doc_id)
-                if not content_data:
-                    raise RuntimeError(f'Document content not found in full_docs for doc_id: {doc_id}')
-                content = content_data['content']
-
-                if self.tokenizer is None:
-                    raise ValueError('Tokenizer is not initialized')
-
-                doc_metadata = getattr(status_doc, 'metadata', {}) or {}
-                pre_chunks = doc_metadata.get('pre_chunks')
-
-                if pre_chunks:
-                    logger.info(f'Using {len(pre_chunks)} pre-computed chunks for {file_path}')
-                    chunking_result = pre_chunks
-                else:
-                    doc_chunking_preset = doc_metadata.get('chunking_preset')
-                    if doc_chunking_preset is not None:
-                        chunking_func = create_chunker(preset=doc_chunking_preset)
-                    else:
-                        chunking_func = self.chunking_func
-                    chunking_result = chunking_func(
-                        self.tokenizer,
-                        content,
-                        split_by_character,
-                        split_by_character_only,
-                        self.chunk_overlap_token_size,
-                        self.chunk_token_size,
-                    )
-                    if inspect.isawaitable(chunking_result):
-                        chunking_result = await chunking_result
-
-                if not isinstance(chunking_result, (list, tuple)):
-                    raise TypeError(f'chunking_func must return a list or tuple, got {type(chunking_result)}')
-
-                validated_chunks = cast(list[dict[str, Any]], chunking_result)
-                doc_s3_key = doc_metadata.get('s3_key')
-                chunks: dict[str, Any] = {
-                    compute_mdhash_id(dp['content'], prefix='chunk-'): {
-                        **dp,
-                        'full_doc_id': doc_id,
-                        'file_path': file_path,
-                        's3_key': doc_s3_key,
-                        'llm_cache_list': [],
-                    }
-                    for dp in validated_chunks
-                }
-
-                if not chunks:
-                    logger.warning(f'No chunks produced for {file_path}, skipping')
-                    continue
-
-                effective_chunk_size = doc_metadata.get('chunk_token_size') or self.chunk_token_size
-                effective_overlap = doc_metadata.get('chunk_overlap_token_size') or self.chunk_overlap_token_size
-
-                # Stage 1: upsert doc_status + chunks in parallel
-                await asyncio.gather(
-                    self.doc_status.upsert(
-                        {
-                            doc_id: {
-                                'status': DocStatus.PROCESSING,
-                                'chunks_count': len(chunks),
-                                'chunks_list': list(chunks.keys()),
-                                'content_summary': status_doc.content_summary,
-                                'content_length': status_doc.content_length,
-                                'created_at': status_doc.created_at,
-                                'updated_at': datetime.now(timezone.utc).isoformat(),
-                                'file_path': file_path,
-                                'track_id': status_doc.track_id,
-                                'metadata': {
-                                    'processing_start_time': int(time.time()),
-                                    'chunking_preset': doc_metadata.get('chunking_preset') or 'semantic',
-                                    'chunk_token_size': effective_chunk_size,
-                                    'chunk_overlap_token_size': effective_overlap,
-                                    'one_pass_chunking': bool(pre_chunks),
-                                },
-                            }
-                        }
-                    ),
-                    self.chunks_vdb.upsert(chunks),
-                    self.text_chunks.upsert(chunks),
-                )
-
-                doc_data[doc_id] = {
-                    'chunks': chunks,
-                    'content': content,
-                    'status_doc': status_doc,
-                    'file_path': file_path,
-                    'metadata': doc_metadata,
-                }
-
-                log_message = f'Chunked {file_path}: {len(chunks)} chunks'
-                logger.info(log_message)
-                async with pipeline_status_lock:
-                    pipeline_status['history_messages'].append(log_message)
-
-            except PipelineCancelledException:
-                raise
-            except Exception as e:
-                logger.error(f'Failed to chunk {file_path}: {e}')
-                logger.error(traceback.format_exc())
-                await self.doc_status.upsert(
-                    {
-                        doc_id: {
-                            'status': DocStatus.FAILED,
-                            'error_msg': str(e),
-                            'content_summary': status_doc.content_summary,
-                            'content_length': status_doc.content_length,
-                            'created_at': status_doc.created_at,
-                            'updated_at': datetime.now(timezone.utc).isoformat(),
-                            'file_path': file_path,
-                            'track_id': status_doc.track_id,
-                        }
-                    }
-                )
-
-        if not doc_data:
-            logger.warning('No documents successfully chunked')
-            return
-
-        # --- Phase 2: Global entity extraction ---
-        all_chunks: dict[str, Any] = {}
-        for data in doc_data.values():
-            all_chunks.update(data['chunks'])
-
-        total_chunks = len(all_chunks)
-        log_message = (
-            f'Phased pipeline: extracting entities from {total_chunks} chunks across {len(doc_data)} documents'
-        )
-        logger.info(log_message)
-        async with pipeline_status_lock:
-            pipeline_status['latest_message'] = log_message
-            pipeline_status['history_messages'].append(log_message)
-
-        chunk_results = await self._process_extract_entities(all_chunks, pipeline_status, pipeline_status_lock)
-
-        # --- Phase 3: Global merge with entity resolution ---
-        doc_chunk_map: dict[str, set[str]] = {did: set(data['chunks'].keys()) for did, data in doc_data.items()}
-
-        log_message = f'Phased pipeline: merging {len(chunk_results)} chunk results with global entity resolution'
-        logger.info(log_message)
-        async with pipeline_status_lock:
-            pipeline_status['latest_message'] = log_message
-            pipeline_status['history_messages'].append(log_message)
-
-        await merge_nodes_and_edges(
-            chunk_results=chunk_results,
-            knowledge_graph_inst=self.chunk_entity_relation_graph,
-            entity_vdb=self.entities_vdb,
-            relationships_vdb=self.relationships_vdb,
-            global_config=cast(GlobalConfig, asdict(self)),
-            full_entities_storage=self.full_entities,
-            full_relations_storage=self.full_relations,
-            doc_chunk_map=doc_chunk_map,
-            pipeline_status=pipeline_status,
-            pipeline_status_lock=pipeline_status_lock,
-            llm_response_cache=self.llm_response_cache,
-            entity_chunks_storage=self.entity_chunks,
-            relation_chunks_storage=self.relation_chunks,
-            total_files=len(doc_data),
-            file_path=f'{len(doc_data)} documents (phased)',
-        )
-
-        # --- Phase 4: Per-document bookkeeping ---
-        for did, data in doc_data.items():
-            processing_end_time = int(time.time())
-            status_doc = data['status_doc']
-            content = data['content']
-            file_path = data['file_path']
-            doc_metadata = data['metadata']
-
-            doc_summary = status_doc.content_summary
-            if self.llm_model_func and content:
-                try:
-                    excerpt = content[:3000].strip()
-                    summary_prompt = (
-                        'Summarize this document in 1-2 concise sentences. '
-                        'State the main topic and key subjects. '
-                        'Output ONLY the summary text, no preamble.\n\n'
-                        f'{excerpt}'
-                    )
-                    llm_fn = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
-                    raw_summary = await llm_fn(summary_prompt)
-                    generated = raw_summary.strip()
-                    if generated:
-                        doc_summary = generated[:500]
-                except Exception as e:
-                    logger.debug('Document summary generation failed for %s: %s', file_path, e)
-
-            effective_chunk_size = doc_metadata.get('chunk_token_size') or self.chunk_token_size
-            effective_overlap = doc_metadata.get('chunk_overlap_token_size') or self.chunk_overlap_token_size
-
-            await self.doc_status.upsert(
-                {
-                    did: {
-                        'status': DocStatus.PROCESSED,
-                        'chunks_count': len(data['chunks']),
-                        'chunks_list': list(data['chunks'].keys()),
-                        'content_summary': doc_summary,
-                        'content_length': status_doc.content_length,
-                        'created_at': status_doc.created_at,
-                        'updated_at': datetime.now(timezone.utc).isoformat(),
-                        'file_path': file_path,
-                        'track_id': status_doc.track_id,
-                        'metadata': {
-                            'processing_start_time': doc_metadata.get('processing_start_time', int(time.time())),
-                            'processing_end_time': processing_end_time,
-                            'chunking_preset': doc_metadata.get('chunking_preset') or 'semantic',
-                            'chunk_token_size': effective_chunk_size,
-                            'chunk_overlap_token_size': effective_overlap,
-                            'one_pass_chunking': bool(doc_metadata.get('pre_chunks')),
-                        },
-                    }
-                }
-            )
-
-            log_message = f'Completed processing: {file_path}'
-            logger.info(log_message)
-            async with pipeline_status_lock:
-                pipeline_status['history_messages'].append(log_message)
-
-        # Flush all storages
-        await self._insert_done()
-
-        # Persist LLM cache
-        if self.llm_response_cache:
-            try:
-                await self.llm_response_cache.index_done_callback()
-            except Exception as e:
-                logger.error(f'Failed to persist LLM cache: {e}')
 
     async def _process_extract_entities(
         self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None
