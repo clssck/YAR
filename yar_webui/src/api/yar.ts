@@ -507,14 +507,17 @@ export type StreamReference = {
 
 /**
  * Build a browser-accessible URL for a document reference.
- * Routes through the API's S3 content proxy (`/s3/content/{key}`) so the
- * browser never needs direct access to the internal S3 endpoint.
+ * Prefer presigned URLs when available; otherwise fall back to the API's
+ * S3 content proxy (`/s3/content/{key}`) for protected objects.
  */
 export const getDocumentUrl = (ref: { s3_key: string | null; presigned_url: string | null }): string | null => {
+  if (ref.presigned_url) {
+    return ref.presigned_url
+  }
   if (ref.s3_key) {
     return `${backendBaseUrl}/s3/content/${encodeURIComponent(ref.s3_key)}`
   }
-  return ref.presigned_url
+  return null
 }
 
 export const queryTextStream = async (

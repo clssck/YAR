@@ -1153,18 +1153,19 @@ class TestYARPublicMethods:
         mock_merge_nodes_and_edges,
         temp_working_dir,
         mock_embedding_func,
-        mock_llm_func,
     ):
-        """Pipeline processing invalidates FTS cache after mutating documents."""
+        """Pipeline processing invalidates FTS cache without regenerating a document summary."""
         pipeline_status = {'busy': False, 'history_messages': []}
         pipeline_status_lock = asyncio.Lock()
         mock_get_namespace_data.return_value = pipeline_status
         mock_get_namespace_lock.return_value = pipeline_status_lock
 
+        summary_llm = AsyncMock(side_effect=AssertionError('document summary LLM should not be called'))
+
         rag = YAR(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
-            llm_model_func=mock_llm_func,
+            llm_model_func=summary_llm,
             workspace='workspace-test',
         )
         rag._storages_status = StoragesStatus.INITIALIZED
@@ -1192,9 +1193,18 @@ class TestYARPublicMethods:
 
         await rag.apipeline_process_enqueue_documents()
 
+        rag._process_extract_entities.assert_awaited_once()
         rag._insert_done.assert_awaited_once()
         rag._invalidate_fts_cache.assert_awaited_once_with('document processing pipeline')
         mock_merge_nodes_and_edges.assert_awaited_once()
+        summary_llm.assert_not_awaited()
+        processed_updates = [
+            call.args[0]['doc-1']
+            for call in rag.doc_status.upsert.await_args_list
+            if call.args and call.args[0]['doc-1'].get('status') == DocStatus.PROCESSED
+        ]
+        assert processed_updates
+        assert processed_updates[-1]['content_summary'] == 'doc'
 
     @patch('yar.kg.verify_storage_implementation')
     @patch('yar.utils.check_storage_env_vars')
@@ -1551,6 +1561,105 @@ class TestYARLLMConfiguration:
 
         assert rag.llm_model_max_async == 32
 
+@pytest.mark.offline
+class TestYAREntityExtractionBulkhead:
+    """Tests for YAR entity extraction bulkhead configuration."""
+
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    def test_entity_extract_max_async_auto_derives_from_llm_capacity(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Unset extraction concurrency should reserve one shared LLM slot when possible."""
+        auto_rag = YAR(
+            working_dir=os.path.join(temp_working_dir, 'auto-bulkhead'),
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            llm_model_max_async=4,
+        )
+        single_slot_rag = YAR(
+            working_dir=os.path.join(temp_working_dir, 'single-slot-bulkhead'),
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            llm_model_max_async=1,
+        )
+
+        assert auto_rag.entity_extract_max_async == 3
+        assert auto_rag._entity_extract_semaphore._value == 3
+        assert single_slot_rag.entity_extract_max_async == 1
+        assert single_slot_rag._entity_extract_semaphore._value == 1
+
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    def test_entity_extract_max_async_honors_explicit_cap_without_exceeding_llm_budget(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Explicit extraction concurrency should stay within the shared LLM budget."""
+        explicit_rag = YAR(
+            working_dir=os.path.join(temp_working_dir, 'explicit-bulkhead'),
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            llm_model_max_async=4,
+            entity_extract_max_async=2,
+        )
+        capped_rag = YAR(
+            working_dir=os.path.join(temp_working_dir, 'capped-bulkhead'),
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            llm_model_max_async=4,
+            entity_extract_max_async=99,
+        )
+
+        assert explicit_rag.entity_extract_max_async == 2
+        assert explicit_rag._entity_extract_semaphore._value == 2
+        assert capped_rag.entity_extract_max_async == 4
+        assert capped_rag._entity_extract_semaphore._value == 4
+
+    @patch('yar.yar.verify_storage_implementation')
+    @patch('yar.yar.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_process_extract_entities_passes_effective_cap_and_shared_semaphore(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Each extraction call should reuse the instance bulkhead wiring."""
+        rag = YAR(
+            working_dir=os.path.join(temp_working_dir, 'process-bulkhead'),
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+            llm_model_max_async=4,
+            entity_extract_max_async=2,
+        )
+        first_chunk = {'chunk-1': {'content': 'Alpha'}}
+        second_chunk = {'chunk-2': {'content': 'Beta'}}
+
+        with patch('yar.yar.extract_entities', new_callable=AsyncMock) as mock_extract_entities:
+            mock_extract_entities.return_value = []
+
+            await rag._process_extract_entities(first_chunk)
+            await rag._process_extract_entities(second_chunk)
+
+        assert mock_extract_entities.await_count == 2
+        assert [call.args[0] for call in mock_extract_entities.await_args_list] == [first_chunk, second_chunk]
+
+        for call in mock_extract_entities.await_args_list:
+            global_config = call.kwargs['global_config']
+            assert global_config['entity_extract_max_async'] == 2
+            assert global_config['entity_extract_semaphore'] is rag._entity_extract_semaphore
 
 @pytest.mark.offline
 class TestYAROrphanBackgroundControl:

@@ -877,7 +877,567 @@ class TestExtractEntities:
         assert 'TRUNCATED_CONTENT' in captured_prompts[0]
         assert content not in captured_prompts[0]
 
+    @pytest.mark.asyncio
+    async def test_extract_entities_caps_default_batch_size_and_honors_override(self):
+        """Default batching should stay bounded while env override still wins."""
+        from yar.operate import extract_entities
 
+        chunks: dict[str, TextChunkSchema] = {
+            f'chunk-{index}': {
+                'tokens': 10,
+                'content': f'Content {index}',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': index,
+            }
+            for index in range(16)
+        }
+
+        captured_batch_sizes: list[int] = []
+
+        async def fake_use_llm_with_cache(prompt, *_args, **_kwargs):
+            chunk_ids = [
+                line[len('[CHUNK: ') : -1]
+                for line in prompt.splitlines()
+                if line.startswith('[CHUNK: ') and line.endswith(']')
+            ]
+            if chunk_ids:
+                captured_batch_sizes.append(len(chunk_ids))
+                raw_output = '\n'.join(
+                    f'[CHUNK: {chunk_id}]\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}' for chunk_id in chunk_ids
+                )
+            else:
+                raw_output = PROMPTS['DEFAULT_COMPLETION_DELIMITER']
+            return raw_output, 1234567890
+
+        global_config = {
+            'llm_model_func': AsyncMock(return_value='unused'),
+            'entity_extract_max_gleaning': 0,
+            'max_output_tokens': 96000,
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+            'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+            'llm_model_max_async': 1,
+        }
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
+            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+        ):
+            result = await extract_entities(chunks=chunks, global_config=global_config)
+
+        assert isinstance(result, list)
+        assert captured_batch_sizes == [8, 8]
+
+        captured_batch_sizes.clear()
+        with (
+            patch.dict('os.environ', {'ENTITY_EXTRACT_BATCH_SIZE': '20'}, clear=False),
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
+            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+        ):
+            result = await extract_entities(chunks=chunks, global_config=global_config)
+
+        assert isinstance(result, list)
+        assert captured_batch_sizes == [16]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_tolerates_minor_batch_header_drift(self):
+        """Minor header drift should still map output sections to the right chunks."""
+        from yar.operate import extract_entities
+
+        chunks: dict[str, TextChunkSchema] = {
+            'chunk-1': {
+                'tokens': 10,
+                'content': 'Alpha',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            },
+            'chunk-2': {
+                'tokens': 10,
+                'content': 'Beta',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+        }
+
+        captured_sections: list[tuple[str, str]] = []
+
+        async def fake_use_llm_with_cache(*_args, **_kwargs):
+            return (
+                'CHUNK: chunk-1\nsection-one\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                '### [Chunk: chunk-2]\nsection-two\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                1234567890,
+            )
+
+        async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
+            captured_sections.append((chunk_key, section_text.strip()))
+            return {}, {}
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
+            patch('yar.operate._process_extraction_result', new=AsyncMock(side_effect=fake_process_extraction)),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert llm_mock.await_count == 1
+        assert captured_sections == [
+            ('chunk-1', f'section-one\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+            ('chunk-2', f'section-two\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_resolves_unique_single_character_batch_header_drift(self):
+        """A unique one-character chunk-id drift should stay batched."""
+        from yar.operate import extract_entities
+
+        first_chunk_id = 'chunk-726cdd081ee9de77680e61cb56cb588c'
+        second_chunk_id = 'chunk-723fe86b033d3a295ba9d02345e1853a'
+        chunks: dict[str, TextChunkSchema] = {
+            first_chunk_id: {
+                'tokens': 10,
+                'content': 'Alpha',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            },
+            second_chunk_id: {
+                'tokens': 10,
+                'content': 'Beta',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+        }
+
+        captured_sections: list[tuple[str, str]] = []
+
+        async def fake_use_llm_with_cache(*_args, **_kwargs):
+            return (
+                '[CHUNK: chunk-726cdd081ee9de77680e61cb56cb588f]\nsection-one\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                f'[CHUNK: {second_chunk_id}]\nsection-two\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                1234567890,
+            )
+
+        async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
+            captured_sections.append((chunk_key, section_text.strip()))
+            return {}, {}
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
+            patch('yar.operate._process_extraction_result', new=AsyncMock(side_effect=fake_process_extraction)),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert llm_mock.await_count == 1
+        assert captured_sections == [
+            (first_chunk_id, f'section-one\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+            (second_chunk_id, f'section-two\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_does_not_canonicalize_ambiguous_single_character_batch_header_drift(self):
+        """Ambiguous one-character header drift should fall back instead of guessing."""
+        from yar.operate import extract_entities
+
+        chunks: dict[str, TextChunkSchema] = {
+            'chunk-aaaa': {
+                'tokens': 10,
+                'content': 'Alpha',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            },
+            'chunk-baaa': {
+                'tokens': 10,
+                'content': 'Beta',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+        }
+
+        batch_call_count = 0
+        single_chunk_ids: list[str] = []
+        captured_sections: list[tuple[str, str]] = []
+
+        async def fake_use_llm_with_cache(prompt, *_args, **kwargs):
+            nonlocal batch_call_count
+            batch_chunk_ids = [
+                line[len('[CHUNK: ') : -1]
+                for line in prompt.splitlines()
+                if line.startswith('[CHUNK: ') and line.endswith(']')
+            ]
+            if len(batch_chunk_ids) > 1:
+                batch_call_count += 1
+                return (
+                    '[CHUNK: chunk-caaa]\nsection-ambiguous\n'
+                    f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                    '[CHUNK: chunk-baaa]\nsection-two\n'
+                    f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                    1234567890,
+                )
+
+            single_chunk_ids.append(kwargs['chunk_id'])
+            return (
+                f'single-recovered-{kwargs["chunk_id"]}\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                1234567890,
+            )
+
+        async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
+            captured_sections.append((chunk_key, section_text.strip()))
+            return {}, {}
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
+            patch('yar.operate._process_extraction_result', new=AsyncMock(side_effect=fake_process_extraction)),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert batch_call_count == 1
+        assert llm_mock.await_count == 2
+        assert single_chunk_ids == ['chunk-aaaa']
+        assert captured_sections == [
+            ('chunk-baaa', f'section-two\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+            ('chunk-aaaa', f'single-recovered-chunk-aaaa\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_ignores_trailing_empty_duplicate_batch_section(self):
+        """A later delimiter-only duplicate should not force per-chunk fallback."""
+        from yar.operate import extract_entities
+
+        first_chunk_id = 'chunk-726cdd081ee9de77680e61cb56cb588c'
+        second_chunk_id = 'chunk-723fe86b033d3a295ba9d02345e1853a'
+        chunks: dict[str, TextChunkSchema] = {
+            first_chunk_id: {
+                'tokens': 10,
+                'content': 'Alpha',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            },
+            second_chunk_id: {
+                'tokens': 10,
+                'content': 'Beta',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+        }
+
+        captured_sections: list[tuple[str, str]] = []
+
+        async def fake_use_llm_with_cache(*_args, **_kwargs):
+            return (
+                f'[CHUNK: {first_chunk_id}]\nsection-one\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                f'[CHUNK: {second_chunk_id}]\nsection-two\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                f'[CHUNK: {second_chunk_id}]\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                1234567890,
+            )
+
+        async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
+            captured_sections.append((chunk_key, section_text.strip()))
+            return {}, {}
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
+            patch('yar.operate._process_extraction_result', new=AsyncMock(side_effect=fake_process_extraction)),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert llm_mock.await_count == 1
+        assert captured_sections == [
+            (first_chunk_id, f'section-one\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+            (second_chunk_id, f'section-two\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_conflicting_duplicate_batch_sections_fall_back_to_single_chunk(self):
+        """Conflicting duplicate sections must still fall back for safety."""
+        from yar.operate import extract_entities
+
+        chunks: dict[str, TextChunkSchema] = {
+            'chunk-1': {
+                'tokens': 10,
+                'content': 'Alpha',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            },
+            'chunk-2': {
+                'tokens': 10,
+                'content': 'Beta',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+        }
+
+        batch_call_count = 0
+        single_chunk_ids: list[str] = []
+        captured_sections: list[tuple[str, str]] = []
+
+        async def fake_use_llm_with_cache(prompt, *_args, **kwargs):
+            nonlocal batch_call_count
+            batch_chunk_ids = [
+                line[len('[CHUNK: ') : -1]
+                for line in prompt.splitlines()
+                if line.startswith('[CHUNK: ') and line.endswith(']')
+            ]
+            if len(batch_chunk_ids) > 1:
+                batch_call_count += 1
+                return (
+                    '[CHUNK: chunk-1]\nsection-one\n'
+                    f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                    '[CHUNK: chunk-2]\nsection-two\n'
+                    f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                    '[CHUNK: chunk-2]\nconflicting-two\n'
+                    f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                    1234567890,
+                )
+
+            single_chunk_ids.append(kwargs['chunk_id'])
+            return (
+                f'single-recovered-{kwargs["chunk_id"]}\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                1234567890,
+            )
+
+        async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
+            captured_sections.append((chunk_key, section_text.strip()))
+            return {}, {}
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
+            patch('yar.operate._process_extraction_result', new=AsyncMock(side_effect=fake_process_extraction)),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert batch_call_count == 1
+        assert llm_mock.await_count == 2
+        assert single_chunk_ids == ['chunk-2']
+        assert captured_sections == [
+            ('chunk-1', f'section-one\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+            ('chunk-2', f'single-recovered-chunk-2\n{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}'),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_batch_failure_falls_back_without_gleaning_amplification(self):
+        """Batch failures should recover via bounded parallel singles without gleaning retries."""
+        from yar.operate import extract_entities
+
+        chunks: dict[str, TextChunkSchema] = {
+            f'chunk-{index}': {
+                'tokens': 10,
+                'content': f'Content {index}',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': index,
+            }
+            for index in range(3)
+        }
+
+        batch_call_count = 0
+        single_call_count = 0
+        active_single_calls = 0
+        max_active_single_calls = 0
+
+        async def fake_use_llm_with_cache(prompt, *_args, **kwargs):
+            nonlocal batch_call_count, single_call_count, active_single_calls, max_active_single_calls
+            batch_chunk_ids = [
+                line[len('[CHUNK: ') : -1]
+                for line in prompt.splitlines()
+                if line.startswith('[CHUNK: ') and line.endswith(']')
+            ]
+            if len(batch_chunk_ids) > 1:
+                batch_call_count += 1
+                raise RuntimeError('batch exploded')
+
+            single_call_count += 1
+            active_single_calls += 1
+            max_active_single_calls = max(max_active_single_calls, active_single_calls)
+            try:
+                await asyncio.sleep(0.01)
+                return PROMPTS['DEFAULT_COMPLETION_DELIMITER'], 1234567890
+            finally:
+                active_single_calls -= 1
+
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
+            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 1,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 4,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert batch_call_count == 1
+        assert single_call_count == 3
+        assert 1 < max_active_single_calls <= 2
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_times_out_hung_llm_calls(self):
+        """Hung extraction calls should fail fast enough to surface document failure."""
+        from yar.operate import extract_entities
+
+        chunks: dict[str, TextChunkSchema] = {
+            'chunk-1': {
+                'tokens': 10,
+                'content': 'Alpha',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            }
+        }
+
+        async def fake_use_llm_with_cache(*_args, **_kwargs):
+            await asyncio.sleep(1)
+            return PROMPTS['DEFAULT_COMPLETION_DELIMITER'], 1234567890
+
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        with (
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
+            pytest.raises(RuntimeError, match='All 1 chunks failed during entity extraction'),
+        ):
+            await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'default_llm_timeout': 0.01,
+                    'entity_extract_max_gleaning': 0,
+                    'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert loop.time() - started_at < 0.2
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_respects_shared_extraction_semaphore_across_invocations(self):
+        """Concurrent extractions should share one semaphore for actual LLM calls."""
+        from yar.operate import extract_entities
+
+        def make_chunks(prefix: str) -> dict[str, TextChunkSchema]:
+            return {
+                f'{prefix}-{index}': {
+                    'tokens': 10,
+                    'content': f'Content {prefix}-{index}',
+                    'full_doc_id': prefix,
+                    'chunk_order_index': index,
+                }
+                for index in range(3)
+            }
+
+        shared_semaphore = asyncio.Semaphore(2)
+        counter_lock = asyncio.Lock()
+        first_two_started = asyncio.Event()
+        active_calls = 0
+        max_active_calls = 0
+        seen_chunk_ids: list[str] = []
+
+        async def fake_use_llm_with_cache(prompt, *_args, **kwargs):
+            nonlocal active_calls, max_active_calls
+            chunk_id = kwargs['chunk_id']
+            async with counter_lock:
+                active_calls += 1
+                max_active_calls = max(max_active_calls, active_calls)
+                seen_chunk_ids.append(chunk_id)
+                if active_calls == 2:
+                    first_two_started.set()
+            try:
+                await asyncio.wait_for(first_two_started.wait(), timeout=0.1)
+                await asyncio.sleep(0.01)
+                return PROMPTS['DEFAULT_COMPLETION_DELIMITER'], 1234567890
+            finally:
+                async with counter_lock:
+                    active_calls -= 1
+
+        global_config = {
+            'llm_model_func': AsyncMock(return_value='unused'),
+            'entity_extract_max_gleaning': 0,
+            'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+            'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+            'llm_model_max_async': 4,
+            'entity_extract_max_async': 3,
+            'entity_extract_semaphore': shared_semaphore,
+        }
+
+        with (
+            patch.dict('os.environ', {'ENTITY_EXTRACT_BATCH_SIZE': '1'}, clear=False),
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
+            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+        ):
+            first_result, second_result = await asyncio.gather(
+                extract_entities(chunks=make_chunks('doc-a'), global_config=dict(global_config)),
+                extract_entities(chunks=make_chunks('doc-b'), global_config=dict(global_config)),
+            )
+
+        assert [len(first_result), len(second_result)] == [3, 3]
+        assert llm_mock.await_count == 6
+        assert max_active_calls == 2
+        assert active_calls == 0
+        assert sorted(seen_chunk_ids) == [
+            'doc-a-0',
+            'doc-a-1',
+            'doc-a-2',
+            'doc-b-0',
+            'doc-b-1',
+            'doc-b-2',
+        ]
 # ============================================================================
 # Edge Cases and Integration Tests
 # ============================================================================

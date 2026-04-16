@@ -253,6 +253,15 @@ def create_app(args):
     if args.embedding_binding_host is None:
         args.embedding_binding_host = get_default_host(args.embedding_binding)
 
+    if getattr(args, 'vision_binding_host', None) is None:
+        args.vision_binding_host = args.llm_binding_host
+
+    if getattr(args, 'vision_binding_api_key', None) is None:
+        args.vision_binding_api_key = getattr(args, 'llm_binding_api_key', None)
+
+    if getattr(args, 'vision_model', None) is None:
+        args.vision_model = 'salmon'
+
     # Add SSL validation
     if args.ssl:
         if not args.ssl_certfile or not args.ssl_keyfile:
@@ -283,8 +292,7 @@ def create_app(args):
         logger.info(f'S3 client configured for endpoint: {s3_endpoint_url}')
     except ValueError as e:
         raise RuntimeError(
-            f'S3 configuration error: {e}. Ensure S3_ACCESS_KEY_ID and '
-            'S3_SECRET_ACCESS_KEY are set correctly.'
+            f'S3 configuration error: {e}. Ensure S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are set correctly.'
         ) from e
 
     @asynccontextmanager
@@ -631,6 +639,7 @@ def create_app(args):
             llm_model_func=create_optimized_openai_llm_func(config_cache, args, llm_timeout),
             llm_model_name=args.llm_model,
             llm_model_max_async=args.max_async,
+            entity_extract_max_async=args.entity_extract_max_async,
             summary_max_tokens=args.summary_max_tokens,
             summary_context_size=args.summary_context_size,
             chunk_token_size=int(args.chunk_size),
@@ -818,6 +827,8 @@ def create_app(args):
                             'configuration': {
                                 'llm_binding': 'openai',
                                 'llm_model': 'gpt-4',
+                                'vision_model': 'salmon',
+                                'entity_extract_max_async': 3,
                                 'embedding_binding': 'openai',
                                 'embedding_model': 'text-embedding-ada-002',
                                 'workspace': 'default',
@@ -862,6 +873,7 @@ def create_app(args):
             safe_configuration = {
                 'llm_binding': args.llm_binding,
                 'llm_model': args.llm_model,
+                'vision_model': getattr(args, 'vision_model', 'salmon'),
                 'embedding_binding': args.embedding_binding,
                 'embedding_model': args.embedding_model,
                 'summary_language': args.summary_language,
@@ -871,6 +883,7 @@ def create_app(args):
                 'min_rerank_score': args.min_rerank_score,
                 'related_chunk_number': args.related_chunk_number,
                 'max_async': args.max_async,
+                'entity_extract_max_async': rag.entity_extract_max_async,
                 'embedding_func_max_async': args.embedding_func_max_async,
                 'embedding_batch_num': args.embedding_batch_num,
                 'kv_storage': args.kv_storage,
@@ -885,6 +898,7 @@ def create_app(args):
                 'enable_s3': s3_client is not None,
                 # Keep shape stable for WebUI while avoiding host disclosure by default.
                 'llm_binding_host': '-',
+                'vision_binding_host': '-',
                 'embedding_binding_host': '-',
                 'rerank_binding_host': '-',
                 'rerank_binding': '-',
@@ -911,8 +925,9 @@ def create_app(args):
                 response['keyed_locks'] = keyed_lock_info
                 response['configuration'] = {
                     **safe_configuration,
-                    # LLM/embedding hosts are only exposed in verbose mode.
+                    # Provider hosts are only exposed in verbose mode.
                     'llm_binding_host': args.llm_binding_host,
+                    'vision_binding_host': getattr(args, 'vision_binding_host', args.llm_binding_host),
                     'embedding_binding_host': args.embedding_binding_host,
                     'rerank_binding': getattr(args, 'rerank_binding', os.getenv('RERANK_BINDING', '-')),
                     'rerank_binding_host': getattr(
@@ -998,12 +1013,14 @@ def create_app(args):
         @app.get('/webui/')
         async def serve_webui_index():
             from fastapi.responses import FileResponse
+
             return FileResponse(static_dir / 'index.html', media_type='text/html')
 
         # Serve static assets from /webui/assets/ (MUST be before catch-all)
         @app.get('/webui/assets/{file_path:path}')
         async def serve_webui_assets(file_path: str):
             from fastapi.responses import FileResponse
+
             file = static_dir / 'assets' / file_path
             if file.exists() and file.is_file():
                 suffix = file.suffix.lower()
@@ -1019,6 +1036,7 @@ def create_app(args):
                 }
                 return FileResponse(file, media_type=content_types.get(suffix, 'application/octet-stream'))
             from fastapi import HTTPException
+
             raise HTTPException(status_code=404, detail='Asset not found')
 
         # Serve favicon/logo at both root and /webui paths
@@ -1060,6 +1078,7 @@ def create_app(args):
             if query:
                 target = f'{target}?{query}'
             return RedirectResponse(url=target, status_code=307)
+
         logger.info('WebUI assets mounted at /webui')
     else:
         logger.info('WebUI assets not available, /webui route not mounted')

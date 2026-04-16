@@ -21,6 +21,7 @@ from starlette.status import HTTP_403_FORBIDDEN, HTTP_413_CONTENT_TOO_LARGE
 from yar import __version__ as core_version
 from yar.api import __api_version__ as api_version
 from yar.constants import DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE
+from yar.type_defs import resolve_entity_extract_max_async
 from yar.utils import logger
 from yar.validators import validate_workspace_name
 
@@ -195,6 +196,7 @@ def validate_text_payload_size(
                 status_code=HTTP_413_CONTENT_TOO_LARGE,
                 detail=f'{payload_name} too large: {size_mb:.1f}MB exceeds limit of {max_size_mb}MB',
             )
+
 
 def handle_api_error(operation: str | None = None) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """
@@ -432,6 +434,23 @@ def display_splash_screen(args: argparse.Namespace) -> None:
     """
     ASCIIColors.cyan(banner)
 
+    configured_entity_extract_max_async = getattr(args, 'entity_extract_max_async', None)
+    effective_entity_extract_max_async = resolve_entity_extract_max_async(
+        args.max_async,
+        configured_entity_extract_max_async,
+    )
+    if configured_entity_extract_max_async is None:
+        entity_extract_max_async_display = f'auto -> {effective_entity_extract_max_async}'
+    elif effective_entity_extract_max_async != configured_entity_extract_max_async:
+        entity_extract_max_async_display = (
+            f'{configured_entity_extract_max_async} (effective {effective_entity_extract_max_async})'
+        )
+    else:
+        entity_extract_max_async_display = str(effective_entity_extract_max_async)
+
+    vision_binding_host_display = getattr(args, 'vision_binding_host', args.llm_binding_host)
+    vision_model_display = getattr(args, 'vision_model', 'salmon')
+
     # Server Configuration
     ASCIIColors.magenta('\n📡 Server Configuration:')
     ASCIIColors.white('    ├─ Host: ', end='')
@@ -475,8 +494,14 @@ def display_splash_screen(args: argparse.Namespace) -> None:
     ASCIIColors.yellow(f'{args.llm_binding_host}')
     ASCIIColors.white('    ├─ Model: ', end='')
     ASCIIColors.yellow(f'{args.llm_model}')
+    ASCIIColors.white('    ├─ Vision Host: ', end='')
+    ASCIIColors.yellow(f'{vision_binding_host_display}')
+    ASCIIColors.white('    ├─ Vision Model: ', end='')
+    ASCIIColors.yellow(f'{vision_model_display}')
     ASCIIColors.white('    ├─ Max Async for LLM: ', end='')
     ASCIIColors.yellow(f'{args.max_async}')
+    ASCIIColors.white('    ├─ Entity Extract Max Async: ', end='')
+    ASCIIColors.yellow(entity_extract_max_async_display)
     ASCIIColors.white('    ├─ Summary Context Size: ', end='')
     ASCIIColors.yellow(f'{args.summary_context_size}')
     ASCIIColors.white('    ├─ LLM Cache Enabled: ', end='')

@@ -92,7 +92,7 @@ from yar.operate import (
     rebuild_knowledge_from_chunks,
 )
 from yar.prompt import PROMPTS
-from yar.type_defs import GlobalConfig, KnowledgeGraph
+from yar.type_defs import GlobalConfig, KnowledgeGraph, resolve_entity_extract_max_async
 from yar.utils import (
     EmbeddingFunc,
     TiktokenTokenizer,
@@ -352,6 +352,11 @@ class YAR:
     llm_model_max_async: int = field(default=int(os.getenv('MAX_ASYNC', DEFAULT_MAX_ASYNC)))
     """Maximum number of concurrent LLM calls."""
 
+    entity_extract_max_async: int | None = field(
+        default=get_env_value('ENTITY_EXTRACT_MAX_ASYNC', None, int, special_none=True)
+    )
+    """Maximum concurrent entity extraction LLM calls. Auto-derives from llm_model_max_async when unset."""
+
     llm_model_kwargs: dict[str, Any] = field(default_factory=dict)
     """Additional keyword arguments passed to the LLM model function."""
 
@@ -504,6 +509,13 @@ class YAR:
             logger.warning(
                 f'max_total_tokens({self.summary_max_tokens}) should greater than summary_length_recommended({self.summary_length_recommended})'
             )
+
+        self.entity_extract_max_async = resolve_entity_extract_max_async(
+            self.llm_model_max_async,
+            self.entity_extract_max_async,
+        )
+        # Keep the semaphore off dataclass fields so asdict(self) stays serializable.
+        self._entity_extract_semaphore = asyncio.Semaphore(self.entity_extract_max_async)
 
         # Init Embedding
         # Step 1: Capture embedding_func and max_token_size before applying rate_limit decorator
@@ -1846,24 +1858,6 @@ class YAR:
 
                                 # Record processing end time
                                 processing_end_time = int(time.time())
-                                # Generate LLM document summary (falls back to filename)
-                                doc_summary = status_doc.content_summary
-                                if self.llm_model_func and content:
-                                    try:
-                                        excerpt = content[:3000].strip()
-                                        summary_prompt = (
-                                            'Summarize this document in 1-2 concise sentences. '
-                                            'State the main topic and key subjects. '
-                                            'Output ONLY the summary text, no preamble.\n\n'
-                                            f'{excerpt}'
-                                        )
-                                        llm_fn = cast(Callable[[str], Awaitable[str]], self.llm_model_func)
-                                        raw_summary = await llm_fn(summary_prompt)
-                                        generated = raw_summary.strip()
-                                        if generated:
-                                            doc_summary = generated[:500]
-                                    except Exception as e:
-                                        logger.debug('Document summary generation failed: %s', e)
 
                                 await self.doc_status.upsert(
                                     {
@@ -1871,7 +1865,7 @@ class YAR:
                                             'status': DocStatus.PROCESSED,
                                             'chunks_count': len(chunks),
                                             'chunks_list': list(chunks.keys()),
-                                            'content_summary': doc_summary,
+                                            'content_summary': status_doc.content_summary,
                                             'content_length': status_doc.content_length,
                                             'created_at': status_doc.created_at,
                                             'updated_at': datetime.now(timezone.utc).isoformat(),
@@ -2025,9 +2019,13 @@ class YAR:
         self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None
     ) -> list:
         try:
+            global_config = cast(GlobalConfig, asdict(self))
+            global_config['entity_extract_max_async'] = self.entity_extract_max_async
+            global_config['entity_extract_semaphore'] = self._entity_extract_semaphore
+
             chunk_results = await extract_entities(
                 chunk,
-                global_config=cast(GlobalConfig, asdict(self)),
+                global_config=global_config,
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,

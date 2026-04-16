@@ -1,13 +1,38 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any, TypedDict
 
 from pydantic import BaseModel
 
+from yar.constants import DEFAULT_MAX_ASYNC
+
 # Type alias for LLM model functions used throughout the codebase
 # These are async callables that take a prompt and return a string response
 LLMFunc = Callable[..., Coroutine[Any, Any, str]]
+
+
+def resolve_entity_extract_max_async(
+    llm_model_max_async: Any,
+    entity_extract_max_async: Any | None = None,
+) -> int:
+    """Clamp entity extraction concurrency to the shared LLM budget."""
+    try:
+        provider_limit = int(llm_model_max_async)
+    except (TypeError, ValueError):
+        provider_limit = DEFAULT_MAX_ASYNC
+    provider_limit = max(1, provider_limit)
+
+    if entity_extract_max_async is None:
+        requested_limit = provider_limit - 1
+    else:
+        try:
+            requested_limit = int(entity_extract_max_async)
+        except (TypeError, ValueError):
+            requested_limit = provider_limit - 1
+
+    return max(1, min(requested_limit, provider_limit))
 
 
 class GPTKeywordExtractionFormat(BaseModel):
@@ -35,13 +60,12 @@ class KnowledgeGraph(BaseModel):
     is_truncated: bool = False
 
 
-
 class GlobalConfig(TypedDict, total=False):
     """Type definition for the global configuration dict passed through the RAG pipeline.
 
     Created via ``dataclasses.asdict(yar_instance)`` in ``YAR.__post_init__``.
-    Uses ``total=False`` because the dict contains additional runtime fields
-    beyond those typed here.
+    Runtime-only entries such as ``entity_extract_semaphore`` are injected after
+    ``asdict()`` so they are not serialized.
     """
 
     # Core LLM/embedding functions
@@ -58,6 +82,7 @@ class GlobalConfig(TypedDict, total=False):
     summary_length_recommended: int
     force_llm_summary_on_merge: int
     llm_model_max_async: int
+    entity_extract_max_async: int
     max_source_ids_per_entity: int
     max_source_ids_per_relation: int
     source_ids_limit_method: str
@@ -71,3 +96,6 @@ class GlobalConfig(TypedDict, total=False):
     # Cache control
     enable_llm_cache: bool
     enable_llm_cache_for_entity_extract: bool
+
+    # Runtime coordination
+    entity_extract_semaphore: asyncio.Semaphore

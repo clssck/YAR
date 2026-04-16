@@ -50,7 +50,7 @@ from yar.constants import (
 from yar.exceptions import PipelineCancelledException
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
-from yar.type_defs import GlobalConfig
+from yar.type_defs import GlobalConfig, resolve_entity_extract_max_async
 from yar.utils import (
     CacheData,
     Tokenizer,
@@ -2987,6 +2987,13 @@ async def extract_entities(
 
     use_llm_func = cast(Callable[..., Awaitable[str]], global_config['llm_model_func'])
     entity_extract_max_gleaning = int(global_config.get('entity_extract_max_gleaning', 0))
+    extract_max_async = resolve_entity_extract_max_async(
+        global_config.get('llm_model_max_async'),
+        global_config.get('entity_extract_max_async'),
+    )
+    extraction_semaphore = cast(asyncio.Semaphore | None, global_config.get('entity_extract_semaphore'))
+    if extraction_semaphore is None:
+        extraction_semaphore = asyncio.Semaphore(extract_max_async)
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
@@ -3018,18 +3025,55 @@ async def extract_entities(
     # --- Batched extraction ---
     # Pack multiple chunks into a single LLM call to reduce HTTP round-trips.
     # The LLM outputs [CHUNK: <id>] headers so we can attribute results per chunk.
-    _BATCH_CHUNK_HEADER_RE = re.compile(r'\[CHUNK:\s*([^\]]+)\]')
+    _BATCH_CHUNK_HEADER_RE = re.compile(r'(?im)^[ \t]*(?:[#>*-]+\s*)?\[?\s*chunk\s*:\s*([^\]\n]+?)\s*\]?[ \t]*$')
 
     # Dynamic batch sizing: the binding constraint is output tokens, not input.
     # Each chunk produces ~300 tokens of entity/relation output.
-    # Cap at max_output_tokens / 300, floored to leave headroom.
+    # Cap at max_output_tokens / 300, floored to leave headroom, then clamp to a
+    # conservative default so one large document does not become a single oversized call.
     max_output_tokens = int(global_config.get('max_output_tokens', os.getenv('MAX_OUTPUT_TOKENS', '32000')))
     output_per_chunk_estimate = 300
     output_budget_limit = max(1, max_output_tokens * 3 // 4 // output_per_chunk_estimate)  # 75% of budget
+    default_batch_cap = 8
     env_override = os.getenv('ENTITY_EXTRACT_BATCH_SIZE')
-    batch_size = int(env_override) if env_override else min(output_budget_limit, total_chunks)
+    if env_override:
+        try:
+            batch_size = int(env_override)
+        except (TypeError, ValueError):
+            logger.warning(
+                'Invalid ENTITY_EXTRACT_BATCH_SIZE=%r; falling back to default batch cap=%d',
+                env_override,
+                default_batch_cap,
+            )
+            batch_size = min(output_budget_limit, default_batch_cap, total_chunks)
+    else:
+        batch_size = min(output_budget_limit, default_batch_cap, total_chunks)
     if batch_size < 1:
         batch_size = 1
+
+    fallback_max_async = max(1, min(extract_max_async, 2))
+
+    raw_extraction_timeout: Any = global_config.get('default_llm_timeout')
+    if raw_extraction_timeout is None:
+        llm_model_kwargs = global_config.get('llm_model_kwargs')
+        if isinstance(llm_model_kwargs, dict):
+            raw_extraction_timeout = llm_model_kwargs.get('timeout')
+    if raw_extraction_timeout is None:
+        raw_extraction_timeout = global_config.get('llm_timeout', os.getenv('LLM_TIMEOUT', '180'))
+    try:
+        extract_call_timeout = float(raw_extraction_timeout)
+    except (TypeError, ValueError):
+        logger.warning(
+            'Invalid extraction timeout=%r; falling back to default timeout=180s',
+            raw_extraction_timeout,
+        )
+        extract_call_timeout = 180.0
+    if extract_call_timeout <= 0:
+        logger.warning(
+            'Non-positive extraction timeout=%r; falling back to default timeout=180s',
+            raw_extraction_timeout,
+        )
+        extract_call_timeout = 180.0
 
     entity_extraction_system_prompt = PROMPTS['entity_extraction_system_prompt'].format(**context_base)
 
@@ -3047,22 +3091,119 @@ async def extract_entities(
         raw_output: str,
         batch: list[tuple[str, TextChunkSchema]],
     ) -> dict[str, str]:
-        """Split LLM output into per-chunk sections using [CHUNK: id] headers."""
+        """Split LLM output into per-chunk sections using tolerant chunk headers."""
+
+        def _is_single_character_drift(observed_key: str, expected_key: str) -> bool:
+            return (
+                len(observed_key) == len(expected_key)
+                and sum(
+                    observed_char != expected_char
+                    for observed_char, expected_char in zip(observed_key, expected_key, strict=True)
+                )
+                == 1
+            )
+
+        def _resolve_chunk_key(observed_key: str) -> str | None:
+            if observed_key in expected_keys:
+                return observed_key
+
+            candidates = sorted(
+                expected_key for expected_key in expected_keys if _is_single_character_drift(observed_key, expected_key)
+            )
+            if len(candidates) == 1:
+                canonical_key = candidates[0]
+                logger.info(
+                    'Canonicalizing batch chunk header %s -> %s via single-character drift tolerance',
+                    observed_key,
+                    canonical_key,
+                )
+                return canonical_key
+            if len(candidates) > 1:
+                logger.warning(
+                    'Ambiguous batch chunk header %s matched multiple expected chunk ids %s; leaving unresolved',
+                    observed_key,
+                    candidates,
+                )
+                return None
+
+            logger.warning('Ignoring unexpected batch chunk header %s during batch parse', observed_key)
+            return None
+
+        def _is_effectively_empty_section(section_text: str) -> bool:
+            """Treat delimiter-only duplicates as empty noise, not conflicting content."""
+            non_empty_lines = [line.strip() for line in section_text.splitlines() if line.strip()]
+            return not non_empty_lines or (
+                len(non_empty_lines) == 1 and non_empty_lines[0] == context_base['completion_delimiter']
+            )
+
         sections: dict[str, str] = {}
         markers = list(_BATCH_CHUNK_HEADER_RE.finditer(raw_output))
         if not markers:
             return sections
 
         expected_keys = {ck for ck, _ in batch}
+        invalid_keys: set[str] = set()
         for i, match in enumerate(markers):
-            chunk_id = match.group(1).strip()
+            observed_key = match.group(1).strip().strip('`').strip('"').strip("'")
+            canonical_key = _resolve_chunk_key(observed_key)
+            if canonical_key is None or canonical_key in invalid_keys:
+                continue
+
             start = match.end()
             end = markers[i + 1].start() if i + 1 < len(markers) else len(raw_output)
-            if chunk_id in expected_keys:
-                sections[chunk_id] = raw_output[start:end]
+            section_text = raw_output[start:end]
+            if canonical_key in sections:
+                if section_text == sections[canonical_key]:
+                    logger.info('Ignoring identical duplicate batch section for %s', canonical_key)
+                    continue
+                if _is_effectively_empty_section(section_text):
+                    logger.info('Ignoring empty duplicate batch section for %s', canonical_key)
+                    continue
+                logger.warning(
+                    'Conflicting duplicate batch sections for %s; forcing single-chunk fallback',
+                    canonical_key,
+                )
+                sections.pop(canonical_key, None)
+                invalid_keys.add(canonical_key)
+                continue
+
+            sections[canonical_key] = section_text
         return sections
 
-    async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
+    async def _call_extraction_llm(
+        prompt: str,
+        *,
+        chunk_id: str,
+        cache_keys_collector: list[str],
+        history_messages: list[dict[str, str]] | None = None,
+        call_label: str | None = None,
+    ) -> tuple[str, int]:
+        try:
+            async with extraction_semaphore:
+                return await asyncio.wait_for(
+                    use_llm_func_with_cache(
+                        prompt,
+                        use_llm_func,
+                        system_prompt=entity_extraction_system_prompt,
+                        llm_response_cache=llm_response_cache,
+                        history_messages=history_messages,
+                        cache_type='extract',
+                        chunk_id=chunk_id,
+                        cache_keys_collector=cache_keys_collector,
+                    ),
+                    timeout=extract_call_timeout,
+                )
+        except asyncio.TimeoutError as exc:
+            label = call_label or chunk_id
+            raise TimeoutError(
+                f'Entity extraction LLM call timed out after {extract_call_timeout:.1f}s for {label}'
+            ) from exc
+
+    async def _process_single_content(
+        chunk_key_dp: tuple[str, TextChunkSchema],
+        *,
+        allow_gleaning: bool = True,
+    ):
         """Process a single chunk (used as fallback for batch parse failures)."""
         nonlocal processed_chunks
         chunk_key = chunk_key_dp[0]
@@ -3074,12 +3215,8 @@ async def extract_entities(
 
         user_prompt = PROMPTS['entity_extraction_user_prompt'].format(**{**context_base, 'input_text': content})
 
-        final_result, timestamp = await use_llm_func_with_cache(
+        final_result, timestamp = await _call_extraction_llm(
             user_prompt,
-            use_llm_func,
-            system_prompt=entity_extraction_system_prompt,
-            llm_response_cache=llm_response_cache,
-            cache_type='extract',
             chunk_id=chunk_key,
             cache_keys_collector=cache_keys_collector,
         )
@@ -3094,20 +3231,16 @@ async def extract_entities(
         )
 
         # Gleaning support
-        if entity_extract_max_gleaning > 0:
+        if allow_gleaning and entity_extract_max_gleaning > 0:
             history = pack_user_ass_to_openai_messages(user_prompt, final_result)
             continue_prompt = PROMPTS['entity_continue_extraction_user_prompt'].format(
                 **{**context_base, 'input_text': content}
             )
-            glean_result, timestamp = await use_llm_func_with_cache(
+            glean_result, timestamp = await _call_extraction_llm(
                 continue_prompt,
-                use_llm_func,
-                system_prompt=entity_extraction_system_prompt,
-                llm_response_cache=llm_response_cache,
-                history_messages=history,
-                cache_type='extract',
                 chunk_id=chunk_key,
                 cache_keys_collector=cache_keys_collector,
+                history_messages=history,
             )
             glean_nodes, glean_edges = await _process_extraction_result(
                 glean_result,
@@ -3147,13 +3280,56 @@ async def extract_entities(
 
         return maybe_nodes, maybe_edges
 
+    async def _process_fallback_chunks(
+        fallback_chunks: list[tuple[str, TextChunkSchema]],
+        *,
+        reason: str,
+    ) -> list[tuple[dict, dict]]:
+        if not fallback_chunks:
+            return []
+
+        fallback_semaphore = asyncio.Semaphore(fallback_max_async)
+
+        async def _run_fallback(chunk_key_dp: tuple[str, TextChunkSchema]):
+            chunk_key = chunk_key_dp[0]
+            async with fallback_semaphore:
+                await check_pipeline_cancellation(
+                    pipeline_status,
+                    pipeline_status_lock,
+                    f'fallback extraction ({reason})',
+                )
+                try:
+                    return await _process_single_content(chunk_key_dp, allow_gleaning=False)
+                except PipelineCancelledException:
+                    raise
+                except Exception as exc:
+                    logger.warning(f'Single-chunk fallback failed for {chunk_key} after {reason}: {exc}')
+                    return None
+
+        fallback_results = await asyncio.gather(
+            *(asyncio.create_task(_run_fallback(chunk_key_dp)) for chunk_key_dp in fallback_chunks),
+            return_exceptions=True,
+        )
+
+        recovered_results: list[tuple[dict, dict]] = []
+        for fallback_result in fallback_results:
+            if isinstance(fallback_result, PipelineCancelledException):
+                raise fallback_result
+            if isinstance(fallback_result, Exception):
+                logger.warning(f'Unexpected fallback task failure after {reason}: {fallback_result}')
+                continue
+            if fallback_result is not None:
+                recovered_results.append(fallback_result)
+
+        return recovered_results
+
     async def _process_batch(
         batch: list[tuple[str, TextChunkSchema]],
     ) -> list[tuple[dict, dict]]:
         """Process a batch of chunks in a single LLM call.
 
         Returns a list of (nodes, edges) tuples, one per chunk in the batch.
-        On parse failure for individual chunks, falls back to single-chunk processing.
+        On batch-call or per-section parse failure, falls back to single-chunk processing.
         """
         nonlocal processed_chunks
 
@@ -3170,15 +3346,23 @@ async def extract_entities(
         )
 
         cache_keys_collector: list[str] = []
-        raw_result, timestamp = await use_llm_func_with_cache(
-            batch_user_prompt,
-            use_llm_func,
-            system_prompt=entity_extraction_system_prompt,
-            llm_response_cache=llm_response_cache,
-            cache_type='extract',
-            chunk_id=batch[0][0],
-            cache_keys_collector=cache_keys_collector,
-        )
+        chunk_ids_label = f'{batch[0][0]}..{batch[-1][0]}'
+        try:
+            raw_result, timestamp = await _call_extraction_llm(
+                batch_user_prompt,
+                chunk_id=batch[0][0],
+                cache_keys_collector=cache_keys_collector,
+                call_label=f'batch {chunk_ids_label}',
+            )
+        except PipelineCancelledException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                'Batch %s failed before parsing; falling back to per-chunk extraction: %s',
+                chunk_ids_label,
+                exc,
+            )
+            return await _process_fallback_chunks(batch, reason='batch call failure')
 
         # Split output by chunk headers
         sections = _split_batch_output(raw_result, batch)
@@ -3213,29 +3397,20 @@ async def extract_entities(
                             chunk_key, text_chunks_storage, cache_keys_collector, 'entity_extraction'
                         )
                     continue
-                except Exception as e:
-                    logger.warning(f'Batch parse failed for {chunk_key}, falling back to single: {e}')
+                except Exception as exc:
+                    logger.warning(f'Batch parse failed for {chunk_key}, falling back to single: {exc}')
                     fallback_chunks.append((chunk_key, chunk_dp))
             else:
                 logger.warning(f'Batch output missing chunk {chunk_key}, falling back to single')
                 fallback_chunks.append((chunk_key, chunk_dp))
 
-        # Fallback: process missing/failed chunks individually
-        for chunk_key, chunk_dp in fallback_chunks:
-            try:
-                single_result = await _process_single_content((chunk_key, chunk_dp))
-                if single_result is not None:
-                    results.append(single_result)
-            except PipelineCancelledException:
-                raise
-            except Exception as e:
-                logger.warning(f'Single-chunk fallback failed for {chunk_key}: {e}')
+        if fallback_chunks:
+            results.extend(await _process_fallback_chunks(fallback_chunks, reason='batch section recovery'))
 
         return results
 
     # --- Dispatch: group chunks into batches and process concurrently ---
-    chunk_max_async = global_config.get('llm_model_max_async', 4)
-    semaphore = asyncio.Semaphore(chunk_max_async)
+    dispatch_semaphore = asyncio.Semaphore(extract_max_async)
 
     batches: list[list[tuple[str, TextChunkSchema]]] = []
     for i in range(0, len(ordered_chunks), batch_size):
@@ -3243,13 +3418,13 @@ async def extract_entities(
 
     log_msg = (
         f'Entity extraction: {total_chunks} chunks in {len(batches)} batches '
-        f'(batch_size={batch_size}, async={chunk_max_async})'
+        f'(batch_size={batch_size}, async={extract_max_async})'
     )
     logger.info(log_msg)
     await update_pipeline_status(pipeline_status, pipeline_status_lock, log_msg)
 
     async def _process_batch_with_semaphore(batch: list[tuple[str, TextChunkSchema]]):
-        async with semaphore:
+        async with dispatch_semaphore:
             await check_pipeline_cancellation(pipeline_status, pipeline_status_lock, 'batch processing')
             try:
                 return await _process_batch(batch)

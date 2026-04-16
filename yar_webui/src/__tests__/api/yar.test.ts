@@ -198,21 +198,30 @@ describe('queryTextStream NDJSON parsing', () => {
 })
 
 describe('getDocumentUrl', () => {
-  test('encodes S3 keys before building proxy URLs', () => {
+  test('prefers presigned URLs when available', () => {
     expect(
       getDocumentUrl({
         s3_key: 'folder/report #1?.pdf',
-        presigned_url: 'https://example.test/fallback.pdf',
+        presigned_url: 'https://example.test/fallback.pdf?download=1',
+      }),
+    ).toBe('https://example.test/fallback.pdf?download=1')
+  })
+
+  test('falls back to encoded S3 proxy URLs when no presigned URL is present', () => {
+    expect(
+      getDocumentUrl({
+        s3_key: 'folder/report #1?.pdf',
+        presigned_url: null,
       }),
     ).toBe(`${TEST_BACKEND_ORIGIN}/s3/content/folder%2Freport%20%231%3F.pdf`)
   })
 
-  test('preserves presigned URLs when no S3 key is present', () => {
+  test('returns null when no browser-safe document URL is available', () => {
     expect(
       getDocumentUrl({
         s3_key: null,
-        presigned_url: 'https://example.test/fallback.pdf?download=1',
+        presigned_url: null,
       }),
-    ).toBe('https://example.test/fallback.pdf?download=1')
+    ).toBeNull()
   })
 })

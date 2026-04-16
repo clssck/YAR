@@ -905,13 +905,20 @@ async def _extract_document_with_vision_bytes(
     filename: str,
     mime_type: str,
 ) -> DocumentExtractionResult:
+    vision_binding_host = getattr(global_args, 'vision_binding_host', None) or getattr(
+        global_args, 'llm_binding_host', None
+    )
+    vision_binding_api_key = getattr(global_args, 'vision_binding_api_key', None) or getattr(
+        global_args, 'llm_binding_api_key', None
+    )
+
     result = await extract_document_with_vision(
         file_content,
         filename=filename,
         mime_type=mime_type,
         model=getattr(global_args, 'vision_model', 'salmon'),
-        base_url=getattr(global_args, 'llm_binding_host', None),
-        api_key=getattr(global_args, 'llm_binding_api_key', None),
+        base_url=vision_binding_host,
+        api_key=vision_binding_api_key,
         pdf_password=getattr(global_args, 'pdf_decrypt_password', None),
     )
     return DocumentExtractionResult(
@@ -2921,7 +2928,9 @@ def create_document_routes(
                         if not s3_key and isinstance(file_path, str) and file_path.startswith('s3://'):
                             s3_location = file_path.removeprefix('s3://')
                             bucket_name, _, inferred_key = s3_location.partition('/')
-                            if inferred_key and (configured_bucket is None or not bucket_name or bucket_name == configured_bucket):
+                            if inferred_key and (
+                                configured_bucket is None or not bucket_name or bucket_name == configured_bucket
+                            ):
                                 s3_key = inferred_key
                             elif inferred_key:
                                 logger.warning(

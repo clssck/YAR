@@ -13,6 +13,7 @@ Uses httpx AsyncClient with FastAPI's TestClient pattern and mocked dependencies
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -644,6 +645,73 @@ class TestDocumentExtractionDispatch:
         assert manager.is_supported_file('deck.PPSX') is True
         assert manager.is_supported_file('notes.odt') is True
         assert manager.is_supported_file('archive.zip') is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('binding_overrides', 'expected_base_url', 'expected_api_key'),
+        [
+            pytest.param(
+                {
+                    'vision_binding_host': 'http://vision-host/v1',
+                    'vision_binding_api_key': 'vision-key',
+                },
+                'http://vision-host/v1',
+                'vision-key',
+                id='vision-binding',
+            ),
+            pytest.param({}, 'http://llm-host/v1', 'llm-key', id='llm-binding-fallback'),
+        ],
+    )
+    async def test_extract_document_with_vision_uses_expected_binding_credentials(
+        self,
+        binding_overrides,
+        expected_base_url,
+        expected_api_key,
+    ):
+        from yar.api.routers import document_routes as routes
+
+        vision_response = SimpleNamespace(
+            content='vision markdown',
+            pre_chunks=['chunk'],
+            tables=[{'name': 'table'}],
+            metadata={'pages': 1},
+        )
+        global_args = {
+            'vision_model': 'salmon',
+            'llm_binding_host': 'http://llm-host/v1',
+            'llm_binding_api_key': 'llm-key',
+            'pdf_decrypt_password': 'secret',
+        }
+        global_args.update(binding_overrides)
+
+        with (
+            patch.object(routes, 'global_args', SimpleNamespace(**global_args)),
+            patch.object(
+                routes,
+                'extract_document_with_vision',
+                AsyncMock(return_value=vision_response),
+            ) as extract_mock,
+        ):
+            result = await routes._extract_document_with_vision_bytes(
+                b'%PDF-1.7',
+                filename='report.pdf',
+                mime_type='application/pdf',
+            )
+
+        extract_mock.assert_awaited_once_with(
+            b'%PDF-1.7',
+            filename='report.pdf',
+            mime_type='application/pdf',
+            model='salmon',
+            base_url=expected_base_url,
+            api_key=expected_api_key,
+            pdf_password='secret',
+        )
+        assert result.content == 'vision markdown'
+        assert result.pre_chunks == ['chunk']
+        assert result.tables == [{'name': 'table'}]
+        assert result.extractor == 'vision'
+        assert result.metadata == {'pages': 1}
 
     @pytest.mark.asyncio
     async def test_dispatch_routes_pdf_to_vision(self):

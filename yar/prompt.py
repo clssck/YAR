@@ -143,9 +143,10 @@ Extract entities and relationships from EACH of the input text chunks below.
 
 ---Instructions---
 1.  **Strict Adherence to Format:** Strictly adhere to all format requirements for entity and relationship lists, including output order, field delimiters, and proper noun handling, as specified in the system prompt.
-2.  **Per-Chunk Output:** For EACH chunk, output a chunk header line `[CHUNK: <chunk_id>]` followed by the extracted entities and relationships for that chunk, then `{completion_delimiter}`. Process chunks in the order given.
-3.  **Output Content Only:** Output *only* chunk headers and extracted entities/relationships. No introductory or concluding remarks.
-4.  **Output Language:** Ensure the output language is {language}. Proper nouns must be kept in their original language.
+2.  **Per-Chunk Output:** For EACH chunk, output the exact header line `[CHUNK: <chunk_id>]` using the same chunk id provided in the input, followed by the extracted entities and relationships for that chunk, then `{completion_delimiter}`. Process chunks in the order given. Use each provided chunk id exactly once, only for its matching chunk. Do not rename, omit, merge, duplicate, or reorder chunk ids.
+3.  **Empty Sections Are Required:** If a chunk has no entities or relationships, still output its exact `[CHUNK: <chunk_id>]` header and then `{completion_delimiter}` on the next line.
+4.  **Output Content Only:** Output *only* chunk headers and extracted entities/relationships. No introductory or concluding remarks.
+5.  **Output Language:** Ensure the output language is {language}. Proper nouns must be kept in their original language.
 
 ---Data to be Processed---
 <Entity_types>

@@ -25,19 +25,32 @@ PDFTOPPM_COMMAND_ENV = 'PDFTOPPM_COMMAND'
 SOFFICE_COMMAND_ENV = 'SOFFICE_COMMAND'
 NO_TEXT_DETECTED_SENTINEL = '[NO_TEXT_DETECTED]'
 VISION_MAX_OUTPUT_TOKENS_DEFAULT = 65536
+VISION_MAX_CONTEXT_TOKENS_DEFAULT = 200_000
 VISION_PAGES_PER_CALL_DEFAULT = 15
-CONCURRENCY = 10
 RETRY_DELAY_SECONDS = 2.0
 VISION_CONCURRENCY_DEFAULT = 4
+VISION_INPUT_TOKENS_PER_PAGE_ESTIMATE = 8_000
+VISION_PROMPT_TOKENS_ESTIMATE = 4_000
 VISION_MAX_RETRIES = 4
+_vision_concurrency_limit: int | None = None
 _vision_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_vision_concurrency_limit() -> int:
+    global _vision_concurrency_limit
+    if _vision_concurrency_limit is None:
+        _vision_concurrency_limit = max(
+            1,
+            int(os.environ.get('VISION_CONCURRENCY', str(VISION_CONCURRENCY_DEFAULT))),
+        )
+    return _vision_concurrency_limit
 
 
 def _get_vision_semaphore() -> asyncio.Semaphore:
     """Return a global semaphore limiting concurrent vision API calls across all documents."""
     global _vision_semaphore
     if _vision_semaphore is None:
-        limit = int(os.environ.get('VISION_CONCURRENCY', str(VISION_CONCURRENCY_DEFAULT)))
+        limit = _get_vision_concurrency_limit()
         _vision_semaphore = asyncio.Semaphore(limit)
         logger.info('Vision extraction concurrency limit: %d', limit)
     return _vision_semaphore
@@ -49,23 +62,28 @@ MAX_TOKENS_PER_PAGE = 4096
 
 def _compute_pages_per_call() -> int:
     env_override = os.getenv('VISION_PAGES_PER_CALL')
-    if env_override:
-        pages_per_call = max(1, int(env_override))
-        max_output_tokens = pages_per_call * MAX_TOKENS_PER_PAGE
-    else:
-        max_output_tokens = int(
-            os.getenv('VISION_MAX_OUTPUT_TOKENS', str(VISION_MAX_OUTPUT_TOKENS_DEFAULT))
-        )
-        pages_per_call = min(
-            max(1, max_output_tokens * 3 // 4 // MAX_TOKENS_PER_PAGE),
-            VISION_PAGES_PER_CALL_DEFAULT,
-        )
+    requested_pages_per_call = max(1, int(env_override)) if env_override else VISION_PAGES_PER_CALL_DEFAULT
+    max_output_tokens = int(os.getenv('VISION_MAX_OUTPUT_TOKENS', str(VISION_MAX_OUTPUT_TOKENS_DEFAULT)))
+    output_cap_pages = max(1, max_output_tokens // MAX_TOKENS_PER_PAGE)
+    max_context_tokens = int(os.getenv('VISION_MAX_CONTEXT_TOKENS', str(VISION_MAX_CONTEXT_TOKENS_DEFAULT)))
+    available_context_tokens = max(0, max_context_tokens - VISION_PROMPT_TOKENS_ESTIMATE)
+    total_context_tokens_per_page = VISION_INPUT_TOKENS_PER_PAGE_ESTIMATE + MAX_TOKENS_PER_PAGE
+    context_cap_pages = max(1, available_context_tokens // total_context_tokens_per_page)
+    pages_per_call = min(requested_pages_per_call, output_cap_pages, context_cap_pages)
     logger.info(
-        'Vision batch sizing: %d pages/call (max_output_tokens=%d)',
+        'Vision batch sizing: %d pages/call (requested=%d, output_cap=%d from %d tokens, context_cap=%d from %d total-context tokens with %d prompt + %d/page input + %d/page output estimate)',
         pages_per_call,
+        requested_pages_per_call,
+        output_cap_pages,
         max_output_tokens,
+        context_cap_pages,
+        max_context_tokens,
+        VISION_PROMPT_TOKENS_ESTIMATE,
+        VISION_INPUT_TOKENS_PER_PAGE_ESTIMATE,
+        MAX_TOKENS_PER_PAGE,
     )
     return pages_per_call
+
 
 PAGE_SPLIT_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
 BATCH_EXTRACTION_PROMPT = (
@@ -331,7 +349,8 @@ async def _extract_pdf_streaming(
                 return page_results, warnings, total_pages
 
             pages_per_call = _compute_pages_per_call()
-            wave_size = pages_per_call * CONCURRENCY
+            concurrency_limit = _get_vision_concurrency_limit()
+            wave_size = pages_per_call * concurrency_limit
             logger.info(
                 'Vision extraction starting for %s: %s pages via %s',
                 filename or 'document',
@@ -339,11 +358,11 @@ async def _extract_pdf_streaming(
                 model,
             )
             logger.info(
-                'Vision streaming extraction: %d pages, wave_size=%d (%d pages/call × %d concurrent)',
+                'Vision streaming extraction: %d pages, wave_size=%d (%d pages/call × %d concurrent requests)',
                 total_pages,
                 wave_size,
                 pages_per_call,
-                CONCURRENCY,
+                concurrency_limit,
             )
 
             all_results: list[PageResult] = []
@@ -563,18 +582,20 @@ async def _process_all_pages(
         return [], []
 
     pages_per_call = _compute_pages_per_call()
+    concurrency_limit = _get_vision_concurrency_limit()
     batches = [pages[index : index + pages_per_call] for index in range(0, len(pages), pages_per_call)]
     logger.info(
-        'Vision extraction: %d pages in %d batches (%d pages/call)',
+        'Vision extraction: %d pages in %d batches (%d pages/call, %d concurrent requests)',
         len(pages),
         len(batches),
         pages_per_call,
+        concurrency_limit,
     )
     all_results: list[PageResult] = []
     all_warnings: list[ExtractionWarning] = []
 
-    for index in range(0, len(batches), CONCURRENCY):
-        batch_group = batches[index : index + CONCURRENCY]
+    for index in range(0, len(batches), concurrency_limit):
+        batch_group = batches[index : index + concurrency_limit]
         batch_outputs = await asyncio.gather(
             *[_extract_batch_adaptively(client, model, batch) for batch in batch_group]
         )
@@ -748,10 +769,7 @@ def _render_pdf_page_range(
             raise VisionExtractionError(f'Failed to rasterize PDF for vision extraction: {stderr}')
 
         numbered_page_paths = sorted(
-            (
-                (int(page_path.stem.rsplit('-', maxsplit=1)[-1]), page_path)
-                for page_path in tmp_path.glob('page-*.jpg')
-            ),
+            ((int(page_path.stem.rsplit('-', maxsplit=1)[-1]), page_path) for page_path in tmp_path.glob('page-*.jpg')),
             key=lambda item: item[0],
         )
         if not numbered_page_paths:
@@ -804,10 +822,7 @@ def _render_pdf_pages(document_bytes: bytes, *, pdf_password: str | None = None)
             raise VisionExtractionError(f'Failed to rasterize PDF for vision extraction: {stderr}')
 
         numbered_page_paths = sorted(
-            (
-                (int(page_path.stem.rsplit('-', maxsplit=1)[-1]), page_path)
-                for page_path in tmp_path.glob('page-*.jpg')
-            ),
+            ((int(page_path.stem.rsplit('-', maxsplit=1)[-1]), page_path) for page_path in tmp_path.glob('page-*.jpg')),
             key=lambda item: item[0],
         )
         if not numbered_page_paths:

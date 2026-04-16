@@ -229,8 +229,10 @@ def parse_args() -> argparse.Namespace:
     args.max_graph_nodes = get_env_value('MAX_GRAPH_NODES', 1000, int)
 
     args.llm_binding_host = get_env_value('LLM_BINDING_HOST', get_default_host(args.llm_binding))
+    args.vision_binding_host = get_env_value('VISION_BINDING_HOST', args.llm_binding_host)
     args.embedding_binding_host = get_env_value('EMBEDDING_BINDING_HOST', get_default_host(args.embedding_binding))
     args.llm_binding_api_key = get_env_value('LLM_BINDING_API_KEY', None)
+    args.vision_binding_api_key = get_env_value('VISION_BINDING_API_KEY', args.llm_binding_api_key)
     args.embedding_binding_api_key = get_env_value('EMBEDDING_BINDING_API_KEY', '')
 
     # Inject model configuration
@@ -317,6 +319,7 @@ def parse_args() -> argparse.Namespace:
     )
     args.embedding_func_max_async = get_env_value('EMBEDDING_FUNC_MAX_ASYNC', DEFAULT_EMBEDDING_FUNC_MAX_ASYNC, int)
     args.embedding_batch_num = get_env_value('EMBEDDING_BATCH_NUM', DEFAULT_EMBEDDING_BATCH_NUM, int)
+    args.entity_extract_max_async = get_env_value('ENTITY_EXTRACT_MAX_ASYNC', None, int, special_none=True)
 
     # Embedding token limit configuration
     args.embedding_token_limit = get_env_value('EMBEDDING_TOKEN_LIMIT', None, int, special_none=True)
