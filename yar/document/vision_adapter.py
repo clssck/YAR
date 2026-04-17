@@ -275,6 +275,9 @@ async def extract_document_with_vision(
 
     content, collected_warnings = stitch_extracted_pages(page_results, warnings)
     if not content:
+        failure_detail = _failure_detail_for_empty_extraction(collected_warnings)
+        if failure_detail is not None:
+            raise VisionExtractionError(failure_detail)
         raise VisionExtractionError('Vision extraction found no extractable text in the document')
 
     if collected_warnings:
@@ -503,28 +506,40 @@ async def _extract_batch_with_retry(
 ) -> tuple[list[PageResult], list[ExtractionWarning], bool]:
     """Try up to VISION_MAX_RETRIES times with exponential backoff + jitter."""
     last_exc: Exception | None = None
+    attempts_used = 0
+    stopped_on_non_retryable_error = False
     for attempt in range(VISION_MAX_RETRIES):
+        attempts_used = attempt + 1
         try:
             return await _extract_batch(client, model, pages)
         except Exception as exc:
             last_exc = exc
-            if attempt < VISION_MAX_RETRIES - 1:
-                delay = RETRY_DELAY_SECONDS * (2**attempt) + random.uniform(0, 1)
-                logger.warning(
-                    'Vision extraction retrying batch %s (attempt %d/%d, %.1fs backoff) after error: %s',
-                    _page_range_label(pages),
-                    attempt + 2,
-                    VISION_MAX_RETRIES,
-                    delay,
-                    _format_exception_message(exc),
-                )
-                await asyncio.sleep(delay)
+            stopped_on_non_retryable_error = _is_non_retryable_vision_error(exc)
+            if stopped_on_non_retryable_error or attempt == VISION_MAX_RETRIES - 1:
+                break
 
+            delay = RETRY_DELAY_SECONDS * (2**attempt) + random.uniform(0, 1)
+            logger.warning(
+                'Vision extraction retrying batch %s (attempt %d/%d, %.1fs backoff) after error: %s',
+                _page_range_label(pages),
+                attempt + 2,
+                VISION_MAX_RETRIES,
+                delay,
+                _format_exception_message(exc),
+            )
+            await asyncio.sleep(delay)
+
+    if last_exc is None:
+        raise VisionExtractionError('Vision extraction failed without an error detail')
     detail = _format_exception_message(last_exc)
+    attempt_label = 'attempt' if attempts_used == 1 else 'attempts'
+    retry_note = ' (non-retryable)' if stopped_on_non_retryable_error else ''
     logger.warning(
-        'Vision extraction failed batch %s after %d attempts: %s',
+        'Vision extraction failed batch %s after %d %s%s: %s',
         _page_range_label(pages),
-        VISION_MAX_RETRIES,
+        attempts_used,
+        attempt_label,
+        retry_note,
         detail,
     )
     warnings = [
@@ -999,6 +1014,58 @@ def _normalize_mime_type(mime_type: str | None) -> str:
 def _as_data_url(image_bytes: bytes, media_type: str) -> str:
     encoded = base64.b64encode(image_bytes).decode('ascii')
     return f'data:{media_type};base64,{encoded}'
+
+
+_NON_RETRYABLE_VISION_STATUS_CODES = frozenset({401, 403})
+_NON_RETRYABLE_VISION_ERROR_SNIPPETS = (
+    'authentication',
+    'forbidden',
+    'insufficient quota',
+    'insufficient_quota',
+    'key limit exceeded',
+    'permission denied',
+    'quota exceeded',
+    'quota exhausted',
+    'unauthorized',
+)
+
+
+def _failure_detail_for_empty_extraction(warnings: list[ExtractionWarning]) -> str | None:
+    details: list[str] = []
+    for warning in warnings:
+        if warning.source != 'vision_batch_failure':
+            continue
+        _, _, detail = warning.message.partition(': ')
+        normalized_detail = (detail or warning.message).strip()
+        if normalized_detail and normalized_detail not in details:
+            details.append(normalized_detail)
+
+    if not details:
+        return None
+    if len(details) == 1:
+        return details[0]
+    return 'Vision extraction failed: ' + '; '.join(details)
+
+
+def _exception_status_code(exc: Exception) -> int | None:
+    status_code = getattr(exc, 'status_code', None)
+    if isinstance(status_code, int):
+        return status_code
+
+    response = getattr(exc, 'response', None)
+    response_status = getattr(response, 'status_code', None)
+    if isinstance(response_status, int):
+        return response_status
+    return None
+
+
+def _is_non_retryable_vision_error(exc: Exception) -> bool:
+    status_code = _exception_status_code(exc)
+    if status_code in _NON_RETRYABLE_VISION_STATUS_CODES:
+        return True
+
+    detail = _format_exception_message(exc).lower()
+    return any(snippet in detail for snippet in _NON_RETRYABLE_VISION_ERROR_SNIPPETS)
 
 
 def _format_exception_message(exc: Exception) -> str:

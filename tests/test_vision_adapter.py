@@ -94,6 +94,66 @@ class TestVisionAdapter:
 
         client.close.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_extract_document_with_vision_surfaces_non_retryable_provider_failure(self):
+        class ProviderError(RuntimeError):
+            def __init__(self, message: str, *, status_code: int):
+                super().__init__(message)
+                self.status_code = status_code
+
+        pages = [vision.RenderedPage(page_number=1, total_pages=1, media_type='image/png', image_bytes=b'page-one')]
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=ProviderError('Key limit exceeded', status_code=403)
+        )
+        client.close = AsyncMock()
+
+        with (
+            patch.object(vision.asyncio, 'to_thread', AsyncMock(return_value=pages)),
+            patch.object(vision, 'create_openai_async_client', return_value=client),
+            patch.object(vision.asyncio, 'sleep', AsyncMock()) as sleep_mock,
+        ):
+            with pytest.raises(vision.VisionExtractionError, match='Key limit exceeded'):
+                await vision.extract_document_with_vision(
+                    b'fake-image',
+                    filename='scan.png',
+                    mime_type='image/png',
+                )
+
+        assert client.chat.completions.create.await_count == 1
+        sleep_mock.assert_not_awaited()
+        client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_extract_document_with_vision_retries_transient_failures_then_succeeds(self):
+        pages = [vision.RenderedPage(page_number=1, total_pages=1, media_type='image/png', image_bytes=b'page-one')]
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=[
+                RuntimeError('temporary upstream timeout'),
+                _make_chat_response('# Page 1\n\nRecovered text'),
+            ]
+        )
+        client.close = AsyncMock()
+
+        with (
+            patch.object(vision.asyncio, 'to_thread', AsyncMock(return_value=pages)),
+            patch.object(vision, 'create_openai_async_client', return_value=client),
+            patch.object(vision.random, 'uniform', return_value=0.0),
+            patch.object(vision.asyncio, 'sleep', AsyncMock()) as sleep_mock,
+        ):
+            result = await vision.extract_document_with_vision(
+                b'fake-image',
+                filename='scan.png',
+                mime_type='image/png',
+            )
+
+        assert client.chat.completions.create.await_count == 2
+        sleep_mock.assert_awaited_once_with(vision.RETRY_DELAY_SECONDS)
+        assert 'Recovered text' in result.content
+        assert result.warnings == []
+        client.close.assert_awaited_once()
+
     def test_is_vision_document_recognizes_office_extensions_and_mime_types(self):
         assert vision.is_vision_document(filename='slides.PPTX') is True
         assert vision.is_vision_document(filename='notes.rtf') is True
