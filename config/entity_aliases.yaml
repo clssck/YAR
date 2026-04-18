@@ -1,0 +1,39 @@
+entities:
+  - canonical: isatuximab
+    aliases:
+      - sarclisa
+      - sar650984
+  - canonical: fitusiran
+    aliases:
+      - fitusiran
+      - alnylam collaboration
+  - canonical: project freeze
+    aliases:
+      - project freeze
+      - freezd project
+      - freez project
+      - frozen project
+  - canonical: licencing
+    aliases:
+      - outsourcing and licensing
+      - formal check points about cmc outsourcing and licensing
+      - cmc outsourcing
+  - canonical: neogaa china bla
+    aliases:
+      - neogaa china bla
+      - m3 strategy
+      - neogaa lessons learned
+  - canonical: japanese icmc handbook
+    aliases:
+      - japanese icmc handbook
+      - japan-specific activities
+      - japan specific activities
+  - canonical: myokardia
+    aliases:
+      - myokardia
+      - powder in a bottle
+      - powder-in-a-bottle
+      - myk4491
+      - sar440181
+      - dcm1
+      - powder in bottle
