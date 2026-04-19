@@ -220,6 +220,7 @@
       "id": 13,
       "question": "For biologics should we ask shipping validation question in type C or B meeting",
       "expected_answer": "In type C",
+      "context_reference": "In type C meeting.",
       "contact": "Sophie Girault",
       "source_documents": [
         {
@@ -227,6 +228,9 @@
           "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-01-Shipping%20validation.pptx?d=w430d3892f2b14cb292c55e3ee6730e96&csf=1&web=1&e=pyQguk"
         }
       ],
+      "entity_filter": "shipping validation",
+      "hl_keywords": ["Biologics shipping validation"],
+      "ll_keywords": ["type C meeting", "shipping validation question"],
       "comments": ""
     },
     {
@@ -320,6 +324,7 @@
       "id": 20,
       "question": "Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk",
       "expected_answer": "the correct syntaxe of the description of a risk is: • Due to … the risk …could impact ….",
+      "context_reference": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
       "contact": "Sophie Girault",
       "source_documents": [
         {
@@ -327,6 +332,9 @@
           "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/17-LLsession-01-Risk%20Review%20CIR%2015%20march%202017.pdf?csf=1&web=1&e=55d6M6"
         }
       ],
+      "entity_filter": "risk review",
+      "hl_keywords": ["CMC risk descriptive syntax"],
+      "ll_keywords": ["Due to the risk could impact", "risk review syntax"],
       "comments": ""
     },
     {
@@ -458,6 +466,7 @@
       "id": 29,
       "question": "Is the sub-team leader the primary interface to the CMC project leader for all activities in scope of the subteam",
       "expected_answer": "Yes",
+      "context_reference": "Yes. The Sub-team Leader is the primary interface to the iCMC Leader for all activities in scope of the sub-teams.",
       "contact": "Sophie Girault",
       "source_documents": [
         {
@@ -465,6 +474,9 @@
           "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SOTA%20project%20closure%20LL%20consolidated%20version%20for%20cross-sharing%20session%20Nov%202020.pptx?d=wd64849ced5974c2696578acfe199cd45&csf=1&web=1&e=6Q8g44"
         }
       ],
+      "entity_filter": "sub-team leader",
+      "hl_keywords": ["Sub-team Leader responsibilities"],
+      "ll_keywords": ["primary interface", "all activities in scope of the sub-teams"],
       "comments": ""
     },
     {
@@ -548,6 +560,12 @@
           "name": "2023-11-09_NeoGAA Lessons Learned CN BLA_final.pptx",
           "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023-11-09_NeoGAA%20Lessons%20Learned%20CN%20BLA_final.pptx?d=w61e450cda5874f468a522fd12e426bee&csf=1&web=1&e=1IGH6f"
         }
+      ],
+      "hl_keywords": ["NeoGAA China submission"],
+      "ll_keywords": [
+        "full detail included",
+        "2 to 3 steps of reaction",
+        "starting material definition"
       ],
       "comments": ""
     },

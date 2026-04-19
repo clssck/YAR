@@ -3029,3 +3029,13 @@ class TestResponseQualityControls:
 
         assert any('List every supported item explicitly' in instruction for instruction in instructions)
         assert any('separate them with semicolons' in instruction for instruction in instructions)
+
+    def test_build_query_shaping_instructions_for_choice_queries(self):
+        """Choice questions should answer with the supported option only."""
+        instructions = _build_query_shaping_instructions(
+            'For biologics should we ask shipping validation question in type C or B meeting'
+        )
+
+        assert any('single supported fact or option' in instruction for instruction in instructions)
+        assert any('choose the supported option verbatim' in instruction for instruction in instructions)
+        assert any('fixed phrasing template' in instruction for instruction in instructions)

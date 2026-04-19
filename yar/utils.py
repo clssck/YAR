@@ -3192,6 +3192,13 @@ def analyze_query_intent(query: str) -> dict[str, Any]:
     is_culture_domain = any(re.search(pattern, normalized_query) for pattern in culture_domain_patterns)
     is_material_lookup = any(re.search(pattern, normalized_query) for pattern in material_lookup_patterns)
     is_document_completeness = any(re.search(pattern, normalized_query) for pattern in document_completeness_patterns)
+    is_choice = (
+        ' or ' in normalized_query
+        and not is_binary
+        and not is_enumeration
+        and not is_comparison
+        and any(re.search(pattern, normalized_query) for pattern in (r'\bwhat\b', r'\bwhich\b', r'\bshould\b'))
+    )
 
     if is_consequence:
         return {
@@ -3271,6 +3278,14 @@ def analyze_query_intent(query: str) -> dict[str, Any]:
             'recommended_chunk_limit': 7,
             'per_document_limit': 2,
             'allow_single_document_expansion': True,
+            'recommended_mode': 'mix',
+        }
+    if is_choice:
+        return {
+            'kind': 'single_fact',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 1,
+            'allow_single_document_expansion': False,
             'recommended_mode': 'mix',
         }
     if len(query_terms) <= 7:

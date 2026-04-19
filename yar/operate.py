@@ -3653,7 +3653,9 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
         ]
     if kind == 'single_fact':
         return [
-            'Lead with the single supported fact and stop after the minimum supporting detail needed for clarity.',
+            'Lead with the single supported fact or option and stop after the minimum supporting detail needed for clarity.',
+            'If the question asks between named options, choose the supported option verbatim and do not explain alternatives unless the context explicitly requires it.',
+            'If the source provides a fixed phrasing template, reproduce that phrasing plainly instead of adding markdown emphasis, placeholder labels, or extra explanation.',
         ]
     return []
 
