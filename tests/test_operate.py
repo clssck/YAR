@@ -2936,6 +2936,44 @@ class TestResponseQualityControls:
             assert [chunk['chunk_id'] for chunk in processed] == ['alpha-1', 'beta-1', 'gamma-1']
 
     @pytest.mark.asyncio
+    async def test_process_chunks_unified_prioritizes_exact_low_level_phrase_matches(self):
+        """Exact user-supplied low-level phrases should outrank generic phase/study matches."""
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=6, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Phase 1 study overview with site setup details and generic background.',
+                'file_path': 'generic-a.pdf',
+                'chunk_id': 'generic-a',
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'LL-2 - Difficult tracking of scope change in SoW\n\nLL-3 - "New Phase 1 clinical strategy tested"\nA new Phase 1 (SAD) clinical strategy was tested by MyoKardia: powder in bottle directly to the clinical center.',
+                'file_path': 'myokardia.pdf',
+                'chunk_id': 'myokardia-1',
+                'retrieval_score': 0.70,
+            },
+            {
+                'content': 'Phase 1 regulatory acceptance table covering submission content and questioned materials.',
+                'file_path': 'generic-b.pdf',
+                'chunk_id': 'generic-b',
+                'retrieval_score': 0.90,
+            },
+        ]
+
+        processed = await process_chunks_unified(
+            query='Do we already use Powder in a bottle directly for phase 1 study?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='hybrid',
+            chunk_token_limit=10_000,
+            topic_terms=['powder in bottle directly to the clinical center'],
+        )
+
+        assert processed[0]['chunk_id'] == 'myokardia-1'
+
+    @pytest.mark.asyncio
     async def test_process_chunks_unified_keeps_multiple_passages_for_single_document_lists(self):
         """Enumeration questions should retain multiple top passages when one document carries the full answer."""
         tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
@@ -2980,7 +3018,8 @@ class TestResponseQualityControls:
         )
 
         assert instructions[0].startswith('If the context supports a binary judgment')
-        assert 'shortest supported explanation' in instructions[1]
+        assert 'one short supported explanation' in instructions[1]
+        assert 'pending approval' in instructions[1]
 
     def test_build_query_shaping_instructions_for_enumeration_queries(self):
         """Enumeration questions should force explicit itemization instead of narrative blending."""

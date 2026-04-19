@@ -94,8 +94,8 @@ DEFAULT_MAX_FILE_PATHS = 100
 DEFAULT_FILE_PATH_MORE_PLACEHOLDER = 'truncated'
 
 # Default temperature for LLM (lower = more deterministic, less hallucination risk)
-# Using 0.1 for evaluation stability; production may use 0.3-0.7 for more varied responses
-DEFAULT_TEMPERATURE = 0.1
+# Keep zero by default so retrieval-backed answers and benchmark reruns stay reproducible.
+DEFAULT_TEMPERATURE = 0.0
 
 # Async configuration defaults
 DEFAULT_MAX_ASYNC = 4  # Default maximum async operations

@@ -3067,12 +3067,6 @@ def _normalize_chunk_base_scores(unique_chunks: Sequence[dict[str, Any]]) -> lis
     return [0.0 if score is None else (score - minimum_score) / (maximum_score - minimum_score) for score in raw_scores]
 
 
-
-
-
-
-
-
 def _apply_lexical_chunk_boost(
     query: str,
     unique_chunks: list[dict[str, Any]],
@@ -3407,6 +3401,14 @@ async def process_chunks_unified(
     # 3. Blend lexical boost after rerank filtering and before chunk budgeting
     lexical_boost_enabled = get_env_value('ENABLE_LEXICAL_BOOST', True, bool)
     lexical_boost_weight = min(max(cast(float, get_env_value('LEXICAL_BOOST_WEIGHT', 0.2, float)), 0.0), 1.0)
+    normalized_topic_terms = [
+        term for raw_term in (topic_terms or []) if (term := _normalize_lexical_term(str(raw_term)))
+    ]
+    if any(' ' in term for term in normalized_topic_terms):
+        # Exact low-level phrases are deliberate hints from the caller. Let them
+        # outrank higher base retrieval scores from generic phase/study chunks when
+        # the chunk text actually carries the requested phrase.
+        lexical_boost_weight = max(lexical_boost_weight, 0.75)
     if lexical_boost_enabled and lexical_boost_weight > 0.0 and len(unique_chunks) > 1:
         rare_terms = _derive_rare_terms(query, topic_terms=topic_terms, facet_terms=facet_terms)
         if rare_terms:
@@ -3418,7 +3420,6 @@ async def process_chunks_unified(
             )
 
     # 4. Prefer exact-support chunks when upstream retrieval already attached intent metadata.
-    
 
     # 5. Apply adaptive chunk budgeting before token truncation.
     configured_chunk_limit = (

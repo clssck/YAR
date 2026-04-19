@@ -120,23 +120,23 @@ try:
     RAGAS_AVAILABLE = True
 
 except ImportError:
-	RAGAS_AVAILABLE = False
-	Dataset = None
-	evaluate = None
-	Embeddings = object
-	OpenAI = None
-	ChatOpenAI = None
-	OpenAIEmbeddings = None
-	LangchainLLMWrapper = None
-	AnswerRelevancy = None
-	ContextPrecision = None
-	ContextPrecisionPrompt = None
-	ContextRecall = None
-	ContextRecallClassificationPrompt = None
-	Faithfulness = None
-	QCA = None
-	QAC = None
-	tqdm = None
+    RAGAS_AVAILABLE = False
+    Dataset = None
+    evaluate = None
+    Embeddings = object
+    OpenAI = None
+    ChatOpenAI = None
+    OpenAIEmbeddings = None
+    LangchainLLMWrapper = None
+    AnswerRelevancy = None
+    ContextPrecision = None
+    ContextPrecisionPrompt = None
+    ContextRecall = None
+    ContextRecallClassificationPrompt = None
+    Faithfulness = None
+    QCA = None
+    QAC = None
+    tqdm = None
 
 
 class OpenAICompatibleEmbeddings(Embeddings):
@@ -180,8 +180,12 @@ TOTAL_TIMEOUT_SECONDS = 180.0
 EVAL_USER_PROMPT = os.getenv(
     'EVAL_USER_PROMPT',
     'Answer confidently and directly based on the provided context. '
+    'For yes/no questions, start with "Yes" or "No" and immediately give one brief evidence-based sentence that cites or closely paraphrases the key supporting phrase from the context. '
+    'Never answer with only Yes or No. '
+    'Do not add your own caution, policy advice, or unsupported conditions. '
+    'If the context describes a pending question, requested feedback, or proposed next step, keep it pending and do not rewrite it as approval or endorsement. '
     'Synthesize information across sources. Avoid phrases like "does not explicitly mention" '
-    'or "context does not detail". If information is partial, provide what you can.',
+    'or "context does not detail". If information is partial, provide only the supported portion and stop there.',
 )
 
 # RAGAS AnswerRelevancy strictness - number of questions generated per answer
@@ -237,6 +241,7 @@ def _calculate_ragas_score(metrics: dict[str, float]) -> float:
 
     return sum(metrics[metric_name] for metric_name in REQUIRED_METRIC_NAMES) / len(REQUIRED_METRIC_NAMES)
 
+
 async def _collect_metric_verdict_traces(
     llm: Any,
     question: str,
@@ -289,6 +294,7 @@ async def _collect_metric_verdict_traces(
         result['context_precision_trace_error'] = str(exc)
 
     return result
+
 
 def _coerce_skip_flag(value: Any) -> bool:
     """Normalize skip markers from datasets to a strict bool."""
@@ -592,6 +598,7 @@ def _summarize_reference(reference: dict[str, Any]) -> dict[str, str]:
         'excerpt': _preview_text(excerpt),
     }
 
+
 def _flatten_references_to_contexts_and_sources(
     references: list[Any],
 ) -> tuple[list[str], list[dict[str, Any]]]:
@@ -623,6 +630,7 @@ def _flatten_references_to_contexts_and_sources(
             contexts.append(content)
             sources.append({**meta, 'content_index': 0})
     return contexts, sources
+
 
 def _summarize_chunk(chunk: dict[str, Any]) -> dict[str, str]:
     """Convert a chunk record into a compact diagnostic entry."""
@@ -839,6 +847,7 @@ class RAGEvaluator:
 
             eval_model = os.getenv('EVAL_LLM_MODEL', 'gpt-4o-mini')
             eval_llm_base_url = os.getenv('EVAL_LLM_BINDING_HOST')
+            eval_llm_temperature = float(os.getenv('EVAL_LLM_TEMPERATURE', '0'))
             eval_embedding_api_key = (
                 os.getenv('EVAL_EMBEDDING_BINDING_API_KEY')
                 or os.getenv('EVAL_LLM_BINDING_API_KEY')
@@ -857,6 +866,7 @@ class RAGEvaluator:
                 'api_key': eval_llm_api_key,
                 'max_retries': int(os.getenv('EVAL_LLM_MAX_RETRIES', '5')),
                 'request_timeout': int(os.getenv('EVAL_LLM_TIMEOUT', '180')),
+                'temperature': eval_llm_temperature,
             }
             embedding_kwargs = {
                 'model': eval_embedding_model,

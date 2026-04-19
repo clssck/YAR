@@ -33,16 +33,17 @@ from yar.base import (
 )
 from yar.evaluation.e2e_test_harness import resolve_dataset_path
 from yar.evaluation.eval_rag_quality import (
-	EVAL_ANSWER_RELEVANCY_STRICTNESS,
-	RAGEvaluator,
-	_calculate_ragas_score,
-	_collect_metric_verdict_traces,
-	_flatten_references_to_contexts_and_sources,
-	_has_complete_metrics,
-	_load_bottom_case_numbers,
-	_load_case_mode_overrides,
-	_parse_case_numbers,
-	_pick_results_for_diagnostics,
+    EVAL_ANSWER_RELEVANCY_STRICTNESS,
+    EVAL_USER_PROMPT,
+    RAGEvaluator,
+    _calculate_ragas_score,
+    _collect_metric_verdict_traces,
+    _flatten_references_to_contexts_and_sources,
+    _has_complete_metrics,
+    _load_bottom_case_numbers,
+    _load_case_mode_overrides,
+    _parse_case_numbers,
+    _pick_results_for_diagnostics,
 )
 from yar.yar import YAR, _resolve_effective_query_mode
 
@@ -872,6 +873,27 @@ class TestEvaluationHarnessHelpers:
 
         assert payload['mode'] == 'naive'
 
+    def test_build_query_payload_uses_yes_no_evidence_prompt(self):
+        """Eval payloads should force a short evidence sentence after yes/no answers."""
+        evaluator = object.__new__(RAGEvaluator)
+        evaluator.query_mode = 'mix'
+        evaluator.debug_mode = False
+
+        payload = RAGEvaluator._build_query_payload(
+            evaluator,
+            'Does the NeoGAA China submission include full detail for the reaction steps?',
+            {},
+            include_response_type=True,
+        )
+
+        assert payload['response_type'] == 'Single Paragraph'
+        assert payload['user_prompt'] == EVAL_USER_PROMPT
+        assert 'Never answer with only Yes or No' in payload['user_prompt']
+        assert 'brief evidence-based sentence' in payload['user_prompt']
+        assert 'closely paraphrases the key supporting phrase' in payload['user_prompt']
+        assert 'Do not add your own caution' in payload['user_prompt']
+        assert 'keep it pending' in payload['user_prompt']
+
     def test_load_case_mode_overrides_validates_keys_and_modes(self, tmp_path):
         overrides_path = tmp_path / 'case_modes.json'
         overrides_path.write_text(json.dumps({'3': 'naive', '5': 'local'}), encoding='utf-8')
@@ -1006,6 +1028,7 @@ class TestEvaluationHarnessHelpers:
             api_key='llm-secret',
             max_retries=7,
             request_timeout=123,
+            temperature=0.0,
             base_url='https://llm.example.test/v1',
         )
         embeddings_cls.assert_called_once_with(
@@ -1057,6 +1080,7 @@ class TestEvaluationHarnessHelpers:
             api_key='llm-secret',
             max_retries=2,
             request_timeout=45,
+            temperature=0.0,
             base_url='https://llm.example.test/v1',
         )
         embeddings_cls.assert_called_once_with(
@@ -1295,9 +1319,7 @@ class TestEvaluationHarnessHelpers:
         with (
             patch.object(RAGEvaluator, 'generate_rag_response', new=AsyncMock(return_value=rag_response)),
             patch.object(RAGEvaluator, '_post_query', new=AsyncMock(return_value=retrieval_result)),
-            patch.object(
-                RAGEvaluator, '_build_query_payload', return_value={'mode': 'mix'}
-            ),
+            patch.object(RAGEvaluator, '_build_query_payload', return_value={'mode': 'mix'}),
         ):
             diagnostic = await RAGEvaluator._collect_single_case_diagnostic(
                 evaluator, test_case, benchmark_result, client=object()
@@ -1362,12 +1384,14 @@ class TestEvaluationHarnessHelpers:
             )
 
         # RAGAS dataset must receive context_reference, not the filename-laden ground_truth
-        dataset_from_dict.assert_called_once_with({
-            'question': ['Is there a lesson learned on comparability?'],
-            'answer': ['Yes, a lesson exists.'],
-            'contexts': [['chunk about comparability']],
-            'ground_truth': ['Yes, there is a lesson learned on comparability covering evaluation of similarity.'],
-        })
+        dataset_from_dict.assert_called_once_with(
+            {
+                'question': ['Is there a lesson learned on comparability?'],
+                'answer': ['Yes, a lesson exists.'],
+                'contexts': [['chunk about comparability']],
+                'ground_truth': ['Yes, there is a lesson learned on comparability covering evaluation of similarity.'],
+            }
+        )
         # Displayed result still carries the original benchmark answer
         assert result['ground_truth'] == 'Yes 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx'
 
@@ -1410,12 +1434,14 @@ class TestEvaluationHarnessHelpers:
             )
 
         # No context_reference → RAGAS receives the raw ground_truth directly
-        dataset_from_dict.assert_called_once_with({
-            'question': ['Should we sign?'],
-            'answer': ['No.'],
-            'contexts': [['chunk']],
-            'ground_truth': ['yes'],
-        })
+        dataset_from_dict.assert_called_once_with(
+            {
+                'question': ['Should we sign?'],
+                'answer': ['No.'],
+                'contexts': [['chunk']],
+                'ground_truth': ['yes'],
+            }
+        )
 
     @pytest.mark.asyncio
     async def test_collect_single_case_diagnostic_uses_context_reference_as_ragas_reference(self):
@@ -1455,10 +1481,15 @@ class TestEvaluationHarnessHelpers:
             )
 
         # ragas_reference must be the context_reference, not the filename-laden benchmark answer
-        assert diagnostic['ragas_reference'] == 'Yes, there is a lesson learned on comparability from the IntraCluster Diabetes program.'
+        assert (
+            diagnostic['ragas_reference']
+            == 'Yes, there is a lesson learned on comparability from the IntraCluster Diabetes program.'
+        )
         # ground_truth must preserve the original benchmark answer unchanged
         assert diagnostic['ground_truth'] == 'Yes 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx'
         assert diagnostic['test_number'] == 19
+
+
 class TestFlattenReferencesToContextsAndSources:
     """Unit tests for _flatten_references_to_contexts_and_sources."""
 
@@ -1525,15 +1556,14 @@ class TestFlattenReferencesToContextsAndSources:
         assert contexts == ['chunk']
         assert len(sources) == 1
 
+
 class TestCollectMetricVerdictTraces:
     """Unit tests for _collect_metric_verdict_traces."""
 
     @pytest.mark.asyncio
     async def test_none_llm_returns_empty_verdicts(self):
         """When llm is None the function returns empty lists without contacting any model."""
-        result = await _collect_metric_verdict_traces(
-            llm=None, question='Q?', contexts=['ctx'], reference='ref'
-        )
+        result = await _collect_metric_verdict_traces(llm=None, question='Q?', contexts=['ctx'], reference='ref')
         assert result['context_recall_verdicts'] == []
         assert result['context_precision_verdicts'] == []
         assert 'context_recall_trace_error' not in result
@@ -1542,9 +1572,7 @@ class TestCollectMetricVerdictTraces:
     @pytest.mark.asyncio
     async def test_empty_contexts_returns_empty_verdicts(self):
         """Empty contexts list short-circuits before any prompt call."""
-        result = await _collect_metric_verdict_traces(
-            llm=object(), question='Q?', contexts=[], reference='ref'
-        )
+        result = await _collect_metric_verdict_traces(llm=object(), question='Q?', contexts=[], reference='ref')
         assert result['context_recall_verdicts'] == []
         assert result['context_precision_verdicts'] == []
 

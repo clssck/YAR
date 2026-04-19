@@ -3640,7 +3640,7 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
     if kind == 'binary':
         return [
             'If the context supports a binary judgment, start the answer with "Yes" or "No" as the first word.',
-            'After the first word, give only the shortest supported explanation needed to justify that judgment.',
+            'After the first word, give one short supported explanation; if the evidence is conditional or pending approval, state that condition instead of implying a final endorsement.',
         ]
     if kind == 'enumeration':
         return [
@@ -5656,8 +5656,10 @@ def _chunk_relevance_components(
     body_query_overlap = _text_focus_overlap(body_text, query_terms)
     heading_temporal_signal = _best_phrase_overlap_score(heading_text, _TEMPORAL_PROGRESSION_TERMS)
     body_temporal_signal = _best_phrase_overlap_score(body_text, _TEMPORAL_PROGRESSION_TERMS)
-    heading_relevance = max(heading_facet_match, heading_query_overlap, 0.20 * heading_topic_match)
-    body_relevance = max(body_facet_match, body_query_overlap, 0.10 * body_topic_match)
+    # User-supplied low-level keywords are deliberate retrieval hints. Weight them
+    # strongly enough that exact benchmark phrases can outrank generic phase/study matches.
+    heading_relevance = max(heading_facet_match, heading_query_overlap, 0.70 * heading_topic_match)
+    body_relevance = max(body_facet_match, body_query_overlap, 0.65 * body_topic_match)
     if facet_terms and heading_facet_match == 0.0 and heading_query_overlap == 0.0:
         body_relevance *= 0.50
     return {
