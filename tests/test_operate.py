@@ -24,6 +24,7 @@ from yar.operate import (
     _build_context_str,
     _build_prompt_chunk_context,
     _build_query_context,
+    _build_query_shaping_instructions,
     _enrich_local_keywords,
     _find_most_related_edges_from_entities,
     _get_node_data,
@@ -41,6 +42,7 @@ from yar.operate import (
     kg_query,
 )
 from yar.prompt import PROMPTS
+from yar.utils import process_chunks_unified
 
 # ============================================================================
 # Text Chunking Tests
@@ -1438,6 +1440,8 @@ class TestExtractEntities:
             'doc-b-1',
             'doc-b-2',
         ]
+
+
 # ============================================================================
 # Edge Cases and Integration Tests
 # ============================================================================
@@ -1841,7 +1845,6 @@ class TestPerformKgSearchScoreAwareMerge:
         assert result['final_relations'][0].get('src_id') == 'a'
 
 
-
 @pytest.mark.offline
 class TestEntityQueryEmbeddingReuse:
     """Regression tests for reusing precomputed entity query embeddings."""
@@ -1940,9 +1943,7 @@ class TestEntityQueryEmbeddingReuse:
                 'BetaOne': {'entity_type': 'COMPANY', 'description': 'Beta one'},
             }
         )
-        knowledge_graph_inst.node_degrees_batch = AsyncMock(
-            return_value={'AlphaOne': 5, 'BetaOne': 3}
-        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(return_value={'AlphaOne': 5, 'BetaOne': 3})
 
         candidate_lists = [
             [
@@ -1971,6 +1972,8 @@ class TestEntityQueryEmbeddingReuse:
         knowledge_graph_inst.get_nodes_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
         knowledge_graph_inst.node_degrees_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
         assert all(node['entity_name'] != 'AlphaTwo' for node in node_datas)
+
+
 @pytest.mark.offline
 class TestPerformKgSearchBranchExecution:
     """Tests for branch execution behavior in _perform_kg_search."""
@@ -2666,6 +2669,47 @@ class TestResponseQualityControls:
         assert [reference['file_path'] for reference in visible_references] == ['medical_diabetes.md']
         assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1']
 
+    def test_prepare_visible_reference_payload_drops_near_best_off_topic_doc_when_topic_signal_exists(self):
+        visible_references, visible_chunks = _prepare_visible_reference_payload(
+            [
+                {
+                    'reference_id': '1',
+                    'content': '=== Sarclisa manufacturing flow ===\nThe Netherlands physical flow created label and shipping consequences for Sarclisa.',
+                    'file_path': 'sarclisa.md',
+                    'chunk_id': 'sarclisa-1',
+                    'intent_relevance': 0.78,
+                    'query_focus_overlap': 0.72,
+                    'heading_topic_match': 1.0,
+                    'body_topic_match': 1.0,
+                    'heading_facet_match': 0.5,
+                    'body_facet_match': 0.5,
+                },
+                {
+                    'reference_id': '2',
+                    'content': '=== Manufacturing impact ===\nA different program had manufacturing and regulatory consequences for a separate product.',
+                    'file_path': 'other-program.md',
+                    'chunk_id': 'other-1',
+                    'intent_relevance': 0.76,
+                    'query_focus_overlap': 0.70,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 0.0,
+                    'heading_facet_match': 1.0,
+                    'body_facet_match': 1.0,
+                },
+            ],
+            [
+                {'reference_id': '1', 'file_path': 'sarclisa.md'},
+                {'reference_id': '2', 'file_path': 'other-program.md'},
+            ],
+            'What were the manufacturing consequences for Sarclisa in the Netherlands?',
+            include_reference_ids=False,
+            topic_terms=['Sarclisa'],
+            facet_terms=['manufacturing consequences', 'regulatory submission impact'],
+        )
+
+        assert [reference['file_path'] for reference in visible_references] == ['sarclisa.md']
+        assert [chunk['chunk_id'] for chunk in visible_chunks] == ['sarclisa-1']
+
     def test_prepare_visible_reference_payload_uses_best_chunk_per_document_group(self):
         visible_references, visible_chunks = _prepare_visible_reference_payload(
             [
@@ -2777,6 +2821,7 @@ class TestResponseQualityControls:
     @pytest.mark.asyncio
     async def test_hyde_timeout_falls_back_to_original_query(self):
         """HyDE gracefully degrades on timeout instead of failing the query."""
+
         async def slow_llm(*args, **kwargs):
             await asyncio.sleep(10)  # Will exceed timeout
             return 'Hypothetical answer'
@@ -2847,3 +2892,101 @@ class TestResponseQualityControls:
         assert result is not None
         assert result.content == 'Fallback answer'
         assert result.raw_data['metadata']['fallback'] == 'direct_vector'
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_limits_binary_questions_to_one_passage_per_document(self):
+        """Binary questions should keep the best passage per document for vector-only and hybrid chunk sets."""
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=8, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Alpha answer passage',
+                'file_path': 'alpha.md',
+                'chunk_id': 'alpha-1',
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'Alpha background passage',
+                'file_path': 'alpha.md',
+                'chunk_id': 'alpha-2',
+                'retrieval_score': 0.80,
+            },
+            {
+                'content': 'Beta supporting passage',
+                'file_path': 'beta.md',
+                'chunk_id': 'beta-1',
+                'retrieval_score': 0.75,
+            },
+            {'content': 'Beta extra detail', 'file_path': 'beta.md', 'chunk_id': 'beta-2', 'retrieval_score': 0.70},
+            {'content': 'Gamma fallback note', 'file_path': 'gamma.md', 'chunk_id': 'gamma-1', 'retrieval_score': 0.65},
+        ]
+
+        for source_type in ('naive', 'hybrid'):
+            processed = await process_chunks_unified(
+                query='Does Alpha already use powder in a bottle directly?',
+                unique_chunks=chunks,
+                query_param=query_param,
+                global_config={'tokenizer': tokenizer},
+                source_type=source_type,
+                chunk_token_limit=10_000,
+            )
+
+            assert [chunk['chunk_id'] for chunk in processed] == ['alpha-1', 'beta-1', 'gamma-1']
+
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_keeps_multiple_passages_for_single_document_lists(self):
+        """Enumeration questions should retain multiple top passages when one document carries the full answer."""
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=8, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Category one lesson',
+                'file_path': 'lessons.pdf',
+                'chunk_id': 'lesson-1',
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'Category two lesson',
+                'file_path': 'lessons.pdf',
+                'chunk_id': 'lesson-2',
+                'retrieval_score': 0.90,
+            },
+            {
+                'content': 'Category three lesson',
+                'file_path': 'lessons.pdf',
+                'chunk_id': 'lesson-3',
+                'retrieval_score': 0.85,
+            },
+            {'content': 'Appendix detail', 'file_path': 'lessons.pdf', 'chunk_id': 'lesson-4', 'retrieval_score': 0.80},
+        ]
+
+        processed = await process_chunks_unified(
+            query='What are the 3 categories of lessons learned about chemistry?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='naive',
+            chunk_token_limit=10_000,
+        )
+
+        assert [chunk['chunk_id'] for chunk in processed] == ['lesson-1', 'lesson-2', 'lesson-3']
+
+    def test_build_query_shaping_instructions_for_binary_queries(self):
+        """Binary questions should force a yes/no-first response contract."""
+        instructions = _build_query_shaping_instructions(
+            'Does the NeoGAA China submission include full detail for the reaction steps?'
+        )
+
+        assert instructions[0].startswith('If the context supports a binary judgment')
+        assert 'shortest supported explanation' in instructions[1]
+
+    def test_build_query_shaping_instructions_for_enumeration_queries(self):
+        """Enumeration questions should force explicit itemization instead of narrative blending."""
+        instructions = _build_query_shaping_instructions(
+            'What are the 3 categories of lessons learned about chemistry?'
+        )
+
+        assert any('List every supported item explicitly' in instruction for instruction in instructions)
+        assert any('separate them with semicolons' in instruction for instruction in instructions)

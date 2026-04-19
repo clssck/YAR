@@ -236,6 +236,16 @@ class TestRAGResponsePrompts:
         response = PROMPTS['fail_response']
         assert '[no-context]' in response
 
+    def test_rag_response_guides_binary_and_list_shapes(self):
+        """Answer prompts should explicitly cover binary and list-style questions."""
+        rag_prompt = PROMPTS['rag_response']
+        naive_prompt = PROMPTS['naive_rag_response']
+
+        assert 'For yes/no questions, start the answer with "Yes" or "No"' in rag_prompt
+        assert 'For yes/no questions, start the answer with "Yes" or "No"' in naive_prompt
+        assert 'keep each supported item explicit and separate them cleanly with semicolons' in rag_prompt
+        assert 'keep each supported item explicit and separate them cleanly with semicolons' in naive_prompt
+
 
 class TestQueryContextPrompts:
     """Tests for query context prompts."""
@@ -454,4 +464,3 @@ class TestPromptKeyConsistency:
 
         for key in example_keys:
             assert key.endswith('examples'), f'List key {key} should end with examples'
-

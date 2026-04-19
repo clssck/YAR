@@ -50,10 +50,12 @@ from yar.constants import (
 from yar.exceptions import PipelineCancelledException
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
+from yar.retrieval import resolve_entity_filter
 from yar.type_defs import GlobalConfig, resolve_entity_extract_max_async
 from yar.utils import (
     CacheData,
     Tokenizer,
+    analyze_query_intent,
     apply_source_ids_limit,
     compute_args_hash,
     compute_mdhash_id,
@@ -102,6 +104,29 @@ def _resolve_max_file_paths(global_config: GlobalConfig) -> int:
         )
         max_file_paths = DEFAULT_MAX_FILE_PATHS
     return max(0, max_file_paths)
+
+
+def _apply_auto_entity_filter(query: str, query_param: QueryParam) -> str | None:
+    """Populate entity_filter from alias table when auto-routing is enabled."""
+    if query_param.entity_filter is not None:
+        return None
+    if os.getenv('ENABLE_AUTO_ENTITY_FILTER', 'true').lower() == 'false':
+        return None
+    resolved_entity_filter = resolve_entity_filter(query)
+    if resolved_entity_filter is None:
+        return None
+    query_param.entity_filter = resolved_entity_filter
+    logger.info(f'auto entity_filter={resolved_entity_filter} (from alias table)')
+    return resolved_entity_filter
+
+
+def _clear_auto_entity_filter(query_param: QueryParam, auto_entity_filter: str | None, *, reason: str) -> bool:
+    """Clear an auto-applied filter so the caller can retry without sacrificing recall."""
+    if auto_entity_filter is None or query_param.entity_filter != auto_entity_filter:
+        return False
+    logger.info(f'auto entity_filter={auto_entity_filter} produced no results; retrying without it for {reason}')
+    query_param.entity_filter = None
+    return True
 
 
 def _truncate_extract_input_content(content: str, global_config: GlobalConfig, chunk_key: str) -> str:
@@ -3592,16 +3617,45 @@ def _normalize_response_type(response_type: str | None) -> str:
     return normalized or 'Multiple Paragraphs'
 
 
-def _format_additional_instructions(user_prompt: str | None) -> str:
+def _format_additional_instructions(user_prompt: str | None, *, query: str = '') -> str:
+    instruction_lines = _build_query_shaping_instructions(query)
     normalized_prompt = (user_prompt or '').strip()
-    if not normalized_prompt:
+    if normalized_prompt:
+        instruction_lines.append(normalized_prompt)
+    if not instruction_lines:
         return ''
+    formatted_lines = '\n'.join(f'- {instruction}' for instruction in instruction_lines)
     return (
         'Additional Instructions:\n'
-        'Follow any extra formatting or concision constraints below, but still '
-        'answer every part of the question that the context supports.\n'
-        f'{normalized_prompt}\n\n'
+        'Follow the answer-shape constraints below while still answering every part '
+        'of the question that the context supports.\n'
+        f'{formatted_lines}\n\n'
     )
+
+
+def _build_query_shaping_instructions(query: str) -> list[str]:
+    """Return query-specific answer-shaping rules for the generator prompt."""
+    intent_profile = analyze_query_intent(query)
+    kind = str(intent_profile.get('kind', 'default'))
+    if kind == 'binary':
+        return [
+            'If the context supports a binary judgment, start the answer with "Yes" or "No" as the first word.',
+            'After the first word, give only the shortest supported explanation needed to justify that judgment.',
+        ]
+    if kind == 'enumeration':
+        return [
+            'List every supported item explicitly; do not collapse multiple items into a vague summary.',
+            'When the format is a single paragraph, keep the items compact and separate them with semicolons.',
+        ]
+    if kind == 'comparison':
+        return [
+            'Keep the comparison explicit: name each side, phase, or time period and state the supported difference for each.',
+        ]
+    if kind == 'single_fact':
+        return [
+            'Lead with the single supported fact and stop after the minimum supporting detail needed for clarity.',
+        ]
+    return []
 
 
 def _is_temporal_or_comparative_query(query: str) -> bool:
@@ -3738,6 +3792,8 @@ async def kg_query(
     if not query:
         return QueryResult(content=PROMPTS['fail_response'])
 
+    auto_entity_filter = _apply_auto_entity_filter(query, query_param)
+
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
@@ -3783,6 +3839,18 @@ async def kg_query(
         query_param,
         chunks_vdb,
     )
+    if context_result is None and _clear_auto_entity_filter(query_param, auto_entity_filter, reason='kg_query'):
+        context_result = await _build_query_context(
+            query,
+            ll_keywords_str,
+            hl_keywords_str,
+            knowledge_graph_inst,
+            entities_vdb,
+            relationships_vdb,
+            text_chunks_db,
+            query_param,
+            chunks_vdb,
+        )
 
     if context_result is None:
         if chunks_vdb is not None:
@@ -3799,7 +3867,7 @@ async def kg_query(
                             global_config.get('max_total_tokens', DEFAULT_MAX_TOTAL_TOKENS),
                         )
                     )
-                    user_prompt = _format_additional_instructions(query_param.user_prompt)
+                    user_prompt = _format_additional_instructions(query_param.user_prompt, query=query)
                     response_type = _normalize_response_type(query_param.response_type)
                     sys_prompt_template = system_prompt if system_prompt else PROMPTS['rag_response']
                     pre_sys_prompt = sys_prompt_template.format(
@@ -3818,6 +3886,8 @@ async def kg_query(
                         global_config=global_config,
                         source_type='vector',
                         chunk_token_limit=available_chunk_tokens,
+                        topic_terms=ll_keywords,
+                        facet_terms=hl_keywords,
                     )
                     if processed_chunks:
                         reference_list, processed_chunks = generate_reference_list_from_chunks(processed_chunks)
@@ -3860,7 +3930,7 @@ async def kg_query(
     if query_param.only_need_context and not query_param.only_need_prompt:
         return QueryResult(content=context_result.context, raw_data=context_result.raw_data)
 
-    user_prompt = _format_additional_instructions(query_param.user_prompt)
+    user_prompt = _format_additional_instructions(query_param.user_prompt, query=query)
     response_type = _normalize_response_type(query_param.response_type)
     response_max_tokens = _response_max_tokens(response_type, query=query)
 
@@ -3908,7 +3978,9 @@ async def kg_query(
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
-    cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
+    cached_result = None
+    if not query_param.disable_cache:
+        cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
 
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
@@ -3927,7 +3999,7 @@ async def kg_query(
             ),
         )
 
-        if hashing_kv and hashing_kv.global_config.get('enable_llm_cache'):
+        if not query_param.disable_cache and hashing_kv and hashing_kv.global_config.get('enable_llm_cache'):
             queryparam_dict = {
                 'mode': query_param.mode,
                 'response_type': query_param.response_type,
@@ -4060,7 +4132,9 @@ async def extract_keywords_only(
         hash_args.append(conversation_history_hash)
 
     args_hash = compute_args_hash(*hash_args)
-    cached_result = await handle_cache(hashing_kv, args_hash, text, param.mode, cache_type='keywords')
+    cached_result = None
+    if not param.disable_cache:
+        cached_result = await handle_cache(hashing_kv, args_hash, text, param.mode, cache_type='keywords')
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
         try:
@@ -4110,7 +4184,7 @@ async def extract_keywords_only(
             'high_level_keywords': hl_keywords,
             'low_level_keywords': ll_keywords,
         }
-        if hashing_kv is not None and hashing_kv.global_config.get('enable_llm_cache'):
+        if not param.disable_cache and hashing_kv is not None and hashing_kv.global_config.get('enable_llm_cache'):
             # Save to cache with query parameters
             queryparam_dict = {
                 'mode': param.mode,
@@ -4182,7 +4256,12 @@ async def _get_vector_context(
         return min(max(max(similarity_candidates), 0.0), 1.0)
 
     try:
-        search_top_k = query_param.chunk_top_k or query_param.top_k
+        base_top_k = query_param.chunk_top_k or query_param.top_k
+        # Two-stage retrieval: oversample candidates when reranking is on so the reranker
+        # has room to surface chunks the first-stage vector score buried. Without rerank
+        # the extra candidates would just be truncated by chunk_top_k later, so skip.
+        multiplier = max(query_param.retrieval_multiplier, 1) if query_param.enable_rerank else 1
+        search_top_k = base_top_k * multiplier
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
 
         try:
@@ -4222,16 +4301,67 @@ async def _get_vector_context(
             }
             valid_chunks.append(chunk_with_metadata)
 
+        if query_param.entity_filter:
+            filter_term = query_param.entity_filter.casefold()
+            filtered_chunks = [
+                chunk
+                for chunk in valid_chunks
+                if any(
+                    filter_term in str(chunk.get(field, '')).casefold() for field in ('content', 'file_path', 's3_key')
+                )
+            ]
+            logger.info(
+                f"Chunk entity filter '{query_param.entity_filter}': "
+                f'{len(valid_chunks)} → {len(filtered_chunks)} chunks'
+            )
+            valid_chunks = filtered_chunks
+            if not valid_chunks:
+                logger.warning(f"Chunk entity filter '{query_param.entity_filter}' removed all results")
+                return []
+
         search_type = 'bm25_fusion' if query_param.enable_bm25_fusion else 'vector'
+        oversample_note = f' oversample:{multiplier}x' if multiplier > 1 else ''
         logger.info(
             f'Naive query ({search_type}): {len(valid_chunks)} chunks '
-            f'(chunk_top_k:{search_top_k} cosine:{cosine_threshold})'
+            f'(chunk_top_k:{base_top_k} retrieved:{search_top_k}{oversample_note} cosine:{cosine_threshold})'
         )
         return valid_chunks
 
     except Exception as e:
         logger.error(f'Error in _get_vector_context: {e}')
         return []
+
+
+async def _generate_hyde_answer(
+    query: str,
+    *,
+    use_model_func: Callable[..., Awaitable[str]] | None,
+    llm_timeout: float,
+    context: str = '',
+) -> str | None:
+    """Generate a hypothetical answer for HyDE retrieval.
+
+    Returns the stripped hypothetical answer when it is long enough to be useful
+    (>= 10 chars), else None. All failure modes (missing LLM, timeout, exception,
+    too-short answer) collapse to None so callers can fall back to the original
+    query without branching on error type.
+    """
+    if not query or not use_model_func:
+        return None
+    label = f'HyDE ({context})' if context else 'HyDE'
+    try:
+        hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
+        response = cast(str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=llm_timeout))
+        normalized = response.strip() if isinstance(response, str) else ''
+        if len(normalized) >= 10:
+            logger.debug(f'{label}: Using hypothetical answer ({len(normalized)} chars)')
+            return normalized
+        logger.warning(f'{label}: Generated answer too short, using original query')
+    except asyncio.TimeoutError:
+        logger.warning(f'{label}: Timed out after {llm_timeout}s, falling back to original query')
+    except Exception as e:
+        logger.warning(f'{label}: Failed: {e}, using original query')
+    return None
 
 
 async def _perform_kg_search(
@@ -4278,33 +4408,17 @@ async def _perform_kg_search(
 
     # HyDE: Generate hypothetical answer if enabled
     if query and query_param.enable_hyde:
-        try:
-            use_model_func = cast(
-                Callable[..., Awaitable[str]],
-                query_param.model_func or text_chunks_db.global_config.get('llm_model_func'),
-            )
-            if use_model_func:
-                hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
-                hyde_timeout = float(text_chunks_db.global_config.get('llm_timeout', 60))
-                hypothetical_answer = cast(
-                    str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=hyde_timeout)
-                )
-                normalized_hypothetical_answer = (
-                    hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
-                )
-                hyde_answer_length = len(normalized_hypothetical_answer)
-                logger.debug(f'HyDE: Generated hypothetical answer length={hyde_answer_length}')
-                if hyde_answer_length >= 10:
-                    embedding_query_text = normalized_hypothetical_answer
-                    logger.debug(f'HyDE: Using hypothetical answer ({hyde_answer_length} chars) for embedding')
-                else:
-                    logger.warning('HyDE: Generated answer too short, using original query')
-            else:
-                logger.warning('HyDE enabled but no LLM function available')
-        except asyncio.TimeoutError:
-            logger.warning(f'HyDE: Timed out after {hyde_timeout}s, falling back to original query')
-        except Exception as e:
-            logger.warning(f'HyDE: Failed to generate hypothetical answer: {e}, using original query')
+        hyde_use_model_func = cast(
+            Callable[..., Awaitable[str]],
+            query_param.model_func or text_chunks_db.global_config.get('llm_model_func'),
+        )
+        hyde_answer = await _generate_hyde_answer(
+            query,
+            use_model_func=hyde_use_model_func,
+            llm_timeout=float(text_chunks_db.global_config.get('llm_timeout', 60)),
+        )
+        if hyde_answer:
+            embedding_query_text = hyde_answer
 
     if query and (kg_chunk_pick_method == 'VECTOR' or chunks_vdb or should_reuse_entity_embedding):
         actual_embedding_func = text_chunks_db.embedding_func
@@ -5029,7 +5143,7 @@ async def _build_context_str(
     sys_prompt_template = global_config.get('system_prompt_template', PROMPTS['rag_response'])
 
     kg_context_template = PROMPTS['kg_query_context']
-    user_prompt = _format_additional_instructions(query_param.user_prompt)
+    user_prompt = _format_additional_instructions(query_param.user_prompt, query=query)
     response_type = _normalize_response_type(query_param.response_type)
 
     entities_str = '\n'.join(json.dumps(entity, ensure_ascii=False) for entity in entities_context)
@@ -5071,6 +5185,8 @@ async def _build_context_str(
         global_config=global_config,
         source_type=query_param.mode,
         chunk_token_limit=available_chunk_tokens,  # Pass dynamic limit
+        topic_terms=topic_terms,
+        facet_terms=facet_terms,
     )
 
     # Generate reference list from truncated chunks using the new common function
@@ -5596,7 +5712,13 @@ def _rank_chunks_by_query_intent(
         if relevance_score > 0.0:
             positive_matches += 1
 
-    if drop_weak_matches and positive_matches:
+    # Drop zero-lexical chunks only when a strong majority of candidates matched
+    # lexically. A small number of positive matches can indicate a terminology-heavy
+    # query (brand vs scientific name, typos, synonyms) where graph-derived chunks
+    # with zero direct overlap may still be relevant via the entity/relation path.
+    # Letting those survive lets downstream rerank adjudicate.
+    total = len(scored_chunks)
+    if drop_weak_matches and total and (positive_matches / total) >= 0.5:
         scored_chunks = [item for item in scored_chunks if item[0] > 0.0]
 
     return [item[2] for item in sorted(scored_chunks, key=lambda item: (-item[0], item[1]))]
@@ -5722,10 +5844,12 @@ def _prepare_visible_reference_payload(
             'best_topic_match': max(
                 _coerce_score(chunk.get('heading_topic_match'), 0.0),
                 _coerce_score(chunk.get('body_topic_match'), 0.0),
+                _coerce_score(chunk.get('title_topic_match'), 0.0),
             ),
             'best_facet_match': max(
                 _coerce_score(chunk.get('heading_facet_match'), 0.0),
                 _coerce_score(chunk.get('body_facet_match'), 0.0),
+                _coerce_score(chunk.get('title_facet_match'), 0.0),
             ),
             'best_rank': float(rank_index),
         }
@@ -5756,8 +5880,7 @@ def _prepare_visible_reference_payload(
         is_clearly_weaker = (
             group_score['best_score'] < top_group_score * 0.5 and group_score['best_score'] < top_group_score - 0.15
         )
-        near_best_without_topic = group_score['best_score'] >= max(top_group_score - 0.05, top_group_score * 0.85)
-        if has_topic_signal and group_score['best_topic_match'] == 0.0 and not near_best_without_topic:
+        if has_topic_signal and group_score['best_topic_match'] == 0.0:
             continue
         if is_strong or not ((group_score['best_score'] <= 0.0 or is_clearly_weaker) and is_off_topic):
             keep_group_keys.add(group_key)
@@ -6500,6 +6623,8 @@ async def naive_query(
     if not query:
         return QueryResult(content=PROMPTS['fail_response'])
 
+    auto_entity_filter = _apply_auto_entity_filter(query, query_param)
+
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
@@ -6514,29 +6639,26 @@ async def naive_query(
     # HyDE: Generate hypothetical answer and compute embedding if enabled
     query_embedding = None
     if query_param.enable_hyde:
-        try:
-            hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
-            hyde_timeout = float(global_config.get('llm_timeout', 60))
-            hypothetical_answer = cast(str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=hyde_timeout))
-            normalized_hypothetical_answer = hypothetical_answer.strip() if isinstance(hypothetical_answer, str) else ''
-            hyde_answer_length = len(normalized_hypothetical_answer)
-            logger.debug(f'HyDE (naive): Generated hypothetical answer length={hyde_answer_length}')
-            if hyde_answer_length >= 10:
-                embedding_func = getattr(chunks_vdb, 'embedding_func', None)
-                if embedding_func:
-                    query_embedding = await embedding_func([normalized_hypothetical_answer])
-                    query_embedding = query_embedding[0]
-                    logger.debug(f'HyDE (naive): Using hypothetical answer ({hyde_answer_length} chars)')
-                else:
-                    logger.warning('HyDE: No embedding function available on chunks_vdb')
+        hyde_answer = await _generate_hyde_answer(
+            query,
+            use_model_func=use_model_func,
+            llm_timeout=float(global_config.get('llm_timeout', 60)),
+            context='naive',
+        )
+        if hyde_answer:
+            embedding_func = getattr(chunks_vdb, 'embedding_func', None)
+            if embedding_func:
+                query_embedding = (await embedding_func([hyde_answer]))[0]
             else:
-                logger.warning('HyDE: Generated answer too short, using original query')
-        except asyncio.TimeoutError:
-            logger.warning(f'HyDE: Timed out after {hyde_timeout}s in naive_query, falling back to original query')
-        except Exception as e:
-            logger.warning(f'HyDE: Failed in naive_query: {e}, using original query')
+                logger.warning('HyDE: No embedding function available on chunks_vdb')
 
     chunks = await _get_vector_context(query, chunks_vdb, query_param, query_embedding)
+    if (chunks is None or len(chunks) == 0) and _clear_auto_entity_filter(
+        query_param,
+        auto_entity_filter,
+        reason='naive_query',
+    ):
+        chunks = await _get_vector_context(query, chunks_vdb, query_param, query_embedding)
 
     if chunks is None or len(chunks) == 0:
         logger.info('[naive_query] No relevant document chunks found; returning no-result.')
@@ -6552,7 +6674,7 @@ async def naive_query(
     )
 
     # Calculate system prompt template tokens (excluding content_data)
-    user_prompt = _format_additional_instructions(query_param.user_prompt)
+    user_prompt = _format_additional_instructions(query_param.user_prompt, query=query)
     response_type = _normalize_response_type(query_param.response_type)
     response_max_tokens = _response_max_tokens(response_type, query=query)
 
@@ -6586,6 +6708,8 @@ async def naive_query(
         global_config=global_config,
         source_type='vector',
         chunk_token_limit=available_chunk_tokens,  # Pass dynamic limit
+        topic_terms=query_param.ll_keywords,
+        facet_terms=query_param.hl_keywords,
     )
 
     # Generate reference list from processed chunks using the new common function
@@ -6673,7 +6797,9 @@ async def naive_query(
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
-    cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
+    cached_result = None
+    if not query_param.disable_cache:
+        cached_result = await handle_cache(hashing_kv, args_hash, user_query, query_param.mode, cache_type='query')
 
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
@@ -6692,7 +6818,7 @@ async def naive_query(
             ),
         )
 
-        if hashing_kv and hashing_kv.global_config.get('enable_llm_cache'):
+        if not query_param.disable_cache and hashing_kv and hashing_kv.global_config.get('enable_llm_cache'):
             queryparam_dict = {
                 'mode': query_param.mode,
                 'response_type': query_param.response_type,

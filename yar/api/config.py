@@ -21,6 +21,7 @@ from yar.constants import (
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_MIN_RERANK_SCORE,
     DEFAULT_RELATED_CHUNK_NUMBER,
+    DEFAULT_RETRIEVAL_MULTIPLIER,
     DEFAULT_SUMMARY_CONTEXT_SIZE,
     DEFAULT_SUMMARY_LANGUAGE,
     DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
@@ -307,6 +308,7 @@ def parse_args() -> argparse.Namespace:
     # Query configuration
     args.top_k = get_env_value('TOP_K', DEFAULT_TOP_K, int)
     args.chunk_top_k = get_env_value('CHUNK_TOP_K', DEFAULT_CHUNK_TOP_K, int)
+    args.retrieval_multiplier = max(get_env_value('RETRIEVAL_MULTIPLIER', DEFAULT_RETRIEVAL_MULTIPLIER, int), 1)
     args.max_entity_tokens = get_env_value('MAX_ENTITY_TOKENS', DEFAULT_MAX_ENTITY_TOKENS, int)
     args.max_relation_tokens = get_env_value('MAX_RELATION_TOKENS', DEFAULT_MAX_RELATION_TOKENS, int)
     args.max_total_tokens = get_env_value('MAX_TOTAL_TOKENS', DEFAULT_MAX_TOTAL_TOKENS, int)

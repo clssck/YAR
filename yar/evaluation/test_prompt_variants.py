@@ -272,7 +272,8 @@ def run_ragas_eval(question: str, answer: str, context: str, ground_truth: str) 
     """Run RAGAS evaluation and return (faithfulness, relevance)"""
     from datasets import Dataset
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-    from ragas.metrics import answer_relevancy, faithfulness
+    from ragas.metrics._answer_relevance import AnswerRelevancy
+    from ragas.metrics._faithfulness import Faithfulness
 
     # Create dataset
     data = {
@@ -284,13 +285,22 @@ def run_ragas_eval(question: str, answer: str, context: str, ground_truth: str) 
     dataset = Dataset.from_dict(data)
 
     # Create evaluation LLM
-    llm = ChatOpenAI(model='gpt-4o-mini', temperature=0)
-    embeddings = OpenAIEmbeddings(model='text-embedding-3-large')
+    llm = ChatOpenAI(
+        model='gpt-4o-mini',
+        api_key=os.getenv('LLM_BINDING_API_KEY') or os.getenv('OPENAI_API_KEY'),
+        base_url=os.getenv('LLM_BINDING_HOST', 'https://api.openai.com/v1'),
+        temperature=0,
+    )
+    embeddings = OpenAIEmbeddings(
+        model='text-embedding-3-large',
+        api_key=os.getenv('LLM_BINDING_API_KEY') or os.getenv('OPENAI_API_KEY'),
+        base_url=os.getenv('LLM_BINDING_HOST', 'https://api.openai.com/v1'),
+    )
 
     # Run evaluation
     result = evaluate(
         dataset,
-        metrics=[faithfulness, answer_relevancy],
+        metrics=[Faithfulness(), AnswerRelevancy()],
         llm=llm,
         embeddings=embeddings,
     )

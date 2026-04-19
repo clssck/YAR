@@ -49,6 +49,7 @@ __all__ = [
     'lazy_external_import',
     'logger',
     'requests_inline_citations',
+    'score_chunk_lexical',
     'set_verbose_debug',
     'setup_logger',
     'sync_wrapper',
@@ -647,7 +648,6 @@ def parse_cache_key(cache_key: str) -> tuple[str, str, str] | None:
     if len(parts) == 3:
         return parts[0], parts[1], parts[2]
     return None
-
 
 
 class HealthCheckTimeoutError(Exception):
@@ -2002,9 +2002,9 @@ def remove_think_tags(text: str) -> str:
     # reasoning ending with </think> but no preceding <think> tag).
     # Uses negative lookahead so `<` chars in the orphaned content
     # (e.g. math "2 < 3") are not treated as a boundary.
-    text = re.sub(r"^((?!<think>).)*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r'^((?!<think>).)*?</think>', '', text, flags=re.DOTALL)
     # Then remove all complete <think>...</think> blocks (including mid-text)
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
 
@@ -2865,6 +2865,477 @@ async def apply_rerank_if_enabled(
         return retrieved_docs
 
 
+_LEXICAL_TERM_PATTERN = re.compile(r'[a-z0-9]+(?:[._/-][a-z0-9]+)*')
+_LEXICAL_STOPWORDS = {
+    'a',
+    'an',
+    'and',
+    'are',
+    'as',
+    'at',
+    'be',
+    'by',
+    'did',
+    'do',
+    'does',
+    'for',
+    'from',
+    'how',
+    'in',
+    'is',
+    'it',
+    'of',
+    'on',
+    'or',
+    'that',
+    'the',
+    'to',
+    'was',
+    'what',
+    'when',
+    'where',
+    'which',
+    'who',
+    'with',
+}
+
+
+def _safe_float(value: Any, default: float | None = 0.0) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_lexical_text(text: str) -> str:
+    normalized = unicodedata.normalize('NFKC', str(text)).casefold()
+    return re.sub(r'\s+', ' ', normalized).strip()
+
+
+def _normalize_lexical_term(term: str) -> str:
+    return _normalize_lexical_text(term).strip(' \t\n\r.,:;!?()[]{}"\'')
+
+
+def _extract_lexical_tokens(text: str) -> list[str]:
+    return _LEXICAL_TERM_PATTERN.findall(_normalize_lexical_text(text))
+
+
+def _is_specific_lexical_term(term: str) -> bool:
+    if not term:
+        return False
+    if any(char.isdigit() for char in term):
+        return True
+    collapsed = term.translate(str.maketrans('', '', '._/-'))
+    if len(collapsed) <= 2:
+        return False
+    return term not in _LEXICAL_STOPWORDS
+
+
+def _append_unique_lexical_term(terms: list[str], seen_terms: set[str], candidate: str) -> None:
+    normalized_candidate = _normalize_lexical_term(candidate)
+    if not normalized_candidate or normalized_candidate in seen_terms:
+        return
+    seen_terms.add(normalized_candidate)
+    terms.append(normalized_candidate)
+
+
+def _derive_rare_terms(
+    query: str,
+    topic_terms: Sequence[str] | None = None,
+    facet_terms: Sequence[str] | None = None,
+) -> list[str]:
+    rare_terms: list[str] = []
+    seen_terms: set[str] = set()
+
+    for token in _extract_lexical_tokens(query):
+        if _is_specific_lexical_term(token):
+            _append_unique_lexical_term(rare_terms, seen_terms, token)
+
+    for raw_term in [*(topic_terms or []), *(facet_terms or [])]:
+        normalized_term = _normalize_lexical_term(str(raw_term))
+        if not normalized_term:
+            continue
+        if ' ' in normalized_term and any(
+            _is_specific_lexical_term(token) for token in _extract_lexical_tokens(normalized_term)
+        ):
+            _append_unique_lexical_term(rare_terms, seen_terms, normalized_term)
+        for token in _extract_lexical_tokens(normalized_term):
+            if _is_specific_lexical_term(token):
+                _append_unique_lexical_term(rare_terms, seen_terms, token)
+
+    return rare_terms
+
+
+def _lexical_term_weight(term: str) -> float:
+    weight = 1.0
+    if ' ' in term:
+        weight += 0.35
+    if any(char.isdigit() for char in term):
+        weight += 0.35
+    if any(char in '._/-' for char in term):
+        weight += 0.15
+    if len(term) >= 8:
+        weight += 0.10
+    return weight
+
+
+def score_chunk_lexical(query: str, chunk_text: str, rare_terms: list[str]) -> float:
+    """Compute a deterministic lexical relevance score from rare-term matches."""
+    if not chunk_text or not rare_terms:
+        return 0.0
+
+    normalized_chunk = _normalize_lexical_text(chunk_text)
+    if not normalized_chunk:
+        return 0.0
+
+    token_counts: dict[str, int] = {}
+    for token in _extract_lexical_tokens(normalized_chunk):
+        token_counts[token] = token_counts.get(token, 0) + 1
+
+    weighted_matches = 0.0
+    total_weight = 0.0
+    seen_terms: set[str] = set()
+
+    for raw_term in rare_terms:
+        term = _normalize_lexical_term(str(raw_term))
+        if not term or term in seen_terms:
+            continue
+        seen_terms.add(term)
+
+        term_tokens = _extract_lexical_tokens(term)
+        if not term_tokens:
+            continue
+
+        term_weight = _lexical_term_weight(term)
+        total_weight += term_weight
+        match_strength = 0.0
+
+        if ' ' in term:
+            phrase_occurrences = normalized_chunk.count(term)
+            if phrase_occurrences > 0:
+                match_strength = min(1.0, 0.8 + 0.1 * (phrase_occurrences - 1))
+            elif all(token_counts.get(token, 0) > 0 for token in term_tokens):
+                match_strength = 0.6
+        else:
+            token_occurrences = token_counts.get(term, 0)
+            if token_occurrences > 0:
+                match_strength = min(1.0, 0.7 + 0.15 * min(token_occurrences - 1, 2))
+
+        weighted_matches += term_weight * match_strength
+
+    if total_weight == 0.0:
+        return 0.0
+
+    return min(weighted_matches / total_weight, 1.0)
+
+
+def _extract_chunk_base_score(chunk: dict[str, Any]) -> float | None:
+    for field_name in (
+        'rerank_score',
+        'merge_score',
+        'retrieval_score',
+        'rrf_score',
+        'score',
+        'similarity',
+        'cosine_similarity',
+    ):
+        if field_name in chunk and chunk.get(field_name) is not None:
+            return _safe_float(chunk.get(field_name), 0.0)
+
+    if chunk.get('distance') is not None:
+        distance = max(cast(float, _safe_float(chunk.get('distance'), 0.0)), 0.0)
+        return 1.0 / (1.0 + distance)
+
+    return None
+
+
+def _normalize_chunk_base_scores(unique_chunks: Sequence[dict[str, Any]]) -> list[float]:
+    raw_scores = [_extract_chunk_base_score(chunk) for chunk in unique_chunks]
+    explicit_scores = [score for score in raw_scores if score is not None]
+    if not raw_scores:
+        return []
+    if not explicit_scores:
+        if len(raw_scores) == 1:
+            return [1.0]
+        return [1.0 - (index / (len(raw_scores) - 1)) for index in range(len(raw_scores))]
+
+    minimum_score = min(explicit_scores)
+    maximum_score = max(explicit_scores)
+    if maximum_score == minimum_score:
+        return [1.0 if score is not None else 0.0 for score in raw_scores]
+
+    return [0.0 if score is None else (score - minimum_score) / (maximum_score - minimum_score) for score in raw_scores]
+
+
+
+
+
+
+
+
+def _apply_lexical_chunk_boost(
+    query: str,
+    unique_chunks: list[dict[str, Any]],
+    rare_terms: list[str],
+    lexical_weight: float,
+) -> list[dict[str, Any]]:
+    base_scores = _normalize_chunk_base_scores(unique_chunks)
+    scored_chunks: list[tuple[float, float, int, dict[str, Any]]] = []
+
+    for index, (chunk, base_score) in enumerate(zip(unique_chunks, base_scores, strict=False)):
+        chunk_text = (
+            chunk.get('content') or chunk.get('text') or chunk.get('chunk_content') or chunk.get('document') or ''
+        )
+        lexical_score = score_chunk_lexical(query, str(chunk_text), rare_terms)
+        blended_score = (1.0 - lexical_weight) * base_score + lexical_weight * lexical_score
+        scored_chunks.append((blended_score, lexical_score, index, chunk))
+
+    if all(lexical_score == 0.0 for _, lexical_score, _, _ in scored_chunks):
+        return unique_chunks
+
+    sorted_chunks = sorted(
+        scored_chunks,
+        key=lambda item: (-item[0], -item[1], item[2]),
+    )
+    return [chunk for _, _, _, chunk in sorted_chunks]
+
+
+def analyze_query_intent(query: str) -> dict[str, Any]:
+    """Classify the query shape for retrieval and answer-shaping heuristics."""
+    normalized_query = ' '.join((query or '').casefold().split())
+    if not normalized_query:
+        return {
+            'kind': 'default',
+            'recommended_chunk_limit': 0,
+            'per_document_limit': 0,
+            'allow_single_document_expansion': False,
+            'recommended_mode': 'mix',
+        }
+
+    query_terms = set(_extract_lexical_tokens(query))
+    binary_prefixes = (
+        'is ',
+        'are ',
+        'was ',
+        'were ',
+        'do ',
+        'does ',
+        'did ',
+        'can ',
+        'could ',
+        'should ',
+        'would ',
+        'has ',
+        'have ',
+        'had ',
+        'will ',
+    )
+    enumeration_patterns = (
+        r'\b(?:what|which)\s+(?:are|were)\s+(?:the\s+)?(?:\d+\s+)?(?:categories|types|steps|phases|reasons|risks|issues|drivers|benefits|consequences|impacts|outcomes)\b',
+        r'\b(?:what|which)\s+(?:are|were)\s+the\b',
+        r'\bhow many\b',
+        r'\b(?:list|lists|enumerate|enumeration)\b',
+        r'\b(?:lessons learned|recommendations|actions)\b',
+    )
+    comparison_patterns = (
+        r'\bcompare\b',
+        r'\bcomparison\b',
+        r'\bdifference\b',
+        r'\bversus\b',
+        r'\bvs\.?\b',
+        r'\bbefore\b',
+        r'\bsince\b',
+        r'\bover time\b',
+        r'\bhistory\b',
+    )
+    consequence_patterns = (
+        r'\bconsequences?\b',
+        r'\bimpacts?\b',
+        r'\boutcomes?\b',
+        r'\bwhat happened\b',
+        r'\bresulted?\b',
+    )
+    mitigation_patterns = (
+        r'\bmitigate\b',
+        r'\bmitigation\b',
+        r'\bput in place\b',
+        r'\bimplemented?\b',
+        r'\bprevent(?:ed|ing|ion)?\b',
+        r'\baddress(?:ed|ing)?\b',
+        r'\brecommended step\b',
+    )
+
+    risk_format_patterns = (
+        r'\b(?:syntax(?:e)?|phrase|phrasing|wording)\b.*\brisk\b',
+        r'\brisk\b.*\b(?:syntax(?:e)?|phrase|phrasing|wording)\b',
+    )
+    role_interface_patterns = (
+        r'\bprimary interface\b',
+        r'\ball activities in scope\b',
+        r'\bin scope of the sub-?team\b',
+    )
+    culture_domain_patterns = (
+        r'\b(?:domains?|dimensions?) of experience\b.*\bcorporate culture\b',
+        r'\bcorporate culture\b.*\b(?:domains?|dimensions?) of experience\b',
+    )
+    material_lookup_patterns = (
+        r'\bprovide the link\b',
+        r'\blink to the material\b',
+    )
+    document_completeness_patterns = (
+        r'\bfull detail\b.*\b(?:included|covering)\b.*\bsubmission\b',
+        r'\bsubmission\b.*\bfull detail\b.*\b(?:included|covering)\b',
+        r'\bsteps? of rea\w+\b.*\bsubmission\b',
+    )
+
+    is_enumeration = any(re.search(pattern, normalized_query) for pattern in enumeration_patterns)
+    is_comparison = any(re.search(pattern, normalized_query) for pattern in comparison_patterns)
+    is_consequence = any(re.search(pattern, normalized_query) for pattern in consequence_patterns)
+    is_mitigation = any(re.search(pattern, normalized_query) for pattern in mitigation_patterns)
+    is_risk_format = any(re.search(pattern, normalized_query) for pattern in risk_format_patterns)
+    is_binary = normalized_query.startswith(binary_prefixes)
+    is_role_interface = is_binary and any(re.search(pattern, normalized_query) for pattern in role_interface_patterns)
+    is_culture_domain = any(re.search(pattern, normalized_query) for pattern in culture_domain_patterns)
+    is_material_lookup = any(re.search(pattern, normalized_query) for pattern in material_lookup_patterns)
+    is_document_completeness = any(re.search(pattern, normalized_query) for pattern in document_completeness_patterns)
+
+    if is_consequence:
+        return {
+            'kind': 'consequence',
+            'recommended_chunk_limit': 6,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'local',
+        }
+    if is_mitigation:
+        return {
+            'kind': 'mitigation',
+            'recommended_chunk_limit': 5,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': False,
+            'recommended_mode': 'global',
+        }
+    if is_risk_format:
+        return {
+            'kind': 'risk_format',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'global',
+        }
+    if is_role_interface:
+        return {
+            'kind': 'role_interface',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'naive',
+        }
+    if is_culture_domain:
+        return {
+            'kind': 'culture_domain',
+            'recommended_chunk_limit': 6,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'naive',
+        }
+    if is_material_lookup:
+        return {
+            'kind': 'material_lookup',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 1,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'hybrid',
+        }
+    if is_document_completeness:
+        return {
+            'kind': 'document_completeness',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 1,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'local',
+        }
+    if is_binary and not is_comparison:
+        return {
+            'kind': 'binary',
+            'recommended_chunk_limit': 3,
+            'per_document_limit': 1,
+            'allow_single_document_expansion': False,
+            'recommended_mode': 'hybrid',
+        }
+    if is_enumeration:
+        return {
+            'kind': 'enumeration',
+            'recommended_chunk_limit': 6,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'naive',
+        }
+    if is_comparison:
+        return {
+            'kind': 'comparison',
+            'recommended_chunk_limit': 7,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'mix',
+        }
+    if len(query_terms) <= 7:
+        return {
+            'kind': 'single_fact',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 1,
+            'allow_single_document_expansion': False,
+            'recommended_mode': 'mix',
+        }
+    return {
+        'kind': 'default',
+        'recommended_chunk_limit': 0,
+        'per_document_limit': 0,
+        'allow_single_document_expansion': False,
+        'recommended_mode': 'mix',
+    }
+
+
+def _chunk_document_key(chunk: dict[str, Any]) -> str:
+    """Return the best available document-level key for chunk grouping."""
+    for field_name in ('file_path', 's3_key', 'document_title', 'title', 'chunk_id'):
+        candidate = str(chunk.get(field_name) or '').strip()
+        if candidate:
+            return candidate
+    return ''
+
+
+def _apply_per_document_chunk_focus(
+    unique_chunks: list[dict[str, Any]],
+    *,
+    total_limit: int,
+    per_document_limit: int,
+    allow_single_document_expansion: bool,
+) -> list[dict[str, Any]]:
+    """Keep only the strongest passages per document while preserving ranked order."""
+    if total_limit <= 0 or per_document_limit <= 0 or not unique_chunks:
+        return unique_chunks
+
+    document_keys = [_chunk_document_key(chunk) for chunk in unique_chunks]
+    unique_document_count = len({key for key in document_keys if key})
+    effective_per_document_limit = per_document_limit
+    if allow_single_document_expansion and unique_document_count <= 1:
+        effective_per_document_limit = min(total_limit, max(per_document_limit, 3))
+
+    selected_chunks: list[dict[str, Any]] = []
+    document_counts: dict[str, int] = {}
+    for chunk, document_key in zip(unique_chunks, document_keys, strict=False):
+        group_key = document_key or f'chunk:{len(selected_chunks)}'
+        if document_counts.get(group_key, 0) >= effective_per_document_limit:
+            continue
+        document_counts[group_key] = document_counts.get(group_key, 0) + 1
+        selected_chunks.append(chunk)
+        if len(selected_chunks) >= total_limit:
+            break
+
+    return selected_chunks or unique_chunks[:total_limit]
+
+
 async def process_chunks_unified(
     query: str,
     unique_chunks: list[dict],
@@ -2872,25 +3343,28 @@ async def process_chunks_unified(
     global_config: GlobalConfig,
     source_type: str = 'mixed',
     chunk_token_limit: int | None = None,  # Add parameter for dynamic token limit
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
 ) -> list[dict]:
     """
-    Unified processing for text chunks: deduplication, chunk_top_k limiting, reranking, and token truncation.
+    Unified processing for text chunks: reranking, min-score filtering, lexical-aware reordering,
+    adaptive chunk budgeting, and token truncation.
 
     Args:
-        query: Search query for reranking
-        chunks: List of text chunks to process
+        query: Search query for reranking and lexical scoring
+        unique_chunks: List of text chunks to process
         query_param: Query parameters containing configuration
         global_config: Global configuration dictionary
         source_type: Source type for logging ("vector", "entity", "relationship", "mixed")
         chunk_token_limit: Dynamic token limit for chunks (if None, uses default)
+        topic_terms: Forwarded low-level/topic keywords for lexical scoring
+        facet_terms: Forwarded high-level/facet keywords for lexical scoring
 
     Returns:
         Processed and filtered list of text chunks
     """
     if not unique_chunks:
         return []
-
-    origin_count = len(unique_chunks)
 
     # 1. Apply reranking if enabled and query is provided
     if query_param.enable_rerank and query and unique_chunks:
@@ -2930,13 +3404,74 @@ async def process_chunks_unified(
             if not unique_chunks:
                 return []
 
-    # 3. Apply chunk_top_k limiting if specified
-    if query_param.chunk_top_k is not None and query_param.chunk_top_k > 0:
-        if len(unique_chunks) > query_param.chunk_top_k:
-            unique_chunks = unique_chunks[: query_param.chunk_top_k]
-        logger.debug(f'Kept chunk_top-k: {len(unique_chunks)} chunks (deduplicated original: {origin_count})')
+    # 3. Blend lexical boost after rerank filtering and before chunk budgeting
+    lexical_boost_enabled = get_env_value('ENABLE_LEXICAL_BOOST', True, bool)
+    lexical_boost_weight = min(max(cast(float, get_env_value('LEXICAL_BOOST_WEIGHT', 0.2, float)), 0.0), 1.0)
+    if lexical_boost_enabled and lexical_boost_weight > 0.0 and len(unique_chunks) > 1:
+        rare_terms = _derive_rare_terms(query, topic_terms=topic_terms, facet_terms=facet_terms)
+        if rare_terms:
+            unique_chunks = _apply_lexical_chunk_boost(
+                query=query,
+                unique_chunks=unique_chunks,
+                rare_terms=rare_terms,
+                lexical_weight=lexical_boost_weight,
+            )
 
-    # 4. Token-based final truncation
+    # 4. Prefer exact-support chunks when upstream retrieval already attached intent metadata.
+    
+
+    # 5. Apply adaptive chunk budgeting before token truncation.
+    configured_chunk_limit = (
+        query_param.chunk_top_k
+        if query_param.chunk_top_k is not None and query_param.chunk_top_k > 0
+        else len(unique_chunks)
+    )
+    intent_profile = analyze_query_intent(query)
+    effective_chunk_limit = configured_chunk_limit
+    adaptive_chunk_focus_enabled = source_type in {'naive', 'vector', 'hybrid'}
+    if adaptive_chunk_focus_enabled:
+        recommended_chunk_limit = int(intent_profile.get('recommended_chunk_limit') or 0)
+        if recommended_chunk_limit > 0:
+            effective_chunk_limit = min(configured_chunk_limit, recommended_chunk_limit)
+        per_document_limit = int(intent_profile.get('per_document_limit') or 0)
+        if per_document_limit > 0:
+            focused_chunks = _apply_per_document_chunk_focus(
+                unique_chunks,
+                total_limit=effective_chunk_limit,
+                per_document_limit=per_document_limit,
+                allow_single_document_expansion=bool(intent_profile.get('allow_single_document_expansion')),
+            )
+            if len(focused_chunks) != len(unique_chunks) or effective_chunk_limit < configured_chunk_limit:
+                logger.debug(
+                    'Adaptive chunk focus: %s query kept %s/%s chunks (configured_top_k=%s, per_document_limit=%s, source=%s)',
+                    intent_profile['kind'],
+                    len(focused_chunks),
+                    len(unique_chunks),
+                    configured_chunk_limit,
+                    per_document_limit,
+                    source_type,
+                )
+            unique_chunks = focused_chunks
+        elif effective_chunk_limit < len(unique_chunks):
+            unique_chunks = unique_chunks[:effective_chunk_limit]
+    elif (
+        query_param.chunk_top_k is not None
+        and query_param.chunk_top_k > 0
+        and len(unique_chunks) > query_param.chunk_top_k
+    ):
+        unique_chunks = unique_chunks[: query_param.chunk_top_k]
+
+    if query_param.chunk_top_k is not None and query_param.chunk_top_k > 0:
+        logger.debug(
+            'Chunk budget result: %s query kept %s chunks (configured_top_k=%s, effective_top_k=%s, source=%s)',
+            intent_profile['kind'],
+            len(unique_chunks),
+            configured_chunk_limit,
+            effective_chunk_limit,
+            source_type,
+        )
+
+    # 6. Token-based final truncation
     tokenizer = global_config.get('tokenizer')
     if tokenizer and unique_chunks:
         # Set default chunk_token_limit if not provided
@@ -2965,7 +3500,7 @@ async def process_chunks_unified(
             f'(chunk available tokens: {chunk_token_limit}, source: {source_type})'
         )
 
-    # 5. add id field to each chunk
+    # 7. add id field to each chunk
     final_chunks = []
     for i, chunk in enumerate(unique_chunks):
         chunk_with_id = chunk.copy()
@@ -3575,12 +4110,11 @@ def has_citation(text: str) -> bool:
     """Check if text contains at least one citation marker [n]."""
     return bool(_CITATION_PATTERN.search(text))
 
+
 def requests_inline_citations(query: str | None, user_prompt: str | None = None) -> bool:
     """Detect whether the caller explicitly asked for inline citations in prose."""
     combined = '\n'.join(
-        part.strip()
-        for part in (query or '', user_prompt or '')
-        if isinstance(part, str) and part.strip()
+        part.strip() for part in (query or '', user_prompt or '') if isinstance(part, str) and part.strip()
     )
     if not combined:
         return False
@@ -3591,6 +4125,7 @@ def requests_inline_citations(query: str | None, user_prompt: str | None = None)
             flags=re.IGNORECASE,
         )
     )
+
 
 def is_factual_sentence(sentence: str) -> bool:
     """
@@ -3651,19 +4186,65 @@ def find_best_reference(sentence: str, references: list[dict]) -> dict | None:
         return None
 
     # Extract words from sentence (lowercase, alphanumeric only)
-    sentence_words = set(
-        re.findall(r'\b[a-z][a-z0-9]+\b', sentence.lower())
-    )
+    sentence_words = set(re.findall(r'\b[a-z][a-z0-9]+\b', sentence.lower()))
 
     # Common words to ignore
     stopwords = {
-        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-        'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-        'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-        'can', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
-        'where', 'why', 'how', 'what', 'which', 'who', 'whom',
-        'this', 'that', 'these', 'those', 'it', 'its', 'of', 'to',
-        'for', 'with', 'on', 'at', 'by', 'from', 'in', 'as',
+        'the',
+        'a',
+        'an',
+        'is',
+        'are',
+        'was',
+        'were',
+        'be',
+        'been',
+        'being',
+        'have',
+        'has',
+        'had',
+        'do',
+        'does',
+        'did',
+        'will',
+        'would',
+        'could',
+        'should',
+        'may',
+        'might',
+        'must',
+        'shall',
+        'can',
+        'and',
+        'or',
+        'but',
+        'if',
+        'then',
+        'else',
+        'when',
+        'where',
+        'why',
+        'how',
+        'what',
+        'which',
+        'who',
+        'whom',
+        'this',
+        'that',
+        'these',
+        'those',
+        'it',
+        'its',
+        'of',
+        'to',
+        'for',
+        'with',
+        'on',
+        'at',
+        'by',
+        'from',
+        'in',
+        'as',
     }
     sentence_words -= stopwords
 
@@ -3676,11 +4257,13 @@ def find_best_reference(sentence: str, references: list[dict]) -> dict | None:
 
     for ref in references:
         # Build reference text from title and excerpt
-        ref_text = ' '.join([
-            ref.get('document_title', ''),
-            ref.get('excerpt', ''),
-            ref.get('file_path', ''),
-        ]).lower()
+        ref_text = ' '.join(
+            [
+                ref.get('document_title', ''),
+                ref.get('excerpt', ''),
+                ref.get('file_path', ''),
+            ]
+        ).lower()
 
         ref_words = set(re.findall(r'\b[a-z][a-z0-9]+\b', ref_text))
         ref_words -= stopwords
@@ -3778,10 +4361,7 @@ def validate_and_fix_citations(
                 fixed_sentence = insert_citation(sentence, ref_id)
                 modified_text = modified_text.replace(sentence, fixed_sentence, 1)
                 was_modified = True
-                logger.info(
-                    f'[citation_validation] Auto-added citation [{ref_id}] to: '
-                    f'"{sentence[:50]}..."'
-                )
+                logger.info(f'[citation_validation] Auto-added citation [{ref_id}] to: "{sentence[:50]}..."')
 
     if was_modified:
         return modified_text + references_section, True

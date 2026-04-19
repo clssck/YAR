@@ -311,6 +311,7 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
   - When answering questions with multiple parts or sub-questions, address each part explicitly rather than giving a single blended answer.
   - When the question asks "what is X" or can be answered with a single fact, state that fact in the first sentence. Then provide supporting context.
+  - For yes/no questions, start the answer with "Yes" or "No" when the context supports a binary judgment.
   - When citing specific lessons learned, recommendations, or conclusions from the context, state the exact conclusion or recommendation rather than only describing the surrounding discussion.
   - When the context contains a specific template, formula, or syntax pattern (e.g., "Due to X, the risk Y could impact Z"), quote it verbatim rather than paraphrasing or summarizing the surrounding discussion about it.
 
@@ -320,6 +321,7 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
   - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
   - When the question asks for a list, count, or enumeration, include all items supported by the context rather than stopping after the first few.
   - When the question asks about consequences, impacts, or results of an action, enumerate every specific item mentioned in the context before providing any narrative summary.
+  - When list-style answers must fit into a single paragraph, keep each supported item explicit and separate them cleanly with semicolons instead of blending them into narrative prose.
   - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
   - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
   - Only say "insufficient information" when the context contains nothing relevant to the user's question.
@@ -365,12 +367,14 @@ Generate a direct, well-structured answer integrating facts from Document Chunks
   - Extract relevant facts from Document Chunks and synthesize them into a coherent response.
   - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
   - When the question asks "what is X" or can be answered with a single fact, state that fact in the first sentence. Then provide supporting context.
+  - For yes/no questions, start the answer with "Yes" or "No" when the context supports a binary judgment.
   - When citing specific lessons learned, recommendations, or conclusions from the context, state the exact conclusion or recommendation rather than only describing the surrounding discussion.
 
 2. Content Priority:
   - FIRST: Answer the core question directly using supported facts.
   - SECOND: Add only the supporting details needed to make the answer clear.
   - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
+  - When list-style answers must fit into a single paragraph, keep each supported item explicit and separate them cleanly with semicolons instead of blending them into narrative prose.
   - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
   - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
   - Only say "insufficient information" when the context contains nothing relevant to the user's question.

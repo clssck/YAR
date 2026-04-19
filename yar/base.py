@@ -42,6 +42,7 @@ from .constants import (
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_MIN_ENTITY_COVERAGE,
     DEFAULT_MIN_RELATIONSHIP_DENSITY,
+    DEFAULT_RETRIEVAL_MULTIPLIER,
     DEFAULT_TOP_K,
 )
 from .type_defs import KnowledgeGraph
@@ -104,6 +105,14 @@ class QueryParam:
 
     chunk_top_k: int = int(os.getenv('CHUNK_TOP_K', str(DEFAULT_CHUNK_TOP_K)))
     """Number of text chunks to retrieve."""
+
+    retrieval_multiplier: int = max(int(os.getenv('RETRIEVAL_MULTIPLIER', str(DEFAULT_RETRIEVAL_MULTIPLIER))), 1)
+    """Two-stage retrieval oversampling factor for chunks.
+    When reranking is enabled, the vector search retrieves chunk_top_k * retrieval_multiplier
+    candidates, which the reranker then trims back to chunk_top_k. A value of 1 disables
+    oversampling. Values of 2-3 help surface chunks the first-stage vector score buried
+    but a cross-encoder rerank can recover. Set via RETRIEVAL_MULTIPLIER env var.
+    """
 
     max_entity_tokens: int = int(os.getenv('MAX_ENTITY_TOKENS', str(DEFAULT_MAX_ENTITY_TOKENS)))
     """Maximum number of tokens allocated for entity context in unified token control system."""
@@ -194,6 +203,12 @@ class QueryParam:
     When provided, only retrieves entities whose name or description contains the filter term.
     Useful for multi-product corpora to prevent context mixing between different products.
     Example: 'Fitusiran' to restrict results to Fitusiran-related content only.
+    """
+
+    disable_cache: bool = False
+    """If True, bypasses keyword and query-result cache reads/writes for this request.
+    Useful for evaluation and debugging when cached responses would hide the effect of
+    new retrieval logic or prompt changes.
     """
 
     disable_truncation: bool = False
@@ -440,6 +455,10 @@ class BaseVectorStorage(StorageNameSpace, ABC):
         """
 
     @abstractmethod
+    async def delete_by_doc_id(self, doc_id: str) -> int:
+        """Delete vectors for a document ID and return the delete count"""
+
+    @abstractmethod
     async def get_vectors_by_ids(self, ids: list[str]) -> dict[str, list[float]]:
         """Get vectors by their IDs, returning only ID and vector data for efficiency
 
@@ -464,6 +483,10 @@ class BaseKVStorage(StorageNameSpace, ABC):
     @abstractmethod
     async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
         """Get values by ids"""
+
+    @abstractmethod
+    async def get_chunk_ids_by_doc_id(self, doc_id: str) -> list[str]:
+        """Get chunk IDs for a document ID"""
 
     @abstractmethod
     async def filter_keys(self, keys: set[str]) -> set[str]:
@@ -492,6 +515,10 @@ class BaseKVStorage(StorageNameSpace, ABC):
         Returns:
             None
         """
+
+    @abstractmethod
+    async def delete_by_doc_id(self, doc_id: str) -> list[str]:
+        """Delete records for a document ID and return deleted IDs"""
 
     @abstractmethod
     async def is_empty(self) -> bool:
@@ -865,6 +892,12 @@ class DocProcessingStatus:
 @dataclass
 class DocStatusStorage(BaseKVStorage, ABC):
     """Base class for document status storage"""
+
+    async def get_chunk_ids_by_doc_id(self, doc_id: str) -> list[str]:
+        raise ValueError('doc status storage does not support chunk lookup by document id')
+
+    async def delete_by_doc_id(self, doc_id: str) -> list[str]:
+        raise ValueError('doc status storage does not support chunk deletion by document id')
 
     @abstractmethod
     async def get_status_counts(self) -> dict[str, int]:

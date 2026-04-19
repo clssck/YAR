@@ -41,6 +41,7 @@ INLINE_CITATION_MARKER_PATTERN = re.compile(r'(?:\s*\[(?:\d+(?:\s*,\s*\d+)*)\])+
 # Pattern to match raw reference_id leaks like `(reference_id 1)` or `reference_id 1`
 REFERENCE_ID_MARKER_PATTERN = re.compile(r'\s*\(?reference_id\s+\d+\)?', re.IGNORECASE)
 
+
 def deduplicate_references_section(text: str) -> str:
     """Remove duplicate reference entries from LLM-generated References section.
 
@@ -79,6 +80,7 @@ def deduplicate_references_section(text: str) -> str:
 
     return REFERENCES_SECTION_PATTERN.sub(dedupe_refs, text)
 
+
 def strip_embedded_references_section(text: str) -> str:
     """Remove LLM-generated References sections from response prose.
 
@@ -88,6 +90,7 @@ def strip_embedded_references_section(text: str) -> str:
     if not text:
         return text
     return REFERENCES_SECTION_PATTERN.sub('', text).strip()
+
 
 def strip_inline_citation_markers(text: str) -> str:
     """Remove inline citation markers and raw reference_id leaks from response prose."""
@@ -100,6 +103,7 @@ def strip_inline_citation_markers(text: str) -> str:
     text = re.sub(r' *\n *', '\n', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
+
 
 def _normalize_query_response_text(
     response_content: str,
@@ -123,7 +127,7 @@ def _attach_chunk_content(
     chunks: list[dict[str, Any]],
     *,
     include_chunk_content: bool,
- ) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Attach grouped chunk content to copied reference payloads when requested."""
     copied_references = [ref.copy() for ref in references]
     if not include_chunk_content:
@@ -148,7 +152,7 @@ def _attach_chunk_content(
 async def _attach_presigned_urls(
     references: list[dict[str, Any]],
     s3_client: S3Client | None,
- ) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Attach presigned URLs concurrently, keeping failures non-fatal."""
     if not s3_client or not references:
         return references
@@ -287,6 +291,13 @@ class QueryRequest(BaseModel):
         description='Number of text chunks to retrieve initially from vector search and keep after reranking.',
     )
 
+    retrieval_multiplier: int | None = Field(
+        ge=1,
+        le=10,
+        default=None,
+        description='Two-stage retrieval oversampling factor for chunks. When reranking is enabled, the vector search retrieves chunk_top_k * retrieval_multiplier candidates, then the reranker trims back to chunk_top_k. 1 disables oversampling, 2-3 helps surface chunks the first-stage vector score buried. No effect when reranking is disabled.',
+    )
+
     max_entity_tokens: int | None = Field(
         default=None,
         description='Maximum number of tokens allocated for entity context in unified token control system.',
@@ -380,6 +391,10 @@ class QueryRequest(BaseModel):
         max_length=500,
         description='Filter results to entities/chunks containing this term. Useful for multi-product corpora to prevent context mixing. Example: "Fitusiran" to restrict to Fitusiran-related content only.',
     )
+    disable_cache: bool | None = Field(
+        default=False,
+        description='If True, bypasses keyword and query-result cache reads/writes for this request. Useful for evaluation and debugging.',
+    )
 
     @field_validator('query', mode='after')
     @classmethod
@@ -406,9 +421,7 @@ class QueryRequest(BaseModel):
             if not isinstance(msg['content'], str):
                 raise ValueError("Each message 'content' must be a string.")
             if len(msg['content']) > 50_000:
-                raise ValueError(
-                    'Conversation message content exceeds maximum length of 50000 characters'
-                )
+                raise ValueError('Conversation message content exceeds maximum length of 50000 characters')
         return conversation_history
 
     @field_validator('hl_keywords', 'll_keywords', mode='after')
@@ -860,7 +873,10 @@ def create_query_routes(
                 s3_client if request.include_references else None,
             )
 
-            response_content = _normalize_query_response_text(llm_response.get('content', ''), keep_inline_citations=requests_inline_citations(request.query, request.user_prompt))
+            response_content = _normalize_query_response_text(
+                llm_response.get('content', ''),
+                keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
+            )
 
             # Return response with or without references based on request
             if request.include_references:
@@ -1148,7 +1164,10 @@ def create_query_routes(
                             yield line
                 else:
                     # Non-streaming mode: send complete response in one message
-                    response_content = _normalize_query_response_text(llm_response.get('content', ''), keep_inline_citations=requests_inline_citations(request.query, request.user_prompt))
+                    response_content = _normalize_query_response_text(
+                        llm_response.get('content', ''),
+                        keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
+                    )
 
                     # Create complete response object
                     complete_response: dict[str, Any] = {'response': response_content}

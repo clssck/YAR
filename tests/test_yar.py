@@ -74,6 +74,55 @@ def mock_llm_func():
     return llm_func
 
 
+class _DummyStorage:
+    def __init__(self, *args, **kwargs):
+        self.db = None
+
+    async def get_by_id(self, *args, **kwargs):
+        return None
+
+    async def get_by_ids(self, *args, **kwargs):
+        return []
+
+    async def get_docs_by_status(self, *args, **kwargs):
+        return {}
+
+    async def upsert(self, *args, **kwargs):
+        return None
+
+    async def delete(self, *args, **kwargs):
+        return None
+
+    async def delete_by_doc_id(self, *args, **kwargs):
+        return []
+
+    async def get_chunk_ids_by_doc_id(self, *args, **kwargs):
+        return []
+
+    async def initialize(self, *args, **kwargs):
+        return None
+
+    async def finalize(self, *args, **kwargs):
+        return None
+
+    async def index_done_callback(self, *args, **kwargs):
+        return None
+
+    async def get_nodes_batch(self, *args, **kwargs):
+        return {}
+
+    async def get_edges_batch(self, *args, **kwargs):
+        return {}
+
+    async def remove_nodes(self, *args, **kwargs):
+        return None
+
+
+def _build_rag_with_mock_storages(**kwargs) -> YAR:
+    with patch.object(YAR, '_get_storage_class', return_value=_DummyStorage):
+        return YAR(**kwargs)
+
+
 class TestYARInitialization:
     """Tests for YAR initialization and __post_init__."""
 
@@ -848,7 +897,7 @@ class TestYARPublicMethods:
         mock_get_namespace_data.return_value = pipeline_status
         mock_get_namespace_lock.return_value = pipeline_status_lock
 
-        rag = YAR(
+        rag = _build_rag_with_mock_storages(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -869,6 +918,7 @@ class TestYARPublicMethods:
         rag.doc_status.get_by_id = AsyncMock(return_value=mock_doc_status)
         rag.doc_status.delete = AsyncMock()
         rag.full_docs.get_by_id = AsyncMock(return_value=None)
+        rag.text_chunks.get_chunk_ids_by_doc_id = AsyncMock(return_value=[])
         rag.text_chunks.get_by_ids = AsyncMock(return_value=[])
         rag.chunks_vdb.delete = AsyncMock()
         rag.entities_vdb.delete = AsyncMock()
@@ -1079,7 +1129,7 @@ class TestYARPublicMethods:
         mock_get_namespace_data.return_value = pipeline_status
         mock_get_namespace_lock.return_value = pipeline_status_lock
 
-        rag = YAR(
+        rag = _build_rag_with_mock_storages(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=mock_llm_func,
@@ -1095,6 +1145,7 @@ class TestYARPublicMethods:
                 'chunks_list': [],
             }
         )
+        rag.text_chunks.get_chunk_ids_by_doc_id = AsyncMock(return_value=[])
         rag.full_docs.delete = AsyncMock()
         rag.doc_status.delete = AsyncMock()
 
@@ -1162,7 +1213,7 @@ class TestYARPublicMethods:
 
         summary_llm = AsyncMock(side_effect=AssertionError('document summary LLM should not be called'))
 
-        rag = YAR(
+        rag = _build_rag_with_mock_storages(
             working_dir=temp_working_dir,
             embedding_func=mock_embedding_func,
             llm_model_func=summary_llm,
@@ -1188,6 +1239,8 @@ class TestYARPublicMethods:
         rag._validate_and_fix_document_consistency = AsyncMock(return_value=docs_to_process)
         rag.full_docs.get_by_id = AsyncMock(return_value={'content': 'hello world'})
         rag.doc_status.upsert = AsyncMock()
+        rag.text_chunks.delete_by_doc_id = AsyncMock(return_value=[])
+        rag.chunks_vdb.delete_by_doc_id = AsyncMock(return_value=0)
         rag.chunks_vdb.upsert = AsyncMock()
         rag.text_chunks.upsert = AsyncMock()
 
@@ -1561,6 +1614,7 @@ class TestYARLLMConfiguration:
 
         assert rag.llm_model_max_async == 32
 
+
 @pytest.mark.offline
 class TestYAREntityExtractionBulkhead:
     """Tests for YAR entity extraction bulkhead configuration."""
@@ -1660,6 +1714,7 @@ class TestYAREntityExtractionBulkhead:
             global_config = call.kwargs['global_config']
             assert global_config['entity_extract_max_async'] == 2
             assert global_config['entity_extract_semaphore'] is rag._entity_extract_semaphore
+
 
 @pytest.mark.offline
 class TestYAROrphanBackgroundControl:

@@ -97,6 +97,7 @@ from yar.utils import (
     EmbeddingFunc,
     TiktokenTokenizer,
     Tokenizer,
+    analyze_query_intent,
     check_storage_env_vars,
     compute_mdhash_id,
     convert_to_user_format,
@@ -124,6 +125,29 @@ __all__ = [
 # allows to use different .env file for each yar instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path='.env', override=False)
+
+
+def _resolve_effective_query_mode(query: str, requested_mode: str) -> str:
+    """Route mix queries to a more suitable retrieval mode when the intent is clear."""
+    if requested_mode != 'mix':
+        return requested_mode
+    intent_profile = analyze_query_intent(query)
+    recommended_mode = str(intent_profile.get('recommended_mode', 'mix'))
+    return recommended_mode if recommended_mode in {'local', 'global', 'hybrid', 'naive'} else requested_mode
+
+
+def _annotate_requested_query_mode(
+    payload: dict[str, Any],
+    *,
+    requested_mode: str,
+    effective_mode: str,
+) -> None:
+    """Preserve both the requested and effective query mode in response metadata."""
+    metadata = payload.setdefault('metadata', {})
+    metadata['mode'] = effective_mode
+    if requested_mode != effective_mode:
+        metadata['requested_query_mode'] = requested_mode
+        metadata['effective_query_mode'] = effective_mode
 
 
 @final
@@ -1399,6 +1423,41 @@ class YAR:
                     status_doc = to_process_docs[doc_id]
                     file_path = getattr(status_doc, 'file_path', 'unknown_source')
 
+                    text_chunk_delete_result, chunks_vdb_delete_result = await asyncio.gather(
+                        self.text_chunks.delete_by_doc_id(doc_id),
+                        self.chunks_vdb.delete_by_doc_id(doc_id),
+                        return_exceptions=True,
+                    )
+                    cleanup_errors = []
+                    deleted_chunk_rows = 0
+                    deleted_chunk_vectors = 0
+                    if isinstance(text_chunk_delete_result, Exception):
+                        cleanup_errors.append(f'text_chunks: {text_chunk_delete_result!s}')
+                    else:
+                        deleted_chunk_rows = len(text_chunk_delete_result)
+                    if isinstance(chunks_vdb_delete_result, Exception):
+                        cleanup_errors.append(f'chunks_vdb: {chunks_vdb_delete_result!s}')
+                    else:
+                        deleted_chunk_vectors = chunks_vdb_delete_result
+
+                    if cleanup_errors:
+                        cleanup_message = (
+                            f'Failed to fully delete orphan chunks for inconsistent entry: {doc_id} '
+                            f'({file_path}) - deleted {deleted_chunk_rows} chunk rows, '
+                            f'{deleted_chunk_vectors} chunk vectors; errors: {"; ".join(cleanup_errors)}'
+                        )
+                        logger.error(cleanup_message)
+                    else:
+                        cleanup_message = (
+                            f'Deleted {deleted_chunk_rows} orphan chunk rows and '
+                            f'{deleted_chunk_vectors} chunk vectors for inconsistent entry: {doc_id} ({file_path})'
+                        )
+                        logger.info(cleanup_message)
+
+                    async with pipeline_status_lock:
+                        pipeline_status['latest_message'] = cleanup_message
+                        pipeline_status['history_messages'].append(cleanup_message)
+
                     # Delete doc_status entry
                     await self.doc_status.delete([doc_id])
                     successful_deletions += 1
@@ -1695,7 +1754,7 @@ class YAR:
                             # Extract s3_key from metadata (set during S3 upload flow)
                             doc_s3_key = doc_metadata.get('s3_key')
                             chunks: dict[str, Any] = {
-                                compute_mdhash_id(dp['content'], prefix='chunk-'): {
+                                compute_mdhash_id(doc_id + dp['content'], prefix='chunk-'): {
                                     **dp,
                                     'full_doc_id': doc_id,
                                     'file_path': file_path,  # Add file path to each chunk
@@ -1717,10 +1776,15 @@ class YAR:
                                     raise PipelineCancelledException('User cancelled')
 
                             # Process document in two stages
-                            # Stage 1: Process text chunks and docs (parallel execution)
+                            # Stage 1: Refresh doc-scoped chunks, then process text chunks and docs
                             effective_chunk_size = doc_metadata.get('chunk_token_size') or self.chunk_token_size
                             effective_overlap = (
                                 doc_metadata.get('chunk_overlap_token_size') or self.chunk_overlap_token_size
+                            )
+
+                            await asyncio.gather(
+                                self.text_chunks.delete_by_doc_id(doc_id),
+                                self.chunks_vdb.delete_by_doc_id(doc_id),
                             )
 
                             doc_status_task = asyncio.create_task(
@@ -2132,14 +2196,15 @@ class YAR:
                 file_path = chunk_data.get('file_path', 'custom_kg')
                 tokens = len(self.tokenizer.encode(chunk_content))
                 chunk_order_index = chunk_data.get('chunk_order_index', 0)
-                chunk_id = compute_mdhash_id(chunk_content, prefix='chunk-')
+                effective_doc_id = full_doc_id if full_doc_id is not None else source_id
+                chunk_id = compute_mdhash_id(effective_doc_id + chunk_content, prefix='chunk-')
 
                 chunk_entry = {
                     'content': chunk_content,
                     'source_id': source_id,
                     'tokens': tokens,
                     'chunk_order_index': chunk_order_index,
-                    'full_doc_id': full_doc_id if full_doc_id is not None else source_id,
+                    'full_doc_id': effective_doc_id,
                     'file_path': file_path,
                     'status': DocStatus.PROCESSED,
                 }
@@ -2364,96 +2429,21 @@ class YAR:
 
         Returns:
             dict[str, Any]: Structured data result in the following format:
-
-            **Success Response:**
-            ```python
-            {
-                "status": "success",
-                "message": "Query executed successfully",
-                "data": {
-                    "entities": [
-                        {
-                            "entity_name": str,      # Entity identifier
-                            "entity_type": str,      # Entity category/type
-                            "description": str,      # Entity description
-                            "source_id": str,        # Source chunk references
-                            "file_path": str,        # Origin file path
-                            "created_at": str,       # Creation timestamp
-                            "reference_id": str      # Reference identifier for citations
-                        }
-                    ],
-                    "relationships": [
-                        {
-                            "src_id": str,           # Source entity name
-                            "tgt_id": str,           # Target entity name
-                            "description": str,      # Relationship description
-                            "keywords": str,         # Relationship keywords
-                            "weight": float,         # Relationship strength
-                            "source_id": str,        # Source chunk references
-                            "file_path": str,        # Origin file path
-                            "created_at": str,       # Creation timestamp
-                            "reference_id": str      # Reference identifier for citations
-                        }
-                    ],
-                    "chunks": [
-                        {
-                            "content": str,          # Document chunk content
-                            "file_path": str,        # Origin file path
-                            "chunk_id": str,         # Unique chunk identifier
-                            "reference_id": str      # Reference identifier for citations
-                        }
-                    ],
-                    "references": [
-                        {
-                            "reference_id": str,     # Reference identifier
-                            "file_path": str         # Corresponding file path
-                        }
-                    ]
-                },
-                "metadata": {
-                    "query_mode": str,           # Query mode used ("local", "global", "hybrid", "mix", "naive", "bypass")
-                    "keywords": {
-                        "high_level": List[str], # High-level keywords extracted
-                        "low_level": List[str]   # Low-level keywords extracted
+                {
+                    "status": "success" | "failure",
+                    "message": str,
+                    "data": {
+                        "entities": list[dict],
+                        "relationships": list[dict],
+                        "chunks": list[dict],
+                        "references": list[dict],
                     },
-                    "processing_info": {
-                        "total_entities_found": int,        # Total entities before truncation
-                        "total_relations_found": int,       # Total relations before truncation
-                        "entities_after_truncation": int,   # Entities after token truncation
-                        "relations_after_truncation": int,  # Relations after token truncation
-                        "merged_chunks_count": int,          # Chunks before final processing
-                        "final_chunks_count": int            # Final chunks in result
-                    }
+                    "metadata": {
+                        "query_mode": str,
+                        "failure_reason": str,  # Present only on failure
+                    },
                 }
-            }
-            ```
 
-            **Query Mode Differences:**
-            - **local**: Focuses on entities and their related chunks based on low-level keywords
-            - **global**: Focuses on relationships and their connected entities based on high-level keywords
-            - **hybrid**: Combines local and global results using round-robin merging
-            - **mix**: Includes knowledge graph data plus vector-retrieved document chunks
-            - **naive**: Only vector-retrieved chunks, entities and relationships arrays are empty
-            - **bypass**: All data arrays are empty, used for direct LLM queries
-
-            ** processing_info is optional and may not be present in all responses, especially when query result is empty**
-
-            **Failure Response:**
-            ```python
-            {
-                "status": "failure",
-                "message": str,  # Error description
-                "data": {}       # Empty data object
-            }
-            ```
-
-            **Common Failure Cases:**
-            - Empty query string
-            - Both high-level and low-level keywords are empty
-            - Query returns empty dataset
-            - Missing tokenizer or system configuration errors
-
-        Note:
             The function adapts to the new data format from convert_to_user_format where
             actual data is nested under the 'data' field, with 'status' and 'message'
             fields at the top level.
@@ -2468,6 +2458,10 @@ class YAR:
             only_need_prompt=False,
             stream=False,
         )
+        effective_mode = _resolve_effective_query_mode(query.strip(), data_param.mode)
+        effective_param = replace(data_param, mode=effective_mode)
+        if effective_mode != data_param.mode:
+            logger.info('[aquery_data] Routed %s query to %s for: %s', data_param.mode, effective_mode, query[:80])
 
         query_result = None
         final_data: dict[str, Any] = {
@@ -2476,69 +2470,84 @@ class YAR:
             'data': {},
             'metadata': {
                 'failure_reason': 'no_results',
-                'mode': data_param.mode,
             },
         }
+        _annotate_requested_query_mode(
+            final_data,
+            requested_mode=data_param.mode,
+            effective_mode=effective_param.mode,
+        )
 
-        if data_param.mode in ['local', 'global', 'hybrid', 'mix']:
-            logger.debug(f'[aquery_data] Using kg_query for mode: {data_param.mode}')
+        if effective_param.mode in ['local', 'global', 'hybrid', 'mix']:
+            logger.debug(f'[aquery_data] Using kg_query for mode: {effective_param.mode}')
             query_result = await kg_query(
                 query.strip(),
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
                 self.text_chunks,
-                data_param,  # Use data_param with only_need_context=True
+                effective_param,
                 global_config,
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 chunks_vdb=self.chunks_vdb,
             )
-        elif data_param.mode == 'naive':
-            logger.debug(f'[aquery_data] Using naive_query for mode: {data_param.mode}')
+        elif effective_param.mode == 'naive':
+            logger.debug(f'[aquery_data] Using naive_query for mode: {effective_param.mode}')
             query_result = await naive_query(
                 query.strip(),
                 self.chunks_vdb,
-                data_param,  # Use data_param with only_need_context=True
+                effective_param,
                 global_config,
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
             )
-        elif data_param.mode == 'bypass':
+        elif effective_param.mode == 'bypass':
             logger.debug('[aquery_data] Using bypass mode')
-            # bypass mode returns empty data using convert_to_user_format
             empty_raw_data = convert_to_user_format(
-                [],  # no entities
-                [],  # no relationships
-                [],  # no chunks
-                [],  # no references
+                [],
+                [],
+                [],
+                [],
                 'bypass',
+            )
+            _annotate_requested_query_mode(
+                empty_raw_data,
+                requested_mode=data_param.mode,
+                effective_mode=effective_param.mode,
             )
             query_result = QueryResult(content='', raw_data=empty_raw_data)
         else:
-            raise ValueError(f'Unknown mode {data_param.mode}')
+            raise ValueError(f'Unknown mode {effective_param.mode}')
 
         if query_result is None:
             no_result_message = 'Query returned no results'
-            if data_param.mode == 'naive':
+            if effective_param.mode == 'naive':
                 no_result_message = 'No relevant document chunks found.'
-            final_data: dict[str, Any] = {
+            final_data = {
                 'status': 'failure',
                 'message': no_result_message,
                 'data': {},
                 'metadata': {
                     'failure_reason': 'no_results',
-                    'mode': data_param.mode,
                 },
             }
+            _annotate_requested_query_mode(
+                final_data,
+                requested_mode=data_param.mode,
+                effective_mode=effective_param.mode,
+            )
             logger.info('[aquery_data] Query returned no results.')
         elif isinstance(query_result, QueryResult):
-            # Extract raw_data from QueryResult
             final_data = query_result.raw_data or {}
+            _annotate_requested_query_mode(
+                final_data,
+                requested_mode=data_param.mode,
+                effective_mode=effective_param.mode,
+            )
         else:
             logger.warning(f'[aquery_data] Unexpected query_result type: {type(query_result)}')
 
-            # Log final result counts - adapt to new data format from convert_to_user_format
             if final_data and 'data' in final_data:
                 data_section = final_data['data']
                 entities_count = len(data_section.get('entities', []))
@@ -2578,39 +2587,41 @@ class YAR:
         logger.debug(f'[aquery_llm] Query param: {param}')
 
         global_config = cast(GlobalConfig, asdict(self))
+        effective_mode = _resolve_effective_query_mode(query.strip(), param.mode)
+        effective_param = replace(param, mode=effective_mode)
+        if effective_mode != param.mode:
+            logger.info('[aquery_llm] Routed %s query to %s for: %s', param.mode, effective_mode, query[:80])
 
         try:
             query_result = None
 
-            if param.mode in ['local', 'global', 'hybrid', 'mix']:
+            if effective_param.mode in ['local', 'global', 'hybrid', 'mix']:
                 query_result = await kg_query(
                     query.strip(),
                     self.chunk_entity_relation_graph,
                     self.entities_vdb,
                     self.relationships_vdb,
                     self.text_chunks,
-                    param,
+                    effective_param,
                     global_config,
                     hashing_kv=self.llm_response_cache,
                     system_prompt=system_prompt,
                     chunks_vdb=self.chunks_vdb,
                 )
-            elif param.mode == 'naive':
+            elif effective_param.mode == 'naive':
                 query_result = await naive_query(
                     query.strip(),
                     self.chunks_vdb,
-                    param,
+                    effective_param,
                     global_config,
                     hashing_kv=self.llm_response_cache,
                     system_prompt=system_prompt,
                 )
-            elif param.mode == 'bypass':
-                # Bypass mode: directly use LLM without knowledge retrieval
-                use_llm_func = param.model_func or global_config['llm_model_func']
-                # Apply higher priority (8) to entity/relation summary tasks
+            elif effective_param.mode == 'bypass':
+                use_llm_func = effective_param.model_func or global_config['llm_model_func']
                 use_llm_func = partial(use_llm_func, _priority=8)
 
-                param.stream = True if param.stream is None else param.stream
+                effective_param.stream = True if effective_param.stream is None else effective_param.stream
                 llm_callable = cast(
                     Callable[..., Awaitable[str | AsyncIterator[str]]],
                     use_llm_func,
@@ -2618,13 +2629,13 @@ class YAR:
                 response = await llm_callable(
                     query.strip(),
                     system_prompt=system_prompt,
-                    history_messages=param.conversation_history,
+                    history_messages=effective_param.conversation_history,
                     enable_cot=True,
-                    stream=param.stream,
+                    stream=effective_param.stream,
                 )
                 if isinstance(response, str):
                     await self._query_done()
-                    return {
+                    payload = {
                         'status': 'success',
                         'message': 'Bypass mode LLM non streaming response',
                         'data': {},
@@ -2635,9 +2646,13 @@ class YAR:
                             'is_streaming': False,
                         },
                     }
+                    _annotate_requested_query_mode(
+                        payload, requested_mode=param.mode, effective_mode=effective_param.mode
+                    )
+                    return payload
                 else:
                     await self._query_done()
-                    return {
+                    payload = {
                         'status': 'success',
                         'message': 'Bypass mode LLM streaming response',
                         'data': {},
@@ -2648,20 +2663,22 @@ class YAR:
                             'is_streaming': True,
                         },
                     }
+                    _annotate_requested_query_mode(
+                        payload, requested_mode=param.mode, effective_mode=effective_param.mode
+                    )
+                    return payload
             else:
-                raise ValueError(f'Unknown mode {param.mode}')
+                raise ValueError(f'Unknown mode {effective_param.mode}')
 
             await self._query_done()
 
-            # Check if query_result is None
             if query_result is None:
-                return {
+                payload = {
                     'status': 'failure',
                     'message': 'Query returned no results',
                     'data': {},
                     'metadata': {
                         'failure_reason': 'no_results',
-                        'mode': param.mode,
                     },
                     'llm_response': {
                         'content': PROMPTS['fail_response'],
@@ -2669,17 +2686,18 @@ class YAR:
                         'is_streaming': False,
                     },
                 }
+                _annotate_requested_query_mode(payload, requested_mode=param.mode, effective_mode=effective_param.mode)
+                return payload
 
-            # Extract structured data from query result
             if isinstance(query_result, QueryResult):
                 raw_data = query_result.raw_data or {}
+                _annotate_requested_query_mode(raw_data, requested_mode=param.mode, effective_mode=effective_param.mode)
                 raw_data['llm_response'] = {
                     'content': query_result.content if not query_result.is_streaming else None,
                     'response_iterator': query_result.response_iterator if query_result.is_streaming else None,
                     'is_streaming': query_result.is_streaming,
                 }
                 return raw_data
-            # Fallback for dict type (shouldn't happen in normal flow)
             return query_result if isinstance(query_result, dict) else {}
 
         except Exception as e:
@@ -2687,8 +2705,7 @@ class YAR:
 
             logger.error(f'Query failed: {e}')
             logger.error(f'Query traceback: {traceback.format_exc()}')
-            # Return error response
-            return {
+            payload = {
                 'status': 'failure',
                 'message': f'Query failed: {e!s}',
                 'data': {},
@@ -2699,6 +2716,8 @@ class YAR:
                     'is_streaming': False,
                 },
             }
+            _annotate_requested_query_mode(payload, requested_mode=param.mode, effective_mode=effective_param.mode)
+            return payload
 
     @sync_wrapper()
     def query_llm(
@@ -2937,8 +2956,10 @@ class YAR:
                     pipeline_status['latest_message'] = warning_msg
                     pipeline_status['history_messages'].append(warning_msg)
 
-            # 2. Get chunk IDs from document status
-            chunk_ids = list(set(doc_status_data.get('chunks_list', [])))
+            # 2. Get chunk IDs from document status and any stale doc-scoped chunk rows
+            stored_chunk_ids = doc_status_data.get('chunks_list') or []
+            stale_chunk_ids = await self.text_chunks.get_chunk_ids_by_doc_id(doc_id)
+            chunk_ids = list({*stored_chunk_ids, *stale_chunk_ids})
 
             if not chunk_ids:
                 logger.warning(f'No chunks found for document {doc_id}')

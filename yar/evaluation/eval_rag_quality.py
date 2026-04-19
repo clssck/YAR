@@ -31,10 +31,9 @@ Results are saved to: yar/evaluation/results/
     - results_YYYYMMDD_HHMMSS.json  (Full results with details)
 
 Technical Notes:
-    - Uses stable RAGAS API (LangchainLLMWrapper) for maximum compatibility
+    - Uses the RAGAS 0.4 llm_factory API with OpenAI-compatible clients
     - Supports custom OpenAI-compatible endpoints via EVAL_LLM_BINDING_HOST
-    - Enables bypass_n mode for endpoints that don't support 'n' parameter
-    - Deprecation warnings are suppressed for cleaner output
+    - Supports separate embedding endpoints via EVAL_EMBEDDING_BINDING_HOST
 """
 
 import argparse
@@ -49,17 +48,23 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import httpx
 from dotenv import load_dotenv
 
 from yar.utils import logger
 
-# Suppress LangchainLLMWrapper deprecation warning
-# We use LangchainLLMWrapper for stability and compatibility with all RAGAS versions
+# Suppress legacy wrapper deprecation warnings that remain necessary while
+# ragas.evaluate() in 0.4.x still expects legacy Metric/BaseRagasEmbeddings types.
 warnings.filterwarnings(
     'ignore',
     message='.*LangchainLLMWrapper is deprecated.*',
+    category=DeprecationWarning,
+)
+warnings.filterwarnings(
+    'ignore',
+    message='.*LangchainEmbeddingsWrapper is deprecated.*',
     category=DeprecationWarning,
 )
 
@@ -81,13 +86,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 load_dotenv(dotenv_path='.env', override=False)
 
 # Placeholder annotations for optional dependencies
+Embeddings: Any = object
+OpenAI: Any = None
 ChatOpenAI: Any = None
 OpenAIEmbeddings: Any = None
 LangchainLLMWrapper: Any = None
 AnswerRelevancy: Any = None
 ContextPrecision: Any = None
+ContextPrecisionPrompt: Any = None
 ContextRecall: Any = None
+ContextRecallClassificationPrompt: Any = None
 Faithfulness: Any = None
+QCA: Any = None
+QAC: Any = None
 Dataset: Any = None
 evaluate: Any = None
 tqdm: Any = None
@@ -95,31 +106,69 @@ tqdm: Any = None
 # Conditional imports - will raise ImportError if dependencies not installed
 try:
     from datasets import Dataset
+    from langchain_core.embeddings import Embeddings
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from openai import OpenAI
     from ragas import evaluate
-    from ragas.llms import LangchainLLMWrapper
-    from ragas.metrics import (
-        AnswerRelevancy,
-        ContextPrecision,
-        ContextRecall,
-        Faithfulness,
-    )
+    from ragas.llms.base import LangchainLLMWrapper
+    from ragas.metrics._answer_relevance import AnswerRelevancy
+    from ragas.metrics._context_precision import QAC, ContextPrecision, ContextPrecisionPrompt
+    from ragas.metrics._context_recall import QCA, ContextRecall, ContextRecallClassificationPrompt
+    from ragas.metrics._faithfulness import Faithfulness
     from tqdm.auto import tqdm
 
     RAGAS_AVAILABLE = True
 
 except ImportError:
-    RAGAS_AVAILABLE = False
-    Dataset = None
-    evaluate = None
-    LangchainLLMWrapper = None
-    ChatOpenAI = None
-    OpenAIEmbeddings = None
-    AnswerRelevancy = None
-    ContextPrecision = None
-    ContextRecall = None
-    Faithfulness = None
-    tqdm = None
+	RAGAS_AVAILABLE = False
+	Dataset = None
+	evaluate = None
+	Embeddings = object
+	OpenAI = None
+	ChatOpenAI = None
+	OpenAIEmbeddings = None
+	LangchainLLMWrapper = None
+	AnswerRelevancy = None
+	ContextPrecision = None
+	ContextPrecisionPrompt = None
+	ContextRecall = None
+	ContextRecallClassificationPrompt = None
+	Faithfulness = None
+	QCA = None
+	QAC = None
+	tqdm = None
+
+
+class OpenAICompatibleEmbeddings(Embeddings):
+    """Minimal embeddings adapter for OpenAI-compatible gateways that require explicit encoding_format."""
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        base_url: str,
+        max_retries: int,
+        timeout: int,
+    ):
+        self.model = model
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            max_retries=max_retries,
+            timeout=timeout,
+        )
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        response = self.client.embeddings.create(
+            model=self.model,
+            input=texts,
+            encoding_format='float',
+        )
+        return [item.embedding for item in response.data]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
 
 
 CONNECT_TIMEOUT_SECONDS = 180.0
@@ -188,6 +237,520 @@ def _calculate_ragas_score(metrics: dict[str, float]) -> float:
 
     return sum(metrics[metric_name] for metric_name in REQUIRED_METRIC_NAMES) / len(REQUIRED_METRIC_NAMES)
 
+async def _collect_metric_verdict_traces(
+    llm: Any,
+    question: str,
+    contexts: list[str],
+    reference: str,
+) -> dict[str, Any]:
+    """Run ContextRecall and ContextPrecision prompts and return raw per-statement/per-context
+    judgments for diagnostic inspection only.  Never raises; on any failure the returned dict
+    carries a *_trace_error key instead of raising."""
+    if not RAGAS_AVAILABLE or llm is None or not contexts:
+        return {'context_recall_verdicts': [], 'context_precision_verdicts': []}
+
+    result: dict[str, Any] = {}
+
+    # ContextRecall: all contexts joined; answer field = reference (ground truth)
+    try:
+        cr_prompt = ContextRecallClassificationPrompt()
+        cr_output = await cr_prompt.generate(
+            llm=llm,
+            data=QCA(
+                question=question,
+                context='\n'.join(contexts),
+                answer=reference,
+            ),
+        )
+        result['context_recall_verdicts'] = [c.model_dump() for c in cr_output.classifications]
+    except Exception as exc:
+        result['context_recall_verdicts'] = []
+        result['context_recall_trace_error'] = str(exc)
+
+    # ContextPrecision: one verdict per context chunk; answer field = reference (ground truth)
+    try:
+        cp_prompt = ContextPrecisionPrompt()
+        verdicts = []
+        for idx, ctx in enumerate(contexts):
+            cp_output = await cp_prompt.generate(
+                llm=llm,
+                data=QAC(
+                    question=question,
+                    context=ctx,
+                    answer=reference,
+                ),
+            )
+            entry: dict[str, Any] = {'context_index': idx, 'context_snippet': ctx[:200]}
+            entry.update(cp_output.model_dump())
+            verdicts.append(entry)
+        result['context_precision_verdicts'] = verdicts
+    except Exception as exc:
+        result['context_precision_verdicts'] = []
+        result['context_precision_trace_error'] = str(exc)
+
+    return result
+
+def _coerce_skip_flag(value: Any) -> bool:
+    """Normalize skip markers from datasets to a strict bool."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'y'}
+
+
+def _normalize_document_identifier(value: Any) -> str | None:
+    """Normalize document names and paths for retrieval matching."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    parsed = urlparse(candidate)
+    candidate = unquote(parsed.path or '') if parsed.scheme else unquote(candidate)
+    candidate = candidate.replace('\\', '/').rstrip('/')
+    if not candidate:
+        return None
+    candidate = candidate.rsplit('/', 1)[-1].strip()
+    if not candidate:
+        return None
+    return candidate.casefold()
+
+
+def _collect_expected_documents(source_documents: Any) -> dict[str, Any]:
+    """Return display names and normalized identifiers for expected documents."""
+    documents = source_documents if isinstance(source_documents, list) else []
+    display_names: list[str] = []
+    identifiers: set[str] = set()
+    for document in documents:
+        if isinstance(document, str):
+            normalized = _normalize_document_identifier(document)
+            if normalized:
+                identifiers.add(normalized)
+                if document not in display_names:
+                    display_names.append(document)
+            continue
+        if not isinstance(document, dict):
+            continue
+        raw_display = next(
+            (
+                candidate.strip()
+                for candidate in (
+                    document.get('name'),
+                    document.get('file_path'),
+                    document.get('document_title'),
+                    document.get('title'),
+                )
+                if isinstance(candidate, str) and candidate.strip()
+            ),
+            None,
+        )
+        document_identifiers: set[str] = set()
+        fallback_identifier = None
+        for key in ('name', 'file_path', 'document_title', 'title', 'url'):
+            normalized = _normalize_document_identifier(document.get(key))
+            if not normalized:
+                continue
+            document_identifiers.add(normalized)
+            fallback_identifier = fallback_identifier or normalized
+        identifiers.update(document_identifiers)
+        if raw_display:
+            if raw_display not in display_names:
+                display_names.append(raw_display)
+        elif fallback_identifier and fallback_identifier not in display_names:
+            display_names.append(fallback_identifier)
+    return {'display_names': display_names, 'identifiers': identifiers}
+
+
+def _extract_retrieved_documents(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract ordered, deduplicated retrieved documents from query/data responses."""
+    data = result.get('data', {}) if isinstance(result, dict) else {}
+    records: list[dict[str, Any]] = []
+    for key in ('references',):
+        value = data.get(key) if isinstance(data, dict) else None
+        if isinstance(value, list):
+            records.extend(item for item in value if isinstance(item, dict))
+    chunks = data.get('chunks') if isinstance(data, dict) else None
+    if isinstance(chunks, list):
+        records.extend(item for item in chunks if isinstance(item, dict))
+    top_level_references = result.get('references') if isinstance(result, dict) else None
+    if isinstance(top_level_references, list):
+        records.extend(item for item in top_level_references if isinstance(item, dict))
+
+    retrieved_documents: list[dict[str, Any]] = []
+    seen_identifiers: set[str] = set()
+    for record in records:
+        display_name = next(
+            (
+                candidate.strip()
+                for candidate in (
+                    record.get('file_path'),
+                    record.get('document_title'),
+                    record.get('file_name'),
+                    record.get('document_name'),
+                    record.get('source_file_path'),
+                    record.get('source_file_name'),
+                    record.get('name'),
+                    record.get('title'),
+                )
+                if isinstance(candidate, str) and candidate.strip()
+            ),
+            None,
+        )
+        identifiers = {
+            normalized
+            for key in (
+                'file_path',
+                'document_title',
+                'file_name',
+                'document_name',
+                'source_file_path',
+                'source_file_name',
+                'name',
+                'title',
+            )
+            if (normalized := _normalize_document_identifier(record.get(key)))
+        }
+        if not identifiers:
+            fallback_identifier = _normalize_document_identifier(record.get('s3_key'))
+            if fallback_identifier:
+                identifiers = {fallback_identifier}
+                display_name = display_name or record.get('s3_key')
+        if not identifiers:
+            continue
+        if identifiers & seen_identifiers:
+            continue
+        seen_identifiers.update(identifiers)
+        retrieved_documents.append(
+            {
+                'display_name': display_name or sorted(identifiers)[0],
+                'identifiers': identifiers,
+            }
+        )
+    return retrieved_documents
+
+
+def _calculate_retrieval_metrics(
+    retrieved_documents: list[dict[str, Any]],
+    expected_identifiers: set[str],
+) -> dict[str, float]:
+    """Compute retrieval hit metrics and MRR against expected document identifiers."""
+    first_hit_rank = 0
+    if expected_identifiers:
+        for rank, document in enumerate(retrieved_documents, 1):
+            identifiers = document.get('identifiers', set())
+            if isinstance(identifiers, set) and identifiers & expected_identifiers:
+                first_hit_rank = rank
+                break
+    return {
+        'hit@1': 1.0 if first_hit_rank and first_hit_rank <= 1 else 0.0,
+        'hit@3': 1.0 if first_hit_rank and first_hit_rank <= 3 else 0.0,
+        'hit@10': 1.0 if first_hit_rank and first_hit_rank <= 10 else 0.0,
+        'mrr': 1.0 / first_hit_rank if first_hit_rank else 0.0,
+    }
+
+
+def _parse_case_numbers(raw: str | None) -> list[int]:
+    """Parse comma-separated case numbers and inclusive ranges."""
+    if raw is None or not raw.strip():
+        return []
+
+    case_numbers: list[int] = []
+    seen: set[int] = set()
+    for raw_token in raw.split(','):
+        token = raw_token.strip()
+        if not token:
+            continue
+
+        if '-' in token:
+            start_raw, end_raw = token.split('-', 1)
+            try:
+                start = int(start_raw)
+                end = int(end_raw)
+            except ValueError as exc:
+                raise ValueError(f'Invalid case range: {token}') from exc
+            if start <= 0 or end <= 0 or end < start:
+                raise ValueError(f'Case ranges must be positive and ascending: {token}')
+            values = range(start, end + 1)
+        else:
+            try:
+                number = int(token)
+            except ValueError as exc:
+                raise ValueError(f'Case numbers must be positive integers: {token}') from exc
+            if number <= 0:
+                raise ValueError(f'Case numbers must be positive integers: {token}')
+            values = (number,)
+
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            case_numbers.append(value)
+
+    if not case_numbers:
+        raise ValueError('No valid case numbers were provided.')
+    return case_numbers
+
+
+def _load_bottom_case_numbers(results_path: str | Path, limit: int) -> list[int]:
+    """Load the lowest-scoring case numbers from a prior results JSON artifact."""
+    if limit <= 0:
+        raise ValueError('--bottom-case-count must be greater than zero.')
+
+    path = Path(results_path)
+    if not path.exists():
+        raise FileNotFoundError(f'Results file not found: {path}')
+
+    with open(path, encoding='utf-8') as f:
+        payload = json.load(f)
+
+    results = payload.get('results') if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        raise ValueError(f'Results file does not contain a top-level results list: {path}')
+
+    ranked_cases: list[tuple[float, int]] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        if result.get('status') not in {'success', 'incomplete'}:
+            continue
+        test_number = result.get('test_number')
+        if not isinstance(test_number, int):
+            continue
+        ragas_score = _coerce_metric_value(result.get('ragas_score'))
+        if _is_nan(ragas_score):
+            continue
+        ranked_cases.append((ragas_score, test_number))
+
+    if not ranked_cases:
+        raise ValueError(f'No successful benchmark rows found in {path}')
+
+    ranked_cases.sort(key=lambda item: (item[0], item[1]))
+    return [test_number for _, test_number in ranked_cases[:limit]]
+
+
+def _load_case_mode_overrides(overrides_path: str | Path | None) -> dict[int, str]:
+    """Load explicit per-case query modes keyed by active benchmark case number."""
+    if overrides_path is None or not str(overrides_path).strip():
+        return {}
+
+    path = Path(overrides_path)
+    if not path.exists():
+        raise FileNotFoundError(f'Case mode overrides file not found: {path}')
+
+    with open(path, encoding='utf-8') as f:
+        payload = json.load(f)
+
+    if not isinstance(payload, dict):
+        raise ValueError(f'Case mode overrides must be a JSON object keyed by case number: {path}')
+
+    case_mode_overrides: dict[int, str] = {}
+    for raw_case_number, raw_mode in payload.items():
+        try:
+            case_number = int(raw_case_number)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'Case mode override keys must be positive integers: {raw_case_number!r}') from exc
+        if case_number <= 0:
+            raise ValueError(f'Case mode override keys must be positive integers: {raw_case_number!r}')
+
+        mode = str(raw_mode).strip()
+        if mode not in QUERY_MODES:
+            raise ValueError(
+                f'Unsupported query mode {raw_mode!r} for case {case_number}; expected one of {", ".join(QUERY_MODES)}'
+            )
+        case_mode_overrides[case_number] = mode
+
+    return case_mode_overrides
+
+
+def _preview_text(value: Any, *, limit: int = 280) -> str:
+    """Return a compact single-line preview for diagnostic output."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    text = ' '.join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 3, 1)].rstrip() + '...'
+
+
+def _summarize_reference(reference: dict[str, Any]) -> dict[str, str]:
+    """Convert a verbose reference record into a compact diagnostic entry."""
+    content = reference.get('content')
+    excerpt = ''
+    if isinstance(content, list):
+        excerpt = next((chunk for chunk in content if isinstance(chunk, str) and chunk.strip()), '')
+    elif isinstance(content, str):
+        excerpt = content
+    elif isinstance(reference.get('excerpt'), str):
+        excerpt = reference.get('excerpt', '')
+
+    return {
+        'reference_id': str(reference.get('reference_id') or ''),
+        'document_title': str(reference.get('document_title') or reference.get('title') or ''),
+        'file_path': str(reference.get('file_path') or ''),
+        'excerpt': _preview_text(excerpt),
+    }
+
+def _flatten_references_to_contexts_and_sources(
+    references: list[Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Flatten reference content into parallel (contexts, sources) lists for RAGAS input.
+
+    Each source entry records reference_id, document_title, file_path, and content_index
+    (0-based position within that reference's content list). All metadata fields fall back
+    to empty strings when absent so callers never get KeyError.
+    """
+    contexts: list[str] = []
+    sources: list[dict[str, Any]] = []
+    if not isinstance(references, list):
+        return contexts, sources
+    for ref in references:
+        if not isinstance(ref, dict):
+            continue
+        meta = {
+            'reference_id': str(ref.get('reference_id') or ''),
+            'document_title': str(ref.get('document_title') or ref.get('title') or ''),
+            'file_path': str(ref.get('file_path') or ''),
+        }
+        content = ref.get('content', [])
+        if isinstance(content, list):
+            for idx, chunk in enumerate(content):
+                if isinstance(chunk, str):
+                    contexts.append(chunk)
+                    sources.append({**meta, 'content_index': idx})
+        elif isinstance(content, str):
+            contexts.append(content)
+            sources.append({**meta, 'content_index': 0})
+    return contexts, sources
+
+def _summarize_chunk(chunk: dict[str, Any]) -> dict[str, str]:
+    """Convert a chunk record into a compact diagnostic entry."""
+    return {
+        'reference_id': str(chunk.get('reference_id') or ''),
+        'chunk_id': str(chunk.get('chunk_id') or ''),
+        'file_path': str(chunk.get('file_path') or ''),
+        'excerpt': _preview_text(chunk.get('content', '')),
+    }
+
+
+def _pick_results_for_diagnostics(
+    results: list[dict[str, Any]],
+    *,
+    case_numbers: tuple[int, ...] = (),
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Choose which completed results should receive verbose diagnostics."""
+    if case_numbers:
+        selected_results: list[dict[str, Any]] = []
+        for case_number in case_numbers:
+            match = next(
+                (result for result in results if isinstance(result, dict) and result.get('test_number') == case_number),
+                None,
+            )
+            if match is not None:
+                selected_results.append(match)
+        return selected_results
+
+    completed_results = [
+        result
+        for result in results
+        if isinstance(result, dict)
+        and result.get('status') in {'success', 'incomplete'}
+        and not _is_nan(_coerce_metric_value(result.get('ragas_score')))
+    ]
+    completed_results.sort(
+        key=lambda result: (
+            _coerce_metric_value(result.get('ragas_score')),
+            int(result.get('test_number', 0)),
+        ),
+    )
+    return completed_results[:limit]
+
+
+def _format_metric_value(value: Any) -> str:
+    """Render diagnostic metrics consistently."""
+    numeric = _coerce_metric_value(value)
+    return 'n/a' if _is_nan(numeric) else f'{numeric:.4f}'
+
+
+def _render_case_diagnostics_markdown(payload: dict[str, Any]) -> str:
+    """Render a compact markdown view for selected case diagnostics."""
+    lines = [
+        '# YAR case diagnostics',
+        '',
+        f'- Evaluator default mode: `{payload.get("query_mode", "unknown")}`',
+        f'- Generated at: `{payload.get("timestamp", "")}`',
+        f'- Selection: {payload.get("selection", "unspecified")}',
+    ]
+    case_mode_overrides = payload.get('case_mode_overrides')
+    if isinstance(case_mode_overrides, dict) and case_mode_overrides.get('count'):
+        source = case_mode_overrides.get('source') or 'unspecified source'
+        lines.append(f'- Case mode overrides: `{case_mode_overrides["count"]}` from `{source}`')
+    lines.append('')
+
+    for case in payload.get('cases', []):
+        if not isinstance(case, dict):
+            continue
+        question = _preview_text(case.get('question', ''), limit=160)
+        lines.extend(
+            [
+                f'## Case {case.get("test_number", "?")} - {question}',
+                '',
+                f'- Effective query mode: `{case.get("query_mode", "unknown")}`',
+                f'- RAGAS score: {_format_metric_value(case.get("ragas_score"))}',
+                f'- Faithfulness: {_format_metric_value(case.get("metrics", {}).get("faithfulness"))}',
+                f'- Answer relevance: {_format_metric_value(case.get("metrics", {}).get("answer_relevance"))}',
+                f'- Context recall: {_format_metric_value(case.get("metrics", {}).get("context_recall"))}',
+                f'- Context precision: {_format_metric_value(case.get("metrics", {}).get("context_precision"))}',
+                f'- Retrieval hit@1 / hit@3 / MRR: {_format_metric_value(case.get("retrieval_metrics", {}).get("hit@1"))} / {_format_metric_value(case.get("retrieval_metrics", {}).get("hit@3"))} / {_format_metric_value(case.get("retrieval_metrics", {}).get("mrr"))}',
+                f'- Retrieved documents: {case.get("retrieved_document_count", 0)}',
+            ]
+        )
+        requested_query_mode = case.get('requested_query_mode')
+        if requested_query_mode and requested_query_mode != case.get('query_mode'):
+            lines.append(f'- Requested query mode: `{requested_query_mode}`')
+        if case.get('expected_documents'):
+            lines.append(f'- Expected documents: {", ".join(case["expected_documents"])}')
+        if case.get('retrieved_documents'):
+            lines.append(f'- Retrieved documents (ordered): {", ".join(case["retrieved_documents"])}')
+        if case.get('diagnostic_error'):
+            lines.extend(['', f'[diagnostic_error] {case["diagnostic_error"]}', ''])
+            continue
+
+        processing_info = case.get('processing_info', {})
+        if processing_info:
+            lines.extend(
+                [
+                    '',
+                    '### Retrieval metadata',
+                    '',
+                    f'- Keywords: HL={case.get("keywords", {}).get("high_level", [])} | LL={case.get("keywords", {}).get("low_level", [])}',
+                    f'- Processing info: {processing_info}',
+                ]
+            )
+
+        lines.extend(
+            ['', '### Answer', '', case.get('answer', ''), '', '### Ground truth', '', case.get('ground_truth', '')]
+        )
+
+        references = case.get('reference_previews', [])
+        if references:
+            lines.extend(['', '### Top references', ''])
+            for reference in references:
+                label = reference.get('document_title') or reference.get('file_path') or 'unknown reference'
+                lines.append(f'- [{reference.get("reference_id", "?")}] `{label}` - {reference.get("excerpt", "")}')
+
+        chunks = case.get('chunk_previews', [])
+        if chunks:
+            lines.extend(['', '### Top visible chunks', ''])
+            for chunk in chunks:
+                chunk_label = chunk.get('chunk_id') or chunk.get('reference_id') or 'chunk'
+                lines.append(f'- `{chunk_label}` `{chunk.get("file_path", "")}` - {chunk.get("excerpt", "")}')
+
+        lines.extend(['', '---', ''])
+
+    return '\n'.join(lines).rstrip() + '\n'
 
 
 class RAGEvaluator:
@@ -199,98 +762,36 @@ class RAGEvaluator:
         rag_api_url: str | None = None,
         query_mode: str = 'mix',
         debug_mode: bool = False,
+        retrieval_only: bool = False,
+        retrieval_csv_only: bool = False,
+        selected_case_numbers: list[int] | None = None,
+        emit_diagnostics: bool = False,
+        diagnostic_limit: int = 10,
+        diagnostic_case_numbers: list[int] | None = None,
+        case_filter_source: str | None = None,
+        case_mode_overrides: dict[int, str] | None = None,
+        case_mode_overrides_source: str | None = None,
     ):
         """
-        Initialize evaluator with test dataset
+        Initialize evaluator with test dataset.
 
         Args:
-            test_dataset_path: Path to test dataset JSON file
-            rag_api_url: Base URL of YAR API (e.g., http://localhost:9621)
-                        If None, will try to read from environment or use default
-            query_mode: Query mode for retrieval (local, global, hybrid, mix, naive)
-            debug_mode: Enable verbose logging of retrieved contexts
-
-        Environment Variables:
-            EVAL_LLM_MODEL: LLM model for evaluation (default: gpt-4o-mini)
-            EVAL_EMBEDDING_MODEL: Embedding model for evaluation (default: text-embedding-3-small)
-            EVAL_LLM_BINDING_API_KEY: API key for LLM (fallback to OPENAI_API_KEY)
-            EVAL_LLM_BINDING_HOST: Custom endpoint URL for LLM (optional)
-            EVAL_EMBEDDING_BINDING_API_KEY: API key for embeddings (fallback: EVAL_LLM_BINDING_API_KEY -> OPENAI_API_KEY)
-            EVAL_EMBEDDING_BINDING_HOST: Custom endpoint URL for embeddings (fallback: EVAL_LLM_BINDING_HOST)
-
-        Raises:
-            ImportError: If ragas or datasets packages are not installed
-            EnvironmentError: If EVAL_LLM_BINDING_API_KEY and OPENAI_API_KEY are both not set
+            test_dataset_path: Path to test dataset JSON file.
+            rag_api_url: Base URL of YAR API (for example http://localhost:9621).
+            query_mode: Query mode for retrieval (local, global, hybrid, mix, naive).
+            debug_mode: Enable verbose logging of retrieved contexts.
+            retrieval_only: Skip RAGAS scoring and evaluate retrieval quality only.
+            retrieval_csv_only: In retrieval-only mode, export only the CSV artifact.
+            selected_case_numbers: Optional list of benchmark case numbers to execute.
+            emit_diagnostics: Whether to export compact per-case diagnostics after the run.
+            diagnostic_limit: Maximum number of cases to include when auto-selecting diagnostics.
+            diagnostic_case_numbers: Explicit case numbers to include in the diagnostics export.
+            case_filter_source: Optional label describing where the selected case numbers came from.
+            case_mode_overrides: Optional per-case query modes keyed by active benchmark case number.
+            case_mode_overrides_source: Optional label describing where per-case query modes came from.
         """
-        # Validate RAGAS dependencies are installed
-        if not RAGAS_AVAILABLE:
-            raise ImportError('RAGAS dependencies not installed. Install with: pip install ragas datasets')
-
-        # Configure evaluation LLM (for RAGAS scoring)
-        eval_llm_api_key = os.getenv('EVAL_LLM_BINDING_API_KEY') or os.getenv('OPENAI_API_KEY')
-        if not eval_llm_api_key:
-            raise OSError(
-                'EVAL_LLM_BINDING_API_KEY or OPENAI_API_KEY is required for evaluation. '
-                'Set EVAL_LLM_BINDING_API_KEY to use a custom API key, '
-                'or ensure OPENAI_API_KEY is set.'
-            )
-
-        eval_model = os.getenv('EVAL_LLM_MODEL', 'gpt-4o-mini')
-        eval_llm_base_url = os.getenv('EVAL_LLM_BINDING_HOST')
-
-        # Configure evaluation embeddings (for RAGAS scoring)
-        # Fallback chain: EVAL_EMBEDDING_BINDING_API_KEY -> EVAL_LLM_BINDING_API_KEY -> OPENAI_API_KEY
-        eval_embedding_api_key = (
-            os.getenv('EVAL_EMBEDDING_BINDING_API_KEY')
-            or os.getenv('EVAL_LLM_BINDING_API_KEY')
-            or os.getenv('OPENAI_API_KEY')
-        )
-        eval_embedding_model = os.getenv('EVAL_EMBEDDING_MODEL', 'text-embedding-3-large')
-        # Fallback chain: EVAL_EMBEDDING_BINDING_HOST -> EVAL_LLM_BINDING_HOST -> None
-        eval_embedding_base_url = os.getenv('EVAL_EMBEDDING_BINDING_HOST') or os.getenv('EVAL_LLM_BINDING_HOST')
-
-        # Create LLM and Embeddings instances for RAGAS
-        llm_kwargs = {
-            'model': eval_model,
-            'api_key': eval_llm_api_key,
-            'max_retries': int(os.getenv('EVAL_LLM_MAX_RETRIES', '5')),
-            'request_timeout': int(os.getenv('EVAL_LLM_TIMEOUT', '180')),
-        }
-        embedding_kwargs = {
-            'model': eval_embedding_model,
-            'api_key': eval_embedding_api_key,
-        }
-
-        if eval_llm_base_url:
-            llm_kwargs['base_url'] = eval_llm_base_url
-
-        if eval_embedding_base_url:
-            embedding_kwargs['base_url'] = eval_embedding_base_url
-
-        # Create base LangChain LLM
-        base_llm = ChatOpenAI(**llm_kwargs)
-        self.eval_embeddings = OpenAIEmbeddings(**embedding_kwargs)
-
-        # Wrap LLM with LangchainLLMWrapper and enable bypass_n mode for custom endpoints
-        # This ensures compatibility with endpoints that don't support the 'n' parameter
-        # by generating multiple outputs through repeated prompts instead of using 'n' parameter
-        try:
-            self.eval_llm = LangchainLLMWrapper(
-                langchain_llm=base_llm,
-                bypass_n=True,  # Enable bypass_n to avoid passing 'n' to OpenAI API
-            )
-            logger.debug('Successfully configured bypass_n mode for LLM wrapper')
-        except Exception as e:
-            logger.warning(
-                'Could not configure LangchainLLMWrapper with bypass_n: %s. '
-                'Using base LLM directly, which may cause warnings with custom endpoints.',
-                e,
-            )
-            self.eval_llm = base_llm
-
         if test_dataset_path is None:
             test_dataset_path = Path(__file__).parent / 'sample_dataset.json'
-
         if rag_api_url is None:
             rag_api_url = os.getenv('YAR_API_URL', 'http://localhost:9621')
 
@@ -298,70 +799,371 @@ class RAGEvaluator:
         self.rag_api_url = rag_api_url.rstrip('/')
         self.query_mode = query_mode
         self.debug_mode = debug_mode
+        self.retrieval_only = retrieval_only or retrieval_csv_only
+        self.retrieval_csv_only = retrieval_csv_only
         self.results_dir = Path(__file__).parent / 'results'
         self.results_dir.mkdir(exist_ok=True)
+        self.total_loaded_test_cases = 0
+        self.total_active_test_cases = 0
+        self.skipped_test_count = 0
+        self.filtered_test_count = 0
+        self.selected_case_numbers = tuple(dict.fromkeys(selected_case_numbers or []))
+        self.selected_case_number_set = set(self.selected_case_numbers)
+        self.emit_diagnostics = emit_diagnostics
+        self.diagnostic_limit = diagnostic_limit
+        self.diagnostic_case_numbers = tuple(dict.fromkeys(diagnostic_case_numbers or self.selected_case_numbers))
+        self.case_filter_source = case_filter_source
+        self.case_mode_overrides = dict(case_mode_overrides or {})
+        self.case_mode_overrides_source = case_mode_overrides_source
 
-        # Load test dataset
+        self.eval_model = None
+        self.eval_embedding_model = None
+        self.eval_llm_base_url = None
+        self.eval_embedding_base_url = None
+        self.eval_max_retries = 0
+        self.eval_timeout = 0
+        self.eval_llm = None
+        self.eval_embeddings = None
+
+        if not self.retrieval_only:
+            if not RAGAS_AVAILABLE:
+                raise ImportError('RAGAS dependencies not installed. Install with: pip install ragas datasets')
+
+            eval_llm_api_key = os.getenv('EVAL_LLM_BINDING_API_KEY') or os.getenv('OPENAI_API_KEY')
+            if not eval_llm_api_key:
+                raise OSError(
+                    'EVAL_LLM_BINDING_API_KEY or OPENAI_API_KEY is required for evaluation. '
+                    'Set EVAL_LLM_BINDING_API_KEY to use a custom API key, '
+                    'or ensure OPENAI_API_KEY is set.'
+                )
+
+            eval_model = os.getenv('EVAL_LLM_MODEL', 'gpt-4o-mini')
+            eval_llm_base_url = os.getenv('EVAL_LLM_BINDING_HOST')
+            eval_embedding_api_key = (
+                os.getenv('EVAL_EMBEDDING_BINDING_API_KEY')
+                or os.getenv('EVAL_LLM_BINDING_API_KEY')
+                or os.getenv('OPENAI_API_KEY')
+            )
+            eval_embedding_base_url = os.getenv('EVAL_EMBEDDING_BINDING_HOST') or os.getenv('EVAL_LLM_BINDING_HOST')
+            eval_embedding_model = os.getenv('EVAL_EMBEDDING_MODEL')
+            if not eval_embedding_model:
+                if eval_embedding_base_url:
+                    eval_embedding_model = os.getenv('EMBEDDING_MODEL')
+                if not eval_embedding_model:
+                    eval_embedding_model = 'text-embedding-3-large'
+
+            llm_kwargs = {
+                'model': eval_model,
+                'api_key': eval_llm_api_key,
+                'max_retries': int(os.getenv('EVAL_LLM_MAX_RETRIES', '5')),
+                'request_timeout': int(os.getenv('EVAL_LLM_TIMEOUT', '180')),
+            }
+            embedding_kwargs = {
+                'model': eval_embedding_model,
+                'api_key': eval_embedding_api_key,
+            }
+            if eval_llm_base_url:
+                llm_kwargs['base_url'] = eval_llm_base_url
+            if eval_embedding_base_url:
+                embedding_kwargs['base_url'] = eval_embedding_base_url
+
+            base_llm = ChatOpenAI(**llm_kwargs)
+            if eval_embedding_base_url:
+                self.eval_embeddings = OpenAICompatibleEmbeddings(
+                    model=eval_embedding_model,
+                    api_key=eval_embedding_api_key,
+                    base_url=eval_embedding_base_url,
+                    max_retries=llm_kwargs['max_retries'],
+                    timeout=llm_kwargs['request_timeout'],
+                )
+            else:
+                self.eval_embeddings = OpenAIEmbeddings(**embedding_kwargs)
+            self.eval_llm = LangchainLLMWrapper(
+                langchain_llm=base_llm,
+                bypass_n=True,
+            )
+
+            self.eval_model = eval_model
+            self.eval_embedding_model = eval_embedding_model
+            self.eval_llm_base_url = eval_llm_base_url
+            self.eval_embedding_base_url = eval_embedding_base_url
+            self.eval_max_retries = llm_kwargs['max_retries']
+            self.eval_timeout = llm_kwargs['request_timeout']
+
         self.test_cases = self._load_test_dataset()
-
-        # Store configuration values for display
-        self.eval_model = eval_model
-        self.eval_embedding_model = eval_embedding_model
-        self.eval_llm_base_url = eval_llm_base_url
-        self.eval_embedding_base_url = eval_embedding_base_url
-        self.eval_max_retries = llm_kwargs['max_retries']
-        self.eval_timeout = llm_kwargs['request_timeout']
-
-        # Display configuration
         self._display_configuration()
 
     def _display_configuration(self):
-        """Display all evaluation configuration settings"""
-        logger.info('Evaluation Models:')
-        logger.info('  • LLM Model:            %s', self.eval_model)
-        logger.info('  • Embedding Model:      %s', self.eval_embedding_model)
-
-        # Display LLM endpoint
-        if self.eval_llm_base_url:
-            logger.info('  • LLM Endpoint:         %s', self.eval_llm_base_url)
-            logger.info('  • Bypass N-Parameter:   Enabled (use LangchainLLMWrapper for compatibility)')
+        logger.info('Evaluation Configuration:')
+        if self.retrieval_only:
+            logger.info('  Retrieval-only mode:    enabled')
+            logger.info('  CSV-only export:        %s', 'yes' if self.retrieval_csv_only else 'no')
         else:
-            logger.info('  • LLM Endpoint:         OpenAI Official API')
+            logger.info('  LLM Model:              %s', self.eval_model)
+            logger.info('  Embedding Model:        %s', self.eval_embedding_model)
+            if self.eval_llm_base_url:
+                logger.info('  LLM Endpoint:           %s', self.eval_llm_base_url)
+            else:
+                logger.info('  LLM Endpoint:           OpenAI official API')
+            if self.eval_embedding_base_url:
+                if self.eval_embedding_base_url != self.eval_llm_base_url:
+                    logger.info('  Embedding Endpoint:     %s', self.eval_embedding_base_url)
+            elif self.eval_llm_base_url:
+                logger.info('  Embedding Endpoint:     OpenAI official API')
+            logger.info('  LLM Max Retries:        %s', self.eval_max_retries)
+            logger.info('  LLM Timeout:            %s seconds', self.eval_timeout)
 
-        # Display Embedding endpoint (only if different from LLM)
-        if self.eval_embedding_base_url:
-            if self.eval_embedding_base_url != self.eval_llm_base_url:
-                logger.info('  • Embedding Endpoint:   %s', self.eval_embedding_base_url)
-            # If same as LLM endpoint, no need to display separately
-        elif not self.eval_llm_base_url:
-            # Both using OpenAI - already displayed above
-            pass
-        else:
-            # LLM uses custom endpoint, but embeddings use OpenAI
-            logger.info('  • Embedding Endpoint:   OpenAI Official API')
-
-        logger.info('Concurrency & Rate Limiting:')
-        query_top_k = int(os.getenv('EVAL_QUERY_TOP_K', '10'))
-        logger.info('  • Query Top-K:          %s Entities/Relations', query_top_k)
-        logger.info('  • LLM Max Retries:      %s', self.eval_max_retries)
-        logger.info('  • LLM Timeout:          %s seconds', self.eval_timeout)
+        logger.info('Retrieval Parameters:')
+        logger.info('  Query Top-K:            %s entities/relations', int(os.getenv('EVAL_QUERY_TOP_K', '15')))
+        logger.info('  Chunk Top-K:            %s chunks', int(os.getenv('EVAL_CHUNK_TOP_K', '15')))
+        logger.info(
+            '  BM25 fusion:            %s',
+            'enabled' if os.getenv('EVAL_ENABLE_BM25_FUSION', 'true').lower() == 'true' else 'disabled',
+        )
 
         logger.info('Test Configuration:')
-        logger.info('  • Total Test Cases:     %s', len(self.test_cases))
-        logger.info('  • Test Dataset:         %s', self.test_dataset_path.name)
-        logger.info('  • YAR API:         %s', self.rag_api_url)
-        logger.info('  • Query Mode:           %s', self.query_mode)
-        logger.info('  • Results Directory:    %s', self.results_dir.name)
+        logger.info('  Loaded Test Cases:      %s', self.total_loaded_test_cases)
+        logger.info('  Active Test Cases:      %s', self.total_active_test_cases)
+        logger.info('  Skipped Test Cases:     %s', self.skipped_test_count)
+        logger.info('  Executed Test Cases:    %s', len(self.test_cases))
+        logger.info('  Test Dataset:           %s', self.test_dataset_path.name)
+        logger.info('  YAR API:                %s', self.rag_api_url)
+        logger.info('  Query Mode:             %s', self.query_mode)
+        if self.case_mode_overrides:
+            logger.info(
+                '  Case Mode Overrides:    %s cases%s',
+                len(self.case_mode_overrides),
+                f' ({self.case_mode_overrides_source})' if self.case_mode_overrides_source else '',
+            )
+        logger.info('  Results Directory:      %s', self.results_dir.name)
+        if self.selected_case_numbers:
+            logger.info(
+                '  Case Filter:            %s',
+                ', '.join(str(case_number) for case_number in self.selected_case_numbers),
+            )
+            if self.case_filter_source:
+                logger.info('  Case Filter Source:     %s', self.case_filter_source)
+        if self.emit_diagnostics:
+            if self.diagnostic_case_numbers:
+                logger.info(
+                    '  Diagnostics:            cases %s',
+                    ', '.join(str(case_number) for case_number in self.diagnostic_case_numbers),
+                )
+            else:
+                logger.info('  Diagnostics:            bottom %s cases after run', self.diagnostic_limit)
 
-    def _load_test_dataset(self) -> list[dict[str, str]]:
-        """Load test cases from JSON file"""
+    def _load_test_dataset(self) -> list[dict[str, Any]]:
         if not self.test_dataset_path.exists():
             raise FileNotFoundError(f'Test dataset not found: {self.test_dataset_path}')
 
         with open(self.test_dataset_path, encoding='utf-8') as f:
             data = json.load(f)
 
-        return data.get('test_cases', [])
+        if 'test_cases' in data:
+            raw_cases = data.get('test_cases', [])
+        elif 'qa_pairs' in data:
+            raw_cases = [
+                {
+                    'id': case.get('id'),
+                    'question': case.get('question', ''),
+                    'ground_truth': case.get('ground_truth') or case.get('answer') or case.get('expected_answer') or '',
+                    'project': case.get('project') or case.get('contact') or 'unknown',
+                    'source_documents': case.get('source_documents') or [],
+                    'hl_keywords': case.get('hl_keywords'),
+                    'll_keywords': case.get('ll_keywords'),
+                    'entity_filter': case.get('entity_filter'),
+                    'mode': case.get('mode'),
+                    'disable_cache': case.get('disable_cache', False),
+                    'context_reference': case.get('context_reference'),
+                    'comments': case.get('comments'),
+                    'skip': case.get('skip', False),
+                }
+                for case in data.get('qa_pairs', [])
+            ]
+        else:
+            raise ValueError(
+                f'Unsupported dataset format in {self.test_dataset_path}. Expected either a test_cases or qa_pairs root key.'
+            )
+
+        if not isinstance(raw_cases, list):
+            raise ValueError(f'Expected a list of test cases in {self.test_dataset_path}')
+
+        case_mode_overrides = dict(getattr(self, 'case_mode_overrides', {}) or {})
+        legacy_mode_error = (
+            'Dataset-embedded `mode` is no longer supported; remove it from the dataset and '
+            'pass per-case query modes via --case-mode-overrides JSON keyed by active benchmark case number.'
+        )
+
+        normalized_cases: list[dict[str, Any]] = []
+        skipped_count = 0
+        active_case_number = 0
+        for raw_case in raw_cases:
+            if not isinstance(raw_case, dict):
+                continue
+            if raw_case.get('mode'):
+                case_id = raw_case.get('id')
+                case_hint = f' id {case_id}' if case_id is not None else ''
+                raise ValueError(
+                    f'Legacy dataset mode found in {self.test_dataset_path.name}{case_hint}. {legacy_mode_error}'
+                )
+            if _coerce_skip_flag(raw_case.get('skip')):
+                skipped_count += 1
+                continue
+
+            active_case_number += 1
+            if self.selected_case_number_set and active_case_number not in self.selected_case_number_set:
+                continue
+
+            normalized_case: dict[str, Any] = {
+                'test_number': active_case_number,
+                'question': raw_case.get('question', ''),
+                'ground_truth': raw_case.get('ground_truth') or raw_case.get('expected_answer') or '',
+                'project': raw_case.get('project') or raw_case.get('contact') or 'unknown',
+                'source_documents': raw_case.get('source_documents') or [],
+            }
+            if raw_case.get('entity_filter'):
+                normalized_case['entity_filter'] = raw_case['entity_filter']
+            override_mode = case_mode_overrides.get(active_case_number)
+            if override_mode:
+                normalized_case['mode'] = override_mode
+            if raw_case.get('disable_cache') is True:
+                normalized_case['disable_cache'] = True
+            if raw_case.get('hl_keywords'):
+                normalized_case['hl_keywords'] = raw_case['hl_keywords']
+            if raw_case.get('ll_keywords'):
+                normalized_case['ll_keywords'] = raw_case['ll_keywords']
+            if raw_case.get('id') is not None:
+                normalized_case['id'] = raw_case['id']
+            if raw_case.get('comments'):
+                normalized_case['comments'] = raw_case['comments']
+
+            if raw_case.get('context_reference'):
+                normalized_case['context_reference'] = raw_case['context_reference']
+
+            normalized_cases.append(normalized_case)
+
+        self.total_loaded_test_cases = len(raw_cases)
+        self.total_active_test_cases = active_case_number
+        self.skipped_test_count = skipped_count
+        self.filtered_test_count = active_case_number - len(normalized_cases)
+
+        invalid_override_numbers = sorted(
+            case_number for case_number in case_mode_overrides if case_number < 1 or case_number > active_case_number
+        )
+        if invalid_override_numbers:
+            raise ValueError(
+                'Case mode overrides did not match active test numbers: '
+                + ', '.join(str(case_number) for case_number in invalid_override_numbers)
+            )
+
+        if self.selected_case_number_set:
+            matched_case_numbers = {int(case['test_number']) for case in normalized_cases}
+            missing_case_numbers = sorted(self.selected_case_number_set - matched_case_numbers)
+            if missing_case_numbers:
+                raise ValueError(
+                    'Case filter did not match active test numbers: '
+                    + ', '.join(str(case_number) for case_number in missing_case_numbers)
+                )
+
+        return normalized_cases
+
+    def _request_headers(self) -> dict[str, str]:
+        """Return request headers for YAR API calls."""
+        api_key = os.getenv('YAR_API_KEY')
+        return {'X-API-Key': api_key} if api_key else {}
+
+    def _build_query_payload(
+        self,
+        question: str,
+        test_case: dict[str, Any] | None = None,
+        *,
+        include_response_type: bool,
+    ) -> dict[str, Any]:
+        """Build a query payload shared by full and retrieval-only evaluation."""
+        payload: dict[str, Any] = {
+            'query': question,
+            'mode': self.query_mode,
+            'include_references': True,
+            'include_chunk_content': True,
+            'top_k': int(os.getenv('EVAL_QUERY_TOP_K', '15')),
+            'chunk_top_k': int(os.getenv('EVAL_CHUNK_TOP_K', '15')),
+            'max_total_tokens': int(os.getenv('EVAL_MAX_TOTAL_TOKENS', '40000')),
+            'cosine_threshold': float(os.getenv('EVAL_COSINE_THRESHOLD', '0.30')),
+            'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'true').lower() == 'true',
+            'enable_bm25_fusion': os.getenv('EVAL_ENABLE_BM25_FUSION', 'true').lower() == 'true',
+            'bm25_weight': float(os.getenv('EVAL_BM25_WEIGHT', '0.3')),
+            'disable_cache': os.getenv('EVAL_DISABLE_CACHE', 'false').lower() == 'true',
+        }
+        if include_response_type:
+            payload['response_type'] = 'Single Paragraph'
+            payload['user_prompt'] = EVAL_USER_PROMPT
+        if test_case:
+            if test_case.get('mode'):
+                payload['mode'] = test_case['mode']
+                if self.debug_mode:
+                    logger.info('[DEBUG] Using mode override: %s', test_case['mode'])
+            if test_case.get('hl_keywords'):
+                payload['hl_keywords'] = test_case['hl_keywords']
+                if self.debug_mode:
+                    logger.info('[DEBUG] Using HL keywords override: %s', test_case['hl_keywords'])
+            if test_case.get('ll_keywords'):
+                payload['ll_keywords'] = test_case['ll_keywords']
+                if self.debug_mode:
+                    logger.info('[DEBUG] Using LL keywords override: %s', test_case['ll_keywords'])
+            if test_case.get('entity_filter'):
+                payload['entity_filter'] = test_case['entity_filter']
+                if self.debug_mode:
+                    logger.info('[DEBUG] Using entity filter override: %s', test_case['entity_filter'])
+            if test_case.get('disable_cache') is True:
+                payload['disable_cache'] = True
+                if self.debug_mode:
+                    logger.info('[DEBUG] Disabling cache for this test case')
+        return payload
+
+    def _create_http_client(self, max_async: int) -> httpx.AsyncClient:
+        """Create a shared HTTP client for evaluator API calls."""
+        timeout = httpx.Timeout(
+            TOTAL_TIMEOUT_SECONDS,
+            connect=CONNECT_TIMEOUT_SECONDS,
+            read=READ_TIMEOUT_SECONDS,
+        )
+        limits = httpx.Limits(
+            max_connections=(max_async + 1) * 2,
+            max_keepalive_connections=max_async + 1,
+        )
+        return httpx.AsyncClient(timeout=timeout, limits=limits)
+
+    async def _post_query(
+        self,
+        endpoint: str,
+        payload: dict[str, Any],
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        """POST a query payload to the YAR API and return the JSON response."""
+        try:
+            headers = self._request_headers()
+            response = await client.post(
+                f'{self.rag_api_url}{endpoint}',
+                json=payload,
+                headers=headers or None,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            raise Exception(
+                f'Cannot connect to YAR API at {self.rag_api_url}\n'
+                'Make sure YAR server is running:\n'
+                'python -m yar.api.yar_server\n'
+                f'Error: {e!s}'
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise Exception(f'YAR API error {e.response.status_code}: {e.response.text}') from e
+        except httpx.ReadTimeout as e:
+            raise Exception(
+                f'Request timeout while calling {endpoint}\nQuery: {payload.get("query", "")[:100]}...\nError: {e!s}'
+            ) from e
+        except Exception as e:
+            raise Exception(f'Error calling YAR API {endpoint}: {type(e).__name__}: {e!s}') from e
 
     async def generate_rag_response(
         self,
@@ -370,139 +1172,246 @@ class RAGEvaluator:
         test_case: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Generate RAG response by calling YAR API.
+        Generate a full RAG response by calling the YAR API.
 
         Args:
             question: The user query.
             client: Shared httpx AsyncClient for connection pooling.
-            test_case: Optional test case dict with keyword overrides (hl_keywords, ll_keywords).
+            test_case: Optional test case dict with retrieval overrides.
 
         Returns:
-            Dictionary with 'answer' and 'contexts' keys.
-            'contexts' is a list of strings (one per retrieved document).
-
-        Raises:
-            Exception: If YAR API is unavailable.
+            Dictionary with answer text and retrieved context chunks.
         """
-        try:
-            # Build payload with tunable parameters via environment variables
-            # These allow testing different retrieval configurations without code changes
-            payload = {
-                'query': question,
-                'mode': self.query_mode,
-                'include_references': True,
-                'include_chunk_content': True,  # Request chunk content in references
-                'response_type': 'Single Paragraph',
-                # Retrieval tuning parameters (override via EVAL_* env vars)
-                # Bumped defaults for better context recall: top_k 10→15, chunk 10→15, tokens 30k→40k
-                'top_k': int(os.getenv('EVAL_QUERY_TOP_K', '15')),
-                'chunk_top_k': int(os.getenv('EVAL_CHUNK_TOP_K', '15')),
-                'max_total_tokens': int(os.getenv('EVAL_MAX_TOTAL_TOKENS', '40000')),
-                'cosine_threshold': float(os.getenv('EVAL_COSINE_THRESHOLD', '0.30')),  # 0.30 default, lower for more recall
-                'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'true').lower() == 'true',
-                'enable_bm25_fusion': os.getenv('EVAL_ENABLE_BM25_FUSION', 'false').lower() == 'true',
-                'bm25_weight': float(os.getenv('EVAL_BM25_WEIGHT', '0.3')),
-                'user_prompt': EVAL_USER_PROMPT,  # Anti-hedging instructions
-            }
+        result = await self._post_query(
+            '/query',
+            self._build_query_payload(question, test_case, include_response_type=True),
+            client,
+        )
 
-            # Optional keyword overrides from test dataset - bypasses LLM keyword extraction
-            # Useful for testing if poor keyword extraction is causing retrieval failures
-            if test_case:
-                if test_case.get('hl_keywords'):
-                    payload['hl_keywords'] = test_case['hl_keywords']
-                    if self.debug_mode:
-                        logger.info('[DEBUG] Using HL keywords override: %s', test_case['hl_keywords'])
-                if test_case.get('ll_keywords'):
-                    payload['ll_keywords'] = test_case['ll_keywords']
-                    if self.debug_mode:
-                        logger.info('[DEBUG] Using LL keywords override: %s', test_case['ll_keywords'])
+        answer = result.get('response', 'No response generated')
+        references = result.get('references', [])
+        contexts, context_sources = _flatten_references_to_contexts_and_sources(references)
 
-            # Get API key from environment for authentication
-            api_key = os.getenv('YAR_API_KEY')
+        if self.debug_mode:
+            logger.info('[DEBUG] Query: %s', question[:100])
+            logger.info('[DEBUG] Retrieved %d context chunks', len(contexts))
+            if not contexts:
+                logger.warning('[DEBUG] No contexts retrieved; check keyword extraction and knowledge base coverage.')
+                logger.info('[DEBUG] Answer preview: %s', answer[:200] if answer else 'No answer')
+            else:
+                for index, context in enumerate(contexts[:3], 1):
+                    context_preview = context[:300] if isinstance(context, str) else str(context)[:300]
+                    logger.info('[DEBUG] Context %d: %s...', index, context_preview)
+                if len(contexts) > 3:
+                    logger.info('[DEBUG] ... and %d more contexts', len(contexts) - 3)
 
-            # Prepare headers with optional authentication
-            headers = {}
-            if api_key:
-                headers['X-API-Key'] = api_key
+        return {
+            'answer': answer,
+            'contexts': contexts,
+            'context_sources': context_sources,
+        }
 
-            # Single optimized API call - gets both answer AND chunk content
-            response = await client.post(
-                f'{self.rag_api_url}/query',
-                json=payload,
-                headers=headers if headers else None,
-            )
-            response.raise_for_status()
-            result = response.json()
+    async def evaluate_retrieval_case(
+        self,
+        idx: int,
+        test_case: dict[str, Any],
+        retrieval_semaphore: asyncio.Semaphore,
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        """Evaluate retrieval quality for a single test case."""
+        async with retrieval_semaphore:
+            question = test_case['question']
+            case_number = int(test_case.get('test_number', idx))
+            expected_documents = _collect_expected_documents(test_case.get('source_documents'))
+            try:
+                result = await self._post_query(
+                    '/query/data',
+                    self._build_query_payload(question, test_case, include_response_type=False),
+                    client,
+                )
+                if result.get('status') not in {None, 'success'}:
+                    raise Exception(result.get('message', 'Retrieval query failed'))
+                retrieved_documents = _extract_retrieved_documents(result)
+                metrics = _calculate_retrieval_metrics(
+                    retrieved_documents,
+                    expected_documents['identifiers'],
+                )
+                evaluation_result = {
+                    'test_number': case_number,
+                    'question': question,
+                    'project': test_case.get('project', 'unknown'),
+                    'expected_document_count': len(expected_documents['display_names']),
+                    'expected_documents': expected_documents['display_names'],
+                    'retrieved_document_count': len(retrieved_documents),
+                    'retrieved_documents': [document['display_name'] for document in retrieved_documents],
+                    'metrics': metrics,
+                    'status': 'success',
+                    'timestamp': datetime.now().isoformat(),
+                }
+                if not expected_documents['identifiers']:
+                    evaluation_result['warning'] = 'No source_documents provided; retrieval metrics default to 0.0.'
+                return evaluation_result
+            except Exception as e:
+                logger.error('Error evaluating retrieval for test %s: %s', case_number, str(e))
+                return {
+                    'test_number': case_number,
+                    'question': question,
+                    'project': test_case.get('project', 'unknown'),
+                    'expected_document_count': len(expected_documents['display_names']),
+                    'expected_documents': expected_documents['display_names'],
+                    'retrieved_document_count': 0,
+                    'retrieved_documents': [],
+                    'metrics': {'hit@1': 0.0, 'hit@3': 0.0, 'hit@10': 0.0, 'mrr': 0.0},
+                    'error': str(e),
+                    'status': 'error',
+                    'timestamp': datetime.now().isoformat(),
+                }
 
-            answer = result.get('response', 'No response generated')
-            references = result.get('references', [])
+    async def evaluate_retrieval_only(self) -> list[dict[str, Any]]:
+        """Evaluate retrieval quality across all active test cases."""
+        max_async = max(1, int(os.getenv('EVAL_MAX_CONCURRENT', '2')))
+        logger.info('%s', '=' * 70)
+        logger.info('Starting retrieval-only evaluation')
+        logger.info('Concurrent requests: %s', max_async)
+        logger.info('%s', '=' * 70)
 
-            # DEBUG: Inspect the API response
-            logger.debug('🔍 References Count: %s', len(references))
-            if references:
-                first_ref = references[0]
-                logger.debug('🔍 First Reference Keys: %s', list(first_ref.keys()))
-                if 'content' in first_ref:
-                    content_preview = first_ref['content']
-                    if isinstance(content_preview, list) and content_preview:
-                        logger.debug(
-                            '🔍 Content Preview (first chunk): %s...',
-                            content_preview[0][:100],
-                        )
-                    elif isinstance(content_preview, str):
-                        logger.debug('🔍 Content Preview: %s...', content_preview[:100])
+        retrieval_semaphore = asyncio.Semaphore(max_async)
+        async with self._create_http_client(max_async) as client:
+            tasks = [
+                self.evaluate_retrieval_case(idx, test_case, retrieval_semaphore, client)
+                for idx, test_case in enumerate(self.test_cases, 1)
+            ]
+            results = await asyncio.gather(*tasks)
+        return list(results)
 
-            # Extract chunk content from enriched references
-            # Note: content is now a list of chunks per reference (one file may have multiple chunks)
-            contexts = []
-            for ref in references:
-                content = ref.get('content', [])
-                if isinstance(content, list):
-                    # Flatten the list: each chunk becomes a separate context
-                    contexts.extend(content)
-                elif isinstance(content, str):
-                    # Backward compatibility: if content is still a string (shouldn't happen)
-                    contexts.append(content)
+    def _export_retrieval_to_csv(self, results: list[dict[str, Any]], timestamp: str) -> Path:
+        """Export retrieval-only results to CSV."""
+        csv_path = self.results_dir / f'retrieval_{timestamp}.csv'
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            fieldnames = [
+                'test_number',
+                'question',
+                'project',
+                'expected_document_count',
+                'expected_documents',
+                'retrieved_document_count',
+                'retrieved_documents',
+                'hit@1',
+                'hit@3',
+                'hit@10',
+                'mrr',
+                'status',
+                'warning',
+                'error',
+                'timestamp',
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for result in results:
+                metrics = result.get('metrics', {})
+                writer.writerow(
+                    {
+                        'test_number': result.get('test_number', ''),
+                        'question': result.get('question', ''),
+                        'project': result.get('project', 'unknown'),
+                        'expected_document_count': result.get('expected_document_count', 0),
+                        'expected_documents': ' | '.join(result.get('expected_documents', [])),
+                        'retrieved_document_count': result.get('retrieved_document_count', 0),
+                        'retrieved_documents': ' | '.join(result.get('retrieved_documents', [])[:10]),
+                        'hit@1': self._format_metric_export(metrics.get('hit@1', 0.0)),
+                        'hit@3': self._format_metric_export(metrics.get('hit@3', 0.0)),
+                        'hit@10': self._format_metric_export(metrics.get('hit@10', 0.0)),
+                        'mrr': self._format_metric_export(metrics.get('mrr', 0.0)),
+                        'status': result.get('status', 'error'),
+                        'warning': result.get('warning', ''),
+                        'error': result.get('error', ''),
+                        'timestamp': result.get('timestamp', ''),
+                    }
+                )
+        return csv_path
 
-            # Debug logging for troubleshooting retrieval issues
-            if self.debug_mode:
-                logger.info('[DEBUG] Query: %s', question[:100])
-                logger.info('[DEBUG] Retrieved %d context chunks', len(contexts))
-                if not contexts:
-                    logger.warning('[DEBUG] ⚠️ NO CONTEXTS RETRIEVED! Check keyword extraction and KB coverage.')
-                    logger.info('[DEBUG] Answer preview: %s', answer[:200] if answer else 'No answer')
-                else:
-                    for i, ctx in enumerate(contexts[:3]):
-                        ctx_preview = ctx[:300] if isinstance(ctx, str) else str(ctx)[:300]
-                        logger.info('[DEBUG] Context %d: %s...', i + 1, ctx_preview)
-                    if len(contexts) > 3:
-                        logger.info('[DEBUG] ... and %d more contexts', len(contexts) - 3)
+    def _calculate_retrieval_stats(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        """Aggregate retrieval metrics over successful retrieval-only cases."""
+        successful_results = [result for result in results if result.get('status') == 'success']
+        total_tests = len(results)
+        successful_tests = len(successful_results)
+        failed_tests = total_tests - successful_tests
+        metric_names = ('hit@1', 'hit@3', 'hit@10', 'mrr')
+        metric_totals = dict.fromkeys(metric_names, 0.0)
+        for result in successful_results:
+            metrics = result.get('metrics', {})
+            for metric_name in metric_names:
+                metric_totals[metric_name] += float(metrics.get(metric_name, 0.0) or 0.0)
+        average_metrics = {
+            metric_name: round(metric_totals[metric_name] / successful_tests, 4) if successful_tests else 0.0
+            for metric_name in metric_names
+        }
+        return {
+            'total_tests': total_tests,
+            'successful_tests': successful_tests,
+            'failed_tests': failed_tests,
+            'success_rate': round(successful_tests / total_tests * 100, 2) if total_tests else 0.0,
+            'average_metrics': average_metrics,
+        }
 
-            return {
-                'answer': answer,
-                'contexts': contexts,  # List of strings from actual retrieved chunks
-            }
+    async def run_retrieval_only(self) -> dict[str, Any]:
+        """Run retrieval-only evaluation and export retrieval metrics."""
+        start_time = time.time()
+        results = await self.evaluate_retrieval_only()
+        elapsed_time = time.time() - start_time
+        retrieval_stats = self._calculate_retrieval_stats(results)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        summary = {
+            'timestamp': datetime.now().isoformat(),
+            'total_tests': len(results),
+            'skipped_tests': self.skipped_test_count,
+            'elapsed_time_seconds': round(elapsed_time, 2),
+            'retrieval_stats': retrieval_stats,
+            'results': results,
+        }
+        json_path = None
+        if not self.retrieval_csv_only:
+            json_path = self.results_dir / f'retrieval_{timestamp}.json'
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2)
+        csv_path = self._export_retrieval_to_csv(results, timestamp)
 
-        except httpx.ConnectError as e:
-            raise Exception(
-                f'❌ Cannot connect to YAR API at {self.rag_api_url}\n'
-                f'   Make sure YAR server is running:\n'
-                f'   python -m yar.api.yar_server\n'
-                f'   Error: {e!s}'
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise Exception(f'YAR API error {e.response.status_code}: {e.response.text}') from e
-        except httpx.ReadTimeout as e:
-            raise Exception(
-                f'Request timeout after waiting for response\n   Question: {question[:100]}...\n   Error: {e!s}'
-            ) from e
-        except Exception as e:
-            raise Exception(f'Error calling YAR API: {type(e).__name__}: {e!s}') from e
+        logger.info('')
+        logger.info('%s', '=' * 70)
+        logger.info('RETRIEVAL EVALUATION COMPLETE')
+        logger.info('%s', '=' * 70)
+        logger.info('Loaded Tests:   %s', self.total_loaded_test_cases)
+        logger.info('Skipped:        %s', self.skipped_test_count)
+        logger.info('Executed:       %s', len(results))
+        logger.info('Successful:     %s', retrieval_stats['successful_tests'])
+        logger.info('Failed:         %s', retrieval_stats['failed_tests'])
+        logger.info('Success Rate:   %.2f%%', retrieval_stats['success_rate'])
+        logger.info('Elapsed Time:   %.2f seconds', elapsed_time)
+        logger.info('Avg Time/Test:  %.2f seconds', elapsed_time / len(results) if results else 0.0)
+        logger.info('')
+        logger.info('%s', '=' * 70)
+        logger.info('RETRIEVAL METRICS (Average)')
+        logger.info('%s', '=' * 70)
+        avg = retrieval_stats['average_metrics']
+        logger.info('Average Hit@1:  %.4f', avg['hit@1'])
+        logger.info('Average Hit@3:  %.4f', avg['hit@3'])
+        logger.info('Average Hit@10: %.4f', avg['hit@10'])
+        logger.info('Average MRR:    %.4f', avg['mrr'])
+        logger.info('')
+        logger.info('%s', '=' * 70)
+        logger.info('GENERATED FILES')
+        logger.info('%s', '=' * 70)
+        logger.info('Results Dir:    %s', self.results_dir.absolute())
+        logger.info('   CSV:  %s', csv_path.name)
+        if json_path:
+            logger.info('   JSON: %s', json_path.name)
+        logger.info('%s', '=' * 70)
+        return summary
 
     async def evaluate_single_case(
         self,
         idx: int,
-        test_case: dict[str, str],
+        test_case: dict[str, Any],
         rag_semaphore: asyncio.Semaphore,
         eval_semaphore: asyncio.Semaphore,
         client: httpx.AsyncClient,
@@ -531,15 +1440,16 @@ class RAGEvaluator:
         async with rag_semaphore:
             question = test_case['question']
             ground_truth = test_case['ground_truth']
+            case_number = int(test_case.get('test_number', idx))
 
             # Stage 1: Generate RAG response
             try:
                 rag_response = await self.generate_rag_response(question=question, client=client, test_case=test_case)
             except Exception as e:
-                logger.error('Error generating response for test %s: %s', idx, str(e))
+                logger.error('Error generating response for test %s: %s', case_number, str(e))
                 progress_counter['completed'] += 1
                 return {
-                    'test_number': idx,
+                    'test_number': case_number,
                     'question': question,
                     'error': str(e),
                     'metrics': {},
@@ -550,6 +1460,9 @@ class RAGEvaluator:
 
             # *** CRITICAL FIX: Use actual retrieved contexts, NOT ground_truth ***
             retrieved_contexts = rag_response['contexts']
+            # Use context_reference for context metrics when present; keeps benchmark
+            # ground_truth (which may contain filenames or bare Yes/No) out of RAGAS.
+            ragas_reference = test_case.get('context_reference') or ground_truth
 
             # Prepare dataset for RAGAS evaluation with CORRECT contexts
             eval_dataset = Dataset.from_dict(
@@ -557,7 +1470,7 @@ class RAGEvaluator:
                     'question': [question],
                     'answer': [rag_response['answer']],
                     'contexts': [retrieved_contexts],
-                    'ground_truth': [ground_truth],
+                    'ground_truth': [ragas_reference],
                 }
             )
 
@@ -579,7 +1492,7 @@ class RAGEvaluator:
                         # preventing accumulation of completed bars and allowing position reuse
                         pbar = tqdm(
                             total=4,
-                            desc=f'Eval-{idx:02d}',
+                            desc=f'Eval-{case_number:02d}',
                             position=position,
                             leave=False,
                         )
@@ -589,10 +1502,14 @@ class RAGEvaluator:
                     eval_results = evaluate(
                         dataset=eval_dataset,
                         metrics=[
-                            Faithfulness(),
-                            AnswerRelevancy(strictness=EVAL_ANSWER_RELEVANCY_STRICTNESS),
-                            ContextRecall(),
-                            ContextPrecision(),
+                            Faithfulness(llm=self.eval_llm),
+                            AnswerRelevancy(
+                                llm=self.eval_llm,
+                                embeddings=self.eval_embeddings,
+                                strictness=EVAL_ANSWER_RELEVANCY_STRICTNESS,
+                            ),
+                            ContextRecall(llm=self.eval_llm),
+                            ContextPrecision(llm=self.eval_llm),
                         ],
                         llm=self.eval_llm,
                         embeddings=self.eval_embeddings,
@@ -610,7 +1527,7 @@ class RAGEvaluator:
                     result_status = 'success' if _has_complete_metrics(metrics) else 'incomplete'
 
                     result = {
-                        'test_number': idx,
+                        'test_number': case_number,
                         'question': question,
                         'answer': rag_response['answer'][:200] + '...'
                         if len(rag_response['answer']) > 200
@@ -634,10 +1551,10 @@ class RAGEvaluator:
                     return result
 
                 except Exception as e:
-                    logger.error('Error evaluating test %s: %s', idx, str(e))
+                    logger.error('Error evaluating test %s: %s', case_number, str(e))
                     progress_counter['completed'] += 1
                     return {
-                        'test_number': idx,
+                        'test_number': case_number,
                         'question': question,
                         'error': str(e),
                         'metrics': {},
@@ -655,52 +1572,24 @@ class RAGEvaluator:
 
     async def evaluate_responses(self) -> list[dict[str, Any]]:
         """
-        Evaluate all test cases in parallel with two-stage pipeline and return metrics
-
-        Returns:
-            List of evaluation results with metrics
+        Evaluate all test cases in parallel with a two-stage pipeline and return metrics.
         """
-        # Get evaluation concurrency from environment (default to 2 for parallel evaluation)
-        max_async = int(os.getenv('EVAL_MAX_CONCURRENT', '2'))
+        max_async = max(1, int(os.getenv('EVAL_MAX_CONCURRENT', '2')))
 
         logger.info('%s', '=' * 70)
-        logger.info('🚀 Starting RAGAS Evaluation of YAR System')
-        logger.info('🔧 RAGAS Evaluation (Stage 2): %s concurrent', max_async)
+        logger.info('Starting RAGAS evaluation')
+        logger.info('RAGAS evaluation concurrency: %s', max_async)
         logger.info('%s', '=' * 70)
 
-        # Create two-stage pipeline semaphores
-        # Stage 1: RAG generation - allow x2 concurrency to keep evaluation fed
         rag_semaphore = asyncio.Semaphore(max_async * 2)
-        # Stage 2: RAGAS evaluation - primary bottleneck
         eval_semaphore = asyncio.Semaphore(max_async)
-
-        # Create progress counter (shared across all tasks)
         progress_counter = {'completed': 0}
-
-        # Create position pool for tqdm progress bars
-        # Positions range from 0 to max_async-1, ensuring no overlapping displays
         position_pool = asyncio.Queue()
         for i in range(max_async):
             await position_pool.put(i)
-
-        # Create lock to serialize tqdm creation and prevent race conditions
-        # This ensures progress bars are created one at a time, avoiding display conflicts
         pbar_creation_lock = asyncio.Lock()
 
-        # Create shared HTTP client with connection pooling and proper timeouts
-        # Timeout: 3 minutes for connect, 5 minutes for read (LLM can be slow)
-        timeout = httpx.Timeout(
-            TOTAL_TIMEOUT_SECONDS,
-            connect=CONNECT_TIMEOUT_SECONDS,
-            read=READ_TIMEOUT_SECONDS,
-        )
-        limits = httpx.Limits(
-            max_connections=(max_async + 1) * 2,  # Allow buffer for RAG stage
-            max_keepalive_connections=max_async + 1,
-        )
-
-        async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
-            # Create tasks for all test cases
+        async with self._create_http_client(max_async) as client:
             tasks = [
                 self.evaluate_single_case(
                     idx,
@@ -714,8 +1603,6 @@ class RAGEvaluator:
                 )
                 for idx, test_case in enumerate(self.test_cases, 1)
             ]
-
-            # Run all evaluations in parallel (limited by two-stage semaphores)
             results = await asyncio.gather(*tasks)
 
         return list(results)
@@ -759,11 +1646,11 @@ class RAGEvaluator:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
 
-            for idx, result in enumerate(results, 1):
+            for result in results:
                 metrics = result.get('metrics', {})
                 writer.writerow(
                     {
-                        'test_number': idx,
+                        'test_number': result.get('test_number', ''),
                         'question': result.get('question', ''),
                         'project': result.get('project', 'unknown'),
                         'faithfulness': self._format_metric_export(metrics.get('faithfulness', 0)),
@@ -781,11 +1668,11 @@ class RAGEvaluator:
     def _format_metric(self, value: float, width: int = 6) -> str:
         """
         Format a metric value for display, handling NaN gracefully
-        
+
         Args:
             value: The metric value to format
             width: The width of the formatted string
-        
+
         Returns:
             Formatted string (e.g., "0.8523" or "  N/A ")
         """
@@ -954,55 +1841,224 @@ class RAGEvaluator:
             'max_ragas_score': round(max_score, 4),
         }
 
+    async def _collect_single_case_diagnostic(
+        self,
+        test_case: dict[str, Any],
+        result: dict[str, Any],
+        client: httpx.AsyncClient,
+    ) -> dict[str, Any]:
+        """Fetch the answer and retrieval payload for one case and summarize it."""
+        case_number = int(test_case.get('test_number', 0))
+        question = test_case['question']
+        requested_payload = self._build_query_payload(question, test_case, include_response_type=False)
+        requested_query_mode = str(requested_payload.get('mode', self.query_mode))
+        try:
+            answer_result = await self.generate_rag_response(question=question, client=client, test_case=test_case)
+            ragas_contexts = answer_result.get('contexts', [])
+            ragas_context_sources = answer_result.get('context_sources', [])
+            ragas_reference = str(test_case.get('context_reference') or test_case.get('ground_truth') or '')
+            retrieval_result = await self._post_query('/query/data', requested_payload, client)
+            if retrieval_result.get('status') not in {None, 'success'}:
+                raise Exception(retrieval_result.get('message', 'Retrieval query failed'))
+
+            expected_documents = _collect_expected_documents(test_case.get('source_documents'))
+            retrieved_documents = _extract_retrieved_documents(retrieval_result)
+            retrieval_metrics = _calculate_retrieval_metrics(
+                retrieved_documents,
+                expected_documents['identifiers'],
+            )
+            metadata = retrieval_result.get('metadata', {}) if isinstance(retrieval_result, dict) else {}
+            data = retrieval_result.get('data', {}) if isinstance(retrieval_result, dict) else {}
+            references = data.get('references') if isinstance(data, dict) else []
+            chunks = data.get('chunks') if isinstance(data, dict) else []
+            effective_query_mode = requested_query_mode
+            if isinstance(metadata, dict):
+                effective_query_mode = str(
+                    metadata.get('effective_query_mode') or metadata.get('mode') or requested_query_mode
+                )
+                requested_query_mode = str(metadata.get('requested_query_mode') or requested_query_mode)
+
+            verdict_traces = await _collect_metric_verdict_traces(
+                llm=getattr(self, 'eval_llm', None),
+                question=question,
+                contexts=ragas_contexts,
+                reference=ragas_reference,
+            )
+            return {
+                'test_number': case_number,
+                'question': question,
+                'query_mode': effective_query_mode,
+                'requested_query_mode': requested_query_mode,
+                'effective_query_mode': effective_query_mode,
+                'project': test_case.get('project', 'unknown'),
+                'ragas_score': result.get('ragas_score'),
+                'metrics': result.get('metrics', {}),
+                'answer': answer_result.get('answer', ''),
+                'ground_truth': test_case.get('ground_truth', ''),
+                'ragas_reference': ragas_reference,
+                'ragas_contexts': ragas_contexts,
+                'ragas_context_sources': ragas_context_sources,
+                **verdict_traces,
+                'expected_documents': expected_documents['display_names'],
+                'retrieved_document_count': len(retrieved_documents),
+                'retrieved_documents': [document['display_name'] for document in retrieved_documents],
+                'retrieval_metrics': retrieval_metrics,
+                'keywords': metadata.get('keywords', {}) if isinstance(metadata, dict) else {},
+                'processing_info': metadata.get('processing_info', {}) if isinstance(metadata, dict) else {},
+                'reference_previews': [
+                    _summarize_reference(reference)
+                    for reference in (references if isinstance(references, list) else [])[:5]
+                ],
+                'chunk_previews': [
+                    _summarize_chunk(chunk) for chunk in (chunks if isinstance(chunks, list) else [])[:5]
+                ],
+            }
+        except Exception as exc:
+            logger.error('Error collecting diagnostics for test %s: %s', case_number, exc)
+            return {
+                'test_number': case_number,
+                'question': question,
+                'query_mode': requested_query_mode,
+                'requested_query_mode': requested_query_mode,
+                'effective_query_mode': requested_query_mode,
+                'project': test_case.get('project', 'unknown'),
+                'ragas_score': result.get('ragas_score'),
+                'metrics': result.get('metrics', {}),
+                'diagnostic_error': str(exc),
+            }
+
+    async def _collect_case_diagnostics(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Collect compact answer/retrieval diagnostics for the requested cases."""
+        selected_results = _pick_results_for_diagnostics(
+            results,
+            case_numbers=self.diagnostic_case_numbers,
+            limit=self.diagnostic_limit,
+        )
+        if not selected_results:
+            return []
+
+        case_map = {
+            int(test_case['test_number']): test_case
+            for test_case in self.test_cases
+            if isinstance(test_case, dict) and isinstance(test_case.get('test_number'), int)
+        }
+        selected_cases = [
+            (case_map[int(result['test_number'])], result)
+            for result in selected_results
+            if isinstance(result.get('test_number'), int) and int(result['test_number']) in case_map
+        ]
+        if not selected_cases:
+            return []
+
+        max_async = max(
+            1,
+            min(
+                len(selected_cases),
+                int(os.getenv('EVAL_DIAGNOSTIC_MAX_CONCURRENT', os.getenv('EVAL_MAX_CONCURRENT', '2'))),
+            ),
+        )
+        async with self._create_http_client(max_async) as client:
+            return list(
+                await asyncio.gather(
+                    *(
+                        self._collect_single_case_diagnostic(test_case, result, client)
+                        for test_case, result in selected_cases
+                    )
+                )
+            )
+
+    def _export_case_diagnostics(
+        self,
+        diagnostics: list[dict[str, Any]],
+        *,
+        timestamp: str,
+    ) -> dict[str, str]:
+        """Write compact diagnostics artifacts for later analysis."""
+        selection = (
+            f'cases {", ".join(str(case_number) for case_number in self.diagnostic_case_numbers)}'
+            if self.diagnostic_case_numbers
+            else f'bottom {self.diagnostic_limit} cases from current run'
+        )
+        if self.case_filter_source:
+            selection = f'{selection} (source: {self.case_filter_source})'
+
+        payload = {
+            'timestamp': datetime.now().isoformat(),
+            'query_mode': self.query_mode,
+            'selection': selection,
+            'case_mode_overrides': {
+                'source': self.case_mode_overrides_source,
+                'count': len(self.case_mode_overrides),
+            }
+            if self.case_mode_overrides
+            else None,
+            'cases': diagnostics,
+        }
+        json_path = self.results_dir / f'diagnostics_{timestamp}.json'
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+
+        markdown_path = self.results_dir / f'diagnostics_{timestamp}.md'
+        with open(markdown_path, 'w', encoding='utf-8') as f:
+            f.write(_render_case_diagnostics_markdown(payload))
+
+        return {
+            'json': json_path.name,
+            'markdown': markdown_path.name,
+        }
+
     async def run(self) -> dict[str, Any]:
-        """Run complete evaluation pipeline"""
+        """Run the configured evaluation pipeline."""
+        if self.retrieval_only:
+            return await self.run_retrieval_only()
 
         start_time = time.time()
-
-        # Evaluate responses
         results = await self.evaluate_responses()
-
         elapsed_time = time.time() - start_time
-
-        # Calculate benchmark statistics
         benchmark_stats = self._calculate_benchmark_stats(results)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        diagnostics: list[dict[str, Any]] = []
+        diagnostic_files: dict[str, str] | None = None
+        if self.emit_diagnostics:
+            diagnostics = await self._collect_case_diagnostics(results)
+            if diagnostics:
+                diagnostic_files = self._export_case_diagnostics(diagnostics, timestamp=timestamp)
 
-        # Save results
         summary = {
             'timestamp': datetime.now().isoformat(),
             'total_tests': len(results),
+            'skipped_tests': self.skipped_test_count,
             'elapsed_time_seconds': round(elapsed_time, 2),
             'benchmark_stats': benchmark_stats,
             'results': results,
         }
+        if diagnostics:
+            summary['diagnostics'] = diagnostics
+        if diagnostic_files:
+            summary['diagnostic_files'] = diagnostic_files
 
-        # Display results table
         self._display_results_table(results)
-
-        # Save JSON results
-        json_path = self.results_dir / f'results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        json_path = self.results_dir / f'results_{timestamp}.json'
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2)
-
-        # Export to CSV
         csv_path = self._export_to_csv(results)
 
-        # Print summary
         logger.info('')
         logger.info('%s', '=' * 70)
-        logger.info('📊 EVALUATION COMPLETE')
+        logger.info('EVALUATION COMPLETE')
         logger.info('%s', '=' * 70)
-        logger.info('Total Tests:    %s', len(results))
+        logger.info('Loaded Tests:   %s', self.total_loaded_test_cases)
+        logger.info('Active Tests:   %s', self.total_active_test_cases)
+        logger.info('Skipped:        %s', self.skipped_test_count)
+        logger.info('Executed:       %s', len(results))
         logger.info('Successful:     %s', benchmark_stats['successful_tests'])
         logger.info('Failed:         %s', benchmark_stats['failed_tests'])
         logger.info('Success Rate:   %.2f%%', benchmark_stats['success_rate'])
         logger.info('Elapsed Time:   %.2f seconds', elapsed_time)
-        logger.info('Avg Time/Test:  %.2f seconds', elapsed_time / len(results))
-
-        # Print benchmark metrics
+        logger.info('Avg Time/Test:  %.2f seconds', elapsed_time / len(results) if results else 0.0)
         logger.info('')
         logger.info('%s', '=' * 70)
-        logger.info('📈 BENCHMARK RESULTS (Average)')
+        logger.info('BENCHMARK RESULTS (Average)')
         logger.info('%s', '=' * 70)
         avg = benchmark_stats['average_metrics']
         logger.info('Average Faithfulness:      %.4f', avg['faithfulness'])
@@ -1011,24 +2067,19 @@ class RAGEvaluator:
         logger.info('Average Context Precision: %.4f', avg['context_precision'])
         logger.info('Average RAGAS Score:       %.4f', avg['ragas_score'])
         logger.info('%s', '-' * 70)
-        logger.info(
-            'Min RAGAS Score:           %.4f',
-            benchmark_stats['min_ragas_score'],
-        )
-        logger.info(
-            'Max RAGAS Score:           %.4f',
-            benchmark_stats['max_ragas_score'],
-        )
-
+        logger.info('Min RAGAS Score:           %.4f', benchmark_stats['min_ragas_score'])
+        logger.info('Max RAGAS Score:           %.4f', benchmark_stats['max_ragas_score'])
         logger.info('')
         logger.info('%s', '=' * 70)
-        logger.info('📁 GENERATED FILES')
+        logger.info('GENERATED FILES')
         logger.info('%s', '=' * 70)
         logger.info('Results Dir:    %s', self.results_dir.absolute())
-        logger.info('   • CSV:  %s', csv_path.name)
-        logger.info('   • JSON: %s', json_path.name)
+        logger.info('   CSV:  %s', csv_path.name)
+        logger.info('   JSON: %s', json_path.name)
+        if diagnostic_files:
+            logger.info('   DIAG JSON: %s', diagnostic_files['json'])
+            logger.info('   DIAG MD:   %s', diagnostic_files['markdown'])
         logger.info('%s', '=' * 70)
-
         return summary
 
 
@@ -1136,144 +2187,201 @@ def generate_mode_comparison(
 
 async def main():
     """
-    Main entry point for RAGAS evaluation
-
-    Command-line arguments:
-        --dataset, -d: Path to test dataset JSON file (default: sample_dataset.json)
-        --ragendpoint, -r: YAR API endpoint URL (default: http://localhost:9621 or $YAR_API_URL)
-
-    Usage:
-        python yar/evaluation/eval_rag_quality.py
-        python yar/evaluation/eval_rag_quality.py --dataset my_test.json
-        python yar/evaluation/eval_rag_quality.py -d my_test.json -r http://localhost:9621
+    Main entry point for RAG quality evaluation.
     """
     try:
-        # Parse command-line arguments
         parser = argparse.ArgumentParser(
-            description='RAGAS Evaluation Script for YAR System',
+            description='RAG quality evaluation script for YAR system',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
-Examples:
-  # Use defaults
-  python yar/evaluation/eval_rag_quality.py
+    Examples:
+      # Use defaults
+      python yar/evaluation/eval_rag_quality.py
 
-  # Specify custom dataset
-  python yar/evaluation/eval_rag_quality.py --dataset my_test.json
+      # Specify custom dataset
+      python yar/evaluation/eval_rag_quality.py --dataset my_test.json
 
-  # Specify custom RAG endpoint
-  python yar/evaluation/eval_rag_quality.py --ragendpoint http://my-server.com:9621
+      # Focus on explicit benchmark cases
+      python yar/evaluation/eval_rag_quality.py --dataset eval_docs/qa_pairs.json --cases 31,34-36 --diagnostics
 
-  # Specify both
-  python yar/evaluation/eval_rag_quality.py -d my_test.json -r http://localhost:9621
+      # Re-run the current worst cases from a prior result file
+      python yar/evaluation/eval_rag_quality.py --dataset eval_docs/qa_pairs.json --bottom-cases-from yar/evaluation/results/results_20260417_194235.json --bottom-case-count 10 --compare-modes
 
-  # Run with debug logging
-  python yar/evaluation/eval_rag_quality.py --debug
+      # Run retrieval-only evaluation with JSON + CSV artifacts
+      python yar/evaluation/eval_rag_quality.py --dataset eval_docs/qa_pairs.json --retrieval-only
 
-  # Run multi-mode comparison (evaluates all modes and generates comparison)
-  python yar/evaluation/eval_rag_quality.py --compare-modes
-
-  # Tune retrieval parameters via environment variables
-  EVAL_QUERY_TOP_K=15 EVAL_CHUNK_TOP_K=20 python yar/evaluation/eval_rag_quality.py
-
-Environment Variables (for parameter tuning):
-  EVAL_QUERY_TOP_K     Number of entities/relations to retrieve (default: 15)
-  EVAL_CHUNK_TOP_K     Number of text chunks to retrieve (default: 15)
-  EVAL_MAX_TOTAL_TOKENS  Maximum tokens for context (default: 40000)
-  EVAL_COSINE_THRESHOLD  Vector similarity threshold (default: 0.30)
-  EVAL_ENABLE_RERANK   Enable reranking (default: true)
-  EVAL_ENABLE_BM25_FUSION  Enable BM25 fusion: vector + BM25 search (default: false)
-  EVAL_BM25_WEIGHT     BM25 weight for fusion 0.0-1.0 (default: 0.3)
-  EVAL_USER_PROMPT     Custom prompt for anti-hedging behavior
-  EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 2)
-  YAR_API_KEY     API key for YAR authentication (optional)
-            """,
+    Environment Variables (for parameter tuning):
+      EVAL_QUERY_TOP_K            Number of entities/relations to retrieve (default: 15)
+      EVAL_CHUNK_TOP_K            Number of text chunks to retrieve (default: 15)
+      EVAL_MAX_TOTAL_TOKENS       Maximum tokens for context (default: 40000)
+      EVAL_COSINE_THRESHOLD       Vector similarity threshold (default: 0.30)
+      EVAL_ENABLE_RERANK          Enable reranking (default: true)
+      EVAL_ENABLE_BM25_FUSION     Enable BM25 fusion: vector + BM25 search (default: true)
+      EVAL_BM25_WEIGHT            BM25 weight for fusion 0.0-1.0 (default: 0.3)
+      EVAL_DISABLE_CACHE          Disable keyword/query cache during evaluation (default: true)
+      EVAL_USER_PROMPT            Custom prompt for anti-hedging behavior
+      EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 2)
+      YAR_API_KEY                 API key for YAR authentication (optional)
+                """,
         )
-
         parser.add_argument(
             '--dataset',
             '-d',
             type=str,
             default=None,
-            help='Path to test dataset JSON file (default: sample_dataset.json in evaluation directory)',
+            help='Path to a dataset JSON file with either test_cases or qa_pairs.',
         )
-
         parser.add_argument(
             '--ragendpoint',
             '-r',
             type=str,
             default=None,
-            help='YAR API endpoint URL (default: http://localhost:9621 or $YAR_API_URL environment variable)',
+            help='YAR API endpoint URL (default: http://localhost:9621 or $YAR_API_URL).',
         )
-
         parser.add_argument(
             '--mode',
             '-m',
             type=str,
             default='mix',
             choices=['local', 'global', 'hybrid', 'mix', 'naive'],
-            help="Query mode for retrieval (default: mix). 'local' for entity-specific questions, 'mix' for comprehensive retrieval.",
+            help='Query mode for retrieval (default: mix).',
         )
-
         parser.add_argument(
             '--debug',
             '-v',
             action='store_true',
-            help='Enable verbose debug logging of retrieved contexts (useful for diagnosing retrieval issues)',
+            help='Enable verbose debug logging of retrieved contexts and overrides.',
         )
-
         parser.add_argument(
             '--compare-modes',
             action='store_true',
-            help='Run evaluation across ALL query modes and generate a comparison report. Ignores --mode.',
+            help='Run evaluation across all query modes and generate a comparison report. Ignores --mode.',
         )
-
+        parser.add_argument(
+            '--retrieval-only',
+            action='store_true',
+            help='Evaluate retrieval quality only and export retrieval JSON + CSV artifacts.',
+        )
+        parser.add_argument(
+            '--retrieval-csv-only',
+            action='store_true',
+            help='Evaluate retrieval quality only and export only the retrieval CSV artifact.',
+        )
+        parser.add_argument(
+            '--cases',
+            type=str,
+            default='',
+            help='Comma-separated active benchmark case numbers or ranges (for example 31,34-36).',
+        )
+        parser.add_argument(
+            '--bottom-cases-from',
+            type=str,
+            default='',
+            help='Path to a prior results JSON artifact used to select the current lowest-scoring cases.',
+        )
+        parser.add_argument(
+            '--bottom-case-count',
+            type=int,
+            default=10,
+            help='Number of low-scoring cases to select from --bottom-cases-from (default: 10).',
+        )
+        parser.add_argument(
+            '--diagnostics',
+            action='store_true',
+            help='Export compact per-case diagnostics (answer, retrieval stats, top references, top chunks).',
+        )
+        parser.add_argument(
+            '--diagnostic-limit',
+            type=int,
+            default=10,
+            help='Maximum number of cases to include when --diagnostics auto-selects the current weakest rows.',
+        )
+        parser.add_argument(
+            '--case-mode-overrides',
+            type=str,
+            default='',
+            help='Path to a JSON object mapping active benchmark case numbers to query modes.',
+        )
         args = parser.parse_args()
+        retrieval_mode = args.retrieval_only or args.retrieval_csv_only
+        if args.compare_modes and retrieval_mode:
+            parser.error('--compare-modes is not supported with retrieval-only modes.')
+        if args.compare_modes and args.case_mode_overrides:
+            parser.error('--compare-modes cannot be used with --case-mode-overrides.')
+        if args.cases and args.bottom_cases_from:
+            parser.error('--cases and --bottom-cases-from are mutually exclusive.')
+        if args.bottom_case_count <= 0:
+            parser.error('--bottom-case-count must be greater than zero.')
+        if args.diagnostic_limit <= 0:
+            parser.error('--diagnostic-limit must be greater than zero.')
+
+        try:
+            selected_case_numbers = _parse_case_numbers(args.cases)
+            case_filter_source = None
+            if args.bottom_cases_from:
+                selected_case_numbers = _load_bottom_case_numbers(args.bottom_cases_from, args.bottom_case_count)
+                case_filter_source = args.bottom_cases_from
+            case_mode_overrides = _load_case_mode_overrides(args.case_mode_overrides)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+
+        case_mode_overrides_source = args.case_mode_overrides or None
+        emit_diagnostics = args.diagnostics or bool(selected_case_numbers)
+        diagnostic_case_numbers = selected_case_numbers if selected_case_numbers else None
 
         logger.info('%s', '=' * 70)
-        logger.info('🔍 RAGAS Evaluation - Using Real YAR API')
+        logger.info(
+            '%s - Using Real YAR API',
+            'Retrieval Evaluation' if retrieval_mode else 'RAGAS Evaluation',
+        )
         logger.info('%s', '=' * 70)
 
         if args.compare_modes:
-            # Multi-mode comparison: run evaluation for each query mode
-            logger.info('🔄 Running multi-mode comparison across: %s', ', '.join(QUERY_MODES))
+            logger.info('Running multi-mode comparison across: %s', ', '.join(QUERY_MODES))
             logger.info('%s', '=' * 70)
-
             all_results: dict[str, dict[str, Any]] = {}
             results_dir = None
-
             for mode in QUERY_MODES:
                 logger.info('')
                 logger.info('%s', '=' * 70)
-                logger.info('📊 Evaluating mode: %s', mode.upper())
+                logger.info('Evaluating mode: %s', mode.upper())
                 logger.info('%s', '=' * 70)
-
                 evaluator = RAGEvaluator(
                     test_dataset_path=args.dataset,
                     rag_api_url=args.ragendpoint,
                     query_mode=mode,
                     debug_mode=args.debug,
+                    selected_case_numbers=selected_case_numbers or None,
+                    emit_diagnostics=emit_diagnostics,
+                    diagnostic_limit=args.diagnostic_limit,
+                    diagnostic_case_numbers=diagnostic_case_numbers,
+                    case_filter_source=case_filter_source,
                 )
                 summary = await evaluator.run()
                 all_results[mode] = summary
-
-                # Capture the results directory from first evaluator
                 if results_dir is None:
                     results_dir = evaluator.results_dir
-
-            # Generate comparison report
             if results_dir:
                 generate_mode_comparison(all_results, results_dir)
         else:
-            # Single mode evaluation
             evaluator = RAGEvaluator(
                 test_dataset_path=args.dataset,
                 rag_api_url=args.ragendpoint,
                 query_mode=args.mode,
                 debug_mode=args.debug,
+                retrieval_only=args.retrieval_only,
+                retrieval_csv_only=args.retrieval_csv_only,
+                selected_case_numbers=selected_case_numbers or None,
+                emit_diagnostics=emit_diagnostics,
+                diagnostic_limit=args.diagnostic_limit,
+                diagnostic_case_numbers=diagnostic_case_numbers,
+                case_filter_source=case_filter_source,
+                case_mode_overrides=case_mode_overrides or None,
+                case_mode_overrides_source=case_mode_overrides_source,
             )
             await evaluator.run()
     except Exception as e:
-        logger.exception('❌ Error: %s', e)
+        logger.exception('Error: %s', e)
         sys.exit(1)
 
 

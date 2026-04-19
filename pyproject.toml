@@ -32,6 +32,7 @@ dependencies = [
     "pydantic",
     "pypinyin",
     "python-dotenv",
+    "PyYAML>=6.0",
     "sentence-transformers>=5.1.2",
     "setuptools",
     "tenacity",
@@ -122,7 +123,7 @@ lint = [
 
 evaluation = [
     "yar[api]",
-    "ragas>=0.3.7",
+    "ragas>=0.4.3,<0.5",
     "datasets>=4.3.0",
 ]
 

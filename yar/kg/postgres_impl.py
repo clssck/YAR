@@ -3280,6 +3280,18 @@ class PGKVStorage(BaseKVStorage):
 
         return _order_results(results)
 
+    async def get_chunk_ids_by_doc_id(self, doc_id: str) -> list[str]:
+        if not is_namespace(self.namespace, NameSpace.KV_STORE_TEXT_CHUNKS):
+            raise ValueError(f'{self.namespace} is not supported')
+
+        db = self._db_required()
+        results = await db.query(
+            SQL_TEMPLATES['get_chunk_ids_by_doc'],
+            [self.workspace, doc_id],
+            multirows=True,
+        )
+        return [str(result['id']) for result in results if result and result.get('id') is not None]
+
     async def filter_keys(self, keys: set[str]) -> set[str]:
         """Filter out duplicated content"""
         if not keys:
@@ -3446,6 +3458,20 @@ class PGKVStorage(BaseKVStorage):
         except Exception as e:
             logger.error(f'[{self.workspace}] Error checking if storage is empty: {e}')
             return True
+
+    async def delete_by_doc_id(self, doc_id: str) -> list[str]:
+        if not is_namespace(self.namespace, NameSpace.KV_STORE_TEXT_CHUNKS):
+            raise ValueError(f'{self.namespace} is not supported')
+
+        db = self._db_required()
+        results = await db.query(
+            SQL_TEMPLATES['delete_chunks_by_doc'],
+            [self.workspace, doc_id],
+            multirows=True,
+        )
+        deleted_ids = [str(result['id']) for result in results if result and result.get('id') is not None]
+        logger.debug(f'[{self.workspace}] Successfully deleted {len(deleted_ids)} chunks for doc {doc_id}')
+        return deleted_ids
 
     async def delete(self, ids: list[str]) -> None:
         """Delete specific records from storage by their IDs
@@ -4142,6 +4168,22 @@ class PGVectorStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f'[{self.workspace}] Error while deleting vectors from {self.namespace}: {e}')
             raise
+
+    async def delete_by_doc_id(self, doc_id: str) -> int:
+        if not is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
+            raise ValueError(f'{self.namespace} is not supported')
+
+        db = self._db_required()
+        result = await db.execute(
+            SQL_TEMPLATES['delete_vdb_chunks_by_doc'],
+            {'workspace': self.workspace, 'full_doc_id': doc_id},
+        )
+        try:
+            count = int(result.split()[-1]) if result else 0
+        except (ValueError, AttributeError, IndexError):
+            count = 0
+        logger.debug(f'[{self.workspace}] Successfully deleted {count} vectors for doc {doc_id}')
+        return count
 
     async def delete_entity(self, entity_name: str) -> None:
         """Delete an entity by its name from the vector storage.
@@ -7113,6 +7155,8 @@ SQL_TEMPLATES = {
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                  FROM YAR_RELATION_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
+    'get_chunk_ids_by_doc': """SELECT id FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND full_doc_id=$2""",
+    'delete_chunks_by_doc': """DELETE FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND full_doc_id=$2 RETURNING id""",
     'upsert_doc_full': """INSERT INTO YAR_DOC_FULL (id, content, doc_name, workspace, s3_key, meta)
                         VALUES ($1, $2, $3, $4, $5, $6)
                         ON CONFLICT (workspace,id) DO UPDATE
@@ -7194,6 +7238,7 @@ SQL_TEMPLATES = {
                       file_path=EXCLUDED.file_path,
                       update_time = EXCLUDED.update_time
                      """,
+    'delete_vdb_chunks_by_doc': """DELETE FROM YAR_VDB_CHUNKS WHERE workspace=$1 AND full_doc_id=$2""",
     'upsert_entity': """INSERT INTO YAR_VDB_ENTITY (workspace, id, entity_name, entity_type, content,
                       content_vector, chunk_ids, file_path, create_time, update_time)
                       VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8, $9, $10)
