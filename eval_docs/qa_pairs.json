@@ -1,653 +1,758 @@
 {
-  "qa_pairs": [
-    {
-      "id": 1,
-      "question": "What is ASMD?",
-      "expected_answer": "Treats ASMD, also known as Niemann-Pick B, an ultra-rare, lethal, and heterogeneous disease with no treatment (as of document date)\nRecombinant human acid spingomyelnsae (rhASM)",
-      "contact": "Kathrin",
-      "source_documents": [
+    "qa_pairs": [
         {
-          "name": "Olipudase",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Olipudase-comparability%20for%20NPP-9JULY2019.pdf?csf=1&web=1&e=f7QzQO"
-        }
-      ],
-      "comments": "General Information; easy to read"
-    },
-    {
-      "id": 2,
-      "question": "Should a commercial agreement with CDMO be signed despite their IP claims",
-      "expected_answer": "No. Sanofi are not willing to sign the commercial MSA under the terms requested by BioSpring, and Procurement/EM&S advise risk that a commercial agreement will not be signed.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "Fitu",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran_CMC%20Escalation_07072023.pptx?d=w2f28536baa8e452f98454e589a9090dc&csf=1&web=1&e=hGWtUB"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 3,
-      "question": "Is the risk to proceed with the compliance gaps acceptable",
-      "expected_answer": "yes",
-      "context_reference": "Yes. The CMC and China teams assessed the compliance gaps as having a low likelihood of affecting submission or approval, with mitigation actions underway including bridging with annual testing at an external laboratory.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "Fitusiran - Risk assessment_China_July 2023.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran%20-%20Risk%20assessment_China_July%202023.pptx?d=wfaa0ec45649d44f8a118ebaf84251e41&csf=1&web=1&e=8TjY6U"
-        }
-      ],
-      "entity_filter": "Fitusiran",
-      "hl_keywords": ["China pharmacopoeia compliance risk"],
-      "ll_keywords": [
-        "3 compliance gaps identified",
-        "low likelihood of affecting submission or approval",
-        "annual testing at an external laboratory"
-      ],
-      "comments": ""
-    },
-    {
-      "id": 4,
-      "question": "Is the strategy for filing the 20 mg PFP feasible",
-      "expected_answer": "The proposal had many complexities that warranted FDA feedback, and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP would be sufficient to support approval.",
-      "context_reference": "The proposal had many complexities that warranted FDA feedback, and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP would be sufficient to support approval.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "20 mg PFP_Strategy_10Jan2024_pre-read.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/20%20mg%20PFP_Strategy_10Jan2024_pre-read.pptx?d=w60c9ae7092414925b71844dddd64fef0&csf=1&web=1&e=4bbjAl"
-        }
-      ],
-
-      "comments": ""
-    },
-    {
-      "id": 5,
-      "question": "Can PMG green light be given?",
-      "expected_answer": "yes",
-      "context_reference": "Yes. The PMG presentation explicitly asked whether the PMG accepts the proposal for issuance of Green Light for the Fitusiran submission.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "2024-02-21_Fitusiran PMG Green Light Presentation.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2024-02-21_Fitusiran%20PMG%20Green%20Light%20Presentation.pdf?csf=1&web=1&e=tiBsvx"
-        }
-      ],
-      "hl_keywords": ["Fitusiran PMG Green Light"],
-      "ll_keywords": ["PMG", "Green Light", "Fitusiran submission", "PAI readiness"],
-
-      "comments": ""
-    },
-    {
-      "id": 6,
-      "question": "Would you agree to change the storage condition o short notice prior to NDA submission",
-      "expected_answer": "Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.",
-      "context_reference": "Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "Escalation meeting_Fitusiran_8-March-2024_FINAL.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Escalation%20meeting_Fitusiran_8-March-2024_FINAL.pdf?csf=1&web=1&e=OuqT4n"
-        }
-      ],
-      "hl_keywords": ["Fitusiran storage condition change"],
-      "ll_keywords": [
-        "labelling working group",
-        "2°C to 8°C",
-        "single period of up to 12 months",
-        "prior to NDA submission"
-      ],
-      "comments": ""
-    },
-    {
-      "id": 7,
-      "question": "Is the change to the 600 mg tablet acceptable",
-      "expected_answer": "yes",
-      "context_reference": "Yes. The 600 mg tablet development was executed on the critical path, remained on track with no timeline change, and the first GMP batch was produced and shipped with QC ongoing.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "2024-06-24 CMC Board Rilzabrutinib.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2024-06-24%20CMC%20Board%20Rilzabrutinib.pptx?d=w8d452e90fe254c7a99981e90232e70e8&csf=1&web=1&e=BWH4C9"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 8,
-      "question": "Second Generation DP ambition\nDo you endorse the approach and to execute the proposed feasibility study\nDS supply strategy\nDo you endorse to advocate for the immediate M&S investment of 13.5 M€ at Aramon",
-      "expected_answer": "yes",
-      "context_reference": "Yes. The CMC board deck explicitly requested endorsement for the Second Generation DP feasibility approach and for advocating the immediate M&S investment at Aramon for the DS supply strategy.",
-      "contact": "Thomas",
-      "source_documents": [
-        {
-          "name": "2024-10-24 CMC board Rilza crystal ver02 - presentation.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2024-10-24%20CMC%20board%20Rilza%20crystal%20ver02%20-%20presentation.pptx?d=wce2de1ffd34f425c97a40f5a33a5ade1&csf=1&web=1&e=j6STGz"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 9,
-      "question": "What is the closed system drug transfer device strategy in Bio?",
-      "expected_answer": "Applicable to therapeutic proteins only. Not for small molecules, gene therapy or vaccines\nApplicable to medical devices designated as CSTDs (e.g., 510(k) cleared by FDA underproduct code ONB). Not applicable to spikes that are not part of CSTDs\nApplicable to studies and regulatory dossiers submitted worldwide\nFind way to avoid systematic amendment of IMPD/IND, Minimize workload, 4 durg categoeis + list of tested CSTD",
-      "contact": "Sophie Girault",
-      "source_documents": [
-        {
-          "name": "2019_Apr04_PDP_NPP_Sharing_Katharina Zylka_LL_SAR42589-f.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2019_Apr04_PDP_NPP_Sharing_Katharina%20Zylka_LL_SAR42589-f.pptx?d=w3c958f488714436c8505e30274baa0ee&csf=1&web=1&e=E8yygc"
+            "id": 1,
+            "question": "What is ASMD?",
+            "expected_answer": "Treats ASMD, also known as Niemann-Pick B, an ultra-rare, lethal, and heterogeneous disease with no treatment (as of document date)\nRecombinant human acid spingomyelnsae (rhASM)",
+            "contact": "Kathrin",
+            "source_documents": [
+                {
+                    "name": "Olipudase",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Olipudase-comparability%20for%20NPP-9JULY2019.pdf?csf=1&web=1&e=f7QzQO"
+                }
+            ],
+            "comments": "General Information; easy to read"
         },
         {
-          "name": "2022_09_20_What Do Patients Really Want CMC Cross Sharing.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2022_09_20_What%20Do%20Patients%20Really%20Want%20%20CMC%20Cross%20Sharing.pdf?csf=1&web=1&e=Zadrbs"
+            "id": 2,
+            "question": "Should a commercial agreement with CDMO be signed despite their IP claims",
+            "expected_answer": "No. Sanofi are not willing to sign the commercial MSA under the terms requested by BioSpring, and Procurement/EM&S advise risk that a commercial agreement will not be signed.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "Fitu",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran_CMC%20Escalation_07072023.pptx?d=w2f28536baa8e452f98454e589a9090dc&csf=1&web=1&e=hGWtUB"
+                }
+            ],
+            "comments": ""
         },
         {
-          "name": "ASAP JUne 14th .pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/ASAP%20JUne%2014th%20.pdf?csf=1&web=1&e=78UKSw"
+            "id": 3,
+            "question": "Is the risk to proceed with the compliance gaps acceptable",
+            "expected_answer": "yes",
+            "context_reference": "Yes. The CMC and China teams assessed the compliance gaps as having a low likelihood of affecting submission or approval, with mitigation actions underway including bridging with annual testing at an external laboratory.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "Fitusiran - Risk assessment_China_July 2023.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran%20-%20Risk%20assessment_China_July%202023.pptx?d=wfaa0ec45649d44f8a118ebaf84251e41&csf=1&web=1&e=8TjY6U"
+                }
+            ],
+            "entity_filter": "Fitusiran",
+            "hl_keywords": [
+                "China pharmacopoeia compliance risk"
+            ],
+            "ll_keywords": [
+                "3 compliance gaps identified",
+                "low likelihood of affecting submission or approval",
+                "annual testing at an external laboratory"
+            ],
+            "comments": ""
         },
         {
-          "name": "2020-06-26 CSTD Strategy WG FINAL_for cross-share_CT_VF.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2020-06-26%20CSTD%20Strategy%20WG%20%20FINAL_for%20cross-share_CT_VF.pptx?d=w77b9a2881f3d46d4aaa125a2c695fbaa&csf=1&web=1&e=ZZWeOM"
+            "id": 4,
+            "question": "Is the strategy for filing the 20 mg PFP feasible",
+            "expected_answer": "The proposal had many complexities that warranted FDA feedback, and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP would be sufficient to support approval.",
+            "context_reference": "The proposal had many complexities that warranted FDA feedback, and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP would be sufficient to support approval.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "20 mg PFP_Strategy_10Jan2024_pre-read.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/20%20mg%20PFP_Strategy_10Jan2024_pre-read.pptx?d=w60c9ae7092414925b71844dddd64fef0&csf=1&web=1&e=4bbjAl"
+                }
+            ],
+            "comments": ""
         },
         {
-          "name": "2021_07_09_CMC Cross Sharing Session - Synthetics Outsourcing.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2021_07_09_CMC%20Cross%20Sharing%20Session%20-%20Synthetics%20Outsourcing.pptx?d=w56f9a7c362d74f3f8a0c2f1d47ee7797&csf=1&web=1&e=BvfUGa"
+            "id": 5,
+            "question": "Can PMG green light be given?",
+            "expected_answer": "yes",
+            "context_reference": "Yes. The PMG presentation explicitly asked whether the PMG accepts the proposal for issuance of Green Light for the Fitusiran submission.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "2024-02-21_Fitusiran PMG Green Light Presentation.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2024-02-21_Fitusiran%20PMG%20Green%20Light%20Presentation.pdf?csf=1&web=1&e=tiBsvx"
+                }
+            ],
+            "hl_keywords": [
+                "Fitusiran PMG Green Light"
+            ],
+            "ll_keywords": [
+                "PMG",
+                "Green Light",
+                "Fitusiran submission",
+                "PAI readiness"
+            ],
+            "comments": ""
         },
         {
-          "name": "Biopharmacy CMC Cross Sharing Feb 2022 _ SHORT.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Biopharmacy%20CMC%20Cross%20Sharing%20Feb%202022%20_%20SHORT.pdf?csf=1&web=1&e=j87FMz"
+            "id": 6,
+            "question": "Would you agree to change the storage condition o short notice prior to NDA submission",
+            "expected_answer": "Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.",
+            "context_reference": "Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "Escalation meeting_Fitusiran_8-March-2024_FINAL.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Escalation%20meeting_Fitusiran_8-March-2024_FINAL.pdf?csf=1&web=1&e=OuqT4n"
+                }
+            ],
+            "hl_keywords": [
+                "Fitusiran storage condition change"
+            ],
+            "ll_keywords": [
+                "labelling working group",
+                "2°C to 8°C",
+                "single period of up to 12 months",
+                "prior to NDA submission"
+            ],
+            "comments": ""
         },
         {
-          "name": "SAR439589 SERD Lesson Learnt final.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SAR439589%20SERD%20Lesson%20Learnt%20final.pdf?csf=1&web=1&e=ufZ3Fi"
+            "id": 7,
+            "question": "Is the change to the 600 mg tablet acceptable",
+            "expected_answer": "yes",
+            "context_reference": "Yes. The 600 mg tablet development was executed on the critical path, remained on track with no timeline change, and the first GMP batch was produced and shipped with QC ongoing.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "2024-06-24 CMC Board Rilzabrutinib.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2024-06-24%20CMC%20Board%20Rilzabrutinib.pptx?d=w8d452e90fe254c7a99981e90232e70e8&csf=1&web=1&e=BWH4C9"
+                }
+            ],
+            "comments": ""
         },
         {
-          "name": "SAR441255 LL low dose specs CK.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SAR441255%20%20LL%20low%20dose%20specs%20CK.pptx?d=w076c89652a094b8c8fc5b016ac63d792&csf=1&web=1&e=oT3IMN"
-        }
-      ],
-      "disable_cache": true,
-      "hl_keywords": ["Bio CSTD strategy"],
-      "ll_keywords": [
-        "therapeutic proteins only",
-        "not for small molecules, gene therapy or vaccines",
-        "510(k) cleared by FDA",
-        "submitted worldwide"
-      ],
-      "comments": "Content of slides 6-8"
-    },
-    {
-      "id": 10,
-      "question": "What is the duty of the iCMC NPP leader?",
-      "expected_answer": "The iCMC NPP leader needs to do everything possible not to delay a submission.",
-      "context_reference": "The iCMC NPP leader needs to do everything possible not to delay a submission.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 8,
+            "question": "Second Generation DP ambition\nDo you endorse the approach and to execute the proposed feasibility study\nDS supply strategy\nDo you endorse to advocate for the immediate M&S investment of 13.5 M€ at Aramon",
+            "expected_answer": "yes",
+            "context_reference": "Yes. The CMC board deck explicitly requested endorsement for the Second Generation DP feasibility approach and for advocating the immediate M&S investment at Aramon for the DS supply strategy.",
+            "contact": "Thomas",
+            "source_documents": [
+                {
+                    "name": "2024-10-24 CMC board Rilza crystal ver02 - presentation.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2024-10-24%20CMC%20board%20Rilza%20crystal%20ver02%20-%20presentation.pptx?d=wce2de1ffd34f425c97a40f5a33a5ade1&csf=1&web=1&e=j6STGz"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "20190227_iCMCNPP_LLcross_Sharing_SARA_lessons learned.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/20190227_iCMCNPP_LLcross_Sharing_SARA_lessons%20learned.pptx?d=w8d01ae047a6d4fbca99b76668d5162d6&csf=1&web=1&e=Ntvf63"
-        }
-      ],
-      "hl_keywords": ["SARA lessons learned"],
-      "ll_keywords": ["iCMC NPP leader", "do everything possible not to delay a submission"],
-      "entity_filter": "iCMC NPP",
-      "comments": ""
-    },
-    {
-      "id": 11,
-      "question": "Do we already use Powder in a bottle directly for phase 1 study?",
-      "expected_answer": "yes",
-      "context_reference": "Yes. A new Phase 1 (SAD) clinical strategy was tested by MyoKardia: powder in bottle directly to the clinical center.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 9,
+            "question": "What is the closed system drug transfer device strategy in Bio?",
+            "expected_answer": "Applicable to therapeutic proteins only. Not for small molecules, gene therapy or vaccines\nApplicable to medical devices designated as CSTDs (e.g., 510(k) cleared by FDA underproduct code ONB). Not applicable to spikes that are not part of CSTDs\nApplicable to studies and regulatory dossiers submitted worldwide\nFind way to avoid systematic amendment of IMPD/IND, Minimize workload, 4 durg categoeis + list of tested CSTD",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2019_Apr04_PDP_NPP_Sharing_Katharina Zylka_LL_SAR42589-f.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2019_Apr04_PDP_NPP_Sharing_Katharina%20Zylka_LL_SAR42589-f.pptx?d=w3c958f488714436c8505e30274baa0ee&csf=1&web=1&e=E8yygc"
+                },
+                {
+                    "name": "2022_09_20_What Do Patients Really Want CMC Cross Sharing.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2022_09_20_What%20Do%20Patients%20Really%20Want%20%20CMC%20Cross%20Sharing.pdf?csf=1&web=1&e=Zadrbs"
+                },
+                {
+                    "name": "ASAP JUne 14th .pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/ASAP%20JUne%2014th%20.pdf?csf=1&web=1&e=78UKSw"
+                },
+                {
+                    "name": "2020-06-26 CSTD Strategy WG FINAL_for cross-share_CT_VF.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2020-06-26%20CSTD%20Strategy%20WG%20%20FINAL_for%20cross-share_CT_VF.pptx?d=w77b9a2881f3d46d4aaa125a2c695fbaa&csf=1&web=1&e=ZZWeOM"
+                },
+                {
+                    "name": "2021_07_09_CMC Cross Sharing Session - Synthetics Outsourcing.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2021_07_09_CMC%20Cross%20Sharing%20Session%20-%20Synthetics%20Outsourcing.pptx?d=w56f9a7c362d74f3f8a0c2f1d47ee7797&csf=1&web=1&e=BvfUGa"
+                },
+                {
+                    "name": "Biopharmacy CMC Cross Sharing Feb 2022 _ SHORT.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Biopharmacy%20CMC%20Cross%20Sharing%20Feb%202022%20_%20SHORT.pdf?csf=1&web=1&e=j87FMz"
+                },
+                {
+                    "name": "SAR439589 SERD Lesson Learnt final.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SAR439589%20SERD%20Lesson%20Learnt%20final.pdf?csf=1&web=1&e=ufZ3Fi"
+                },
+                {
+                    "name": "SAR441255 LL low dose specs CK.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SAR441255%20%20LL%20low%20dose%20specs%20CK.pptx?d=w076c89652a094b8c8fc5b016ac63d792&csf=1&web=1&e=oT3IMN"
+                }
+            ],
+            "disable_cache": true,
+            "hl_keywords": [
+                "Bio CSTD strategy"
+            ],
+            "ll_keywords": [
+                "therapeutic proteins only",
+                "not for small molecules, gene therapy or vaccines",
+                "510(k) cleared by FDA",
+                "submitted worldwide"
+            ],
+            "comments": "Content of slides 6-8"
+        },
         {
-          "name": "Lessons Learned_MyoKardia_DCM1-MYK4491-SAR440181-2020-04-22-final.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Lessons%20Learned_MyoKardia_DCM1-MYK4491-SAR440181-2020-04-22-final.pptx?d=w09bb259c052d4e22b6fc8097abaad142&csf=1&web=1&e=fejTjV"
-        }
-      ],
-      "hl_keywords": ["MyoKardia DCM1"],
-      "ll_keywords": [
-        "MYK4491",
-        "SAR440181",
-        "new Phase 1 clinical strategy",
-        "powder in bottle directly to the clinical center"
-      ],
-
-      "comments": ""
-    },
-    {
-      "id": 12,
-      "question": "What was put in place to mitigate overdosing in low dose drugs",
-      "expected_answer": "For SAR442257 and SAR440234 administrated in nanogram concentration mock preparation and retrospective testiing were implemented",
-      "context_reference": "For low dose drugs administered in nanogram concentration, mock preparation and retrospective testing were implemented to mitigate overdosing.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 10,
+            "question": "What is the duty of the iCMC NPP leader?",
+            "expected_answer": "The iCMC NPP leader needs to do everything possible not to delay a submission.",
+            "context_reference": "The iCMC NPP leader needs to do everything possible not to delay a submission.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "20190227_iCMCNPP_LLcross_Sharing_SARA_lessons learned.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/20190227_iCMCNPP_LLcross_Sharing_SARA_lessons%20learned.pptx?d=w8d01ae047a6d4fbca99b76668d5162d6&csf=1&web=1&e=Ntvf63"
+                }
+            ],
+            "hl_keywords": [
+                "SARA lessons learned"
+            ],
+            "ll_keywords": [
+                "iCMC NPP leader",
+                "do everything possible not to delay a submission"
+            ],
+            "entity_filter": "iCMC NPP",
+            "comments": ""
+        },
         {
-          "name": "2020-10 Cross Sharing Low dose Drugs.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2020-10%20Cross%20Sharing%20Low%20dose%20Drugs.pptx?d=wbf42c7fbe1464961a7cf647fb8d27cfa&csf=1&web=1&e=h5eL7q"
-        }
-      ],
-      "hl_keywords": ["low dose drugs overdosing mitigation"],
-      "ll_keywords": ["mock preparation", "retrospective testing", "nanogram concentration"],
-      "comments": ""
-    },
-    {
-      "id": 13,
-      "question": "For biologics should we ask shipping validation question in type C or B meeting",
-      "expected_answer": "For biologics, the shipping validation question should be asked in a Type C meeting.",
-      "context_reference": "For biologics, the shipping validation question should be asked in a Type C meeting.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 11,
+            "question": "Do we already use Powder in a bottle directly for phase 1 study?",
+            "expected_answer": "yes",
+            "context_reference": "Yes. A new Phase 1 (SAD) clinical strategy was tested by MyoKardia: powder in bottle directly to the clinical center.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "Lessons Learned_MyoKardia_DCM1-MYK4491-SAR440181-2020-04-22-final.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Lessons%20Learned_MyoKardia_DCM1-MYK4491-SAR440181-2020-04-22-final.pptx?d=w09bb259c052d4e22b6fc8097abaad142&csf=1&web=1&e=fejTjV"
+                }
+            ],
+            "hl_keywords": [
+                "MyoKardia DCM1"
+            ],
+            "ll_keywords": [
+                "MYK4491",
+                "SAR440181",
+                "new Phase 1 clinical strategy",
+                "powder in bottle directly to the clinical center"
+            ],
+            "comments": ""
+        },
         {
-          "name": "2016-LL-01-Shipping validation.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-01-Shipping%20validation.pptx?d=w430d3892f2b14cb292c55e3ee6730e96&csf=1&web=1&e=pyQguk"
-        }
-      ],
-      "entity_filter": "shipping validation",
-      "hl_keywords": ["Biologics shipping validation"],
-      "ll_keywords": ["type C meeting", "shipping validation question"],
-      "comments": ""
-    },
-    {
-      "id": 14,
-      "question": "Help me to prepare DWG meeting referring to one previous lesson learned in the case of scenario leveraging decision making",
-      "expected_answer": "For the upcoming DWG meeting, I recommend:\nPrepare a standard basic data set with current cost scenarios, broken down by type (internal, external, investment) and status (spent, approved, committed, planned).\nBe ready to present multiple scenarios with clear pros and cons for each.\nHighlight critical decision points and their impact on timelines and costs.\nPrepare to discuss how recent project developments might affect the scenarios.\nBe prepared to explain how the chosen scenario balances risk, speed, and budget constraints.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 12,
+            "question": "What was put in place to mitigate overdosing in low dose drugs",
+            "expected_answer": "For SAR442257 and SAR440234 administrated in nanogram concentration mock preparation and retrospective testiing were implemented",
+            "context_reference": "For low dose drugs administered in nanogram concentration, mock preparation and retrospective testing were implemented to mitigate overdosing.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2020-10 Cross Sharing Low dose Drugs.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2020-10%20Cross%20Sharing%20Low%20dose%20Drugs.pptx?d=wbf42c7fbe1464961a7cf647fb8d27cfa&csf=1&web=1&e=h5eL7q"
+                }
+            ],
+            "hl_keywords": [
+                "low dose drugs overdosing mitigation"
+            ],
+            "ll_keywords": [
+                "mock preparation",
+                "retrospective testing",
+                "nanogram concentration"
+            ],
+            "comments": ""
+        },
         {
-          "name": "CMC scenarios leveraging decision makingin DWG – example SARP Projects.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/CMC%20scenarios%20leveraging%20decision%20makingin%20DWG%20%E2%80%93%20example%20SARP%20Projects.pptx?d=w808e5079f03f452b99fdad51f2c5c9d8&csf=1&web=1&e=y938kJ"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 15,
-      "question": "What are the 6 best practices related to iCMC team members goal setting",
-      "expected_answer": "1- Translate global project goals into yearly CMC deliverables with an associated CMC plan,budget and allocated ressources\n- It’s an opportunity to remind the respectives roles and responsiblities (or to define it fornew comers)\n2- Ensure alignment with local management on :\n- Yearly CMC deliverables and ressources\n3- Define individual objectives for each CMC rep :\n- Share with CMC team members a template to be filled by mail or through a sharepoint\n- Share the iCMC leader objectives with the iCMC team\n- Ask each CMC team members to fill it\n- Review the individual what objectives collectively within the team\n- Perform some one to one adjustments on the “HOW” if needed\n4- Share each filled template with the CMC team members managers (N+1, N+2 as appropriate)\n5- Optionally: organize informal “one to one” mid reviews or more formal ones in case of issues\n6- At the end of the year :\n- Ask the CMC team members to perform a self evaluation\n- Organize with him a “one to one” meeting without the CMC team member manager\n- Write an “informal” email to the CMC team member manager prior to his performanceevaluation.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 13,
+            "question": "For biologics should we ask shipping validation question in type C or B meeting",
+            "expected_answer": "For biologics, the shipping validation question should be asked in a Type C meeting.",
+            "context_reference": "For biologics, the shipping validation question should be asked in a Type C meeting.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2016-LL-01-Shipping validation.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-01-Shipping%20validation.pptx?d=w430d3892f2b14cb292c55e3ee6730e96&csf=1&web=1&e=pyQguk"
+                }
+            ],
+            "entity_filter": "shipping validation",
+            "hl_keywords": [
+                "Biologics shipping validation"
+            ],
+            "ll_keywords": [
+                "type C meeting",
+                "shipping validation question"
+            ],
+            "comments": ""
+        },
         {
-          "name": "2016-LL-02-iCMC sub team leaders goal setting v3.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-02-iCMC%20sub%20team%20leaders%20goal%20setting%20v3.pptx?d=wd302afc23a9e4667a3290ac6bd20257d&csf=1&web=1&e=yjwgcL"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 16,
-      "question": "What best practice is recommended for sharing a CMC technology issue across projects?",
-      "expected_answer": "Use the Technology Issue Quick Sharing method to rapidly communicate the issue and its impacts across projects within the iCMC-NPP and iCMC community.",
-      "context_reference": "Use the Technology Issue Quick Sharing method to rapidly communicate the issue and its impacts across projects within the iCMC-NPP and iCMC community.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 14,
+            "question": "Help me to prepare DWG meeting referring to one previous lesson learned in the case of scenario leveraging decision making",
+            "expected_answer": "For the upcoming DWG meeting, I recommend:\nPrepare a standard basic data set with current cost scenarios, broken down by type (internal, external, investment) and status (spent, approved, committed, planned).\nBe ready to present multiple scenarios with clear pros and cons for each.\nHighlight critical decision points and their impact on timelines and costs.\nPrepare to discuss how recent project developments might affect the scenarios.\nBe prepared to explain how the chosen scenario balances risk, speed, and budget constraints.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "CMC scenarios leveraging decision makingin DWG – example SARP Projects.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/CMC%20scenarios%20leveraging%20decision%20makingin%20DWG%20%E2%80%93%20example%20SARP%20Projects.pptx?d=w808e5079f03f452b99fdad51f2c5c9d8&csf=1&web=1&e=y938kJ"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "16-05-31-LLsession07-TechnologyIssueQuickSharing-RAW DATA.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-05-31-LLsession07-TechnologyIssueQuickSharing-RAW%20DATA.pdf?csf=1&web=1&e=cPIsAy"
-        }
-      ],
-      "disable_cache": true,
-      "hl_keywords": ["Technology issue quick sharing"],
-      "ll_keywords": [
-        "Technology Issue Quick Sharing",
-        "best practice",
-        "share issue impacts across projects"
-      ],
-      "comments": ""
-    },
-    {
-      "id": 17,
-      "question": "List 5 disagreements source of conflict  within a collaboration",
-      "expected_answer": "Conflict from disagreement can come from\nDifference of perception of issue\nDifference of interest\nDifference of standard\nDifference of communication",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 15,
+            "question": "What are the 6 best practices related to iCMC team members goal setting",
+            "expected_answer": "1- Translate global project goals into yearly CMC deliverables with an associated CMC plan,budget and allocated ressources\n- It’s an opportunity to remind the respectives roles and responsiblities (or to define it fornew comers)\n2- Ensure alignment with local management on :\n- Yearly CMC deliverables and ressources\n3- Define individual objectives for each CMC rep :\n- Share with CMC team members a template to be filled by mail or through a sharepoint\n- Share the iCMC leader objectives with the iCMC team\n- Ask each CMC team members to fill it\n- Review the individual what objectives collectively within the team\n- Perform some one to one adjustments on the “HOW” if needed\n4- Share each filled template with the CMC team members managers (N+1, N+2 as appropriate)\n5- Optionally: organize informal “one to one” mid reviews or more formal ones in case of issues\n6- At the end of the year :\n- Ask the CMC team members to perform a self evaluation\n- Organize with him a “one to one” meeting without the CMC team member manager\n- Write an “informal” email to the CMC team member manager prior to his performanceevaluation.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2016-LL-02-iCMC sub team leaders goal setting v3.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-02-iCMC%20sub%20team%20leaders%20goal%20setting%20v3.pptx?d=wd302afc23a9e4667a3290ac6bd20257d&csf=1&web=1&e=yjwgcL"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "16-LLsession-09- outcome_Jan 18 2017.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-LLsession-09-%20outcome_Jan%2018%202017.pptx?d=wb67cd58783864b3fa23f6b97ed2e4267&csf=1&web=1&e=s5c4T6"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 18,
-      "question": "From the lesson learned experience what step is key and mandaroty in the tech transfer?",
-      "expected_answer": "TT Phase 0 strategic content should trigger the sourcing strategy and Tech transfer(s).",
-      "context_reference": "TT Phase 0 strategic content should trigger the sourcing strategy and Tech transfer(s).",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 16,
+            "question": "What best practice is recommended for sharing a CMC technology issue across projects?",
+            "expected_answer": "Use the Technology Issue Quick Sharing method to rapidly communicate the issue and its impacts across projects within the iCMC-NPP and iCMC community.",
+            "context_reference": "Use the Technology Issue Quick Sharing method to rapidly communicate the issue and its impacts across projects within the iCMC-NPP and iCMC community.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "16-05-31-LLsession07-TechnologyIssueQuickSharing-RAW DATA.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-05-31-LLsession07-TechnologyIssueQuickSharing-RAW%20DATA.pdf?csf=1&web=1&e=cPIsAy"
+                }
+            ],
+            "disable_cache": true,
+            "hl_keywords": [
+                "Technology issue quick sharing"
+            ],
+            "ll_keywords": [
+                "Technology Issue Quick Sharing",
+                "best practice",
+                "share issue impacts across projects"
+            ],
+            "comments": ""
+        },
         {
-          "name": "16-LLsession_12-TechTransfer implementation-final.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-LLsession_12-TechTransfer%20implementation-final.pptx?d=w1d17dceea2f54b16bb833ec0110c5b6c&csf=1&web=1&e=aeoovZ"
-        }
-      ],
-      "hl_keywords": ["tech transfer implementation"],
-      "ll_keywords": ["TT phase 0 strategic content", "sourcing strategy", "Tech transfer(s)"],
-      "comments": ""
-    },
-    {
-      "id": 19,
-      "question": "Is there lesson learned on  comparability? If yes provide the link to the material",
-      "expected_answer": "Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.",
-      "context_reference": "Yes, there is a lesson learned on comparability, including preparing the comparability protocol early and using standardized lab scale DP batches to increase evaluation of comparability and similarity.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 17,
+            "question": "List 5 disagreements source of conflict  within a collaboration",
+            "expected_answer": "Conflict from disagreement can come from\nDifference of perception of issue\nDifference of interest\nDifference of standard\nDifference of communication",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "16-LLsession-09- outcome_Jan 18 2017.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-LLsession-09-%20outcome_Jan%2018%202017.pptx?d=wb67cd58783864b3fa23f6b97ed2e4267&csf=1&web=1&e=s5c4T6"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx?d=w2c909df4e5e64fae98009be18a1c5e02&csf=1&web=1&e=4rYY5P"
-        }
-      ],
-      "hl_keywords": ["comparability similarity lesson learned"],
-      "ll_keywords": ["prepare comparability protocol early", "standardized lab scale DP batches"],
-      "comments": ""
-    },
-    {
-      "id": 20,
-      "question": "Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk",
-      "expected_answer": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
-      "context_reference": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 18,
+            "question": "From the lesson learned experience what step is key and mandaroty in the tech transfer?",
+            "expected_answer": "TT Phase 0 strategic content should trigger the sourcing strategy and Tech transfer(s).",
+            "context_reference": "TT Phase 0 strategic content should trigger the sourcing strategy and Tech transfer(s).",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "16-LLsession_12-TechTransfer implementation-final.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-LLsession_12-TechTransfer%20implementation-final.pptx?d=w1d17dceea2f54b16bb833ec0110c5b6c&csf=1&web=1&e=aeoovZ"
+                }
+            ],
+            "hl_keywords": [
+                "tech transfer implementation"
+            ],
+            "ll_keywords": [
+                "TT phase 0 strategic content",
+                "sourcing strategy",
+                "Tech transfer(s)"
+            ],
+            "comments": ""
+        },
         {
-          "name": "17-LLsession-01-Risk Review CIR 15 march 2017.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/17-LLsession-01-Risk%20Review%20CIR%2015%20march%202017.pdf?csf=1&web=1&e=55d6M6"
-        }
-      ],
-      "entity_filter": "risk review",
-      "hl_keywords": ["CMC risk descriptive syntax"],
-      "ll_keywords": ["Due to the risk could impact", "risk review syntax"],
-      "comments": ""
-    },
-    {
-      "id": 21,
-      "question": "What project get approval on widening of impurity specification limit for sum of total impurities/degradation product from 2.0 to 2.5% as LCM?",
-      "expected_answer": "Toujeo",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 19,
+            "question": "Is there lesson learned on  comparability? If yes provide the link to the material",
+            "expected_answer": "Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.",
+            "context_reference": "Yes, there is a lesson learned on comparability, including preparing the comparability protocol early and using standardized lab scale DP batches to increase evaluation of comparability and similarity.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx?d=w2c909df4e5e64fae98009be18a1c5e02&csf=1&web=1&e=4rYY5P"
+                }
+            ],
+            "hl_keywords": [
+                "comparability similarity lesson learned"
+            ],
+            "ll_keywords": [
+                "prepare comparability protocol early",
+                "standardized lab scale DP batches"
+            ],
+            "comments": ""
+        },
         {
-          "name": "2017-LL-17Nov-IntraClusterDiabetes-LCMProjects_Katharina Zylka.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2017-LL-17Nov-IntraClusterDiabetes-LCMProjects_Katharina%20Zylka.pptx?d=wf564a32b278e43e39ceb8d9f43d64ae9&csf=1&web=1&e=vqKgvB"
-        }
-      ],
-      "hl_keywords": ["Toujeo LCM"],
-      "ll_keywords": ["sum of total impurities", "2.0 to 2.5%"],
-
-      "comments": ""
-    },
-    {
-      "id": 22,
-      "question": "Who should contribute to the initial list of potential comparators?",
-      "expected_answer": "The initial list of potential comparators should be contributed by GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial, medical affairs, TMED, and CSC PL.",
-      "context_reference": "The initial list of potential comparators should be contributed by GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial, medical affairs, TMED, and CSC PL.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 20,
+            "question": "Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk",
+            "expected_answer": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
+            "context_reference": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "17-LLsession-01-Risk Review CIR 15 march 2017.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/17-LLsession-01-Risk%20Review%20CIR%2015%20march%202017.pdf?csf=1&web=1&e=55d6M6"
+                }
+            ],
+            "entity_filter": "risk review",
+            "hl_keywords": [
+                "CMC risk descriptive syntax"
+            ],
+            "ll_keywords": [
+                "Due to the risk could impact",
+                "risk review syntax"
+            ],
+            "comments": ""
+        },
         {
-          "name": "18-LLsession-02-Devpt and supply of blinded comparator- outcome_Oct 18_VF.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/18-LLsession-02-Devpt%20and%20supply%20of%20blinded%20comparator-%20outcome_Oct%2018_VF.pptx?d=w8e6b6c2868934ab1a364987e75844c3b&csf=1&web=1&e=QdUFrO"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 23,
-      "question": "What are the 3 categories of lessons learned about SERD SAR439589",
-      "expected_answer": "Governance, Capabilities/Culture, Organization",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 21,
+            "question": "What project get approval on widening of impurity specification limit for sum of total impurities/degradation product from 2.0 to 2.5% as LCM?",
+            "expected_answer": "Toujeo",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2017-LL-17Nov-IntraClusterDiabetes-LCMProjects_Katharina Zylka.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2017-LL-17Nov-IntraClusterDiabetes-LCMProjects_Katharina%20Zylka.pptx?d=wf564a32b278e43e39ceb8d9f43d64ae9&csf=1&web=1&e=vqKgvB"
+                }
+            ],
+            "hl_keywords": [
+                "Toujeo LCM"
+            ],
+            "ll_keywords": [
+                "sum of total impurities",
+                "2.0 to 2.5%"
+            ],
+            "comments": ""
+        },
         {
-          "name": "SAR439589 SERD Lesson Learnt final.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SAR439589%20SERD%20Lesson%20Learnt%20final.pdf?csf=1&web=1&e=u7cHMf"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 24,
-      "question": "From leasson learned session regarding external collaboration what are 4 domains of experience of our corporate culture?",
-      "expected_answer": "Decision making styles: centralized vs. decentralized\nRisk tolerances: risk adverse vs. risk taking\nCommunication norms: email vs. hallway discussion\nProblem solving styles: group vs. individual",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 22,
+            "question": "Who should contribute to the initial list of potential comparators?",
+            "expected_answer": "The initial list of potential comparators should be contributed by GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial, medical affairs, TMED, and CSC PL.",
+            "context_reference": "The initial list of potential comparators should be contributed by GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial, medical affairs, TMED, and CSC PL.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "18-LLsession-02-Devpt and supply of blinded comparator- outcome_Oct 18_VF.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/18-LLsession-02-Devpt%20and%20supply%20of%20blinded%20comparator-%20outcome_Oct%2018_VF.pptx?d=w8e6b6c2868934ab1a364987e75844c3b&csf=1&web=1&e=QdUFrO"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "Impact of Corporate Culture on External Collaboration Management_Final.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Impact%20of%20Corporate%20Culture%20on%20External%20Collaboration%20Management_Final.pptx?d=wa2d957a647fd424082c212e039770c22&csf=1&web=1&e=67dvui"
-        }
-      ],
-      "hl_keywords": ["external collaboration corporate culture"],
-      "ll_keywords": [
-        "decision making styles",
-        "risk tolerances",
-        "communication norms",
-        "problem solving styles"
-      ],
-
-      "comments": ""
-    },
-    {
-      "id": 25,
-      "question": "For what project sanofi completed a BLA/MAA for the fisrt time?",
-      "expected_answer": "Sarclisa or isatuximab",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 23,
+            "question": "What are the 3 categories of lessons learned about SERD SAR439859",
+            "expected_answer": "SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "SAR439589 SERD Lesson Learnt final.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SAR439589%20SERD%20Lesson%20Learnt%20final.pdf?csf=1&web=1&e=u7cHMf"
+                }
+            ],
+            "comments": "",
+            "context_reference": "SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.",
+            "hl_keywords": [
+                "SERD lessons learned"
+            ],
+            "ll_keywords": [
+                "Governance",
+                "Capabilities/Culture",
+                "Organization",
+                "SAR439859"
+            ]
+        },
         {
-          "name": "Isatuximab_LL_BLA_Sep2019.ppsx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Isatuximab_LL_BLA_Sep2019.ppsx?d=w2d069e7320a745fabf07b5780d16324a&csf=1&web=1&e=W3oLuz"
-        }
-      ],
-      "disable_cache": true,
-      "entity_filter": "isatuximab",
-      "hl_keywords": ["first BLA/MAA"],
-      "ll_keywords": ["Isatuximab", "Sanofi", "first time"],
-      "comments": ""
-    },
-    {
-      "id": 26,
-      "question": "Based on Alnylam collaboration What format is recommended for transfer for CMC source documents  from third party to Sanofi?",
-      "expected_answer": "uploaded files should be organized according to CTD structure",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 24,
+            "question": "From leasson learned session regarding external collaboration what are 4 domains of experience of our corporate culture?",
+            "expected_answer": "Decision making styles: centralized vs. decentralized\nRisk tolerances: risk adverse vs. risk taking\nCommunication norms: email vs. hallway discussion\nProblem solving styles: group vs. individual",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "Impact of Corporate Culture on External Collaboration Management_Final.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Impact%20of%20Corporate%20Culture%20on%20External%20Collaboration%20Management_Final.pptx?d=wa2d957a647fd424082c212e039770c22&csf=1&web=1&e=67dvui"
+                }
+            ],
+            "hl_keywords": [
+                "external collaboration corporate culture"
+            ],
+            "ll_keywords": [
+                "decision making styles",
+                "risk tolerances",
+                "communication norms",
+                "problem solving styles"
+            ],
+            "comments": ""
+        },
         {
-          "name": "Fitusiran - lessons learned from collaboration with Alnylam.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran%20-%20lessons%20learned%20from%20collaboration%20with%20Alnylam.pptx?d=wee4ab8f396c145dda3a56376e8080375&csf=1&web=1&e=gyWAKk"
-        }
-      ],
-      "entity_filter": "fitusiran",
-      "hl_keywords": ["Alnylam collaboration"],
-      "ll_keywords": ["CTD structure", "source documents", "third party to Sanofi"],
-
-      "comments": ""
-    },
-    {
-      "id": 27,
-      "question": "What are the key steps for a CMC team for a freezd project based on leasson learned?",
-      "expected_answer": "- Bring emotional reaction to factual analysis\n- Alignment on continuation / postponement of workpackages\n- Explanation of decisions and buy-in for continued efforts\n- Mitigation of delays upon restart – Use of risk matrix",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 25,
+            "question": "For what project sanofi completed a BLA/MAA for the fisrt time?",
+            "expected_answer": "Sarclisa or isatuximab",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "Isatuximab_LL_BLA_Sep2019.ppsx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Isatuximab_LL_BLA_Sep2019.ppsx?d=w2d069e7320a745fabf07b5780d16324a&csf=1&web=1&e=W3oLuz"
+                }
+            ],
+            "disable_cache": true,
+            "entity_filter": "isatuximab",
+            "hl_keywords": [
+                "first BLA/MAA"
+            ],
+            "ll_keywords": [
+                "Isatuximab",
+                "Sanofi",
+                "first time"
+            ],
+            "comments": ""
+        },
         {
-          "name": "190917_Lessons Learned - Project freeze.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/190917_Lessons%20Learned%20-%20Project%20freeze.pptx?d=w586ede5edf5b4c56a09c1546787ba74c&csf=1&web=1&e=Pemmvp"
-        }
-      ],
-      "entity_filter": "project freeze",
-      "comments": ""
-    },
-    {
-      "id": 28,
-      "question": "What are the 2 formal check points about CMC outsourcing and  licensing during a project development?",
-      "expected_answer": "Full one -At Pre-Candidate Selection (PCS) – when a CMC PL is formally appointed\n- and at M5 - PoC\nand regular monitoring at major milestones (M2, M3 and M4).",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 26,
+            "question": "Based on Alnylam collaboration What format is recommended for transfer for CMC source documents  from third party to Sanofi?",
+            "expected_answer": "uploaded files should be organized according to CTD structure",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "Fitusiran - lessons learned from collaboration with Alnylam.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran%20-%20lessons%20learned%20from%20collaboration%20with%20Alnylam.pptx?d=wee4ab8f396c145dda3a56376e8080375&csf=1&web=1&e=gyWAKk"
+                }
+            ],
+            "entity_filter": "fitusiran",
+            "hl_keywords": [
+                "Alnylam collaboration"
+            ],
+            "ll_keywords": [
+                "CTD structure",
+                "source documents",
+                "third party to Sanofi"
+            ],
+            "comments": ""
+        },
         {
-          "name": "CMC_Licencing_Internal_Due Diligence.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/CMC_Licencing_Internal_Due%20Diligence.pptx?d=w441b1f8fa8254d4e866f6f60a7833e14&csf=1&web=1&e=EjbP8M"
-        }
-      ],
-      "entity_filter": "licencing",
-      "comments": ""
-    },
-    {
-      "id": 29,
-      "question": "Is the sub-team leader the primary interface to the CMC project leader for all activities in scope of the subteam",
-      "expected_answer": "Yes",
-      "context_reference": "Yes. The Sub-team Leader is the primary interface to the iCMC Leader for all activities in scope of the sub-teams.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 27,
+            "question": "What are the key steps for a CMC team for a freezd project based on leasson learned?",
+            "expected_answer": "- Bring emotional reaction to factual analysis\n- Alignment on continuation / postponement of workpackages\n- Explanation of decisions and buy-in for continued efforts\n- Mitigation of delays upon restart – Use of risk matrix",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "190917_Lessons Learned - Project freeze.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/190917_Lessons%20Learned%20-%20Project%20freeze.pptx?d=w586ede5edf5b4c56a09c1546787ba74c&csf=1&web=1&e=Pemmvp"
+                }
+            ],
+            "entity_filter": "project freeze",
+            "comments": ""
+        },
         {
-          "name": "SOTA project closure LL consolidated version for cross-sharing session Nov 2020.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SOTA%20project%20closure%20LL%20consolidated%20version%20for%20cross-sharing%20session%20Nov%202020.pptx?d=wd64849ced5974c2696578acfe199cd45&csf=1&web=1&e=6Q8g44"
-        }
-      ],
-      "entity_filter": "sub-team leader",
-      "hl_keywords": ["Sub-team Leader responsibilities"],
-      "ll_keywords": ["primary interface", "all activities in scope of the sub-teams"],
-      "comments": ""
-    },
-    {
-      "id": 30,
-      "question": "What is the presentation of sarclisa?",
-      "expected_answer": "Two single-use vial: 500mg/25ml and 100mg/5 ml",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 28,
+            "question": "What are the 2 formal check points about CMC outsourcing and  licensing during a project development?",
+            "expected_answer": "Full one -At Pre-Candidate Selection (PCS) – when a CMC PL is formally appointed\n- and at M5 - PoC\nand regular monitoring at major milestones (M2, M3 and M4).",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "CMC_Licencing_Internal_Due Diligence.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/CMC_Licencing_Internal_Due%20Diligence.pptx?d=w441b1f8fa8254d4e866f6f60a7833e14&csf=1&web=1&e=EjbP8M"
+                }
+            ],
+            "entity_filter": "licencing",
+            "comments": ""
+        },
         {
-          "name": "03_Isatuximab_LL_Apr2020-final.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/03_Isatuximab_LL_Apr2020-final.pdf?csf=1&web=1&e=InW6ew"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 31,
-      "question": "After US and EU submission of sarclisa What was the consequences of including additional physical flow in netherland in the manufacture?",
-      "expected_answer": "Tax optimisation reflect Sanofi genzyme as new legal entity and result in a mok ups with wrong logo, Shipping validation protocol and container was questioned and NDC code was wrong, batch shipped back and needed to be re-labeled.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 29,
+            "question": "Is the sub-team leader the primary interface to the CMC project leader for all activities in scope of the subteam",
+            "expected_answer": "Yes",
+            "context_reference": "Yes. The Sub-team Leader is the primary interface to the iCMC Leader for all activities in scope of the sub-teams.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "SOTA project closure LL consolidated version for cross-sharing session Nov 2020.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/SOTA%20project%20closure%20LL%20consolidated%20version%20for%20cross-sharing%20session%20Nov%202020.pptx?d=wd64849ced5974c2696578acfe199cd45&csf=1&web=1&e=6Q8g44"
+                }
+            ],
+            "entity_filter": "sub-team leader",
+            "hl_keywords": [
+                "Sub-team Leader responsibilities"
+            ],
+            "ll_keywords": [
+                "primary interface",
+                "all activities in scope of the sub-teams"
+            ],
+            "comments": ""
+        },
         {
-          "name": "03_Isatuximab_LL_Apr2020-final.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/03_Isatuximab_LL_Apr2020-final.pdf?csf=1&web=1&e=iSetsB"
-        }
-      ],
-
-      "comments": ""
-    },
-    {
-      "id": 32,
-      "question": "What is the lesson learned about regulatory strategy related pre-IND and IND from Sustained API Release Platform (SARP)",
-      "expected_answer": "Strategy of an early pre-IND should be targeted, or IND should be submitted without pre-IND",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 30,
+            "question": "What is the presentation of sarclisa?",
+            "expected_answer": "Two single-use vial: 500mg/25ml and 100mg/5 ml",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "03_Isatuximab_LL_Apr2020-final.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/03_Isatuximab_LL_Apr2020-final.pdf?csf=1&web=1&e=InW6ew"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "2020-05-06 SARP lessons learned at CMC cross-sharing ver06.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2020-05-06%20SARP%20lessons%20learned%20at%20CMC%20cross-sharing%20ver06.pdf?csf=1&web=1&e=UmcYQJ"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 33,
-      "question": "What is the article of japanese GMP is covering the MOU?",
-      "expected_answer": "Article 11",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 31,
+            "question": "After US and EU submission of sarclisa What was the consequences of including additional physical flow in netherland in the manufacture?",
+            "expected_answer": "Tax optimisation reflect Sanofi genzyme as new legal entity and result in a mok ups with wrong logo, Shipping validation protocol and container was questioned and NDC code was wrong, batch shipped back and needed to be re-labeled.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "03_Isatuximab_LL_Apr2020-final.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/03_Isatuximab_LL_Apr2020-final.pdf?csf=1&web=1&e=iSetsB"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Japanese%20iCMC%20Operations%20Managers%27%20Dairy%20life%20Handbook_V1.0.pdf?csf=1&web=1&e=xcv9SO"
-        }
-      ],
-      "hl_keywords": ["Japanese GMP"],
-      "ll_keywords": ["Article 11", "MOU"],
-      "comments": ""
-    },
-    {
-      "id": 34,
-      "question": "What are the japan-specific activities",
-      "expected_answer": "-Foreign Manufacturer Accreditation (FMA) management for manufacturing sites.\n-Analytical method transfer to Japanese labs.\n- Shipping validation between US and Japan.\n-J-CTD (Japanese Common Technical Document) preparation, managed by CDDC and R-CMC.\n- Cross-functional topics like filter selection for clinical use, stability, and sales limits.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 32,
+            "question": "What is the lesson learned about regulatory strategy related pre-IND and IND from Sustained API Release Platform (SARP)",
+            "expected_answer": "Strategy of an early pre-IND should be targeted, or IND should be submitted without pre-IND",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2020-05-06 SARP lessons learned at CMC cross-sharing ver06.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2020-05-06%20SARP%20lessons%20learned%20at%20CMC%20cross-sharing%20ver06.pdf?csf=1&web=1&e=UmcYQJ"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Japanese%20iCMC%20Operations%20Managers%27%20Dairy%20life%20Handbook_V1.0.pdf?csf=1&web=1&e=xcv9SO"
-        }
-      ],
-      "entity_filter": "japanese icmc handbook",
-      "comments": "",
-      "skip": true
-    },
-    {
-      "id": 35,
-      "question": "Does full detail were included covering 2 to 3 steps of reation in NeoGAA china submission?",
-      "expected_answer": "No",
-      "context_reference": "No, full detail covering 2 to 3 steps of reaction was not included in the NeoGAA China BLA submission.",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 33,
+            "question": "What is the article of japanese GMP is covering the MOU?",
+            "expected_answer": "Article 11",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Japanese%20iCMC%20Operations%20Managers%27%20Dairy%20life%20Handbook_V1.0.pdf?csf=1&web=1&e=xcv9SO"
+                }
+            ],
+            "hl_keywords": [
+                "Japanese GMP"
+            ],
+            "ll_keywords": [
+                "Article 11",
+                "MOU"
+            ],
+            "comments": ""
+        },
         {
-          "name": "2023-11-09_NeoGAA Lessons Learned CN BLA_final.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023-11-09_NeoGAA%20Lessons%20Learned%20CN%20BLA_final.pptx?d=w61e450cda5874f468a522fd12e426bee&csf=1&web=1&e=1IGH6f"
-        }
-      ],
-      "hl_keywords": ["NeoGAA China submission"],
-      "ll_keywords": [
-        "full detail included",
-        "2 to 3 steps of reaction",
-        "starting material definition"
-      ],
-      "comments": ""
-    },
-    {
-      "id": 36,
-      "question": "What is key to bear in mind when defining the M3 strategy and content /level of detail",
-      "expected_answer": "LCM",
-      "contact": "Sophie Girault",
-      "source_documents": [
+            "id": 34,
+            "question": "What are the japan-specific activities",
+            "expected_answer": "Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Japanese%20iCMC%20Operations%20Managers%27%20Dairy%20life%20Handbook_V1.0.pdf?csf=1&web=1&e=xcv9SO"
+                }
+            ],
+            "comments": "",
+            "context_reference": "Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.",
+            "hl_keywords": [
+                "Japanese iCMC Operations Managers handbook"
+            ],
+            "ll_keywords": [
+                "Foreign Manufacturer Accreditation",
+                "analytical method transfer to Japanese labs",
+                "J-CTD",
+                "shipping validation between the US and Japan",
+                "sales limits"
+            ],
+            "retrieval_query": "Japanese iCMC Operations Managers Dairy life Handbook FMA analytical transfer J-CTD shipping validation sales limits",
+            "retrieval_mode": "naive"
+        },
         {
-          "name": "2023-11-09_NeoGAA Lessons Learned CN BLA_final.pptx",
-          "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023-11-09_NeoGAA%20Lessons%20Learned%20CN%20BLA_final.pptx?d=w61e450cda5874f468a522fd12e426bee&csf=1&web=1&e=1IGH6f"
-        }
-      ],
-      "entity_filter": "neogaa china bla",
-      "comments": "",
-      "skip": true
-    },
-    {
-      "id": 37,
-      "question": "What are the minimum information to stay on the batch analysis table for AAV product?",
-      "expected_answer": "Batch number, batch size, manufacturing site,\nmanufacturing date, with “batch yield” by total vgs",
-      "contact": "",
-      "source_documents": [
+            "id": 35,
+            "question": "Does full detail were included covering 2 to 3 steps of reation in NeoGAA china submission?",
+            "expected_answer": "No",
+            "context_reference": "No, full detail covering 2 to 3 steps of reaction was not included in the NeoGAA China BLA submission.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2023-11-09_NeoGAA Lessons Learned CN BLA_final.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023-11-09_NeoGAA%20Lessons%20Learned%20CN%20BLA_final.pptx?d=w61e450cda5874f468a522fd12e426bee&csf=1&web=1&e=1IGH6f"
+                }
+            ],
+            "hl_keywords": [
+                "NeoGAA China submission"
+            ],
+            "ll_keywords": [
+                "full detail included",
+                "2 to 3 steps of reaction",
+                "starting material definition"
+            ],
+            "comments": ""
+        },
         {
-          "name": "2023_09_07_PKU IND CMC Dossier Lessons Learned .pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023_09_07_PKU%20IND%20CMC%20Dossier%20Lessons%20Learned%20.pdf?csf=1&web=1&e=5tyUeW"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 38,
-      "question": "What is the dose-ranging recommended by MABEL approach?",
-      "expected_answer": "3-4 log",
-      "contact": "",
-      "source_documents": [
+            "id": 36,
+            "question": "What is key to bear in mind when defining the M3 strategy and content /level of detail",
+            "expected_answer": "The key point is to keep life cycle management (LCM) in mind.",
+            "contact": "Sophie Girault",
+            "source_documents": [
+                {
+                    "name": "2017-LL-17Nov-IntraClusterDiabetes-LCMProjects_Katharina Zylka.pptx",
+                    "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2017-LL-17Nov-IntraClusterDiabetes-LCMProjects_Katharina%20Zylka.pptx?d=wf564a32b278e43e39ceb8d9f43d64ae9&csf=1&web=1&e=vqKgvB"
+                }
+            ],
+            "comments": "",
+            "context_reference": "The key point is to keep life cycle management (LCM) in mind.",
+            "hl_keywords": [
+                "Life cycle management"
+            ],
+            "ll_keywords": [
+                "LCM",
+                "sNDA",
+                "lessons learned"
+            ],
+            "retrieval_query": "Life cycle management LCM",
+            "retrieval_mode": "naive"
+        },
         {
-          "name": "2023_07_11_Clinical Development and CMC Interdependency & Partnership.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023_07_11_Clinical%20Development%20and%20CMC%20Interdependency%20%26%20Partnership.pdf?csf=1&web=1&e=pIENzq"
-        }
-      ],
-      "comments": ""
-    },
-    {
-      "id": 39,
-      "question": "What is the standard duration of shipment to depot?",
-      "expected_answer": "1-3 month",
-      "contact": "",
-      "source_documents": [
+            "id": 37,
+            "question": "What are the minimum information to stay on the batch analysis table for AAV product?",
+            "expected_answer": "Batch number, batch size, manufacturing site,\nmanufacturing date, with “batch yield” by total vgs",
+            "contact": "",
+            "source_documents": [
+                {
+                    "name": "2023_09_07_PKU IND CMC Dossier Lessons Learned .pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023_09_07_PKU%20IND%20CMC%20Dossier%20Lessons%20Learned%20.pdf?csf=1&web=1&e=5tyUeW"
+                }
+            ],
+            "comments": ""
+        },
         {
-          "name": "2023_06_06_Awareness of product usage within R&D.pdf",
-          "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023_06_06_Awareness%20of%20product%20usage%20within%20R%26D.pdf?csf=1&web=1&e=m70ea3"
+            "id": 38,
+            "question": "What is the dose-ranging recommended by MABEL approach?",
+            "expected_answer": "3-4 log",
+            "contact": "",
+            "source_documents": [
+                {
+                    "name": "2023_07_11_Clinical Development and CMC Interdependency & Partnership.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023_07_11_Clinical%20Development%20and%20CMC%20Interdependency%20%26%20Partnership.pdf?csf=1&web=1&e=pIENzq"
+                }
+            ],
+            "comments": ""
+        },
+        {
+            "id": 39,
+            "question": "What is the standard duration of shipment to depot?",
+            "expected_answer": "The standard duration of shipment to depot is 1-3 months before Start packaging.",
+            "contact": "",
+            "source_documents": [
+                {
+                    "name": "2023_06_06_Awareness of product usage within R&D.pdf",
+                    "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2023_06_06_Awareness%20of%20product%20usage%20within%20R%26D.pdf?csf=1&web=1&e=m70ea3"
+                }
+            ],
+            "comments": "",
+            "context_reference": "The standard duration of shipment to depot is 1-3 months before Start packaging.",
+            "retrieval_query": "shipment to depot 1-3 months before Start packaging",
+            "retrieval_mode": "naive"
         }
-      ],
-      "comments": "",
-      "skip": true
+    ],
+    "metadata": {
+        "total": 39
     }
-  ],
-  "metadata": {
-    "total": 36
-  }
 }

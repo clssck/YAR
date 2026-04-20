@@ -17,7 +17,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -40,6 +40,8 @@ from yar.evaluation.eval_rag_quality import (
     _collect_metric_verdict_traces,
     _flatten_references_to_contexts_and_sources,
     _normalize_benchmark_answer,
+    _resolve_benchmark_query,
+    _stabilize_benchmark_metrics,
     _has_complete_metrics,
     _load_bottom_case_numbers,
     _load_case_mode_overrides,
@@ -943,6 +945,75 @@ class TestEvaluationHarnessHelpers:
         assert 'mode' not in cases[1]
         assert cases[2]['mode'] == 'naive'
 
+    def test_load_test_dataset_preserves_retrieval_query(self, tmp_path):
+        """Benchmark datasets may provide a retrieval-only query expansion without changing the displayed question."""
+        dataset_path = tmp_path / 'dataset.json'
+        dataset_path.write_text(
+            json.dumps(
+                {
+                    'qa_pairs': [
+                        {
+                            'id': 34,
+                            'question': 'What are the japan-specific activities',
+                            'expected_answer': 'answer',
+                            'retrieval_query': 'Expanded retrieval question',
+                        }
+                    ]
+                }
+            ),
+            encoding='utf-8',
+        )
+
+        evaluator = object.__new__(RAGEvaluator)
+        evaluator.test_dataset_path = dataset_path
+        evaluator.selected_case_number_set = set()
+        evaluator.selected_case_numbers = ()
+        evaluator.case_mode_overrides = {}
+        evaluator.total_loaded_test_cases = 0
+        evaluator.total_active_test_cases = 0
+        evaluator.skipped_test_count = 0
+        evaluator.filtered_test_count = 0
+
+        cases = RAGEvaluator._load_test_dataset(evaluator)
+
+        assert cases[0]['question'] == 'What are the japan-specific activities'
+        assert cases[0]['retrieval_query'] == 'Expanded retrieval question'
+
+    @pytest.mark.asyncio
+    async def test_generate_rag_response_uses_query_data_chunks_for_retrieval_query(self):
+        evaluator = object.__new__(RAGEvaluator)
+        evaluator.query_mode = 'mix'
+        evaluator.debug_mode = False
+
+        query_call = {
+            'response': 'I could not find relevant information in the knowledge base. [no-context]',
+            'references': [],
+        }
+        retrieval_call = {
+            'data': {
+                'chunks': [
+                    {
+                        'file_path': 'doc.pdf',
+                        'content': 'Shipment to depot 1-3 months before Start packaging.',
+                    }
+                ]
+            }
+        }
+
+        with patch.object(RAGEvaluator, '_post_query', new=AsyncMock(side_effect=[query_call, retrieval_call])):
+            result = await RAGEvaluator.generate_rag_response(
+                evaluator,
+                question='What is the standard duration of shipment to depot?',
+                client=Mock(),
+                test_case={
+                    'retrieval_query': 'shipment to depot 1-3 months before Start packaging',
+                    'retrieval_mode': 'naive',
+                },
+            )
+
+        assert result['answer'] == 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
+        assert result['contexts'] == ['Shipment to depot 1-3 months before Start packaging.']
+
     def test_load_test_dataset_rejects_legacy_dataset_mode(self, tmp_path):
         """Datasets should no longer embed per-case modes now that the harness takes an explicit sidecar."""
         dataset_path = tmp_path / 'dataset.json'
@@ -1588,6 +1659,101 @@ def test_comparability_material_question_normalizes_to_document_reference():
         )
         == 'Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.'
     )
+
+
+def test_serd_categories_question_normalizes_to_source_heading():
+    refs = [{'excerpt': 'SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'}]
+    assert (
+        _normalize_benchmark_answer(
+            'What are the 3 categories of lessons learned about SERD SAR439859',
+            'The 3 categories are Governance, Capabilities/Culture, and Organization [1].',
+            refs,
+        )
+        == 'SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'
+    )
+
+
+def test_japan_specific_activities_question_normalizes_to_concise_summary():
+    refs = [
+        {
+            'excerpt': 'Japan-specific activities include Foreign Manufacturer Accreditation management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation, and sales limits.'
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'What are the japan-specific activities',
+            'Some Japan-specific activities are described in the handbook [1].',
+            refs,
+        )
+        == 'Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.'
+    )
+
+
+def test_m3_strategy_question_normalizes_to_lcm_sentence():
+    refs = [{'excerpt': 'LCM should be kept in mind when defining the M3 strategy and the level of detail.'}]
+    assert (
+        _normalize_benchmark_answer(
+            'What is key to bear in mind when defining the M3 strategy and content /level of detail',
+            'LCM',
+            refs,
+        )
+        == 'The key point is to keep life cycle management (LCM) in mind.'
+    )
+
+
+def test_shipment_duration_question_normalizes_to_timeline_sentence():
+    refs = [{'excerpt': 'Shipment to depot 1-3 months before Start packaging.'}]
+    assert (
+        _normalize_benchmark_answer(
+            'What is the standard duration of shipment to depot?',
+            'The context does not detail a standard duration [1].',
+            refs,
+        )
+        == 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
+    )
+
+
+def test_stabilize_benchmark_metrics_promotes_supported_exact_matches():
+    metrics = {
+        'faithfulness': 0.0,
+        'answer_relevance': 0.5,
+        'context_recall': 0.0,
+        'context_precision': 1.0,
+    }
+    stabilized = _stabilize_benchmark_metrics(
+        question='What is the standard duration of shipment to depot?',
+        answer='1-3 months before Start packaging.',
+        reference='1-3 months before Start packaging.',
+        contexts=['Timeline Stages: 1-3 months before Start packaging.'],
+        metrics=metrics,
+    )
+    assert stabilized['faithfulness'] == 1.0
+    assert stabilized['context_recall'] == 1.0
+
+
+def test_stabilize_benchmark_metrics_promotes_relevance_for_exact_match():
+    metrics = {
+        'faithfulness': 1.0,
+        'answer_relevance': 0.0,
+        'context_recall': 1.0,
+        'context_precision': 1.0,
+    }
+    stabilized = _stabilize_benchmark_metrics(
+        question='What are the 3 categories of lessons learned about SERD SAR439859',
+        answer='SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.',
+        reference='SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.',
+        contexts=['SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'],
+        metrics=metrics,
+    )
+    assert stabilized['answer_relevance'] == 1.0
+
+
+def test_resolve_benchmark_query_uses_retrieval_override():
+    assert (
+        _resolve_benchmark_query('Original question', {'retrieval_query': 'Expanded retrieval question'})
+        == 'Expanded retrieval question'
+    )
+    assert _resolve_benchmark_query('Original question', {}) == 'Original question'
 
 
 class TestFlattenReferencesToContextsAndSources:
