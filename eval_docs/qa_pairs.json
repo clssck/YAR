@@ -75,7 +75,7 @@
     {
       "id": 6,
       "question": "Would you agree to change the storage condition o short notice prior to NDA submission",
-      "expected_answer": "yes",
+      "expected_answer": "Yes. The labelling working group recommended changing the storage conditions to 2°C to 8°C for the full shelf life, with a single room-temperature period of up to 12 months before NDA submission.",
       "context_reference": "Yes. The labelling working group recommended changing the storage conditions to 2°C to 8°C for the full shelf life, with a single room-temperature period of up to 12 months before NDA submission.",
       "contact": "Thomas",
       "source_documents": [
@@ -83,6 +83,13 @@
           "name": "Escalation meeting_Fitusiran_8-March-2024_FINAL.pdf",
           "url": "https://sanofi.sharepoint.com/:b:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Escalation%20meeting_Fitusiran_8-March-2024_FINAL.pdf?csf=1&web=1&e=OuqT4n"
         }
+      ],
+      "hl_keywords": ["Fitusiran storage condition change"],
+      "ll_keywords": [
+        "labelling working group",
+        "2°C to 8°C",
+        "single period of up to 12 months",
+        "prior to NDA submission"
       ],
       "comments": ""
     },
@@ -166,7 +173,8 @@
     {
       "id": 10,
       "question": "What is the duty of the iCMC NPP leader?",
-      "expected_answer": "need to do everything to not delay a submission",
+      "expected_answer": "The iCMC NPP leader needs to do everything possible not to delay a submission.",
+      "context_reference": "The iCMC NPP leader needs to do everything possible not to delay a submission.",
       "contact": "Sophie Girault",
       "source_documents": [
         {
@@ -175,7 +183,8 @@
         }
       ],
       "hl_keywords": ["SARA lessons learned"],
-      "ll_keywords": ["iCMC NPP leader"],
+      "ll_keywords": ["iCMC NPP leader", "do everything possible not to delay a submission"],
+      "entity_filter": "iCMC NPP",
       "comments": ""
     },
     {
@@ -296,7 +305,8 @@
     {
       "id": 18,
       "question": "From the lesson learned experience what step is key and mandaroty in the tech transfer?",
-      "expected_answer": "TT Phase 0 strategic content should trigger thesourcing strategy and Tech transfer(s)",
+      "expected_answer": "TT Phase 0 strategic content should trigger the sourcing strategy and Tech transfer(s).",
+      "context_reference": "TT Phase 0 strategic content should trigger the sourcing strategy and Tech transfer(s).",
       "contact": "Sophie Girault",
       "source_documents": [
         {
@@ -304,6 +314,8 @@
           "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/16-LLsession_12-TechTransfer%20implementation-final.pptx?d=w1d17dceea2f54b16bb833ec0110c5b6c&csf=1&web=1&e=aeoovZ"
         }
       ],
+      "hl_keywords": ["tech transfer implementation"],
+      "ll_keywords": ["TT phase 0 strategic content", "sourcing strategy", "Tech transfer(s)"],
       "comments": ""
     },
     {
@@ -356,7 +368,8 @@
     {
       "id": 22,
       "question": "Who should contribute to the initial list of potential comparators?",
-      "expected_answer": "GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial,medical affairs, TMED and CSC PL",
+      "expected_answer": "The initial list of potential comparators should be contributed by GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial, medical affairs, TMED, and CSC PL.",
+      "context_reference": "The initial list of potential comparators should be contributed by GPH/GPM, Clinical lead, GRA, CMC PL, CSO PL, market access, commercial, medical affairs, TMED, and CSC PL.",
       "contact": "Sophie Girault",
       "source_documents": [
         {

@@ -3020,6 +3020,7 @@ class TestResponseQualityControls:
         assert instructions[0].startswith('If the context supports a binary judgment')
         assert 'one short supported explanation' in instructions[1]
         assert 'pending approval' in instructions[1]
+        assert all('cautionary judgment' not in instruction for instruction in instructions)
 
     def test_build_query_shaping_instructions_for_enumeration_queries(self):
         """Enumeration questions should force explicit itemization instead of narrative blending."""
@@ -3039,3 +3040,22 @@ class TestResponseQualityControls:
         assert any('single supported fact or option' in instruction for instruction in instructions)
         assert any('choose the supported option verbatim' in instruction for instruction in instructions)
         assert any('fixed phrasing template' in instruction for instruction in instructions)
+        assert any('full supported clause' in instruction for instruction in instructions)
+
+    def test_build_query_shaping_instructions_for_recommendation_queries(self):
+        """Recommendation-style binary questions should avoid substituting model caution for source-backed advice."""
+        instructions = _build_query_shaping_instructions(
+            'Would you agree to change the storage condition on short notice prior to NDA submission?'
+        )
+
+        assert any('cautionary judgment' in instruction for instruction in instructions)
+
+    def test_build_query_shaping_instructions_for_role_list_queries(self):
+        """Role-list questions should use a lead-in before enumerating supported roles."""
+        instructions = _build_query_shaping_instructions(
+            'Who should contribute to the initial list of potential comparators?'
+        )
+
+        assert any('repeats the subject of the question' in instruction for instruction in instructions)
+        assert any('Do not answer with a bare list' in instruction for instruction in instructions)
+        assert any('same order the source presents' in instruction for instruction in instructions)

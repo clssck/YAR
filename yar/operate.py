@@ -3637,25 +3637,46 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
     """Return query-specific answer-shaping rules for the generator prompt."""
     intent_profile = analyze_query_intent(query)
     kind = str(intent_profile.get('kind', 'default'))
+    normalized_query = ' '.join((query or '').casefold().split())
     if kind == 'binary':
-        return [
+        instructions = [
             'If the context supports a binary judgment, start the answer with "Yes" or "No" as the first word.',
             'After the first word, give one short supported explanation; if the evidence is conditional or pending approval, state that condition instead of implying a final endorsement.',
         ]
+        if normalized_query.startswith(('would you agree', 'do you endorse', 'should we ')):
+            instructions.append(
+                'Report the recommendation, endorsement, or decision supported by the context; do not substitute your own cautionary judgment for the source-backed answer.'
+            )
+        return instructions
     if kind == 'enumeration':
-        return [
+        instructions = [
             'List every supported item explicitly; do not collapse multiple items into a vague summary.',
             'When the format is a single paragraph, keep the items compact and separate them with semicolons.',
         ]
+        if normalized_query.startswith('who should '):
+            instructions.insert(
+                0,
+                'Start with a short lead-in that repeats the subject of the question, then list the supported people, roles, or functions. Do not answer with a bare list.',
+            )
+            instructions.append(
+                'Keep the listed roles in the same order the source presents them unless the source itself groups them differently.'
+            )
+        return instructions
     if kind == 'comparison':
         return [
             'Keep the comparison explicit: name each side, phase, or time period and state the supported difference for each.',
+        ]
+    if normalized_query.startswith('who should '):
+        return [
+            'Start with a short lead-in that repeats the subject of the question, then list the supported people, roles, or functions. Do not answer with a bare list.',
+            'Keep the listed roles in the same order the source presents them unless the source itself groups them differently.',
         ]
     if kind == 'single_fact':
         return [
             'Lead with the single supported fact or option and stop after the minimum supporting detail needed for clarity.',
             'If the question asks between named options, choose the supported option verbatim and do not explain alternatives unless the context explicitly requires it.',
             'If the source provides a fixed phrasing template, reproduce that phrasing plainly instead of adding markdown emphasis, placeholder labels, or extra explanation.',
+            'When the source states a duty, requirement, or mandatory step, reproduce the full supported clause instead of shortening it to a title or label.',
         ]
     return []
 
