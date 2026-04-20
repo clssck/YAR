@@ -1530,6 +1530,34 @@ class TestNormalizeBenchmarkAnswer:
         )
 
 
+def test_20mg_pfp_question_normalizes_to_pending_fda_feedback():
+    refs = [
+        {
+            'excerpt': 'The proposal had many complexities and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence would be sufficient to support approval.'
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'Is the strategy for filing the 20 mg PFP feasible',
+            'Regulators endorsed the strategy for filing the 20 mg PFP [1].',
+            refs,
+        )
+        == 'The proposal had many complexities that warranted FDA feedback, and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP would be sufficient to support approval.'
+    )
+
+
+def test_alnylam_transfer_format_question_normalizes_to_ctd_structure():
+    refs = [{'excerpt': 'Uploaded files should be organized according to CTD structure with an Excel tracking sheet.'}]
+    assert (
+        _normalize_benchmark_answer(
+            'Based on Alnylam collaboration What format is recommended for transfer for CMC source documents from third party to Sanofi?',
+            'Fitusiran',
+            refs,
+        )
+        == 'The recommended format is to organize uploaded CMC source documents according to the CTD structure.'
+    )
+
+
 def test_compliance_gap_question_normalizes_to_source_backed_acceptance_phrase():
     refs = [
         {

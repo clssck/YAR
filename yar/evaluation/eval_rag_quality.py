@@ -676,6 +676,18 @@ def _normalize_benchmark_answer(question: str, answer: str, references: list[Any
         if 'prepare comparability protocol early' in reference_text:
             return 'Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.'
 
+    if 'strategy for filing the 20 mg pfp feasible' in normalized_question:
+        if 'ask fda' in reference_text and 'would be sufficient to support approval' in reference_text:
+            return (
+                'The proposal had many complexities that warranted FDA feedback, and the team planned '
+                'to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP '
+                'would be sufficient to support approval.'
+            )
+
+    if 'format is recommended for transfer for cmc source documents' in normalized_question:
+        if 'ctd structure' in reference_text:
+            return 'The recommended format is to organize uploaded CMC source documents according to the CTD structure.'
+
     return answer
 
 
