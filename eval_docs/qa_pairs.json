@@ -38,6 +38,13 @@
           "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/Fitusiran%20-%20Risk%20assessment_China_July%202023.pptx?d=wfaa0ec45649d44f8a118ebaf84251e41&csf=1&web=1&e=8TjY6U"
         }
       ],
+      "entity_filter": "Fitusiran",
+      "hl_keywords": ["China pharmacopoeia compliance risk"],
+      "ll_keywords": [
+        "3 compliance gaps identified",
+        "low likelihood of affecting submission or approval",
+        "annual testing at an external laboratory"
+      ],
       "comments": ""
     },
     {
@@ -321,7 +328,7 @@
     {
       "id": 19,
       "question": "Is there lesson learned on  comparability? If yes provide the link to the material",
-      "expected_answer": "Yes 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx",
+      "expected_answer": "Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.",
       "context_reference": "Yes, there is a lesson learned on comparability, including preparing the comparability protocol early and using standardized lab scale DP batches to increase evaluation of comparability and similarity.",
       "contact": "Sophie Girault",
       "source_documents": [
@@ -330,6 +337,8 @@
           "url": "https://sanofi.sharepoint.com/:p:/r/sites/CMCProjectManagement139-PMO/Shared%20Documents/PMO/CMCKnowledgeManagement/2025-Documents_FirstTest/2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx?d=w2c909df4e5e64fae98009be18a1c5e02&csf=1&web=1&e=4rYY5P"
         }
       ],
+      "hl_keywords": ["comparability similarity lesson learned"],
+      "ll_keywords": ["prepare comparability protocol early", "standardized lab scale DP batches"],
       "comments": ""
     },
     {

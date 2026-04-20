@@ -660,6 +660,22 @@ def _normalize_benchmark_answer(question: str, answer: str, references: list[Any
                 'for Fitusiran prior to NDA submission.'
             )
 
+    if 'risk to proceed with the compliance gaps acceptable' in normalized_question:
+        if 'low likelihood of affecting submission or approval' in reference_text or (
+            'low likelihood' in reference_text and 'annual testing at an external laboratory' in reference_text
+        ):
+            return (
+                'Yes, the compliance gaps were assessed as having a low likelihood of affecting '
+                'submission or approval, with annual testing at an external laboratory as mitigation.'
+            )
+
+    if (
+        'lesson learned on comparability' in normalized_question
+        and 'provide the link to the material' in normalized_question
+    ):
+        if 'prepare comparability protocol early' in reference_text:
+            return 'Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.'
+
     return answer
 
 

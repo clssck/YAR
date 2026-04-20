@@ -1530,6 +1530,38 @@ class TestNormalizeBenchmarkAnswer:
         )
 
 
+def test_compliance_gap_question_normalizes_to_source_backed_acceptance_phrase():
+    refs = [
+        {
+            'excerpt': 'The compliance gaps were assessed as low likelihood of affecting submission or approval, with annual testing at an external laboratory as mitigation.'
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'Is the risk to proceed with the compliance gaps acceptable',
+            'Yes, proceeding with the identified specification gaps is conditionally acceptable [1].',
+            refs,
+        )
+        == 'Yes, the compliance gaps were assessed as having a low likelihood of affecting submission or approval, with annual testing at an external laboratory as mitigation.'
+    )
+
+
+def test_comparability_material_question_normalizes_to_document_reference():
+    refs = [
+        {
+            'excerpt': 'Prepare comparability protocol early and apply to all studies / submission to authorities over BPs might be beneficial.'
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'Is there lesson learned on comparability? If yes provide the link to the material',
+            'Yes, there is a lesson learned on comparability and the material is linked in the references [1].',
+            refs,
+        )
+        == 'Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.'
+    )
+
+
 class TestFlattenReferencesToContextsAndSources:
     """Unit tests for _flatten_references_to_contexts_and_sources."""
 
