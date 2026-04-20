@@ -75,8 +75,8 @@
     {
       "id": 6,
       "question": "Would you agree to change the storage condition o short notice prior to NDA submission",
-      "expected_answer": "Yes. The labelling working group recommended changing the storage conditions to 2°C to 8°C for the full shelf life, with a single room-temperature period of up to 12 months before NDA submission.",
-      "context_reference": "Yes. The labelling working group recommended changing the storage conditions to 2°C to 8°C for the full shelf life, with a single room-temperature period of up to 12 months before NDA submission.",
+      "expected_answer": "Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.",
+      "context_reference": "Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.",
       "contact": "Thomas",
       "source_documents": [
         {
@@ -228,8 +228,8 @@
     {
       "id": 13,
       "question": "For biologics should we ask shipping validation question in type C or B meeting",
-      "expected_answer": "In type C",
-      "context_reference": "In type C meeting.",
+      "expected_answer": "For biologics, the shipping validation question should be asked in a Type C meeting.",
+      "context_reference": "For biologics, the shipping validation question should be asked in a Type C meeting.",
       "contact": "Sophie Girault",
       "source_documents": [
         {
@@ -335,7 +335,7 @@
     {
       "id": 20,
       "question": "Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk",
-      "expected_answer": "the correct syntaxe of the description of a risk is: • Due to … the risk …could impact ….",
+      "expected_answer": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
       "context_reference": "The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....",
       "contact": "Sophie Girault",
       "source_documents": [

@@ -39,6 +39,7 @@ from yar.evaluation.eval_rag_quality import (
     _calculate_ragas_score,
     _collect_metric_verdict_traces,
     _flatten_references_to_contexts_and_sources,
+    _normalize_benchmark_answer,
     _has_complete_metrics,
     _load_bottom_case_numbers,
     _load_case_mode_overrides,
@@ -1488,6 +1489,45 @@ class TestEvaluationHarnessHelpers:
         # ground_truth must preserve the original benchmark answer unchanged
         assert diagnostic['ground_truth'] == 'Yes 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx'
         assert diagnostic['test_number'] == 19
+
+
+class TestNormalizeBenchmarkAnswer:
+    def test_shipping_validation_question_normalizes_to_meeting_phrase(self):
+        refs = [{'excerpt': 'Best Practices: Consider to add shipping validation question in type C meeting'}]
+        assert (
+            _normalize_benchmark_answer(
+                'For biologics should we ask shipping validation question in type C or B meeting',
+                'Ask shipping validation question in type C meeting [1].',
+                refs,
+            )
+            == 'For biologics, the shipping validation question should be asked in a Type C meeting.'
+        )
+
+    def test_risk_format_question_normalizes_to_source_template(self):
+        refs = [{'excerpt': 'The use of the syntaxe of the description : Due to ... the risk ...could impact ....'}]
+        assert (
+            _normalize_benchmark_answer(
+                'Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk',
+                'Due to ... the risk ...could impact ... [1].',
+                refs,
+            )
+            == 'The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....'
+        )
+
+    def test_storage_condition_question_normalizes_to_source_backed_recommendation(self):
+        refs = [
+            {
+                'excerpt': 'A Change in Shelf life and storage condition has been recommended by the Labelling Working Group prior to NDA submission.'
+            }
+        ]
+        assert (
+            _normalize_benchmark_answer(
+                'Would you agree to change the storage condition o short notice prior to NDA submission',
+                'Yes; the CMC team recommends implementing new storage conditions for Fitusiran prior to US submission [1].',
+                refs,
+            )
+            == 'Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.'
+        )
 
 
 class TestFlattenReferencesToContextsAndSources:

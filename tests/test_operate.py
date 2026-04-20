@@ -25,6 +25,7 @@ from yar.operate import (
     _build_prompt_chunk_context,
     _build_query_context,
     _build_query_shaping_instructions,
+    _normalize_query_shaped_response,
     _enrich_local_keywords,
     _find_most_related_edges_from_entities,
     _get_node_data,
@@ -3020,6 +3021,7 @@ class TestResponseQualityControls:
         assert instructions[0].startswith('If the context supports a binary judgment')
         assert 'one short supported explanation' in instructions[1]
         assert 'pending approval' in instructions[1]
+        assert any('standalone' in instruction for instruction in instructions)
         assert all('cautionary judgment' not in instruction for instruction in instructions)
 
     def test_build_query_shaping_instructions_for_enumeration_queries(self):
@@ -3038,6 +3040,7 @@ class TestResponseQualityControls:
         )
 
         assert any('single supported fact or option' in instruction for instruction in instructions)
+        assert any('exact option, phrase, or clause from the source' in instruction for instruction in instructions)
         assert any('choose the supported option verbatim' in instruction for instruction in instructions)
         assert any('fixed phrasing template' in instruction for instruction in instructions)
         assert any('full supported clause' in instruction for instruction in instructions)
@@ -3049,6 +3052,8 @@ class TestResponseQualityControls:
         )
 
         assert any('cautionary judgment' in instruction for instruction in instructions)
+        assert any('concrete values' in instruction for instruction in instructions)
+        assert any('standalone' in instruction for instruction in instructions)
 
     def test_build_query_shaping_instructions_for_role_list_queries(self):
         """Role-list questions should use a lead-in before enumerating supported roles."""
@@ -3059,3 +3064,56 @@ class TestResponseQualityControls:
         assert any('repeats the subject of the question' in instruction for instruction in instructions)
         assert any('Do not answer with a bare list' in instruction for instruction in instructions)
         assert any('same order the source presents' in instruction for instruction in instructions)
+
+    def test_build_query_shaping_instructions_for_template_queries(self):
+        """Risk-format questions should reproduce source templates verbatim without expanding ellipses into bracketed labels."""
+        instructions = _build_query_shaping_instructions(
+            'Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk'
+        )
+
+        assert any('ellipses' in instruction for instruction in instructions)
+        assert any('bracketed' in instruction for instruction in instructions)
+        assert any('verbatim' in instruction for instruction in instructions)
+        assert any('lead-in' in instruction for instruction in instructions)
+        assert any(
+            '[subject]' in instruction or '[action]' in instruction or '[impact]' in instruction
+            for instruction in instructions
+        )
+
+    def test_normalize_query_shaped_response_preserves_risk_template(self):
+        """Risk-format questions should collapse invented bracket placeholders back to the source template."""
+        response = (
+            'To phrase the CMC risk correctly, use the syntax: '
+            '**Due to [cause] the risk [risk description] could impact [impact area]** [1].'
+        )
+        available_refs = [
+            {'excerpt': 'The use of the syntaxe of the description : Due to ... the risk ...could impact ....'}
+        ]
+
+        normalized = _normalize_query_shaped_response(
+            query='Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk',
+            response=response,
+            available_refs=available_refs,
+        )
+
+        assert normalized == 'The correct syntax is: Due to ... the risk ... could impact .... [1]'
+
+    def test_normalize_query_shaped_response_strips_single_fact_markdown(self):
+        """Single-fact answers should return the supported option plainly without markdown emphasis."""
+        normalized = _normalize_query_shaped_response(
+            query='For biologics should we ask shipping validation question in type C or B meeting',
+            response='Ask the shipping validation question in a **Type C meeting** [1].',
+            available_refs=[],
+        )
+
+        assert normalized == 'In a Type C meeting [1].'
+
+    def test_normalize_query_shaped_response_collapses_meeting_choice(self):
+        """Single-fact meeting-choice answers should collapse to the supported meeting phrase."""
+        normalized = _normalize_query_shaped_response(
+            query='For biologics should we ask shipping validation question in type C or B meeting',
+            response='Add the shipping validation question in type C meeting [1].',
+            available_refs=[],
+        )
+
+        assert normalized == 'In type C meeting [1].'
