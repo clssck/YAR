@@ -333,3 +333,69 @@ class TestStreamingPageRendering:
         ):
             with pytest.raises(vision.VisionExtractionError, match='PDF produced no renderable pages'):
                 _render_pdf_page_range(pdf_path, 4, 5, total_pages=9)
+
+
+@pytest.mark.offline
+class TestImageVariantTransforms:
+    """Verify the image-variant chain produces structurally valid bypass candidates."""
+
+    def _sample_jpeg(self, width: int = 800, height: int = 1200) -> bytes:
+        from io import BytesIO
+
+        from PIL import Image
+
+        img = Image.new('RGB', (width, height), color=(220, 220, 220))
+        buf = BytesIO()
+        img.save(buf, format='JPEG', quality=80)
+        return buf.getvalue()
+
+    def _decode(self, image_bytes: bytes):
+        from io import BytesIO
+
+        from PIL import Image
+
+        return Image.open(BytesIO(image_bytes))
+
+    def test_chain_contains_lossless_variants_first(self):
+        chain = vision.IMAGE_VARIANT_CHAIN
+        assert chain[0] == 'rotated-90', 'rotated-90 must lead the chain (lossless, full-content)'
+        assert 'bottom-half' in chain[:3], 'bottom-half must be in the early chain (empirically validated)'
+        assert chain[-1] == 'quarter-res', 'quarter-res is heaviest-loss; keep it last'
+        assert set(chain) == set(vision._IMAGE_VARIANT_TRANSFORMS), 'chain and transform map must agree'
+
+    def test_rotated_90_swaps_dimensions(self):
+        original = self._sample_jpeg(width=800, height=1200)
+        out = vision._transform_image_rotated_90(original)
+        img = self._decode(out)
+        assert img.size == (1200, 800), 'rotated-90 must swap width/height'
+
+    def test_bottom_half_keeps_lower_region(self):
+        original = self._sample_jpeg(width=800, height=1200)
+        out = vision._transform_image_bottom_half(original)
+        img = self._decode(out)
+        assert img.size == (800, 600), 'bottom-half preserves width and halves height'
+
+    def test_top_half_keeps_upper_region(self):
+        original = self._sample_jpeg(width=800, height=1200)
+        out = vision._transform_image_top_half(original)
+        img = self._decode(out)
+        assert img.size == (800, 600), 'top-half preserves width and halves height'
+
+    def test_top_and_bottom_halves_cover_full_height(self):
+        """Top + bottom halves together must cover the entire original page height."""
+        original = self._sample_jpeg(width=400, height=1000)
+        top = self._decode(vision._transform_image_top_half(original))
+        bottom = self._decode(vision._transform_image_bottom_half(original))
+        assert top.size[1] + bottom.size[1] == 1000, 'halves must partition the original height with no gap or overlap'
+
+    def test_quarter_res_downsamples(self):
+        original = self._sample_jpeg(width=800, height=1200)
+        out = vision._transform_image_quarter_res(original)
+        img = self._decode(out)
+        assert img.size == (200, 300), 'quarter-res must produce 1/4 of each dimension'
+
+    def test_blurred_preserves_dimensions(self):
+        original = self._sample_jpeg(width=600, height=800)
+        out = vision._transform_image_blurred(original)
+        img = self._decode(out)
+        assert img.size == (600, 800), 'blur is applied in-place; dimensions must not change'

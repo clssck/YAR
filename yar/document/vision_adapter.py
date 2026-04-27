@@ -120,12 +120,16 @@ ALTERNATIVE_BASE_PROMPTS: tuple[str, ...] = (
 ALT_PROMPT_LOW_CONTENT_THRESHOLD = 100  # chars; below this we treat a solo page as a failure
 
 # Image variants tried when a SOLO page is blocked by an image-classifier guardrail.
-# Empirically validated against Bedrock's content_filter on pharma formulation tables:
-# rotation, blur, and downsample all evade the classifier. Order is LOSSLESS FIRST so we
-# preserve chart detail and small numbers when we can. Only fall back to lossy variants
-# if rotation alone fails to bypass.
+# Empirically validated against Bedrock's content_filter on pharma formulation tables
+# AND diagram-heavy process pages: rotation, half-cropping, blur, and downsample each
+# evade the classifier on different page layouts. Order is LOSSLESS FIRST. Half-crops
+# follow rotation because they recover bottom-of-page content the classifier blocks
+# when the top heading region is in view (empirically: BLU-808 PDP page 33 jumped from
+# 71 chars rotated to 1110 chars bottom-half). Lossy variants are last resort.
 IMAGE_VARIANT_CHAIN: tuple[str, ...] = (
     'rotated-90',    # Rotate 90 degrees; LOSSLESS - every pixel preserved, just reoriented.
+    'bottom-half',   # Crop bottom 50%; LOSSLESS for that region. Recovers body when top trips classifier.
+    'top-half',      # Crop top 50%; LOSSLESS for that region. Complementary to bottom-half.
     'blurred',       # Gaussian blur radius 3; LOSSY but text usually legible. Last resort.
     'quarter-res',   # 25% resolution; HEAVILY LOSSY - small text/charts degraded. Last resort.
 )
@@ -667,10 +671,36 @@ def _transform_image_rotated_90(image_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _transform_image_bottom_half(image_bytes: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+    img = Image.open(BytesIO(image_bytes)).convert('RGB')
+    width, height = img.size
+    cropped = img.crop((0, height // 2, width, height))
+    buf = BytesIO()
+    cropped.save(buf, format='JPEG', quality=80)
+    return buf.getvalue()
+
+
+def _transform_image_top_half(image_bytes: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+    img = Image.open(BytesIO(image_bytes)).convert('RGB')
+    width, height = img.size
+    cropped = img.crop((0, 0, width, height // 2))
+    buf = BytesIO()
+    cropped.save(buf, format='JPEG', quality=80)
+    return buf.getvalue()
+
+
 _IMAGE_VARIANT_TRANSFORMS = {
     'blurred': _transform_image_blurred,
     'quarter-res': _transform_image_quarter_res,
     'rotated-90': _transform_image_rotated_90,
+    'bottom-half': _transform_image_bottom_half,
+    'top-half': _transform_image_top_half,
 }
 
 
