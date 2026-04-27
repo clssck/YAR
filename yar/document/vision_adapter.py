@@ -522,7 +522,24 @@ async def _extract_batch(
         # Multi-page empty batch: trigger adaptive split so failing pages get isolated.
         # Children may recover individual pages or emit per-page warnings.
         if len(pages) > 1:
+            logger.warning(
+                'Vision empty batch %s finish=%s - splitting to isolate offending pages',
+                _page_range_label(pages), finish_label,
+            )
             return empty_results, [], True
+        # Solo page empty - log clearly so operators can trace why content is missing.
+        if finish_label == 'content_filter':
+            logger.warning(
+                'Vision GUARDRAIL BLOCK page %d finish=content_filter completion_tokens=%s '
+                '(model refused to extract; will try alt-prompts)',
+                pages[0].page_number,
+                getattr(getattr(response, 'usage', None), 'completion_tokens', '?'),
+            )
+        else:
+            logger.warning(
+                'Vision empty page %d finish=%s (will try alt-prompts)',
+                pages[0].page_number, finish_label,
+            )
         warnings = [
             ExtractionWarning(
                 source='vision_empty_response',
