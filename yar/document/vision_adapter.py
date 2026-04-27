@@ -479,13 +479,20 @@ async def _extract_batch(
     choices = getattr(response, 'choices', None) or []
     finish_reason = getattr(choices[0], 'finish_reason', None) if choices else None
     if not raw_text:
+        finish_label = finish_reason or 'unknown'
         empty_results = [PageResult(page_number=page.page_number, content='') for page in pages]
+        # Multi-page empty batch: trigger adaptive split so failing pages get isolated.
+        # Children may recover individual pages or emit per-page warnings.
+        if len(pages) > 1:
+            return empty_results, [], True
         warnings = [
             ExtractionWarning(
                 source='vision_empty_response',
-                message=f'Vision model returned empty content for page {page.page_number}.',
+                message=(
+                    f'Vision model returned empty content for page {pages[0].page_number} '
+                    f'(finish_reason={finish_label}).'
+                ),
             )
-            for page in pages
         ]
         return empty_results, warnings, False
 
