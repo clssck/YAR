@@ -222,7 +222,8 @@ def _make_image_variants(page: RenderedPage) -> list[tuple[str, RenderedPage]]:
     - downsampled: lower resolution may evade visual classifier"""
     try:
         from PIL import Image, ImageOps
-    except ImportError:
+    except ImportError as exc:
+        print(f'[test] Pillow not available ({exc}) - skipping image variant phase')
         return [('full-image', page)]
 
     import io
