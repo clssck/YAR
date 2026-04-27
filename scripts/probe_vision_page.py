@@ -197,6 +197,11 @@ async def main() -> None:
     if not pages_wanted:
         sys.exit('No pages parsed from spec.')
 
+    save_dir_env = os.environ.get('PROBE_SAVE_DIR')
+    save_dir = Path(save_dir_env) if save_dir_env else None
+    if save_dir:
+        save_dir.mkdir(parents=True, exist_ok=True)
+
     base_url = os.environ.get('LLM_BINDING_HOST') or os.environ.get('VISION_BINDING_HOST')
     api_key = os.environ.get('LLM_BINDING_API_KEY') or os.environ.get('VISION_BINDING_API_KEY')
     model = os.environ.get('VISION_MODEL', 'salmon')
@@ -216,6 +221,12 @@ async def main() -> None:
     missing = sorted(set(pages_wanted) - found_pages)
     if missing:
         print(f'[probe] WARN: pages not rendered: {missing}')
+
+    if save_dir:
+        for page in rendered:
+            target = save_dir / f'{doc_id}_page{page.page_number:03d}.jpg'
+            target.write_bytes(page.image_bytes)
+        print(f'[probe] saved {len(rendered)} rendered pages to {save_dir}')
 
     for page in sorted(rendered, key=lambda p: p.page_number):
         try:
