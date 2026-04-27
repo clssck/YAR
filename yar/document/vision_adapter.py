@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from functools import partial
@@ -269,7 +270,7 @@ async def extract_document_with_vision(
 
         client = create_openai_async_client(api_key=api_key, base_url=base_url)
         try:
-            page_results, warnings = await _process_all_pages(client, model, pages)
+            page_results, warnings = await _process_all_pages(client, model, pages, filename=filename)
         finally:
             await client.close()
 
@@ -348,7 +349,7 @@ async def _extract_pdf_streaming(
                     total_pages,
                     model,
                 )
-                page_results, warnings = await _process_all_pages(client, model, pages)
+                page_results, warnings = await _process_all_pages(client, model, pages, filename=filename)
                 return page_results, warnings, total_pages
 
             pages_per_call = _compute_pages_per_call()
@@ -382,7 +383,7 @@ async def _extract_pdf_streaming(
                         pdf_password=pdf_password,
                     )
                 )
-                wave_results, wave_warnings = await _process_all_pages(client, model, wave_pages)
+                wave_results, wave_warnings = await _process_all_pages(client, model, wave_pages, filename=filename)
                 all_results.extend(wave_results)
                 all_warnings.extend(wave_warnings)
 
@@ -592,6 +593,8 @@ async def _process_all_pages(
     client: Any,
     model: str,
     pages: list[RenderedPage],
+    *,
+    filename: str | None = None,
 ) -> tuple[list[PageResult], list[ExtractionWarning]]:
     if not pages:
         return [], []
@@ -608,16 +611,42 @@ async def _process_all_pages(
     )
     all_results: list[PageResult] = []
     all_warnings: list[ExtractionWarning] = []
+    label = filename or 'document'
+    batches_done = 0
+    cumulative_chars = 0
+    extraction_start = time.monotonic()
 
     for index in range(0, len(batches), concurrency_limit):
         batch_group = batches[index : index + concurrency_limit]
+        group_start = time.monotonic()
         batch_outputs = await asyncio.gather(
             *[_extract_batch_adaptively(client, model, batch) for batch in batch_group]
+        )
+        group_elapsed = time.monotonic() - group_start
+        group_pages = sum(len(batch) for batch in batch_group)
+        group_chars = sum(len(result.content) for results, _ in batch_outputs for result in results)
+        batches_done += len(batch_group)
+        cumulative_chars += group_chars
+        logger.info(
+            'Vision batch %d/%d done for %s: %d pages, %d chars in %.1fs',
+            batches_done,
+            len(batches),
+            label,
+            group_pages,
+            group_chars,
+            group_elapsed,
         )
         for batch_results, batch_warnings in batch_outputs:
             all_results.extend(batch_results)
             all_warnings.extend(batch_warnings)
 
+    logger.info(
+        'Vision extraction processed %d pages for %s in %.1fs (%d chars total)',
+        len(all_results),
+        label,
+        time.monotonic() - extraction_start,
+        cumulative_chars,
+    )
     all_results.sort(key=lambda result: result.page_number)
     return all_results, all_warnings
 
