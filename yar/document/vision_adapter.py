@@ -125,7 +125,7 @@ ALT_PROMPT_LOW_CONTENT_THRESHOLD = 100  # chars; below this we treat a solo page
 # evade the classifier on different page layouts. Order is LOSSLESS FIRST. Half-crops
 # follow rotation because they recover bottom-of-page content the classifier blocks
 # when the top heading region is in view (empirically: BLU-808 PDP page 33 jumped from
-# 71 chars rotated to 1110 chars bottom-half). Lossy variants are last resort.
+# 71->1110 chars and page 64 jumped from 454->1319 chars via bottom-half). Lossy variants last.
 IMAGE_VARIANT_CHAIN: tuple[str, ...] = (
     'rotated-90',    # Rotate 90 degrees; LOSSLESS - every pixel preserved, just reoriented.
     'bottom-half',   # Crop bottom 50%; LOSSLESS for that region. Recovers body when top trips classifier.
