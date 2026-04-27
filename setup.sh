@@ -302,8 +302,8 @@ echo -e "${GREEN}* Environment configured${NC}"
 echo ""
 echo -e "${YELLOW}Creating data directories...${NC}"
 
-mkdir -p data/rag_storage data/inputs
-echo -e "${GREEN}* Created data/rag_storage and data/inputs${NC}"
+mkdir -p data/rag_storage data/inputs data/postgres data/rustfs
+echo -e "${GREEN}* Created data/rag_storage, data/inputs, data/postgres, data/rustfs${NC}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 7: Build WebUI and install HonoHub dependencies

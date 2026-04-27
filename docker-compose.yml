@@ -35,7 +35,7 @@ services:
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:5432:5432'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ${YAR_DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
     command: |
       postgres
       -c shared_preload_libraries='vector,age'
@@ -79,7 +79,7 @@ services:
       RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
     command: /data
     volumes:
-      - rustfs_data:/data
+      - ${YAR_DATA_DIR:-./data}/rustfs:/data
     healthcheck:
       test: ['CMD-SHELL', "curl -s http://localhost:9000/ | grep -q 'AccessDenied' || curl -sf http://localhost:9000/"]
       interval: 10s
@@ -123,6 +123,6 @@ services:
     mem_limit: 1g
     restart: unless-stopped
 
-volumes:
-  pgdata:
-  rustfs_data:
+# All persistent data lives on the host filesystem under ${YAR_DATA_DIR:-./data}
+# so it survives Docker daemon resets and is easy to back up. See setup.sh which
+# creates the directories with the correct permissions on first run.
