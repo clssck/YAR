@@ -40,6 +40,7 @@ dependencies = [
     "xlsxwriter>=3.1.0",
     "kreuzberg>=4.0.8",
     "pypdfium2>=5.0.0",  # PDF rendering library for Kreuzberg (pdfium bindings)
+    "Pillow>=10.0.0",  # Image manipulation for guardrail-bypass image variants
 ]
 
 [project.optional-dependencies]

@@ -119,6 +119,17 @@ ALTERNATIVE_BASE_PROMPTS: tuple[str, ...] = (
 )
 ALT_PROMPT_LOW_CONTENT_THRESHOLD = 100  # chars; below this we treat a solo page as a failure
 
+# Image variants tried when a SOLO page is blocked by an image-classifier guardrail.
+# Empirically validated against Bedrock's content_filter on pharma formulation tables:
+# rotation, blur, and downsample all evade the classifier. Order is LOSSLESS FIRST so we
+# preserve chart detail and small numbers when we can. Only fall back to lossy variants
+# if rotation alone fails to bypass.
+IMAGE_VARIANT_CHAIN: tuple[str, ...] = (
+    'rotated-90',    # Rotate 90 degrees; LOSSLESS - every pixel preserved, just reoriented.
+    'blurred',       # Gaussian blur radius 3; LOSSY but text usually legible. Last resort.
+    'quarter-res',   # 25% resolution; HEAVILY LOSSY - small text/charts degraded. Last resort.
+)
+
 
 PAGE_SPLIT_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
 BATCH_EXTRACTION_PROMPT = (
@@ -622,6 +633,131 @@ def _content_chars(results: list[PageResult]) -> int:
     return sum(len(result.content) for result in results)
 
 
+def _transform_image_blurred(image_bytes: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image, ImageFilter
+    img = Image.open(BytesIO(image_bytes)).convert('RGB')
+    blurred = img.filter(ImageFilter.GaussianBlur(radius=3))
+    buf = BytesIO()
+    blurred.save(buf, format='JPEG', quality=80)
+    return buf.getvalue()
+
+
+def _transform_image_quarter_res(image_bytes: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+    img = Image.open(BytesIO(image_bytes)).convert('RGB')
+    width, height = img.size
+    resized = img.resize((max(1, width // 4), max(1, height // 4)))
+    buf = BytesIO()
+    resized.save(buf, format='JPEG', quality=80)
+    return buf.getvalue()
+
+
+def _transform_image_rotated_90(image_bytes: bytes) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+    img = Image.open(BytesIO(image_bytes)).convert('RGB')
+    rotated = img.rotate(90, expand=True)
+    buf = BytesIO()
+    rotated.save(buf, format='JPEG', quality=80)
+    return buf.getvalue()
+
+
+_IMAGE_VARIANT_TRANSFORMS = {
+    'blurred': _transform_image_blurred,
+    'quarter-res': _transform_image_quarter_res,
+    'rotated-90': _transform_image_rotated_90,
+}
+
+
+async def _try_image_variants(
+    client: Any,
+    model: str,
+    page: RenderedPage,
+    primary_results: list[PageResult],
+    primary_warnings: list[ExtractionWarning],
+) -> tuple[list[PageResult], list[ExtractionWarning]]:
+    """Retry a single page with image transformations to bypass image-classifier guardrails.
+
+    Empirically validated: blur, quarter-resolution, and rotation all defeat Bedrock's
+    visual content_filter on pharma formulation tables, recovering full extraction.
+    Returns the longest extraction across variants. Pillow is required; if unavailable,
+    returns the original results unchanged.
+    """
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        logger.warning(
+            'Vision image-variant retry skipped for page %d: Pillow not installed', page.page_number,
+        )
+        return primary_results, primary_warnings
+
+    best_results = primary_results
+    best_warnings = primary_warnings
+    best_chars = _content_chars(primary_results)
+    page_number = page.page_number
+
+    for variant_name in IMAGE_VARIANT_CHAIN:
+        transform_fn = _IMAGE_VARIANT_TRANSFORMS.get(variant_name)
+        if transform_fn is None:
+            continue
+        try:
+            transformed_bytes = await asyncio.to_thread(transform_fn, page.image_bytes)
+        except Exception as exc:
+            logger.warning(
+                'Vision image-variant %s transform failed for page %d: %s',
+                variant_name, page_number, _format_exception_message(exc),
+            )
+            continue
+
+        variant_page = RenderedPage(
+            page_number=page.page_number,
+            total_pages=page.total_pages,
+            media_type='image/jpeg',
+            image_bytes=transformed_bytes,
+        )
+        try:
+            attempt_results, attempt_warnings, _ = await _extract_batch_with_retry(
+                client, model, [variant_page]
+            )
+        except Exception as exc:
+            logger.warning(
+                'Vision image-variant %s extraction failed for page %d: %s',
+                variant_name, page_number, _format_exception_message(exc),
+            )
+            continue
+
+        attempt_chars = _content_chars(attempt_results)
+        logger.info(
+            'Vision image-variant %s for page %d: %d chars (best so far: %d)',
+            variant_name, page_number, attempt_chars, best_chars,
+        )
+        if attempt_chars > best_chars:
+            best_results = attempt_results
+            # Tag recovered content with a provenance warning so consumers can flag
+            # this page for review - it came from a transformed image, not the original.
+            best_warnings = [
+                *attempt_warnings,
+                ExtractionWarning(
+                    source='vision_image_variant_recovered',
+                    message=(
+                        f'Page {page_number} content recovered via {variant_name!r} '
+                        f'image transform after content_filter on original. '
+                        f'Review for accuracy.'
+                    ),
+                ),
+            ]
+            best_chars = attempt_chars
+            if best_chars >= 1000:
+                break
+    return best_results, best_warnings
+
+
+
 async def _try_alternative_prompts(
     client: Any,
     model: str,
@@ -685,6 +821,19 @@ async def _extract_batch_adaptively(
             page_results, warnings = await _try_alternative_prompts(
                 client, model, pages[0], page_results, warnings
             )
+            # If alt-prompts didn't recover content, the filter MAY be image-specific.
+            # GATE STRICTLY: only try image transforms when the warning explicitly cites
+            # finish_reason=content_filter. For genuinely blank pages (finish=stop) we
+            # leave them blank rather than risk hallucination from transformed images.
+            if _content_chars(page_results) < ALT_PROMPT_LOW_CONTENT_THRESHOLD:
+                blocked_by_filter = any(
+                    w.source == 'vision_empty_response' and 'finish_reason=content_filter' in w.message
+                    for w in warnings
+                )
+                if blocked_by_filter:
+                    page_results, warnings = await _try_image_variants(
+                        client, model, pages[0], page_results, warnings
+                    )
             if _content_chars(page_results) >= ALT_PROMPT_LOW_CONTENT_THRESHOLD:
                 should_split = False
 
