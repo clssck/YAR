@@ -56,6 +56,21 @@ def _api_base() -> str:
 def _workspace() -> str:
     return os.environ.get('YAR_WORKSPACE', 'default')
 
+def _parse_pages(spec: str) -> list[int]:
+    pages: list[int] = []
+    for token in spec.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        if '-' in token:
+            lo, hi = token.split('-', 1)
+            pages.extend(range(int(lo), int(hi) + 1))
+        else:
+            pages.append(int(token))
+    return sorted(set(pages))
+
+
+
 
 def _resolve_doc_path(doc_id: str) -> str:
     api = _api_base()
@@ -100,74 +115,76 @@ async def main() -> None:
         print(__doc__)
         sys.exit(2)
 
-    doc_id, page_str = sys.argv[1], sys.argv[2]
-    page_num = int(page_str)
+    doc_id, page_spec = sys.argv[1], sys.argv[2]
+    pages_wanted = _parse_pages(page_spec)
+    if not pages_wanted:
+        sys.exit('No pages parsed from spec.')
 
     base_url = os.environ.get('LLM_BINDING_HOST') or os.environ.get('VISION_BINDING_HOST')
     api_key = os.environ.get('LLM_BINDING_API_KEY') or os.environ.get('VISION_BINDING_API_KEY')
     model = os.environ.get('VISION_MODEL', 'salmon')
 
-    print(f'[test] doc_id={doc_id} page={page_num} model={model}')
+    print(f'[test] doc_id={doc_id} pages={pages_wanted} model={model}')
     key = _resolve_doc_path(doc_id)
     print(f'[test] resolved: {key}')
 
     doc_bytes = _download_doc(key)
     print(f'[test] downloaded {len(doc_bytes):,} bytes')
 
-    page = _render_page(doc_bytes, key, page_num)
-    print(f'[test] rendered page {page_num} ({len(page.image_bytes):,} bytes)\n')
-
-    print('=' * 90)
-    print('Running _extract_batch_adaptively (full production retry chain)')
-    print('=' * 90)
-    print('Watch for log lines:')
-    print('  - "Vision GUARDRAIL BLOCK" -> page hit content_filter on original')
-    print('  - "Vision alt-prompt N/2 for page X: N chars" -> alt-prompts attempted')
-    print('  - "Vision image-variant rotated-90 for page X: N chars" -> rotation attempted')
-    print('  - "vision_image_variant_recovered" warning -> recovered via transform')
-    print()
+    summary: list[tuple[int, int, list[str]]] = []
 
     client = create_openai_async_client(api_key=api_key, base_url=base_url)
     try:
-        results, warnings = await _extract_batch_adaptively(client, model, [page])
+        for page_num in pages_wanted:
+            print()
+            print('#' * 90)
+            print(f'#  Testing page {page_num}')
+            print('#' * 90)
+            try:
+                page = _render_page(doc_bytes, key, page_num)
+            except SystemExit as exc:
+                print(f'[!] could not render page {page_num}: {exc}')
+                summary.append((page_num, 0, ['render_failed']))
+                continue
+            print(f'[test] rendered page {page_num} ({len(page.image_bytes):,} bytes)')
+            results, warnings = await _extract_batch_adaptively(client, model, [page])
+            if not results:
+                summary.append((page_num, 0, ['no_results']))
+                continue
+            page_result = results[0]
+            chars = len(page_result.content)
+            warning_sources = sorted({w.source for w in warnings})
+            summary.append((page_num, chars, warning_sources))
+            print()
+            print(f'page {page_num}: chars={chars} warnings={warning_sources}')
+            preview = page_result.content[:1500]
+            print(f'--- content preview ({min(chars, 1500)} of {chars}) ---')
+            print(preview if chars else '(empty)')
+            if chars > 1500:
+                print(f'... [+{chars - 1500} more chars]')
     finally:
         await client.close()
 
     print()
     print('=' * 90)
-    print('FINAL RESULT')
+    print('SUMMARY')
     print('=' * 90)
-    if not results:
-        print('(no results)')
-        return
+    print(f'{"page":>4}  {"flag":<10}  {"chars":>6}  warnings')
+    print('-' * 90)
+    for page_num, chars, sources in summary:
+        if chars >= 100:
+            flag = 'RECOVERED' if 'vision_image_variant_recovered' in sources else 'OK'
+        elif chars > 0:
+            flag = 'PARTIAL'
+        else:
+            flag = 'FAILED'
+        print(f'{page_num:>4}  {flag:<10}  {chars:>6}  {",".join(sources) or "-"}')
 
-    page_result = results[0]
-    chars = len(page_result.content)
-    print(f'page_number: {page_result.page_number}')
-    print(f'content_chars: {chars}')
-    print(f'warnings: {len(warnings)}')
-    for w in warnings:
-        print(f'  - source={w.source}')
-        print(f'    msg={w.message}')
-
+    recovered = sum(1 for _, chars, sources in summary if chars >= 100 and 'vision_image_variant_recovered' in sources)
+    failed = sum(1 for _, chars, _ in summary if chars == 0)
+    clean = sum(1 for _, chars, sources in summary if chars >= 100 and 'vision_image_variant_recovered' not in sources)
     print()
-    print('--- content (first 3000 chars) ---')
-    if chars == 0:
-        print('(empty - all recovery attempts failed)')
-    else:
-        preview = page_result.content[:3000]
-        print(preview)
-        if chars > 3000:
-            print(f'... [truncated, total {chars} chars]')
-
-    print()
-    print('=' * 90)
-    print('VERIFICATION CHECKLIST:')
-    print('  1. Did you see "GUARDRAIL BLOCK" log? -> confirmed content_filter on original')
-    print('  2. Did you see "image-variant rotated-90 for page X: N chars" -> retry triggered')
-    print('  3. Is final content > 100 chars? -> recovery succeeded')
-    print('  4. Does the content match what is ACTUALLY on the page? -> no hallucination')
-    print('  5. vision_image_variant_recovered warning present? -> provenance tagged')
+    print(f'Total: {len(summary)} pages | clean: {clean} | recovered via transform: {recovered} | failed: {failed}')
 
 
 if __name__ == '__main__':
