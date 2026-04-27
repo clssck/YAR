@@ -104,7 +104,74 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 2: Docker Network Configuration
+# Step 3: Vision Pipeline System Dependencies
+# ══════════════════════════════════════════════════════════════════════════════
+# YAR's vision adapter (yar/document/vision_adapter.py) shells out to:
+#   - soffice  (LibreOffice)   .docx/.pptx/.odt -> PDF
+#   - pdftoppm (poppler-utils) PDF pages -> JPG for the vision LLM
+# Without both, every PDF and Office upload fails at extraction time.
+
+echo ""
+echo -e "${YELLOW}Checking vision pipeline dependencies...${NC}"
+
+MISSING_BIN=()
+command -v soffice  >/dev/null 2>&1 || MISSING_BIN+=("soffice")
+command -v pdftoppm >/dev/null 2>&1 || MISSING_BIN+=("pdftoppm")
+
+APT_PKGS="poppler-utils libreoffice-common libreoffice-core libreoffice-writer libreoffice-impress fonts-dejavu-core fonts-liberation2"
+
+install_vision_deps_apt() {
+    local sudo_cmd=""
+    if [ "$(id -u)" != "0" ]; then
+        if command -v sudo >/dev/null 2>&1; then
+            sudo_cmd="sudo"
+        else
+            echo -e "${RED}x No sudo available. Install manually:${NC}"
+            echo -e "  ${BLUE}apt-get install -y --no-install-recommends $APT_PKGS${NC}"
+            return 1
+        fi
+    fi
+    echo -e "  Installing: $APT_PKGS"
+    if $sudo_cmd apt-get update && $sudo_cmd DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $APT_PKGS; then
+        return 0
+    fi
+    echo -e "${RED}x apt-get install failed${NC}"
+    echo -e "  Run manually: ${BLUE}sudo apt-get install -y --no-install-recommends $APT_PKGS${NC}"
+    return 1
+}
+
+if [ ${#MISSING_BIN[@]} -eq 0 ]; then
+    echo -e "${GREEN}* soffice and pdftoppm available${NC}"
+elif command -v apt-get >/dev/null 2>&1; then
+    echo -e "${YELLOW}! Missing: ${MISSING_BIN[*]}${NC}"
+    if install_vision_deps_apt; then
+        echo -e "${GREEN}* Vision pipeline dependencies installed${NC}"
+    else
+        read -p "Continue without these? PDF/Office uploads will fail. [y/N]: " SKIP_DEPS
+        if [[ ! "$SKIP_DEPS" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+elif [[ "$OSTYPE" == darwin* ]]; then
+    echo -e "${YELLOW}! Missing: ${MISSING_BIN[*]}${NC}"
+    echo -e "  Install via Homebrew:"
+    echo -e "  ${BLUE}brew install --cask libreoffice && brew install poppler${NC}"
+    read -p "Continue without these? PDF/Office uploads will fail. [y/N]: " SKIP_DEPS
+    if [[ ! "$SKIP_DEPS" =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}! Missing: ${MISSING_BIN[*]}${NC}"
+    echo -e "  Install LibreOffice (provides soffice) and poppler-utils (provides pdftoppm)"
+    echo -e "  for your platform; PDF/Office uploads will fail without them."
+    read -p "Continue without these? [y/N]: " SKIP_DEPS
+    if [[ ! "$SKIP_DEPS" =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 4: Docker Network Configuration
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
@@ -130,7 +197,7 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 3: Environment Configuration
+# Step 5: Environment Configuration
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
@@ -229,7 +296,7 @@ echo -e "  ${GREEN}*${NC} Generated LiteLLM config"
 echo -e "${GREEN}* Environment configured${NC}"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 4: Create data directories
+# Step 6: Create data directories
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
@@ -239,7 +306,7 @@ mkdir -p data/rag_storage data/inputs
 echo -e "${GREEN}* Created data/rag_storage and data/inputs${NC}"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 5: Build WebUI and install HonoHub dependencies
+# Step 7: Build WebUI and install HonoHub dependencies
 # ══════════════════════════════════════════════════════════════════════════════
 
 if command -v bun &> /dev/null; then
@@ -271,7 +338,7 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 6: Summary
+# Step 8: Summary
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
@@ -291,7 +358,7 @@ fi
 echo ""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 7: Build and start Docker containers
+# Step 9: Build and start Docker containers
 # ══════════════════════════════════════════════════════════════════════════════
 
 COMPOSE_PROFILE_FLAG=""
@@ -324,7 +391,7 @@ echo ""
 echo -e "${GREEN}* Containers started${NC}"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 8: Wait for Health Checks
+# Step 10: Wait for Health Checks
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
@@ -401,7 +468,7 @@ fi
 echo ""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Step 9: Start HonoHub proxy (if --proxy flag)
+# Step 11: Start HonoHub proxy (if --proxy flag)
 # ══════════════════════════════════════════════════════════════════════════════
 
 if [ "$START_PROXY" = true ] && command -v bun &> /dev/null; then
