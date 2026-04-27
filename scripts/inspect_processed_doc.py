@@ -142,18 +142,32 @@ def main() -> None:
             snippet += f' ... [+{len(body) - preview} chars]'
         print(f'{page_num:>4}  {flag}  {chars:>6}  {snippet or "(empty)"}')
 
+    # Detect missing pages (gaps in the page-number sequence). These are pages the
+    # vision model returned empty content for - the stitcher strips them entirely so
+    # they don't appear in the listing above. The audit log captures them; this surfaces
+    # them here too.
+    seen_pages = sorted({n for n, _ in pages if n > 0})
+    missing_pages: list[int] = []
+    if seen_pages:
+        highest = seen_pages[-1]
+        missing_pages = [n for n in range(1, highest + 1) if n not in set(seen_pages)]
+
     print('\n' + '=' * 80)
-    print(f'Summary: {total} pages | OK {counts["OK   "]} | SHORT {counts["SHORT"]} | TINY {counts["TINY "]} | EMPTY {counts["EMPTY"]}')
-    if empty_pages:
-        print(f'  Empty pages: {empty_pages}')
+    expected = (seen_pages[-1] if seen_pages else 0)
+    print(
+        f'Summary: {expected} expected | {total} present | OK {counts["OK   "]} | '
+        f'SHORT {counts["SHORT"]} | TINY {counts["TINY "]} | MISSING {len(missing_pages)}'
+    )
+    if missing_pages:
+        print(f'  Missing pages (stripped after empty extraction): {missing_pages}')
     if tiny_pages:
         print(f'  Tiny pages (<100 chars): {tiny_pages}')
     if short_pages:
         print(f'  Short pages (<500 chars): {short_pages}')
 
-    if empty_pages:
-        print('\nTip: probe the empty pages to confirm guardrail vs blank:')
-        joined = ','.join(str(p) for p in empty_pages)
+    if missing_pages:
+        print('\nTip: probe the missing pages to confirm guardrail vs blank:')
+        joined = ','.join(str(p) for p in missing_pages)
         print(f'  uv run python scripts/probe_vision_page.py {doc_id} {joined}')
 
 
