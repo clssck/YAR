@@ -57,7 +57,21 @@ def _get_vision_semaphore() -> asyncio.Semaphore:
     return _vision_semaphore
 
 
-REQUEST_TIMEOUT_SECONDS = 120.0
+REQUEST_TIMEOUT_SECONDS_DEFAULT = 120.0
+
+
+def _get_request_timeout() -> float:
+    env_override = os.getenv('VISION_REQUEST_TIMEOUT')
+    if not env_override:
+        return REQUEST_TIMEOUT_SECONDS_DEFAULT
+    try:
+        value = float(env_override)
+    except ValueError:
+        logger.warning('Invalid VISION_REQUEST_TIMEOUT=%r, falling back to %ss', env_override, REQUEST_TIMEOUT_SECONDS_DEFAULT)
+        return REQUEST_TIMEOUT_SECONDS_DEFAULT
+    if value <= 0:
+        return REQUEST_TIMEOUT_SECONDS_DEFAULT
+    return value
 MAX_TOKENS_PER_PAGE = 4096
 
 
@@ -84,6 +98,26 @@ def _compute_pages_per_call() -> int:
         MAX_TOKENS_PER_PAGE,
     )
     return pages_per_call
+
+
+ALTERNATIVE_BASE_PROMPTS: tuple[str, ...] = (
+    # Plain transcription framing - avoids 'extract data' verbs that sometimes trip
+    # content guardrails on regulated documents (pharma, medical, financial).
+    (
+        'Transcribe the visible text from each page exactly as it appears. '
+        'Use HTML <table> tags for tabular content with proper <thead> and <tbody>. '
+        'Preserve all numbers, dates, identifiers, and labels verbatim. '
+        'For diagrams and infographics, list visible labels and numeric values as a markdown list.'
+    ),
+    # Description framing - softer phrasing that often survives strict guardrails.
+    (
+        'Describe each page in detail. '
+        'Include all visible headings, paragraph text, table contents, captions, dates, '
+        'identifiers, batch numbers, and numeric values. '
+        'Format your description as clean markdown using HTML <table> tags for tables.'
+    ),
+)
+ALT_PROMPT_LOW_CONTENT_THRESHOLD = 100  # chars; below this we treat a solo page as a failure
 
 
 PAGE_SPLIT_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
@@ -274,6 +308,8 @@ async def extract_document_with_vision(
         finally:
             await client.close()
 
+    _log_extraction_summary(filename, page_results, warnings)
+
     content, collected_warnings = stitch_extracted_pages(page_results, warnings)
     if not content:
         failure_detail = _failure_detail_for_empty_extraction(collected_warnings)
@@ -461,6 +497,8 @@ async def _extract_batch(
     client: Any,
     model: str,
     pages: list[RenderedPage],
+    *,
+    prompt_override: str | None = None,
 ) -> tuple[list[PageResult], list[ExtractionWarning], bool]:
     """Send a page batch to the vision model, gated by a global concurrency semaphore."""
     sem = _get_vision_semaphore()
@@ -468,11 +506,11 @@ async def _extract_batch(
         response = await asyncio.wait_for(
             client.chat.completions.create(
                 model=model,
-                messages=cast(Any, _build_batch_vision_messages(pages)),
+                messages=cast(Any, _build_batch_vision_messages(pages, prompt_override=prompt_override)),
                 temperature=0,
                 max_tokens=MAX_TOKENS_PER_PAGE * len(pages),
             ),
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=_get_request_timeout(),
         )
     raw_text = _extract_response_text(response).strip()
 
@@ -511,6 +549,8 @@ async def _extract_batch_with_retry(
     client: Any,
     model: str,
     pages: list[RenderedPage],
+    *,
+    prompt_override: str | None = None,
 ) -> tuple[list[PageResult], list[ExtractionWarning], bool]:
     """Try up to VISION_MAX_RETRIES times with exponential backoff + jitter."""
     last_exc: Exception | None = None
@@ -519,7 +559,7 @@ async def _extract_batch_with_retry(
     for attempt in range(VISION_MAX_RETRIES):
         attempts_used = attempt + 1
         try:
-            return await _extract_batch(client, model, pages)
+            return await _extract_batch(client, model, pages, prompt_override=prompt_override)
         except Exception as exc:
             last_exc = exc
             stopped_on_non_retryable_error = _is_non_retryable_vision_error(exc)
@@ -561,12 +601,77 @@ async def _extract_batch_with_retry(
     return page_results, warnings, False
 
 
+def _content_chars(results: list[PageResult]) -> int:
+    return sum(len(result.content) for result in results)
+
+
+async def _try_alternative_prompts(
+    client: Any,
+    model: str,
+    page: RenderedPage,
+    primary_results: list[PageResult],
+    primary_warnings: list[ExtractionWarning],
+) -> tuple[list[PageResult], list[ExtractionWarning]]:
+    """Retry a single page with alternative prompts when the default returned little/no content.
+
+    Useful when the model's safety guardrail (e.g. Bedrock content_filter) trips on the
+    default extraction prompt for regulated content. Different prompt framings often survive
+    the guardrail and recover meaningful text. Returns the longest extraction across attempts.
+    """
+    best_results = primary_results
+    best_warnings = primary_warnings
+    best_chars = _content_chars(primary_results)
+    page_number = page.page_number
+
+    for alt_idx, alt_prompt in enumerate(ALTERNATIVE_BASE_PROMPTS, start=1):
+        try:
+            attempt_results, attempt_warnings, _ = await _extract_batch_with_retry(
+                client, model, [page], prompt_override=alt_prompt
+            )
+        except Exception as exc:
+            logger.warning(
+                'Vision alt-prompt %d/%d failed for page %d: %s',
+                alt_idx, len(ALTERNATIVE_BASE_PROMPTS), page_number, _format_exception_message(exc),
+            )
+            continue
+
+        attempt_chars = _content_chars(attempt_results)
+        logger.info(
+            'Vision alt-prompt %d/%d for page %d: %d chars (best so far: %d)',
+            alt_idx, len(ALTERNATIVE_BASE_PROMPTS), page_number, attempt_chars, best_chars,
+        )
+        if attempt_chars > best_chars:
+            best_results = attempt_results
+            best_warnings = attempt_warnings
+            best_chars = attempt_chars
+            if best_chars >= 1000:
+                break
+    return best_results, best_warnings
+
+
+
 async def _extract_batch_adaptively(
     client: Any,
     model: str,
     pages: list[RenderedPage],
 ) -> tuple[list[PageResult], list[ExtractionWarning]]:
     page_results, warnings, should_split = await _extract_batch_with_retry(client, model, pages)
+    # When a SOLO page came back fully empty, retry with alternative prompts to work around
+    # model safety guardrails (e.g. Bedrock content_filter on regulated content). Different
+    # prompt framings often survive the guardrail and recover meaningful text.
+    # We trigger only on confirmed-empty model responses, not on hard provider failures
+    # (auth/rate-limit) which won't recover from a different prompt.
+    if len(pages) == 1:
+        has_empty_response = any(w.source == 'vision_empty_response' for w in warnings)
+        has_hard_failure = any(w.source == 'vision_batch_failure' for w in warnings)
+        if has_empty_response and not has_hard_failure:
+            page_results, warnings = await _try_alternative_prompts(
+                client, model, pages[0], page_results, warnings
+            )
+            if _content_chars(page_results) >= ALT_PROMPT_LOW_CONTENT_THRESHOLD:
+                should_split = False
+
+
     if not should_split:
         return page_results, warnings
 
@@ -696,6 +801,39 @@ def _summarize_extraction_quality(
         summary_parts.append(f'Pages flagged as potentially truncated: {truncation_count}')
 
     return ExtractionWarning(source='vision_quality', message='; '.join(summary_parts))
+
+
+def _log_extraction_summary(
+    filename: str | None,
+    page_results: list[PageResult],
+    warnings: list[ExtractionWarning],
+) -> None:
+    """Emit a single high-signal summary line per document so operators can see at a
+    glance how extraction went without scrolling through hundreds of per-batch lines.
+    """
+    label = filename or 'document'
+    total_pages = len(page_results)
+    pages_with_content = sum(1 for r in page_results if r.content.strip())
+    empty_pages = total_pages - pages_with_content
+    total_chars = sum(len(r.content) for r in page_results)
+
+    # Count warnings by source so guardrail-tripped pages stand out.
+    warning_counts: dict[str, int] = {}
+    finish_reason_counts: dict[str, int] = {}
+    for warning in warnings:
+        warning_counts[warning.source] = warning_counts.get(warning.source, 0) + 1
+        if warning.source == 'vision_empty_response':
+            match = re.search(r'finish_reason=([\w_-]+)', warning.message)
+            reason = match.group(1) if match else 'unknown'
+            finish_reason_counts[reason] = finish_reason_counts.get(reason, 0) + 1
+
+    log_method = logger.info if empty_pages == 0 else logger.warning
+    log_method(
+        'Vision audit for %s: pages=%d ok=%d empty=%d chars=%d warnings=%s finish_reasons=%s',
+        label, total_pages, pages_with_content, empty_pages, total_chars,
+        warning_counts or {}, finish_reason_counts or {},
+    )
+
 
 
 def stitch_extracted_pages(
@@ -943,11 +1081,16 @@ def _convert_office_document_to_pdf(
         return pdf_path.read_bytes()
 
 
-def _build_batch_vision_messages(pages: list[RenderedPage]) -> list[dict[str, Any]]:
+def _build_batch_vision_messages(
+    pages: list[RenderedPage],
+    *,
+    prompt_override: str | None = None,
+) -> list[dict[str, Any]]:
     page_numbers = [page.page_number for page in pages]
     expected_markers = ', '.join(f'<!-- PAGE {page_number} -->' for page_number in page_numbers)
+    base_prompt = prompt_override if prompt_override is not None else BATCH_EXTRACTION_PROMPT
     prompt = (
-        f'{BATCH_EXTRACTION_PROMPT}\n\n'
+        f'{base_prompt}\n\n'
         f'This batch covers {_page_range_label(pages)} of {pages[0].total_pages}.\n'
         f'Return exactly one section for each requested page marker: {expected_markers}.\n'
         f'If a page has no readable text, return the marker followed by {NO_TEXT_DETECTED_SENTINEL}.'
