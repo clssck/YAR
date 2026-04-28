@@ -13,7 +13,7 @@ services:
     ports:
       - '5433:5433' # Use 5433 to avoid conflict with agent-sdk postgres
     volumes:
-      - pgdata_test:/var/lib/postgresql/data
+      - pgdata_test:/var/lib/postgresql
     command: |
       postgres
       -p 5433

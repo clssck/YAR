@@ -18,6 +18,7 @@ RUN set -eux \
     && apt-get install -y --no-install-recommends \
         build-essential \
         git \
+        ca-certificates \
         postgresql-server-dev-${PG_MAJOR} \
         libreadline-dev \
         zlib1g-dev \

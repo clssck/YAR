@@ -35,7 +35,7 @@ services:
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:5432:5432'
     volumes:
-      - ${YAR_DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+      - ${YAR_DATA_DIR:-./data}/postgres:/var/lib/postgresql
     command: |
       postgres
       -c shared_preload_libraries='vector,age'
