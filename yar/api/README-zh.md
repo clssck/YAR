@@ -137,11 +137,11 @@ yar-gunicorn --workers 4
 docker compose up
 # 如果希望启动后让程序退到后台运行，需要在命令的最后添加 -d 参数
 ```
-> 可以通过以下链接获取官方的docker compose文件：[docker-compose.yml]( https://raw.githubusercontent.com/HKUDS/YAR/refs/heads/main/docker-compose.yml) 。如需获取YAR的历史版本镜像，可以访问以下链接: [YAR Docker Images]( https://github.com/HKUDS/YAR/pkgs/container/yar). 如需获取更多关于docker部署的信息，请参阅 [DockerDeployment.md](./../../docs/DockerDeployment.md).
+> 可以通过以下链接获取官方的docker compose文件：[docker-compose.yml]( https://raw.githubusercontent.com/HKUDS/YAR/refs/heads/main/docker-compose.yml) 。如需获取YAR的历史版本镜像，可以访问以下链接: [YAR Docker Images]( https://github.com/HKUDS/YAR/pkgs/container/yar).
 
 ### 离线部署
 
-官方的 YAR Docker 镜像完全兼容离线或隔离网络环境。如需搭建自己的离线部署环境，请参考 [离线部署指南](./../../docs/OfflineDeployment.md)。
+官方的 YAR Docker 镜像完全兼容离线或隔离网络环境。
 
 ### 启动多个YAR实例
 
@@ -190,28 +190,6 @@ MAX_PARALLEL_INSERT=2
 MAX_ASYNC=4
 ```
 
-### 将 YAR 安装为 Linux 服务
-
-从示例文件 `yar.service.example` 创建您的服务文件 `yar.service`。修改服务文件中的服务启动定义：
-
-```text
-# Set Enviroment to your Python virtual enviroment
-Environment="PATH=/home/netman/yar-xyj/venv/bin"
-WorkingDirectory=/home/netman/yar-xyj
-# ExecStart=/home/netman/yar-xyj/venv/bin/yar-server
-ExecStart=/home/netman/yar-xyj/venv/bin/yar-gunicorn
-```
-> ExecStart命令必须是 yar-gunicorn 或 yar-server 中的一个，不能使用其它脚本包裹它们。因为停止服务必须要求主进程必须是这两个进程。
-
-安装 YAR 服务。如果您的系统是 Ubuntu，以下命令将生效：
-
-```shell
-sudo cp yar.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl start yar.service
-sudo systemctl status yar.service
-sudo systemctl enable yar.service
-```
 
 ## Ollama 模拟
 

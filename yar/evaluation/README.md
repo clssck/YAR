@@ -25,7 +25,7 @@ yar/evaluation/
   wiki_documents/             # 8 Wikipedia articles (test corpus)
   sample_documents/           # 5 YAR-about markdown files (RAGAS corpus)
   results/                    # All output lands here (gitignored)
-EvaluationTemplate_filled.csv # 25 Q&A pairs (repo root, Pipeline A input)
+  qa_eval_for_runner.csv      # Pipeline A Q&A pairs (question/expectedResponse)
 ```
 
 ---
@@ -84,12 +84,12 @@ Query YAR with each of the 25 benchmark questions and record the responses:
 python yar/evaluation/export_qa_answers.py
 ```
 
-This reads `EvaluationTemplate_filled.csv`, sends each question to `POST /query` (mode=mix, response_type=Single Paragraph), and writes a timestamped CSV to `yar/evaluation/results/`.
+This reads `yar/evaluation/qa_eval_for_runner.csv`, sends each question to `POST /query` (mode=mix, response_type=Single Paragraph), and writes a timestamped CSV to `yar/evaluation/results/`.
 
 Options:
 
 ```
---input-csv PATH    Q&A source file (default: EvaluationTemplate_filled.csv)
+--input-csv PATH    Q&A source file (default: yar/evaluation/qa_eval_for_runner.csv)
 --output-csv PATH   Output path (default: results/qa_answers_<timestamp>.csv)
 --api-url URL       YAR API URL (default: $YAR_API_URL)
 --api-key KEY       YAR API key (default: $YAR_API_KEY)
@@ -319,7 +319,7 @@ The bundled corpus covers five domains:
 | Climate | `climate_climate_change.txt`, `climate_renewable_energy.txt` |
 | Sports | `sports_olympic_games.txt`, `sports_fifa_world_cup.txt` |
 
-The 25 benchmark questions (in `EvaluationTemplate_filled.csv` and `questions.md`) span all four domains plus cross-domain multi-hop reasoning.
+The benchmark questions live in `yar/evaluation/qa_eval_for_runner.csv` (and `questions.md` for the Wikipedia corpus).
 
 To refresh the Wikipedia articles:
 
@@ -329,7 +329,7 @@ python yar/evaluation/download_wikipedia.py
 
 ## Adding Your Own Questions
 
-1. Edit `EvaluationTemplate_filled.csv` (columns: `question`, `expectedResponse`)
+1. Edit `yar/evaluation/qa_eval_for_runner.csv` (columns: `question`, `expectedResponse`)
 2. Ingest documents that contain the answers
 3. Run the QA eval pipeline (Steps 2-3 above)
 

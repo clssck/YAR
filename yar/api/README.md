@@ -145,11 +145,11 @@ docker compose up
 # If you want the program to run in the background after startup, add the -d parameter at the end of the command.
 ```
 
-You can get the official docker compose file from here: [docker-compose.yml](https://raw.githubusercontent.com/HKUDS/YAR/refs/heads/main/docker-compose.yml). For historical versions of YAR docker images, visit this link: [YAR Docker Images](https://github.com/HKUDS/YAR/pkgs/container/yar). For more details about docker deployment, please refer to [DockerDeployment.md](./../../docs/DockerDeployment.md).
+You can get the official docker compose file from here: [docker-compose.yml](https://raw.githubusercontent.com/HKUDS/YAR/refs/heads/main/docker-compose.yml). For historical versions of YAR docker images, visit this link: [YAR Docker Images](https://github.com/HKUDS/YAR/pkgs/container/yar).
 
 ### Offline Deployment
 
-Official YAR Docker images are fully compatible with offline or air-gapped environments. If you want to build up you own  offline enviroment, please refer to [Offline Deployment Guide](./../../docs/OfflineDeployment.md).
+Official YAR Docker images are fully compatible with offline or air-gapped environments.
 
 ### Starting Multiple YAR Instances
 
@@ -192,31 +192,6 @@ WORKERS=2
 MAX_PARALLEL_INSERT=2
 ### Max concurrent requests to the LLM
 MAX_ASYNC=4
-```
-
-### Install YAR as a Linux Service
-
-Create your service file `yar.service` from the sample file: `yar.service.example`. Modify the start options the service file:
-
-```text
-# Set Enviroment to your Python virtual enviroment
-Environment="PATH=/home/netman/yar-xyj/venv/bin"
-WorkingDirectory=/home/netman/yar-xyj
-# ExecStart=/home/netman/yar-xyj/venv/bin/yar-server
-ExecStart=/home/netman/yar-xyj/venv/bin/yar-gunicorn
-
-```
-
-> The ExecStart command must be either `yar-gunicorn` or `yar-server`; no wrapper scripts are allowed. This is because service termination requires the main process to be one of these two executables.
-
-Install YAR service. If your system is Ubuntu, the following commands will work:
-
-```shell
-sudo cp yar.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl start yar.service
-sudo systemctl status yar.service
-sudo systemctl enable yar.service
 ```
 
 ## Ollama Emulation

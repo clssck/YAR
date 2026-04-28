@@ -1,5 +1,0 @@
-include requirements.txt
-include yar/api/requirements.txt
-recursive-include yar/api/webui *
-recursive-include yar/api/static *
-recursive-include config *.yaml

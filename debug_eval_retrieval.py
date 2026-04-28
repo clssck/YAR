@@ -10,7 +10,7 @@ chunks and which source documents were hit.
 
 Usage:
     uv run python debug_eval_retrieval.py
-    uv run python debug_eval_retrieval.py --input-csv qa_eval_for_runner.csv --api-url http://localhost:9621
+    uv run python debug_eval_retrieval.py --input-csv yar/evaluation/qa_eval_for_runner.csv --api-url http://localhost:9621
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from pathlib import Path
 import httpx
 
 API_URL = 'http://localhost:9621'
-INPUT_CSV = 'qa_eval_for_runner.csv'
+INPUT_CSV = 'yar/evaluation/qa_eval_for_runner.csv'
 TIMEOUT = 120.0
 
 

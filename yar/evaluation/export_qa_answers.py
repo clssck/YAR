@@ -7,7 +7,7 @@ Happy path:
     uv run python yar/evaluation/export_qa_answers.py
 
 This defaults to:
-- EvaluationTemplate_filled.csv at repo root
+- yar/evaluation/qa_eval_for_runner.csv
 - YAR at http://localhost:9621
 - output CSV under yar/evaluation/results/
 """

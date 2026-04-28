@@ -138,8 +138,6 @@ S3_BUCKET_NAME=yar-documents
 ## 📚 Documentation
 
 - [API Reference](./yar/api/README.md)
-- [Docker Deployment](./docs/DockerDeployment.md)
-- [Algorithm Details](./docs/Algorithm.md)
 
 ---
 

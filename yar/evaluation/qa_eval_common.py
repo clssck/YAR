@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EVAL_DIR / 'results'
-DEFAULT_QA_CSV = REPO_ROOT / 'EvaluationTemplate_filled.csv'
+DEFAULT_QA_CSV = EVAL_DIR / 'qa_eval_for_runner.csv'
 
 # Load repository .env once so host-side scripts can run with minimal flags.
 load_dotenv(REPO_ROOT / '.env', override=False)
