@@ -598,6 +598,83 @@ def _split_section(section: Section, max_chunk_tokens: int) -> list[Section]:
     return [_clone_section(section, chunk) for chunk in body_chunks if _trim(chunk)]
 
 
+def _strip_repeating_boilerplate_lines(
+    chunks: list[ChunkData],
+    *,
+    min_occurrence_ratio: float = 0.5,
+    max_line_length: int = 80,
+) -> list[ChunkData]:
+    """Strip lines that repeat across many chunks of the same document (likely boilerplate).
+
+    A line is treated as boilerplate when it:
+    - appears in at least ``min_occurrence_ratio`` of all chunks (default 50%),
+    - is short (<= ``max_line_length`` chars after stripping whitespace),
+    - is not blank, not a markdown heading line (starts with #), and not a page marker.
+
+    Headings and page markers are NEVER stripped: headings carry semantic context,
+    page markers are location anchors. With fewer than 3 chunks the pass is skipped (not
+    enough signal). Chunks emptied entirely by stripping are dropped from the output.
+    """
+    from dataclasses import replace as dataclass_replace
+
+    if len(chunks) < 3:
+        return chunks
+
+    occurrence: dict[str, int] = {}
+    for chunk in chunks:
+        seen_lines: set[str] = set()
+        for line in chunk.content.splitlines():
+            stripped = _trim(line)
+            if not stripped or len(stripped) > max_line_length:
+                continue
+            if stripped.startswith('#'):
+                continue
+            if PAGE_MARKER_RE.search(stripped):
+                continue
+            # Table rows and separators are structural, not boilerplate. The header-replication
+            # logic in _split_table_block_preserving_header deliberately repeats the header across
+            # split chunks; the stripper would otherwise undo that.
+            if TABLE_ROW_RE.match(stripped) or TABLE_SEPARATOR_RE.match(stripped):
+                continue
+            seen_lines.add(stripped)
+        for stripped in seen_lines:
+            occurrence[stripped] = occurrence.get(stripped, 0) + 1
+
+    threshold = max(2, int(len(chunks) * min_occurrence_ratio))
+    boilerplate = {line for line, count in occurrence.items() if count >= threshold}
+    if not boilerplate:
+        return chunks
+
+    cleaned: list[ChunkData] = []
+    next_index = 0
+    stripped_any = False
+    for chunk in chunks:
+        new_lines: list[str] = []
+        chunk_changed = False
+        for line in chunk.content.splitlines():
+            stripped = _trim(line)
+            if stripped in boilerplate:
+                chunk_changed = True
+                continue
+            new_lines.append(line)
+        if not chunk_changed:
+            cleaned.append(dataclass_replace(chunk, chunk_index=next_index))
+            next_index += 1
+            continue
+        stripped_any = True
+        new_content = '\n'.join(new_lines).strip('\n')
+        if not _trim(new_content):
+            # Chunk emptied entirely -- drop. Don't advance index so output is contiguous.
+            continue
+        cleaned.append(dataclass_replace(chunk, content=new_content, chunk_index=next_index))
+        next_index += 1
+
+    if not stripped_any:
+        return chunks
+    return cleaned
+
+
+
 def _split_oversized_sections(sections: list[Section], max_chunk_tokens: int) -> list[Section]:
     split_sections: list[Section] = []
     for section in sections:
@@ -625,6 +702,7 @@ def chunk_markdown(markdown: str, *, join_threshold: int = 500) -> list[ChunkDat
                 heading_hierarchy=section.heading_hierarchy,
             )
         )
+    chunks = _strip_repeating_boilerplate_lines(chunks)
     return chunks
 
 

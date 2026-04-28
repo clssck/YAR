@@ -238,3 +238,89 @@ class TestVisionBatchHelpers:
 		expected: bool,
 	):
 		assert should_split_batch(expected_page_count, marker_mode, finish_reason) is expected
+
+
+class TestChunkMarkdownBoilerplate:
+	"""Tests for the repeating-line boilerplate stripper applied at the end of chunk_markdown."""
+
+	def test_chunk_markdown_strips_repeating_footer(self):
+		sections = [
+			f'# Section {i}\n\nUnique content for section {i} discussing topic {i}.\n\nConfidential -- Internal Use'
+			for i in range(6)
+		]
+		markdown = '\n\n'.join(sections)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		assert len(chunks) >= 3
+		for chunk in chunks:
+			assert 'Confidential -- Internal Use' not in chunk.content
+		combined = '\n'.join(chunk.content for chunk in chunks)
+		assert 'Unique content for section 0' in combined
+		assert 'Unique content for section 5' in combined
+
+	def test_chunk_markdown_strips_repeating_page_number_pattern(self):
+		sections = [
+			f'# Section {i}\n\nDistinct prose for section {i} expanding on details.\n\nPage 1 of 12'
+			for i in range(6)
+		]
+		markdown = '\n\n'.join(sections)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		for chunk in chunks:
+			assert 'Page 1 of 12' not in chunk.content
+
+	def test_chunk_markdown_keeps_repeating_heading(self):
+		# A repeated section heading is NOT boilerplate; headings carry semantic context.
+		sections = [
+			f'## Conclusions\n\nUnique closing paragraph {i} for chapter {i}.'
+			for i in range(6)
+		]
+		markdown = '# Document\n\n' + '\n\n'.join(sections)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		heading_chunks = [c for c in chunks if '## Conclusions' in c.content]
+		assert heading_chunks, 'Expected the repeated heading to survive in at least one chunk'
+
+	def test_chunk_markdown_drops_chunk_emptied_by_stripping(self):
+		# Build sections where one chunk is ONLY the boilerplate line and unique content elsewhere.
+		sections = [
+			f'# Section {i}\n\nUnique paragraph {i} with substantial detail.\n\nFooter line A'
+			for i in range(5)
+		]
+		# Add a section whose body is essentially only the boilerplate so it gets emptied.
+		sections.append('# Empty Section\n\nFooter line A')
+		markdown = '\n\n'.join(sections)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		for chunk in chunks:
+			assert 'Footer line A' not in chunk.content
+		# chunk_index must be sequential after dropping.
+		indexes = [chunk.chunk_index for chunk in chunks]
+		assert indexes == list(range(len(chunks)))
+
+	def test_chunk_markdown_keeps_unique_lines_intact(self):
+		# No line repeats across chunks -> stripper is a no-op; content unchanged.
+		sections = [f'# Section {i}\n\nWholly unique paragraph {i} with details {i * 7}.' for i in range(5)]
+		markdown = '\n\n'.join(sections)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		for i, chunk in enumerate(chunks):
+			assert f'unique paragraph {i}' in chunk.content.lower()
+
+	def test_chunk_markdown_skips_stripper_when_few_chunks(self):
+		# With only 2 chunks, even a shared line is not stripped (insufficient signal).
+		markdown = (
+			'# A\n\nFirst section content.\n\nShared boilerplate line\n\n'
+			'# B\n\nSecond section content.\n\nShared boilerplate line'
+		)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		assert len(chunks) == 2
+		for chunk in chunks:
+			assert 'Shared boilerplate line' in chunk.content
