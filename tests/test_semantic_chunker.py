@@ -85,6 +85,59 @@ class TestSemanticChunker:
 		assert len(chunks) == 1
 		assert '| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |' in chunks[0].content
 
+	def test_chunk_markdown_keeps_short_table_atomic(self):
+		markdown = '\n'.join(
+			[
+				'| Name | Value |',
+				'|---|---|',
+				'| Alpha | 1 |',
+				'| Beta | 2 |',
+				'| Gamma | 3 |',
+				'| Delta | 4 |',
+				'| Epsilon | 5 |',
+			]
+		)
+
+		chunks = chunk_markdown(markdown)
+
+		assert len(chunks) == 1
+		assert chunks[0].content == markdown
+
+	def test_chunk_markdown_replicates_header_when_table_splits(self):
+		header = '| ID | Description |'
+		separator = '|---|---|'
+		cell_text = 'cell ' * 20
+		rows = [f'| {index} | {cell_text}{index} |' for index in range(100)]
+		markdown = '\n'.join([header, separator, *rows])
+
+		chunks = chunk_markdown(markdown, join_threshold=30)
+
+		assert len(chunks) > 1
+		assert all(chunk.content.startswith(f'{header}\n{separator}\n') for chunk in chunks)
+
+	def test_chunk_markdown_preserves_table_when_size_under_2x_max(self):
+		header = '| ID | Value |'
+		separator = '|---|---|'
+		rows = [f'| {index} | compact value {index:02d} |' for index in range(8)]
+		markdown = '\n'.join([header, separator, *rows])
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		assert len(chunks) == 1
+		assert chunks[0].content == markdown
+		assert 40 < _approx_tokens(chunks[0].content) <= 80
+
+	def test_chunk_markdown_handles_malformed_table_without_separator(self):
+		malformed_text = 'text ' * 12
+		rows = [f'| row {index} | malformed {malformed_text}{index} |' for index in range(12)]
+		markdown = '\n'.join(rows)
+
+		chunks = chunk_markdown(markdown, join_threshold=20)
+
+		assert len(chunks) > 1
+		assert all('|---' not in chunk.content for chunk in chunks)
+		assert rows[0] in chunks[0].content
+
 	def test_markdown_list_stays_in_one_chunk_when_under_budget(self):
 		markdown = '# Steps\n\n- one\n- two\n- three'
 

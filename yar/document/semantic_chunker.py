@@ -318,6 +318,27 @@ def _split_table_block(block: str) -> list[str]:
     return [_trim(line) for line in block.split('\n') if _trim(line)]
 
 
+def _split_table_block_preserving_header(block: str, max_tokens: int) -> list[str]:
+    trimmed = _trim(block)
+    if not trimmed:
+        return []
+    if _estimate_tokens(trimmed) <= max_tokens * 2:
+        return [trimmed]
+
+    rows = _split_table_block(trimmed)
+    if len(rows) < 2 or TABLE_SEPARATOR_RE.match(rows[1]) is None:
+        return _pack_units(rows, max_tokens, '\n', _split_sentence_block)
+
+    header, separator, *data_rows = rows
+    if not data_rows:
+        return [trimmed]
+
+    prefix = f'{header}\n{separator}'
+    data_budget = max(1, max_tokens - _estimate_tokens(f'{prefix}\n'))
+    data_chunks = _pack_units(data_rows, data_budget, '\n', _split_sentence_block)
+    return [f'{prefix}\n{data_chunk}' for data_chunk in data_chunks if _trim(data_chunk)]
+
+
 def _is_inline_page_marker_transition(text: str, index: int, marker_length: int) -> bool:
     previous_char = text[index - 1] if index > 0 else None
     next_index = index + marker_length
@@ -524,7 +545,9 @@ def _split_paragraph_block(block: str, max_tokens: int) -> list[str]:
     if _is_table_block(block):
         rows = _split_table_block(block)
         if len(rows) > 1:
-            return _pack_units(rows, max_tokens, '\n', _split_sentence_block)
+            if len(rows) < 2 or TABLE_SEPARATOR_RE.match(rows[1]) is None:
+                return _pack_units(rows, max_tokens, '\n', _split_sentence_block)
+            return _split_table_block_preserving_header(block, max_tokens)
     if _is_list_block(block):
         items = _split_list_block(block)
         if len(items) > 1:
