@@ -270,6 +270,7 @@ async def extract_document_with_vision(
     base_url: str | None = None,
     api_key: str | None = None,
     pdf_password: str | None = None,
+    chunk_token_size: int | None = None,
 ) -> VisionExtractionResult:
     """Extract document text by sending page images to an OpenAI-compatible vision model."""
     from yar.document.semantic_chunker import chunk_markdown
@@ -341,7 +342,13 @@ async def extract_document_with_vision(
 
     # Run page-aware semantic chunking on the extracted markdown.
     # The resulting pre_chunks bypass Kreuzberg's generic chunker in the pipeline.
-    chunks = chunk_markdown(content)
+    # Use the configured chunk_token_size when provided so vision-extracted content matches the
+    # rest of the corpus. Without it the chunker falls back to its 500-token join_threshold (1000-
+    # token max), regardless of what the global pipeline expects.
+    chunk_kwargs: dict[str, int] = {}
+    if chunk_token_size and chunk_token_size > 0:
+        chunk_kwargs['join_threshold'] = max(chunk_token_size // 2, 100)
+    chunks = chunk_markdown(content, **chunk_kwargs)
     pre_chunks: list[dict[str, Any]] | None = None
     if chunks:
         pre_chunks = [

@@ -912,6 +912,11 @@ async def _extract_document_with_vision_bytes(
         global_args, 'llm_binding_api_key', None
     )
 
+    chunk_token_size = getattr(global_args, 'chunk_size', None)
+    try:
+        configured_chunk_size = int(chunk_token_size) if chunk_token_size else None
+    except (TypeError, ValueError):
+        configured_chunk_size = None
     result = await extract_document_with_vision(
         file_content,
         filename=filename,
@@ -920,6 +925,7 @@ async def _extract_document_with_vision_bytes(
         base_url=vision_binding_host,
         api_key=vision_binding_api_key,
         pdf_password=getattr(global_args, 'pdf_decrypt_password', None),
+        chunk_token_size=configured_chunk_size,
     )
     return DocumentExtractionResult(
         content=result.content,

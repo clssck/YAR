@@ -108,9 +108,19 @@ def _build_heading_hierarchies(sections: list[Section]) -> None:
 
 
 def _build_heading_prefix(section: Section) -> str:
+    """Render the section's heading line(s) for inclusion at the top of the chunk text.
+
+    When the section has a full heading hierarchy (H1 > H2 > H3 ...), every ancestor is
+    emitted as its own markdown heading line. This gives BM25 and embeddings the parent
+    context that's otherwise lost when a chunk represents a deep H3 detached from its H1.
+    Without the breadcrumb, queries about the parent topic miss matching child chunks.
+    """
     if section.level == 0:
         return ''
-    return f'{"#" * section.level} {section.heading}'
+    hierarchy = section.heading_hierarchy
+    if not hierarchy:
+        return f'{"#" * section.level} {section.heading}'
+    return '\n'.join(f'{"#" * node.level} {node.text}' for node in hierarchy)
 
 
 def _section_full_text(section: Section) -> str:
