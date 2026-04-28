@@ -71,6 +71,7 @@ from yar.type_defs import GlobalConfig
 
 # Precompile regex pattern for JSON sanitization (module-level, compiled once)
 _SURROGATE_PATTERN = re.compile(r'[\uD800-\uDFFF\uFFFE\uFFFF]')
+MIN_CHUNK_TOKEN_BUDGET = 1024
 
 
 class SafeStreamHandler(logging.StreamHandler):
@@ -3094,8 +3095,50 @@ def _apply_lexical_chunk_boost(
     return [chunk for _, _, _, chunk in sorted_chunks]
 
 
+def _infer_preferred_entity_types(normalized_query: str) -> list[str]:
+    """Infer which entity types the query is likely asking about, from WH-question phrasing.
+
+    Returns a list of preferred types (subset of yar.constants.DEFAULT_ENTITY_TYPES) ordered by
+    confidence. Empty list = no preference; the retrieval merge keeps its default ordering.
+
+    The mapping is intentionally narrow: only fire when the question phrasing is unambiguous
+    (e.g. 'who founded X' clearly wants Person/Organization). Ambiguous phrasings ('what is X')
+    return [] so the existing similarity-based ranking wins.
+    """
+    if not normalized_query:
+        return []
+    if re.search(r'^(who is|who are|who was|who were|who founded|who leads|who runs|who manages|who heads)\b', normalized_query):
+        return ['Person', 'Organization']
+    if re.search(r'\b(which|what)\s+(company|companies|organization|organizations|firm|agency|institution|institutions)\b', normalized_query):
+        return ['Organization']
+    if re.search(r'\bwho (founded|owns|manufactures|makes|produces|develops|sells|markets|sponsored|approved)\b', normalized_query):
+        return ['Person', 'Organization']
+    if re.search(r'^(where|where is|where was|where did|where does)\b', normalized_query):
+        return ['Location']
+    if re.search(r'\b(which|what)\s+(product|products|model|models|drug|drugs|technology|technologies|device|devices)\b', normalized_query):
+        return ['Product', 'Technology']
+    if re.search(r'\b(what is the mechanism|how does it work|how does .* work|what is the process|what are the steps)\b', normalized_query):
+        return ['Method', 'Concept']
+    if re.search(r'^(when (was|were|did|does)|in what year|what year)\b', normalized_query):
+        return ['Event']
+    return []
+
+
 def analyze_query_intent(query: str) -> dict[str, Any]:
-    """Classify the query shape for retrieval and answer-shaping heuristics."""
+    """Classify the query shape for retrieval and answer-shaping heuristics.
+
+    Returned dict always carries: kind, recommended_chunk_limit, per_document_limit,
+    allow_single_document_expansion, recommended_mode, preferred_entity_types.
+    """
+    profile = _classify_intent_kind(query)
+    profile['preferred_entity_types'] = _infer_preferred_entity_types(
+        ' '.join((query or '').casefold().split())
+    )
+    return profile
+
+
+def _classify_intent_kind(query: str) -> dict[str, Any]:
+    """Inner kind/limit classifier; see ``analyze_query_intent`` for the public surface."""
     normalized_query = ' '.join((query or '').casefold().split())
     if not normalized_query:
         return {
@@ -3452,6 +3495,19 @@ async def process_chunks_unified(
     if recommended_chunk_limit > 0 and source_type in {'naive', 'vector', 'hybrid'}:
         effective_chunk_limit = min(configured_chunk_limit, recommended_chunk_limit)
 
+    # Adaptive specificity scaling: a 3-token entity query and a 30-token discursive question should
+    # not retrieve the same number of chunks. Scale the effective limit by query length so specific
+    # queries trim, broad queries expand within the configured ceiling. Skipped when an explicit
+    # intent recommendation already applies (recommended_chunk_limit > 0) -- intent wins.
+    if recommended_chunk_limit <= 0 and configured_chunk_limit > 0:
+        query_token_count = len(_extract_lexical_tokens(query)) if query else 0
+        if query_token_count <= 3:
+            specificity_cap = max(2, configured_chunk_limit // 2)
+            effective_chunk_limit = min(effective_chunk_limit, specificity_cap)
+        elif query_token_count >= 25:
+            # Discursive queries already get the full configured limit; nothing to do.
+            effective_chunk_limit = configured_chunk_limit
+
     # Per-document cap: if intent profile names a value, honor it; otherwise fall back to a
     # generic diversity cap proportional to the configured chunk_top_k. Without a fallback the
     # default profile (kind='default', limit=0) lets a single document occupy every slot, which
@@ -3493,17 +3549,42 @@ async def process_chunks_unified(
     # 6. Token-based final truncation
     tokenizer = global_config.get('tokenizer')
     if tokenizer and unique_chunks:
+        max_total_tokens = int(
+            getattr(
+                query_param,
+                'max_total_tokens',
+                global_config.get('MAX_TOTAL_TOKENS', DEFAULT_MAX_TOTAL_TOKENS),
+            )
+            or DEFAULT_MAX_TOTAL_TOKENS
+        )
+        entities_tokens_used = getattr(query_param, 'entities_tokens_used', None)
+        if entities_tokens_used is None:
+            entities_tokens_used = global_config.get('entities_tokens_used', 0)
+        entities_tokens_used = int(entities_tokens_used or 0)
+
+        relations_tokens_used = getattr(query_param, 'relations_tokens_used', None)
+        if relations_tokens_used is None:
+            relations_tokens_used = global_config.get('relations_tokens_used', 0)
+        relations_tokens_used = int(relations_tokens_used or 0)
+
         # Set default chunk_token_limit if not provided
         if chunk_token_limit is None:
-            # Get default from query_param or global_config
-            chunk_token_limit = int(
-                getattr(
-                    query_param,
-                    'max_total_tokens',
-                    global_config.get('MAX_TOTAL_TOKENS', DEFAULT_MAX_TOTAL_TOKENS),
+            computed_chunk_token_limit = max_total_tokens - (entities_tokens_used + relations_tokens_used)
+            if computed_chunk_token_limit < MIN_CHUNK_TOKEN_BUDGET:
+                logger.warning(
+                    'Entities and relations consumed most of the token budget; '
+                    f'using minimum chunk budget of {MIN_CHUNK_TOKEN_BUDGET} '
+                    f'(max_total={max_total_tokens}, entities_used={entities_tokens_used}, '
+                    f'relations_used={relations_tokens_used})'
                 )
-                or DEFAULT_MAX_TOTAL_TOKENS
-            )
+                chunk_token_limit = MIN_CHUNK_TOKEN_BUDGET
+            else:
+                chunk_token_limit = computed_chunk_token_limit
+
+        logger.info(
+            f'Chunk budget: max_total={max_total_tokens}, entities_used={entities_tokens_used}, '
+            f'relations_used={relations_tokens_used}, chunk_budget={chunk_token_limit}'
+        )
 
         original_count = len(unique_chunks)
 

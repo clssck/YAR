@@ -20,11 +20,16 @@ This module tests:
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import pytest
 
+import yar.utils as utils_module
+from yar.base import QueryParam
 from yar.constants import (
     DEFAULT_SOURCE_IDS_LIMIT_METHOD,
     GRAPH_FIELD_SEP,
@@ -55,6 +60,7 @@ from yar.utils import (
     pack_user_ass_to_openai_messages,
     parse_cache_key,
     parse_relation_chunk_key,
+    process_chunks_unified,
     reciprocal_rank_fusion,
     remove_think_tags,
     sanitize_and_normalize_extracted_text,
@@ -970,3 +976,140 @@ class TestPinyinSort:
         assert isinstance(result, str)
         # Should preserve numbers
         assert '123' in result
+
+
+class _FixedTokenTokenizer:
+    def __init__(self, tokens_per_chunk: int) -> None:
+        self.tokens_per_chunk = tokens_per_chunk
+
+    def encode(self, _text: str) -> list[int]:
+        return [0] * self.tokens_per_chunk
+
+
+def _make_budget_chunks(count: int = 40) -> list[dict]:
+    return [
+        {
+            'chunk_id': f'chunk-{index}',
+            'content': f'Budget test content {index}',
+            'file_path': f'document-{index}.md',
+            'retrieval_score': 1.0 - (index / 1000),
+        }
+        for index in range(count)
+    ]
+
+
+def _run_process_chunks_for_budget(
+    chunks: list[dict],
+    query_param: QueryParam,
+    *,
+    tokenizer: _FixedTokenTokenizer,
+    global_config: dict[str, object] | None = None,
+    chunk_token_limit: int | None = None,
+) -> list[dict]:
+    config: dict[str, object] = {'tokenizer': tokenizer}
+    if global_config:
+        config.update(global_config)
+
+    return asyncio.run(
+        process_chunks_unified(
+            query='Explain the budget allocation across many retrieved documents in detail',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config=config,
+            source_type='mixed',
+            chunk_token_limit=chunk_token_limit,
+        )
+    )
+
+
+def test_process_chunks_unified_subtracts_entity_relation_tokens_from_budget() -> None:
+    chunks = _make_budget_chunks()
+    full_budget_param = QueryParam(
+        chunk_top_k=len(chunks),
+        enable_rerank=False,
+        max_total_tokens=30_000,
+    )
+    full_budget_chunks = _run_process_chunks_for_budget(
+        _make_budget_chunks(),
+        full_budget_param,
+        tokenizer=_FixedTokenTokenizer(tokens_per_chunk=1000),
+    )
+
+    reduced_budget_param = QueryParam(
+        chunk_top_k=len(chunks),
+        enable_rerank=False,
+        max_total_tokens=30_000,
+    )
+    reduced_budget_param.entities_tokens_used = 10_000
+    reduced_budget_param.relations_tokens_used = 5_000
+
+    reduced_budget_chunks = _run_process_chunks_for_budget(
+        chunks,
+        reduced_budget_param,
+        tokenizer=_FixedTokenTokenizer(tokens_per_chunk=1000),
+    )
+
+    assert len(reduced_budget_chunks) < len(full_budget_chunks)
+
+
+def test_process_chunks_unified_floors_at_minimum_chunk_budget_when_entities_dominate(monkeypatch) -> None:
+    captured_token_limits: list[int] = []
+    original_truncate = utils_module.truncate_list_by_token_size
+
+    def capture_truncate(
+        list_data: list[Any],
+        key: Callable[[Any], str],
+        max_token_size: int,
+        tokenizer: Any,
+    ) -> list[Any]:
+        captured_token_limits.append(max_token_size)
+        return original_truncate(
+            list_data,
+            key=key,
+            max_token_size=max_token_size,
+            tokenizer=tokenizer,
+        )
+
+    monkeypatch.setattr(utils_module, 'truncate_list_by_token_size', capture_truncate)
+
+    processed_chunks = _run_process_chunks_for_budget(
+        _make_budget_chunks(),
+        QueryParam(
+            chunk_top_k=40,
+            enable_rerank=False,
+            max_total_tokens=30_000,
+        ),
+        tokenizer=_FixedTokenTokenizer(tokens_per_chunk=512),
+        global_config={'entities_tokens_used': 29_000, 'relations_tokens_used': 0},
+    )
+
+    assert captured_token_limits == [1024]
+    assert processed_chunks
+
+
+def test_process_chunks_unified_falls_back_to_full_budget_when_keys_missing() -> None:
+    missing_keys_param = QueryParam(
+        chunk_top_k=40,
+        enable_rerank=False,
+        max_total_tokens=30_000,
+    )
+    missing_keys_chunks = _run_process_chunks_for_budget(
+        _make_budget_chunks(),
+        missing_keys_param,
+        tokenizer=_FixedTokenTokenizer(tokens_per_chunk=1000),
+    )
+
+    explicit_limit_chunks = _run_process_chunks_for_budget(
+        _make_budget_chunks(),
+        QueryParam(
+            chunk_top_k=40,
+            enable_rerank=False,
+            max_total_tokens=30_000,
+        ),
+        tokenizer=_FixedTokenTokenizer(tokens_per_chunk=1000),
+        chunk_token_limit=30_000,
+    )
+
+    assert [chunk['chunk_id'] for chunk in missing_keys_chunks] == [
+        chunk['chunk_id'] for chunk in explicit_limit_chunks
+    ]
