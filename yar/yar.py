@@ -1233,7 +1233,7 @@ class YAR:
                 'status': DocStatus.PENDING,
                 'content_summary': os.path.splitext(os.path.basename(content_data.get('file_path', '')))[0]
                 or get_content_summary(content_data['content']),
-                'content_length': len(self.tokenizer.encode(content_data['content'])),
+                'content_length': len(cast(Tokenizer, self.tokenizer).encode(content_data['content'])),
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat(),
                 'file_path': content_data['file_path'],  # Store file path in document status
@@ -2084,7 +2084,7 @@ class YAR:
     ) -> list:
         try:
             global_config = cast(GlobalConfig, asdict(self))
-            global_config['entity_extract_max_async'] = self.entity_extract_max_async
+            global_config['entity_extract_max_async'] = cast(int, self.entity_extract_max_async)
             global_config['entity_extract_semaphore'] = self._entity_extract_semaphore
 
             chunk_results = await extract_entities(

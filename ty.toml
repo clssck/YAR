@@ -10,6 +10,7 @@ exclude = [
     "scripts/**",                             # utility scripts
     "yar/tools/yar_visualizer/**",            # imgui_bundle, moderngl not installed
     "yar/evaluation/**",                      # ragas optional dep
+    "tests/test_chunk_bookkeeping.py",   # heavy AsyncMock attribute reassignment
     "tests/test_prompt_*.py",                 # heavy mocking
     "tests/test_yar.py",                      # heavy AsyncMock usage
     "tests/test_operate.py",                  # heavy AsyncMock usage

@@ -13,7 +13,7 @@ import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client as S3ClientType
@@ -54,7 +54,7 @@ s3_retry = retry(
     stop=stop_after_attempt(S3_RETRY_ATTEMPTS),
     wait=wait_exponential(multiplier=1, min=1, max=8),
     retry=retry_if_exception_type(ClientError),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
+    before_sleep=before_sleep_log(cast(Any, logger), logging.WARNING),
 )
 
 

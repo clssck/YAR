@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -127,8 +128,9 @@ class TestOpenAIComplete:
             mock_client.close = AsyncMock()
             mock_client_factory.return_value = mock_client
 
-            original_wait = openai_module.openai_complete_if_cache.retry.wait
-            openai_module.openai_complete_if_cache.retry.wait = wait_none()
+            retry_state = cast(Any, openai_module.openai_complete_if_cache).retry
+            original_wait = retry_state.wait
+            retry_state.wait = wait_none()
             try:
                 result = await openai_module.openai_complete_if_cache(
                     model='gpt-4',
@@ -136,7 +138,7 @@ class TestOpenAIComplete:
                     api_key='test-key',
                 )
             finally:
-                openai_module.openai_complete_if_cache.retry.wait = original_wait
+                retry_state.wait = original_wait
 
             assert result == 'Recovered response'
             assert mock_client.chat.completions.create.await_count == 2

@@ -238,7 +238,7 @@ async def detect_embedding_dim(
         | retry_if_exception_type(APITimeoutError)
         | retry_if_exception_type(InvalidResponseError)
     ),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
+    before_sleep=before_sleep_log(cast(Any, logger), logging.WARNING),
 )
 async def openai_complete_if_cache(
     model: str,

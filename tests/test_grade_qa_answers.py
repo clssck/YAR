@@ -3,10 +3,11 @@ from __future__ import annotations
 import sys
 import types
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-litellm_stub = types.ModuleType('litellm')
+litellm_stub: Any = cast(Any, types.ModuleType('litellm'))
 litellm_stub.completion = lambda **kwargs: None
 litellm_stub.suppress_debug_info = False
 litellm_stub.set_verbose = False

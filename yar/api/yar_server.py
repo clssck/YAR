@@ -409,7 +409,7 @@ def create_app(args):
 
     # Add CORS middleware
     app.add_middleware(
-        CORSMiddleware,  # type: ignore[arg-type]  # starlette stub issue
+        CORSMiddleware,
         allow_origins=cors_origins,
         allow_credentials=allow_credentials,
         allow_methods=['*'],

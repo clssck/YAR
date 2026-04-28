@@ -7,6 +7,7 @@ import re
 import time
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -3338,9 +3339,11 @@ async def extract_entities(
 
         recovered_results: list[tuple[dict, dict]] = []
         for fallback_result in fallback_results:
-            if isinstance(fallback_result, PipelineCancelledException):
-                raise fallback_result
-            if isinstance(fallback_result, Exception):
+            if isinstance(fallback_result, BaseException):
+                if isinstance(fallback_result, PipelineCancelledException):
+                    raise fallback_result
+                if not isinstance(fallback_result, Exception):
+                    raise fallback_result  # propagate KeyboardInterrupt/SystemExit/CancelledError
                 logger.warning(f'Unexpected fallback task failure after {reason}: {fallback_result}')
                 continue
             if fallback_result is not None:
@@ -3782,25 +3785,29 @@ def _should_validate_inline_citations(
     *,
     system_prompt: str | None = None,
 ) -> bool:
+    """Decide whether to surface reference IDs and validate inline citations.
+
+    References are emitted by default so that the LLM can ground answers in source IDs
+    and downstream consumers can render citations. Callers opt out by adding negative
+    instructions to the system prompt or user prompt (e.g. "do not include inline citations").
+    """
     if requests_inline_citations(query, user_prompt):
         return True
-    if not system_prompt:
-        return False
-    normalized_prompt = system_prompt.casefold()
-    positive_patterns = (
-        r'\bmust have (?:a|an)?\s*citation\b',
-        r'\b(?:include|add|provide)\s+inline citations\b',
-        r'\b(?:include|add)\s+a `### references` section\b',
-    )
     negative_patterns = (
         r'\bdo not\s+(?:include|add|provide)\s+inline citations\b',
         r"\bdon't\s+(?:include|add|provide)\s+inline citations\b",
         r'\bdo not\s+(?:include|add)\s+a `### references` section\b',
         r"\bdon't\s+(?:include|add)\s+a `### references` section\b",
+        r'\bno\s+(?:inline\s+)?citations\b',
+        r'\bsuppress\s+(?:inline\s+)?citations\b',
     )
-    if any(re.search(pattern, normalized_prompt) for pattern in negative_patterns):
-        return False
-    return any(re.search(pattern, normalized_prompt) for pattern in positive_patterns)
+    for source in (system_prompt, user_prompt):
+        if not source:
+            continue
+        normalized = source.casefold()
+        if any(re.search(pattern, normalized) for pattern in negative_patterns):
+            return False
+    return True
 
 
 def _build_prompt_chunk_context(
@@ -3819,9 +3826,17 @@ def _build_prompt_chunk_context(
     text_units_str = '\n'.join(json.dumps(text_unit, ensure_ascii=False) for text_unit in prompt_chunks)
     reference_list_str = ''
     if include_reference_ids:
-        reference_list_str = '\n'.join(
-            f'[{ref["reference_id"]}] {ref["file_path"]}' for ref in reference_list if ref['reference_id']
-        )
+        reference_lines = [
+            f'[{ref["reference_id"]}] {ref["file_path"]}'
+            for ref in reference_list
+            if ref['reference_id']
+        ]
+        if reference_lines:
+            reference_list_str = (
+                '# Reference Document List\n\n'
+                'Cite chunks by their `reference_id` using `[n]` markers in the answer.\n\n'
+                + '\n'.join(reference_lines)
+            )
     return prompt_chunks, text_units_str, reference_list_str
 
 
@@ -4303,6 +4318,7 @@ async def _get_vector_context(
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
     original_query_embedding: list[float] | None = None,
+    phrase_terms: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve text chunks from the vector database without reranking or truncation.
@@ -4357,6 +4373,7 @@ async def _get_vector_context(
                     query_embedding=query_embedding,
                     original_query_embedding=original_query_embedding,
                     bm25_weight=query_param.bm25_weight,
+                    phrase_terms=phrase_terms,
                 )
             else:
                 results = await chunks_vdb.query(query, top_k=search_top_k, query_embedding=query_embedding)
@@ -4509,7 +4526,7 @@ async def _perform_kg_search(
             try:
                 query_embedding = await actual_embedding_func([embedding_query_text])
                 query_embedding = query_embedding[0]  # Extract first embedding from batch result
-                if embedding_query_text != query and chunks_vdb is not None:
+                if embedding_query_text != query and (chunks_vdb is not None or should_reuse_entity_embedding):
                     original_query_embedding = (await actual_embedding_func([query]))[0]
                 logger.debug('Pre-computed query embedding for all vector operations')
             except Exception as e:
@@ -4525,6 +4542,7 @@ async def _perform_kg_search(
             entities_vdb,
             query_param,
             query_embedding=query_embedding if should_reuse_entity_embedding else None,
+            original_query_embedding=original_query_embedding if should_reuse_entity_embedding else None,
             original_query=query,
         )
 
@@ -4550,6 +4568,7 @@ async def _perform_kg_search(
                     entities_vdb,
                     query_param,
                     query_embedding=query_embedding if should_reuse_entity_embedding else None,
+                    original_query_embedding=original_query_embedding if should_reuse_entity_embedding else None,
                     original_query=query,
                 ),
                 _get_edge_data(
@@ -4569,6 +4588,7 @@ async def _perform_kg_search(
                     entities_vdb,
                     query_param,
                     query_embedding=query_embedding if should_reuse_entity_embedding else None,
+                    original_query_embedding=original_query_embedding if should_reuse_entity_embedding else None,
                     original_query=query,
                 )
             if len(hl_keywords) > 0:
@@ -4589,6 +4609,7 @@ async def _perform_kg_search(
                 query_param,
                 query_embedding,
                 original_query_embedding,
+                phrase_terms=[term for term in ll_search_terms if ' ' in term] or None,
             )
             # Track vector chunks with source metadata
             for i, chunk in enumerate(vector_chunks):
@@ -4890,6 +4911,60 @@ async def _apply_token_truncation(
     }
 
 
+@dataclass(frozen=True, slots=True)
+class ChunkMergeWeights:
+    """Tunable weights for the chunk-level retrieval merge score.
+
+    Each weight scales one normalized [0, 1] feature; the final merge score is the sum of all
+    weighted features. Heavier weight means the feature pulls a chunk higher in the final ranking.
+
+    Defaults were calibrated on the YAR pharma/CMC eval corpus. Override per-deployment via env.
+    """
+
+    retrieval_score: float = 0.30
+    """How well the chunk's first-stage similarity score (cosine/BM25/RRF) matches the query."""
+    heading_relevance: float = 0.22
+    """Lexical/semantic match between query terms and the chunk's heading line."""
+    body_relevance: float = 0.20
+    """Lexical/semantic match between query terms and the chunk's body text."""
+    facet_match: float = 0.10
+    """Match against high-level facet terms (hl_keywords) in heading or body."""
+    temporal_signal: float = 0.10
+    """Temporal/comparative cue strength when the query asks about phases, timing, or change."""
+    source_count: float = 0.05
+    """Cross-source confirmation: chunks found by both vector and BM25 score higher."""
+    occurrence: float = 0.02
+    """Repeat hits across entity/relation/vector retrievals (saturating)."""
+    order: float = 0.01
+    """First-stage rank within the candidate list (top-of-list tiebreaker)."""
+
+    @classmethod
+    def from_env(cls) -> ChunkMergeWeights:
+        """Load weights from YAR_CHUNK_MERGE_WEIGHT_* env vars, falling back to defaults."""
+        def _read(name: str, default: float) -> float:
+            raw = os.getenv(f'YAR_CHUNK_MERGE_WEIGHT_{name.upper()}')
+            if raw is None:
+                return default
+            try:
+                return max(float(raw), 0.0)
+            except ValueError:
+                logger.warning(f'Invalid YAR_CHUNK_MERGE_WEIGHT_{name.upper()}={raw}; using default {default}')
+                return default
+
+        defaults = cls()
+        return cls(
+            retrieval_score=_read('retrieval_score', defaults.retrieval_score),
+            heading_relevance=_read('heading_relevance', defaults.heading_relevance),
+            body_relevance=_read('body_relevance', defaults.body_relevance),
+            facet_match=_read('facet_match', defaults.facet_match),
+            temporal_signal=_read('temporal_signal', defaults.temporal_signal),
+            source_count=_read('source_count', defaults.source_count),
+            occurrence=_read('occurrence', defaults.occurrence),
+            order=_read('order', defaults.order),
+        )
+
+
+
 async def _merge_all_chunks(
     filtered_entities: list[dict[str, Any]],
     filtered_relations: list[dict[str, Any]],
@@ -5048,6 +5123,8 @@ async def _merge_all_chunks(
             if not entry['s3_key'] and chunk.get('s3_key'):
                 entry['s3_key'] = chunk.get('s3_key')
 
+    merge_weights = ChunkMergeWeights.from_env()
+
     def _merge_score(entry: dict[str, Any]) -> float:
         source_count_score = len(entry['source_types']) / 3.0
         occurrence_score = _saturating_score(entry['occurrence_count'], 2.0)
@@ -5063,14 +5140,14 @@ async def _merge_all_chunks(
             else 0.0
         )
         return (
-            0.30 * entry['retrieval_score']
-            + 0.22 * entry['heading_relevance']
-            + 0.20 * entry['body_relevance']
-            + 0.10 * facet_match
-            + 0.10 * temporal_signal
-            + 0.05 * source_count_score
-            + 0.02 * occurrence_score
-            + 0.01 * order_score
+            merge_weights.retrieval_score * entry['retrieval_score']
+            + merge_weights.heading_relevance * entry['heading_relevance']
+            + merge_weights.body_relevance * entry['body_relevance']
+            + merge_weights.facet_match * facet_match
+            + merge_weights.temporal_signal * temporal_signal
+            + merge_weights.source_count * source_count_score
+            + merge_weights.occurrence * occurrence_score
+            + merge_weights.order * order_score
         )
 
     strong_heading_facet_files = {
@@ -5309,6 +5386,7 @@ async def _build_context_str(
 
     # output chunks tracking infomations
     # format: <source><frequency>/<order> (e.g., E5/2 R2/1 C1/1)
+    source_breakdown: dict[str, int] = {}
     if truncated_chunks and chunk_tracking:
         chunk_tracking_log = []
         for chunk in truncated_chunks:
@@ -5319,11 +5397,18 @@ async def _build_context_str(
                 frequency = tracking_info['frequency']
                 order = tracking_info['order']
                 chunk_tracking_log.append(f'{source}{frequency}/{order}')
+                # Aggregate per-source-code totals so it's easy to spot "vector found 20, BM25 found 0".
+                for code in (source or '?'):
+                    source_breakdown[code] = source_breakdown.get(code, 0) + 1
             else:
                 chunk_tracking_log.append('?0/0')
+                source_breakdown['?'] = source_breakdown.get('?', 0) + 1
 
         if chunk_tracking_log:
             logger.info(f'Final chunks S+F/O: {" ".join(chunk_tracking_log)}')
+        if source_breakdown:
+            formatted = ', '.join(f'{code}={count}' for code, count in sorted(source_breakdown.items()))
+            logger.info(f'Final chunk source breakdown: {formatted} (total={len(truncated_chunks)})')
 
     result = kg_context_template.format(
         entities_str=entities_str,
@@ -5509,6 +5594,12 @@ async def _build_query_context(
         'high_level': hl_keywords_list,
         'low_level': ll_keywords_list,
     }
+    chunk_tracking_data = search_result.get('chunk_tracking') or {}
+    source_breakdown_summary: dict[str, int] = {}
+    for tracking_info in chunk_tracking_data.values():
+        source = tracking_info.get('source') if isinstance(tracking_info, dict) else None
+        for code in (source or '?'):
+            source_breakdown_summary[code] = source_breakdown_summary.get(code, 0) + 1
     raw_data['metadata']['processing_info'] = {
         'total_entities_found': len(search_result.get('final_entities', [])),
         'total_relations_found': len(search_result.get('final_relations', [])),
@@ -5516,6 +5607,7 @@ async def _build_query_context(
         'relations_after_truncation': len(truncation_result.get('filtered_relations', [])),
         'merged_chunks_count': len(merged_chunks),
         'final_chunks_count': len(raw_data.get('data', {}).get('chunks', [])),
+        'source_breakdown': source_breakdown_summary,
     }
 
     logger.debug(f'[_build_query_context] Context length: {len(context) if context else 0}')
@@ -5843,7 +5935,10 @@ def _prepare_visible_reference_payload(
     topic_terms: list[str] | None = None,
     facet_terms: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if not chunks or include_reference_ids:
+    # Always dedupe aliased references (same chunk content / chunk_id but different file_path,
+    # e.g. s3://bucket/x.md vs x.md). Previously this only ran when include_reference_ids=False;
+    # with citations now default-on we still want a single canonical reference for each chunk.
+    if not chunks:
         return reference_list, chunks
 
     def _coerce_score(value: Any, default: float = 0.0) -> float:
@@ -5986,41 +6081,64 @@ async def _query_entity_candidates(
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
+    original_query_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """Query entity candidates for a single term.
 
-    Uses hybrid entity search when supported by the storage backend (vector + trigram),
-    otherwise falls back to vector-only search.
+    When both ``query_embedding`` (HyDE / hypothetical answer) and ``original_query_embedding``
+    (raw user query) are supplied, both vector searches are run in parallel and fused with
+    the trigram fallback via Reciprocal Rank Fusion. This mirrors the chunk-vector dual-fallback
+    so HyDE drift does not silently lose entity recall.
+
+    Falls back to hybrid trigram search and finally a plain vector query if RRF inputs are unavailable.
     """
+    from yar.utils import reciprocal_rank_fusion
+
     hybrid_search = getattr(entities_vdb, 'hybrid_entity_search', None)
 
-    if query_embedding is not None:
+    async def _vector_query(embedding: list[float] | None) -> list[dict[str, Any]]:
         try:
-            vector_results = await entities_vdb.query(
-                term,
-                top_k=query_param.top_k,
-                query_embedding=query_embedding,
-            )
-            if vector_results or not callable(hybrid_search):
-                return vector_results
+            if embedding is None:
+                return await entities_vdb.query(term, top_k=query_param.top_k)
+            return await entities_vdb.query(term, top_k=query_param.top_k, query_embedding=embedding)
         except Exception as e:
             logger.error(f'Entity vector search failed for term "{term[:50]}...": {e}')
-            if not callable(hybrid_search):
-                return []
+            return []
 
-    if callable(hybrid_search):
+    async def _hybrid_query() -> list[dict[str, Any]]:
+        if not callable(hybrid_search):
+            return []
         try:
-            hybrid_results = await hybrid_search(term, top_k=query_param.top_k)
-            if hybrid_results:
-                return hybrid_results
+            return await hybrid_search(term, top_k=query_param.top_k) or []
         except Exception as e:
             logger.debug(f'Hybrid entity search failed for "{term}": {e}')
+            return []
 
-    try:
-        return await entities_vdb.query(term, top_k=query_param.top_k)
-    except Exception as e:
-        logger.error(f'Entity vector search failed for term "{term[:50]}...": {e}')
-        return []
+    has_hyde = query_embedding is not None and original_query_embedding is not None
+    if has_hyde:
+        hyde_results, original_results, hybrid_results = await asyncio.gather(
+            _vector_query(query_embedding),
+            _vector_query(original_query_embedding),
+            _hybrid_query(),
+        )
+        result_lists = [lst for lst in (hyde_results, original_results, hybrid_results) if lst]
+        if not result_lists:
+            return []
+        if len(result_lists) == 1:
+            return result_lists[0]
+        rrf_k = int(os.getenv('YAR_RRF_K', '40'))
+        return reciprocal_rank_fusion(result_lists, id_key='entity_name', k=rrf_k)
+
+    if query_embedding is not None:
+        vector_results = await _vector_query(query_embedding)
+        if vector_results or not callable(hybrid_search):
+            return vector_results
+
+    hybrid_results = await _hybrid_query()
+    if hybrid_results:
+        return hybrid_results
+
+    return await _vector_query(None)
 
 
 async def _get_node_data(
@@ -6029,6 +6147,7 @@ async def _get_node_data(
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
+    original_query_embedding: list[float] | None = None,
     original_query: str | None = None,
 ):
     logger.info(f'Query nodes: {query} (top_k:{query_param.top_k}, cosine:{entities_vdb.cosine_better_than_threshold})')
@@ -6050,6 +6169,7 @@ async def _get_node_data(
                 entities_vdb,
                 query_param,
                 query_embedding=query_embedding,
+                original_query_embedding=original_query_embedding,
             )
         )
 
@@ -6084,6 +6204,7 @@ async def _get_node_data(
             entities_vdb,
             query_param,
             query_embedding=query_embedding,
+            original_query_embedding=original_query_embedding,
         )
         for result in full_query_results:
             entity_name = result.get('entity_name')

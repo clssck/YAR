@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from textwrap import dedent
 from unittest.mock import Mock
 
@@ -10,7 +11,7 @@ from yar.retrieval import aliases as aliases_module
 
 
 @pytest.fixture(autouse=True)
-def clear_alias_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def clear_alias_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv('ENABLE_AUTO_ENTITY_FILTER', 'true')
     aliases_module._load_alias_rules.cache_clear()
     yield

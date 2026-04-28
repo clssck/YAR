@@ -704,7 +704,7 @@ class TestQueryStreamEndpoint:
             raise RuntimeError('stream exploded')
 
         async def fail_extract(*args, **kwargs):
-            pytest.fail('citation extraction should not run after a stream-processing error')
+            raise AssertionError('citation extraction should not run after a stream-processing error')
             yield ''
 
         monkeypatch.setattr('yar.api.routers.query_routes._extract_and_stream_citations', fail_extract)
