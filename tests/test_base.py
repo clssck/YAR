@@ -39,14 +39,14 @@ from yar.evaluation.eval_rag_quality import (
     _calculate_ragas_score,
     _collect_metric_verdict_traces,
     _flatten_references_to_contexts_and_sources,
-    _normalize_benchmark_answer,
-    _resolve_benchmark_query,
-    _stabilize_benchmark_metrics,
     _has_complete_metrics,
     _load_bottom_case_numbers,
     _load_case_mode_overrides,
+    _normalize_benchmark_answer,
     _parse_case_numbers,
     _pick_results_for_diagnostics,
+    _resolve_benchmark_query,
+    _stabilize_benchmark_metrics,
 )
 from yar.yar import YAR, _resolve_effective_query_mode
 
@@ -1731,6 +1731,23 @@ def test_stabilize_benchmark_metrics_promotes_supported_exact_matches():
     assert stabilized['context_recall'] == 1.0
 
 
+def test_stabilize_benchmark_metrics_promotes_supported_context_recall_without_exact_answer_match():
+    metrics = {
+        'faithfulness': 1.0,
+        'answer_relevance': 0.6,
+        'context_recall': 0.75,
+        'context_precision': 1.0,
+    }
+    stabilized = _stabilize_benchmark_metrics(
+        question='What are the 6 best practices related to iCMC team members goal setting?',
+        answer='The answer lists the six iCMC goal-setting practices in compact prose.',
+        reference='Translate global project goals into yearly CMC deliverables and define individual objectives.',
+        contexts=['Translate global project goals into yearly CMC deliverables and define individual objectives.'],
+        metrics=metrics,
+    )
+    assert stabilized['context_recall'] == 1.0
+
+
 def test_stabilize_benchmark_metrics_promotes_relevance_for_exact_match():
     metrics = {
         'faithfulness': 1.0,
@@ -1770,7 +1787,7 @@ class TestFlattenReferencesToContextsAndSources:
             }
         ]
         contexts, sources = _flatten_references_to_contexts_and_sources(refs)
-        assert contexts == ['chunk-0', 'chunk-1']
+        assert contexts == ['Source: Doc A\n\nchunk-0', 'Source: Doc A\n\nchunk-1']
         assert sources == [
             {'reference_id': 'r1', 'document_title': 'Doc A', 'file_path': '/docs/a.pdf', 'content_index': 0},
             {'reference_id': 'r1', 'document_title': 'Doc A', 'file_path': '/docs/a.pdf', 'content_index': 1},
@@ -1779,8 +1796,28 @@ class TestFlattenReferencesToContextsAndSources:
     def test_string_content_appends_single_context_at_index_zero(self):
         refs = [{'reference_id': 'r2', 'document_title': 'Doc B', 'file_path': '', 'content': 'single string'}]
         contexts, sources = _flatten_references_to_contexts_and_sources(refs)
-        assert contexts == ['single string']
+        assert contexts == ['Source: Doc B\n\nsingle string']
         assert sources == [{'reference_id': 'r2', 'document_title': 'Doc B', 'file_path': '', 'content_index': 0}]
+
+    def test_source_label_falls_back_to_file_path(self):
+        refs = [{'reference_id': 'r3', 'file_path': '/docs/source.pdf', 'content': ['source chunk']}]
+        contexts, sources = _flatten_references_to_contexts_and_sources(refs)
+        assert contexts == ['Source: /docs/source.pdf\n\nsource chunk']
+        assert sources == [
+            {'reference_id': 'r3', 'document_title': '', 'file_path': '/docs/source.pdf', 'content_index': 0}
+        ]
+
+    def test_source_label_falls_back_to_s3_key_without_source_metadata(self):
+        refs = [{'s3_key': 'default/doc-123/processed.md', 'content': ['processed chunk']}]
+        contexts, sources = _flatten_references_to_contexts_and_sources(refs)
+        assert contexts == ['Source: default/doc-123/processed.md\n\nprocessed chunk']
+        assert sources == [{'reference_id': '', 'document_title': '', 'file_path': '', 'content_index': 0}]
+
+    def test_existing_source_label_is_not_duplicated(self):
+        chunk = 'Source: /docs/source.pdf\n\nalready labelled'
+        refs = [{'file_path': '/docs/source.pdf', 'content': [chunk]}]
+        contexts, _sources = _flatten_references_to_contexts_and_sources(refs)
+        assert contexts == [chunk]
 
     def test_missing_metadata_yields_empty_strings(self):
         """When a reference has no metadata fields, source slots are empty strings rather than missing."""

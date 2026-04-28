@@ -29,6 +29,8 @@ from yar.operate import (
     _find_most_related_edges_from_entities,
     _generate_multi_facet_hyde,
     _get_node_data,
+    _get_vector_context,
+    _matches_entity_filter,
     _merge_all_chunks,
     _normalize_query_shaped_response,
     _perform_kg_search,
@@ -47,6 +49,61 @@ from yar.operate import (
 )
 from yar.prompt import PROMPTS
 from yar.utils import process_chunks_unified
+
+
+@pytest.mark.offline
+class TestEntityFilterMatching:
+    """Tests for entity filter normalization used during retrieval."""
+
+    def test_matches_entity_filter_ignores_punctuation_and_case(self):
+        assert _matches_entity_filter('iCMC-NPP leader guidance', 'iCMC NPP')
+        assert _matches_entity_filter('ICMC NPP leader guidance', 'icmc-npp')
+        assert not _matches_entity_filter('SARA lessons learned', 'iCMC NPP')
+        assert not _matches_entity_filter('iCMC-NPP leader guidance', '')
+
+    @pytest.mark.asyncio
+    async def test_vector_context_filter_matches_hyphenated_source_metadata(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.query = AsyncMock(
+            return_value=[
+                {
+                    'id': 'chunk-1',
+                    'content': 'The leader must avoid delaying submission.',
+                    'file_path': '2019 iCMC-NPP lessons learned.pptx',
+                    's3_key': 'default/doc-1/processed.md',
+                    'score': 0.91,
+                }
+            ]
+        )
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, entity_filter='iCMC NPP', enable_bm25_fusion=False)
+
+        chunks = await _get_vector_context('What must the leader avoid?', chunks_vdb, query_param)
+
+        assert len(chunks) == 1
+        assert chunks[0]['file_path'] == '2019 iCMC-NPP lessons learned.pptx'
+
+    @pytest.mark.asyncio
+    async def test_vector_context_filter_returns_empty_when_no_field_matches(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.query = AsyncMock(
+            return_value=[
+                {
+                    'id': 'chunk-1',
+                    'content': 'SARA sharing lessons learned.',
+                    'file_path': '2019 SARA lessons learned.pptx',
+                    's3_key': 'default/doc-1/processed.md',
+                    'score': 0.91,
+                }
+            ]
+        )
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, entity_filter='iCMC NPP', enable_bm25_fusion=False)
+
+        chunks = await _get_vector_context('What must the leader avoid?', chunks_vdb, query_param)
+
+        assert chunks == []
+
 
 # ============================================================================
 # Text Chunking Tests
@@ -2067,7 +2124,9 @@ class TestPerformKgSearchBranchExecution:
         with (
             patch(
                 'yar.operate._get_node_data',
-                new=AsyncMock(return_value=([{'entity_name': 'OnlyLocal', 'similarity': 0.9}], [{'src_tgt': ('a', 'b')}])),
+                new=AsyncMock(
+                    return_value=([{'entity_name': 'OnlyLocal', 'similarity': 0.9}], [{'src_tgt': ('a', 'b')}])
+                ),
             ) as node_mock,
             patch('yar.operate._get_edge_data', new=AsyncMock(return_value=([], []))) as edge_mock,
         ):
@@ -2137,7 +2196,12 @@ class TestPerformKgSearchBranchExecution:
             ) as node_mock,
             patch(
                 'yar.operate._get_edge_data',
-                new=AsyncMock(return_value=([{'src_id': 'g', 'tgt_id': 'h'}], [{'entity_name': 'GlobalModeEntity', 'similarity': 0.9}])),
+                new=AsyncMock(
+                    return_value=(
+                        [{'src_id': 'g', 'tgt_id': 'h'}],
+                        [{'entity_name': 'GlobalModeEntity', 'similarity': 0.9}],
+                    )
+                ),
             ) as edge_mock,
         ):
             local_result = await _perform_kg_search(
@@ -3249,10 +3313,7 @@ class TestRewriteQueryWithHistory:
     @pytest.mark.asyncio
     async def test_truncates_history_to_max_turns(self):
         # Build 20 history turns; only the last 6 should appear in the prompt.
-        history = [
-            {'role': 'user' if i % 2 == 0 else 'assistant', 'content': f'turn-{i}'}
-            for i in range(20)
-        ]
+        history = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': f'turn-{i}'} for i in range(20)]
         model_func = AsyncMock(return_value='resolved query')
         await rewrite_query_with_history(
             'follow-up',

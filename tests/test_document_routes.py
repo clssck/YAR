@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
-from yar.api.routers.document_routes import create_document_routes
+from yar.api.routers.document_routes import _update_db_with_s3_keys, create_document_routes
 
 # =============================================================================
 # Fixtures
@@ -117,6 +117,29 @@ class TestHelperFunctions:
 
         result = format_datetime('2025-01-19T12:00:00Z')
         assert result == '2025-01-19T12:00:00Z'
+
+    @pytest.mark.asyncio
+    async def test_update_db_with_s3_keys_keeps_original_chunk_file_path(self):
+        """Processed Markdown S3 keys must not replace chunk source identity."""
+        rag = MagicMock()
+        rag.doc_status = MagicMock()
+        rag.doc_status.update_s3_key = AsyncMock()
+        rag.text_chunks = MagicMock()
+        rag.text_chunks.update_s3_key_by_doc_id = AsyncMock(return_value=2)
+
+        await _update_db_with_s3_keys(
+            rag=rag,
+            doc_id='doc-1',
+            original_s3_key='default/doc-1/original.pptx',
+            processed_s3_key='default/doc-1/processed.md',
+        )
+
+        rag.doc_status.update_s3_key.assert_awaited_once_with('doc-1', 'default/doc-1/original.pptx')
+        rag.text_chunks.update_s3_key_by_doc_id.assert_awaited_once_with(
+            full_doc_id='doc-1',
+            s3_key='default/doc-1/processed.md',
+        )
+        assert 'archive_url' not in rag.text_chunks.update_s3_key_by_doc_id.await_args.kwargs
 
     def test_format_datetime_with_none(self):
         """Test that None returns None."""
@@ -485,6 +508,7 @@ class TestPipelineStatusEndpoint:
         assert 'busy' in data
         assert isinstance(data['busy'], bool)
 
+
 @pytest.mark.offline
 class TestDeleteDocumentEndpoint:
     """Tests for POST /documents/delete_document endpoint."""
@@ -514,9 +538,7 @@ class TestDeleteDocumentEndpoint:
         mock_rag.full_docs.get_by_id.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_delete_document_deletes_failed_entry_without_content_while_pipeline_busy(
-        self, client, mock_rag
-    ):
+    async def test_delete_document_deletes_failed_entry_without_content_while_pipeline_busy(self, client, mock_rag):
         from yar.base import DocStatus
 
         mock_rag.doc_status.get_by_id.return_value = {'status': DocStatus.FAILED, 'file_path': 'failed.txt'}
@@ -545,9 +567,7 @@ class TestDeleteDocumentEndpoint:
         mock_rag.full_docs.get_by_id.assert_awaited_once_with('failed-123')
 
     @pytest.mark.asyncio
-    async def test_delete_document_only_blocks_remaining_heavy_docs_when_pipeline_busy(
-        self, client, mock_rag
-    ):
+    async def test_delete_document_only_blocks_remaining_heavy_docs_when_pipeline_busy(self, client, mock_rag):
         from yar.base import DocStatus
 
         mock_rag.doc_status.get_by_id.return_value = {'status': DocStatus.FAILED, 'file_path': 'failed.txt'}
@@ -577,6 +597,7 @@ class TestDeleteDocumentEndpoint:
         }
         mock_rag.doc_status.delete.assert_awaited_once_with(['error-123'])
         mock_rag.full_docs.get_by_id.assert_awaited_once_with('failed-123')
+
 
 # =============================================================================
 # Integration-like Tests

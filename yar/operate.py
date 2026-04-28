@@ -94,14 +94,37 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / '.env', override=False
 # Stop-words filtered from ll_keywords as a single-token entry. Kept tight: only the most common
 # fillers that the LLM occasionally returns ('the system', 'an example'). Do NOT broaden into
 # domain-meaningful tokens (e.g. 'do', 'not' carry meaning when present in a multi-word query).
-_LL_KEYWORD_STOPWORDS: frozenset[str] = frozenset({
-    'a', 'an', 'the',
-    'and', 'or', 'but',
-    'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by',
-    'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'this', 'that', 'these', 'those',
-    'it', 'its',
-})
+_LL_KEYWORD_STOPWORDS: frozenset[str] = frozenset(
+    {
+        'a',
+        'an',
+        'the',
+        'and',
+        'or',
+        'but',
+        'of',
+        'in',
+        'on',
+        'at',
+        'to',
+        'for',
+        'with',
+        'by',
+        'is',
+        'are',
+        'was',
+        'were',
+        'be',
+        'been',
+        'being',
+        'this',
+        'that',
+        'these',
+        'those',
+        'it',
+        'its',
+    }
+)
 
 
 def _resolve_max_file_paths(global_config: GlobalConfig) -> int:
@@ -141,6 +164,24 @@ def _clear_auto_entity_filter(query_param: QueryParam, auto_entity_filter: str |
     logger.info(f'auto entity_filter={auto_entity_filter} produced no results; retrying without it for {reason}')
     query_param.entity_filter = None
     return True
+
+
+def _normalize_filter_match_text(value: Any) -> str:
+    """Normalize text for permissive entity-filter matching."""
+    return ' '.join(re.sub(r'[^a-z0-9]+', ' ', str(value or '').casefold()).split())
+
+
+def _matches_entity_filter(value: Any, filter_term: str) -> bool:
+    """Return whether a value matches an entity filter across punctuation variants."""
+    normalized_filter = _normalize_filter_match_text(filter_term)
+    if not normalized_filter:
+        return False
+    normalized_value = _normalize_filter_match_text(value)
+    if not normalized_value:
+        return False
+    if normalized_filter in normalized_value:
+        return True
+    return normalized_filter.replace(' ', '') in normalized_value.replace(' ', '')
 
 
 def _truncate_extract_input_content(content: str, global_config: GlobalConfig, chunk_key: str) -> str:
@@ -3840,9 +3881,7 @@ def _build_prompt_chunk_context(
     reference_list_str = ''
     if include_reference_ids:
         reference_lines = [
-            f'[{ref["reference_id"]}] {ref["file_path"]}'
-            for ref in reference_list
-            if ref['reference_id']
+            f'[{ref["reference_id"]}] {ref["file_path"]}' for ref in reference_list if ref['reference_id']
         ]
         if reference_lines:
             reference_list_str = (
@@ -4434,12 +4473,13 @@ async def _get_vector_context(
             valid_chunks.append(chunk_with_metadata)
 
         if query_param.entity_filter:
-            filter_term = query_param.entity_filter.casefold()
+            filter_term = query_param.entity_filter
             filtered_chunks = [
                 chunk
                 for chunk in valid_chunks
                 if any(
-                    filter_term in str(chunk.get(field, '')).casefold() for field in ('content', 'file_path', 's3_key')
+                    _matches_entity_filter(chunk.get(field, ''), filter_term)
+                    for field in ('content', 'file_path', 's3_key')
                 )
             ]
             logger.info(
@@ -4523,7 +4563,6 @@ async def rewrite_query_with_history(
     return rewritten
 
 
-
 async def _generate_hyde_answer(
     query: str,
     *,
@@ -4582,7 +4621,8 @@ async def decompose_query_for_hyde(
     # Heuristic gate: skip the LLM call when the query has no obvious multi-facet markers.
     lowered = normalized.lower()
     has_multi_facet_marker = any(
-        marker in lowered for marker in (' and ', ' vs ', ' versus ', ' compare ', ' difference between ', ' as well as ')
+        marker in lowered
+        for marker in (' and ', ' vs ', ' versus ', ' compare ', ' difference between ', ' as well as ')
     )
     if not has_multi_facet_marker:
         return [normalized]
@@ -4676,9 +4716,7 @@ async def _generate_multi_facet_hyde(
     if not valid:
         return None
     combined = '\n\n'.join(valid)
-    logger.debug(
-        f'Multi-facet HyDE: combined {len(valid)}/{len(sub_questions)} sub-answers ({len(combined)} chars)'
-    )
+    logger.debug(f'Multi-facet HyDE: combined {len(valid)}/{len(sub_questions)} sub-answers ({len(combined)} chars)')
     return combined
 
 
@@ -4960,6 +4998,7 @@ async def _perform_kg_search(
     intent_profile = analyze_query_intent(query or '')
     preferred_entity_types = [str(t).casefold() for t in (intent_profile.get('preferred_entity_types') or [])]
     if preferred_entity_types and final_entities:
+
         def _type_match_rank(entity: dict[str, Any]) -> int:
             entity_type = str(entity.get('entity_type', '')).casefold()
             if not entity_type:
@@ -4968,6 +5007,7 @@ async def _perform_kg_search(
                 return preferred_entity_types.index(entity_type)
             except ValueError:
                 return len(preferred_entity_types)
+
         final_entities = sorted(final_entities, key=_type_match_rank)
         logger.debug(
             f'Entity-type preference reorder: preferred={preferred_entity_types}, '
@@ -5215,6 +5255,7 @@ class ChunkMergeWeights:
     @classmethod
     def from_env(cls) -> ChunkMergeWeights:
         """Load weights from YAR_CHUNK_MERGE_WEIGHT_* env vars, falling back to defaults."""
+
         def _read(name: str, default: float) -> float:
             raw = os.getenv(f'YAR_CHUNK_MERGE_WEIGHT_{name.upper()}')
             if raw is None:
@@ -5236,7 +5277,6 @@ class ChunkMergeWeights:
             occurrence=_read('occurrence', defaults.occurrence),
             order=_read('order', defaults.order),
         )
-
 
 
 async def _merge_all_chunks(
@@ -5672,7 +5712,7 @@ async def _build_context_str(
                 order = tracking_info['order']
                 chunk_tracking_log.append(f'{source}{frequency}/{order}')
                 # Aggregate per-source-code totals so it's easy to spot "vector found 20, BM25 found 0".
-                for code in (source or '?'):
+                for code in source or '?':
                     source_breakdown[code] = source_breakdown.get(code, 0) + 1
             else:
                 chunk_tracking_log.append('?0/0')
@@ -5772,7 +5812,7 @@ async def _build_query_context(
 
     # Stage 1.5: Apply entity filter if specified (prevents context mixing between products)
     if query_param.entity_filter:
-        filter_term = query_param.entity_filter.lower()
+        filter_term = query_param.entity_filter
         original_entity_count = len(search_result['final_entities'])
         original_relation_count = len(search_result['final_relations'])
 
@@ -5780,21 +5820,22 @@ async def _build_query_context(
         filtered_entities = [
             e
             for e in search_result['final_entities']
-            if filter_term in e.get('entity_name', '').lower() or filter_term in e.get('description', '').lower()
+            if _matches_entity_filter(e.get('entity_name', ''), filter_term)
+            or _matches_entity_filter(e.get('description', ''), filter_term)
         ]
 
         # Get the set of filtered entity names for relation filtering
-        filtered_entity_names = {e.get('entity_name', '').lower() for e in filtered_entities}
+        filtered_entity_names = {_normalize_filter_match_text(e.get('entity_name', '')) for e in filtered_entities}
 
         # Filter relations: keep those connected to at least one filtered entity
         filtered_relations = [
             r
             for r in search_result['final_relations']
             if (
-                r.get('src_tgt', ('', ''))[0].lower() in filtered_entity_names
-                or r.get('src_tgt', ('', ''))[1].lower() in filtered_entity_names
-                or r.get('src_id', '').lower() in filtered_entity_names
-                or r.get('tgt_id', '').lower() in filtered_entity_names
+                _normalize_filter_match_text(r.get('src_tgt', ('', ''))[0]) in filtered_entity_names
+                or _normalize_filter_match_text(r.get('src_tgt', ('', ''))[1]) in filtered_entity_names
+                or _normalize_filter_match_text(r.get('src_id', '')) in filtered_entity_names
+                or _normalize_filter_match_text(r.get('tgt_id', '')) in filtered_entity_names
             )
         ]
 
@@ -5810,8 +5851,14 @@ async def _build_query_context(
 
         # Return None if filter removed all results
         if not filtered_entities and not filtered_relations:
-            logger.warning(f"Entity filter '{query_param.entity_filter}' removed all results")
-            return None
+            has_vector_chunks = any(
+                bool(chunk.get('content'))
+                for chunk in search_result.get('vector_chunks', [])
+                if isinstance(chunk, dict)
+            )
+            if not has_vector_chunks:
+                logger.warning(f"Entity filter '{query_param.entity_filter}' removed all results")
+                return None
 
     # Stage 2: Apply token truncation for LLM efficiency
     truncation_result = await _apply_token_truncation(
@@ -5872,7 +5919,7 @@ async def _build_query_context(
     source_breakdown_summary: dict[str, int] = {}
     for tracking_info in chunk_tracking_data.values():
         source = tracking_info.get('source') if isinstance(tracking_info, dict) else None
-        for code in (source or '?'):
+        for code in source or '?':
             source_breakdown_summary[code] = source_breakdown_summary.get(code, 0) + 1
     raw_data['metadata']['processing_info'] = {
         'total_entities_found': len(search_result.get('final_entities', [])),
@@ -6791,9 +6838,7 @@ async def _get_edge_data(
     per_term_results: list[list[dict[str, Any]]] = []
     for term in search_terms:
         try:
-            per_term_results.append(
-                await relationships_vdb.query(term, top_k=query_param.top_k) or []
-            )
+            per_term_results.append(await relationships_vdb.query(term, top_k=query_param.top_k) or [])
         except Exception as e:
             logger.error(f'Relationship vector search failed for term "{term[:50]}...": {e}')
             per_term_results.append([])
@@ -6834,7 +6879,6 @@ async def _get_edge_data(
             results.append(candidate)
             if len(results) >= query_param.top_k:
                 break
-
 
     # Prepare edge pairs in two forms:
     # For the batch edge properties function, use dicts.

@@ -1625,7 +1625,6 @@ async def pipeline_process_bytes_with_s3(
                     sanitized_content = sanitize_text_for_encoding(content)
                     content_doc_id = compute_mdhash_id(sanitized_content, prefix='doc-')
                     await _update_db_with_s3_keys(
-                        s3_client=s3_client,
                         rag=rag,
                         doc_id=content_doc_id,
                         original_s3_key=s3_original_key,
@@ -1861,7 +1860,6 @@ async def _upload_processed_text_to_s3(
 
 
 async def _update_db_with_s3_keys(
-    s3_client: S3Client,
     rag: YAR,
     doc_id: str,
     original_s3_key: str,
@@ -1871,10 +1869,9 @@ async def _update_db_with_s3_keys(
 
     Called after document processing completes. Updates:
     - doc_status with original file S3 key
-    - text_chunks with processed text S3 key
+    - text_chunks with processed text S3 key while preserving original file_path
 
     Args:
-        s3_client: S3Client instance (required, S3 is mandatory)
         rag: YAR instance for database updates
         doc_id: Document ID for database updates
         original_s3_key: S3 key for the original uploaded file
@@ -1889,11 +1886,9 @@ async def _update_db_with_s3_keys(
 
         # Update text_chunks with processed text S3 key
         if processed_s3_key and hasattr(rag.text_chunks, 'update_s3_key_by_doc_id'):
-            archive_url = s3_client.get_s3_url(processed_s3_key)
             updated_count = await rag.text_chunks.update_s3_key_by_doc_id(  # type: ignore[misc]
                 full_doc_id=doc_id,
                 s3_key=processed_s3_key,
-                archive_url=archive_url,
             )
             logger.info(f'Updated {updated_count} chunks with processed s3_key: {processed_s3_key}')
 
@@ -1957,7 +1952,6 @@ async def pipeline_index_file_with_s3(
     # because the database stores documents by the content-based ID
     if s3_client and content_doc_id and s3_original_key:
         await _update_db_with_s3_keys(
-            s3_client=s3_client,
             rag=rag,
             doc_id=content_doc_id,
             original_s3_key=s3_original_key,
