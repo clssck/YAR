@@ -33,9 +33,6 @@ Makefile
 /tests
 /scripts
 /data
-/dickens
-/reproduce
-/output_complete
 /rag_storage
 /inputs
 /eval_docs

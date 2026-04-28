@@ -146,7 +146,7 @@ Repository = "https://github.com/clssck/YAR"
 
 [tool.setuptools.packages.find]
 include = ["yar*"]
-exclude = ["data*", "tests*", "scripts*", "examples*", "dickens*", "reproduce*", "output_complete*", "rag_storage*", "inputs*"]
+exclude = ["data*", "tests*", "scripts*", "rag_storage*", "inputs*"]
 
 [tool.setuptools]
 include-package-data = true
