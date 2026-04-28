@@ -683,6 +683,35 @@ Rules:
 ---Standalone Rewrite---
 """
 
+
+# Sub-question decomposition prompt for multi-facet HyDE.
+# When a query covers multiple facets (e.g. "Compare X and Y for safety and efficacy"), one HyDE
+# passage covers only one facet and biases retrieval. The decomposer splits the query into 1-3
+# atomic sub-questions; HyDE then runs once per sub-question and the hypothetical answers are
+# concatenated for embedding so each facet contributes to the retrieval embedding.
+PROMPTS[
+    'decompose_query_for_hyde'
+] = """Split the user query into atomic sub-questions when it covers multiple distinct facets. Output a
+JSON array of strings.
+
+Rules:
+- For atomic single-facet queries ("What is mRNA?", "How does FDA approval work?"), output `["<original query>"]`. Do NOT decompose.
+- For multi-facet queries that compare two things or ask about multiple distinct attributes, output 2-3 sub-questions, each focused on ONE facet.
+- Examples that SHOULD decompose:
+  * "Compare drug A and drug B for safety and efficacy" -> ["What is the safety profile of drug A?", "What is the safety profile of drug B?", "How do drug A and drug B compare in efficacy?"]
+  * "What are the lessons learned and recommended steps?" -> ["What are the lessons learned?", "What are the recommended steps?"]
+  * "What is the mechanism of action and the side effects of fitusiran?" -> ["What is the mechanism of action of fitusiran?", "What are the side effects of fitusiran?"]
+- Examples that should NOT decompose:
+  * "What is the closed system drug transfer device strategy in Bio?" -> ["What is the closed system drug transfer device strategy in Bio?"]
+  * "Who founded OpenAI?" -> ["Who founded OpenAI?"]
+- Maximum 3 sub-questions. Skip the 3rd if 2 cover the query.
+- Each sub-question MUST be self-contained (resolve any pronouns from the original query). Do not split a single thought.
+- Output ONLY the JSON array, no preamble, no markdown fences.
+
+Query: {query}
+
+JSON array:"""
+
 # Entity Review prompt for LLM-based entity resolution
 # Used to determine if entity pairs refer to the same real-world entity
 PROMPTS[

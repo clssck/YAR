@@ -27,6 +27,7 @@ from yar.operate import (
     _build_query_shaping_instructions,
     _enrich_local_keywords,
     _find_most_related_edges_from_entities,
+    _generate_multi_facet_hyde,
     _get_node_data,
     _merge_all_chunks,
     _normalize_query_shaped_response,
@@ -38,6 +39,7 @@ from yar.operate import (
     _truncate_entity_identifier,
     chunking_by_semantic,
     create_chunker,
+    decompose_query_for_hyde,
     extract_keywords_only,
     get_keywords_from_query,
     kg_query,
@@ -3265,3 +3267,164 @@ class TestRewriteQueryWithHistory:
         assert 'turn-14' in prompt_arg
         assert 'turn-13' not in prompt_arg
         assert 'turn-0' not in prompt_arg
+
+
+@pytest.mark.offline
+class TestDecomposeQueryForHyde:
+    """Tests for decompose_query_for_hyde."""
+
+    @pytest.mark.asyncio
+    async def test_atomic_query_short_circuits_without_llm(self):
+        # No multi-facet markers -> heuristic returns the original query without an LLM call.
+        model_func = AsyncMock(return_value='["unused"]')
+        result = await decompose_query_for_hyde(
+            'What is mRNA?',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result == ['What is mRNA?']
+        model_func.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_short_query_with_and_short_circuits(self):
+        # Less than 5 tokens, even with 'and' -> not worth decomposing.
+        model_func = AsyncMock(return_value='["unused"]')
+        result = await decompose_query_for_hyde(
+            'A and B?',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result == ['A and B?']
+        model_func.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_compare_query_decomposes(self):
+        model_func = AsyncMock(return_value='["What is the safety of drug A?", "What is the safety of drug B?"]')
+        result = await decompose_query_for_hyde(
+            'Compare drug A and drug B for safety',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result == ['What is the safety of drug A?', 'What is the safety of drug B?']
+        model_func.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_dedupes_subquestions_case_insensitive(self):
+        model_func = AsyncMock(return_value='["What is X?", "WHAT IS X?", "What is Y?"]')
+        result = await decompose_query_for_hyde(
+            'Compare X and Y in detail',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        # Case-insensitive dedup keeps first occurrence.
+        assert result == ['What is X?', 'What is Y?']
+
+    @pytest.mark.asyncio
+    async def test_caps_at_max_subquestions(self):
+        model_func = AsyncMock(return_value='["q1", "q2", "q3", "q4", "q5"]')
+        result = await decompose_query_for_hyde(
+            'Compare A and B and C and D and E in detail',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+            max_subquestions=3,
+        )
+        assert result == ['q1', 'q2', 'q3']
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_original_on_invalid_json(self):
+        model_func = AsyncMock(return_value='this is not json at all')
+        result = await decompose_query_for_hyde(
+            'Compare drug A and drug B for safety',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        # Falls back to the original query when JSON parse fails.
+        assert result == ['Compare drug A and drug B for safety']
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_llm_returns_empty_list(self):
+        model_func = AsyncMock(return_value='[]')
+        result = await decompose_query_for_hyde(
+            'Compare drug A and drug B for safety',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result == ['Compare drug A and drug B for safety']
+
+    @pytest.mark.asyncio
+    async def test_timeout_falls_back(self):
+        async def slow(*_args, **_kwargs):
+            await asyncio.sleep(5)
+            return '["slow"]'
+
+        result = await decompose_query_for_hyde(
+            'Compare drug A and drug B for safety',
+            use_model_func=slow,
+            llm_timeout=0.01,
+        )
+        assert result == ['Compare drug A and drug B for safety']
+
+    @pytest.mark.asyncio
+    async def test_no_model_func_returns_original(self):
+        result = await decompose_query_for_hyde(
+            'Compare A and B and C across X and Y',
+            use_model_func=None,
+            llm_timeout=10.0,
+        )
+        assert result == ['Compare A and B and C across X and Y']
+
+
+@pytest.mark.offline
+class TestGenerateMultiFacetHyde:
+    """Tests for _generate_multi_facet_hyde."""
+
+    @pytest.mark.asyncio
+    async def test_atomic_query_runs_hyde_once(self):
+        # No multi-facet markers -> decompose returns [query]; HyDE runs once.
+        model_func = AsyncMock(return_value='Single hypothetical answer about mRNA biology and translation.')
+        result = await _generate_multi_facet_hyde(
+            'What is mRNA?',
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result is not None
+        assert 'mRNA' in result
+        # Atomic query -> only one model call (no decompose, just HyDE).
+        assert model_func.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_multi_facet_concatenates_per_facet_passages(self):
+        # First call: decomposition. Subsequent calls: HyDE per sub-question.
+        async def fake_model(prompt, **_kwargs):
+            if 'JSON array' in prompt or 'json array' in prompt.lower():
+                return '["What is the safety of drug A?", "What is the safety of drug B?"]'
+            if 'drug A' in prompt:
+                return 'Drug A safety profile passage with substantial detail and supporting context.'
+            if 'drug B' in prompt:
+                return 'Drug B safety profile passage with substantial detail and supporting context.'
+            return 'fallback hypothetical passage'
+
+        result = await _generate_multi_facet_hyde(
+            'Compare drug A and drug B for safety',
+            use_model_func=fake_model,
+            llm_timeout=10.0,
+        )
+        assert result is not None
+        assert 'Drug A safety' in result
+        assert 'Drug B safety' in result
+        assert '\n\n' in result  # facet passages joined with blank line
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_all_facets_fail(self):
+        # Decomposition succeeds but every HyDE call returns too-short text.
+        async def fake_model(prompt, **_kwargs):
+            if 'JSON array' in prompt or 'json array' in prompt.lower():
+                return '["q1", "q2"]'
+            return 'tiny'  # below the 10-char HyDE floor
+
+        result = await _generate_multi_facet_hyde(
+            'Compare A and B in detail with care',
+            use_model_func=fake_model,
+            llm_timeout=10.0,
+        )
+        assert result is None

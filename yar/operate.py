@@ -4556,6 +4556,132 @@ async def _generate_hyde_answer(
     return None
 
 
+async def decompose_query_for_hyde(
+    query: str,
+    *,
+    use_model_func: Callable[..., Awaitable[str]] | None,
+    llm_timeout: float,
+    max_subquestions: int = 3,
+) -> list[str]:
+    """Split the query into 1-3 atomic sub-questions when it covers multiple facets.
+
+    Returns a list of sub-questions. The original query is the first/only entry when the query is
+    atomic (single facet) or when the LLM call fails. Callers can compare ``len(result) > 1`` to
+    detect actual decomposition.
+
+    Cheap heuristic short-circuit before the LLM call: queries shorter than ~5 tokens or that
+    contain neither "and" nor a comparison verb are not decomposed.
+    """
+    if not query or not use_model_func:
+        return [query] if query else []
+
+    normalized = query.strip()
+    if not normalized:
+        return []
+
+    # Heuristic gate: skip the LLM call when the query has no obvious multi-facet markers.
+    lowered = normalized.lower()
+    has_multi_facet_marker = any(
+        marker in lowered for marker in (' and ', ' vs ', ' versus ', ' compare ', ' difference between ', ' as well as ')
+    )
+    if not has_multi_facet_marker:
+        return [normalized]
+    # Also skip extremely short queries ("X and Y?" rarely benefits from decomposition).
+    if len(normalized.split()) < 5:
+        return [normalized]
+
+    try:
+        prompt = PROMPTS['decompose_query_for_hyde'].format(query=normalized)
+        response = cast(str, await asyncio.wait_for(use_model_func(prompt), timeout=llm_timeout))
+    except asyncio.TimeoutError:
+        logger.warning(f'Query decompose: timed out after {llm_timeout}s, using original query')
+        return [normalized]
+    except Exception as e:
+        logger.warning(f'Query decompose: failed: {e}, using original query')
+        return [normalized]
+
+    response = remove_think_tags(response)
+    try:
+        parsed = json_repair.loads(response)
+    except (json.JSONDecodeError, ValueError):
+        logger.debug('Query decompose: could not parse JSON from response, using original query')
+        return [normalized]
+
+    if not isinstance(parsed, list) or not parsed:
+        return [normalized]
+
+    sub_questions: list[str] = []
+    seen: set[str] = set()
+    for item in parsed[:max_subquestions]:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip()
+        if not cleaned or cleaned.casefold() in seen:
+            continue
+        seen.add(cleaned.casefold())
+        sub_questions.append(cleaned)
+
+    if not sub_questions:
+        return [normalized]
+    if len(sub_questions) > 1:
+        logger.info(f'Query decompose: {normalized!r} -> {sub_questions!r}')
+    return sub_questions
+
+
+async def _generate_multi_facet_hyde(
+    query: str,
+    *,
+    use_model_func: Callable[..., Awaitable[str]] | None,
+    llm_timeout: float,
+    context: str = '',
+) -> str | None:
+    """Run HyDE per sub-question and concatenate the hypothetical answers.
+
+    For atomic queries this is exactly equivalent to ``_generate_hyde_answer`` (one call). For
+    multi-facet queries each sub-question contributes its own facet-specific passage, so the
+    embedded HyDE text covers every facet and the resulting query embedding does not bias retrieval
+    toward whichever facet the LLM picked first.
+
+    Returns ``None`` on total failure (no sub-question produced a usable answer) so the caller can
+    fall back to the original-query embedding.
+    """
+    sub_questions = await decompose_query_for_hyde(
+        query,
+        use_model_func=use_model_func,
+        llm_timeout=llm_timeout,
+    )
+    if not sub_questions:
+        return None
+    if len(sub_questions) == 1:
+        return await _generate_hyde_answer(
+            sub_questions[0],
+            use_model_func=use_model_func,
+            llm_timeout=llm_timeout,
+            context=context,
+        )
+
+    facet_answers = await asyncio.gather(
+        *[
+            _generate_hyde_answer(
+                sub_q,
+                use_model_func=use_model_func,
+                llm_timeout=llm_timeout,
+                context=f'{context}/sub{i + 1}' if context else f'sub{i + 1}',
+            )
+            for i, sub_q in enumerate(sub_questions)
+        ],
+        return_exceptions=False,
+    )
+    valid = [answer for answer in facet_answers if answer]
+    if not valid:
+        return None
+    combined = '\n\n'.join(valid)
+    logger.debug(
+        f'Multi-facet HyDE: combined {len(valid)}/{len(sub_questions)} sub-answers ({len(combined)} chars)'
+    )
+    return combined
+
+
 async def _perform_kg_search(
     query: str,
     ll_keywords: str,
@@ -4604,7 +4730,7 @@ async def _perform_kg_search(
             Callable[..., Awaitable[str]],
             query_param.model_func or text_chunks_db.global_config.get('llm_model_func'),
         )
-        hyde_answer = await _generate_hyde_answer(
+        hyde_answer = await _generate_multi_facet_hyde(
             query,
             use_model_func=hyde_use_model_func,
             llm_timeout=float(text_chunks_db.global_config.get('llm_timeout', 60)),
@@ -7048,7 +7174,7 @@ async def naive_query(
     # HyDE: Generate hypothetical answer and compute embedding if enabled
     query_embedding = None
     if query_param.enable_hyde:
-        hyde_answer = await _generate_hyde_answer(
+        hyde_answer = await _generate_multi_facet_hyde(
             query,
             use_model_func=use_model_func,
             llm_timeout=float(global_config.get('llm_timeout', 60)),
