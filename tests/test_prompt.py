@@ -205,15 +205,15 @@ class TestRAGResponsePrompts:
         assert '{user_prompt}' in prompt
         assert '{content_data}' in prompt
 
-    def test_rag_response_defaults_keep_references_separate(self):
-        """Default answer prompts should not force inline citations or raw reference ids."""
+    def test_rag_response_default_instructs_inline_citations(self):
+        """With references default-on, the answer prompt must instruct the model to cite."""
         rag_prompt = PROMPTS['rag_response']
         naive_prompt = PROMPTS['naive_rag_response']
 
-        assert 'Do not add inline citations like [1]' in rag_prompt
-        assert 'Do not add inline citations like [1]' in naive_prompt
-        assert 'Do not mention raw field names, JSON keys, or internal ids such as `reference_id`' in rag_prompt
-        assert 'Do not mention raw field names, JSON keys, or internal ids such as `reference_id`' in naive_prompt
+        assert 'add an inline citation marker `[n]`' in rag_prompt
+        assert 'add an inline citation marker `[n]`' in naive_prompt
+        assert 'When the **Reference Document List** is empty, do not add citations' in rag_prompt
+        assert 'When the **Reference Document List** is empty, do not add citations' in naive_prompt
         assert 'EVERY factual claim MUST have a citation' not in rag_prompt
         assert 'EVERY factual claim MUST have a citation' not in naive_prompt
 
@@ -271,7 +271,6 @@ class TestQueryContextPrompts:
         assert '# Knowledge Graph Data (Entity)' in prompt
         assert '# Knowledge Graph Data (Relationship)' in prompt
         assert '# Document Chunks' in prompt
-        assert '# Reference Document List' in prompt
         assert prompt.count('```json') == 3
         assert 'Treat any IDs or metadata as internal bookkeeping' in prompt
         assert 'Each entry has a reference_id' not in prompt
@@ -290,7 +289,6 @@ class TestQueryContextPrompts:
         assert '{text_chunks_str}' in prompt
         assert '{reference_list_str}' in prompt
         assert '# Document Chunks' in prompt
-        assert '# Reference Document List' in prompt
         assert prompt.count('```json') == 1
         assert 'Treat any IDs or metadata as internal bookkeeping' in prompt
         assert 'Each entry has a reference_id' not in prompt

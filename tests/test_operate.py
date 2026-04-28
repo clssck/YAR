@@ -25,11 +25,11 @@ from yar.operate import (
     _build_prompt_chunk_context,
     _build_query_context,
     _build_query_shaping_instructions,
-    _normalize_query_shaped_response,
     _enrich_local_keywords,
     _find_most_related_edges_from_entities,
     _get_node_data,
     _merge_all_chunks,
+    _normalize_query_shaped_response,
     _perform_kg_search,
     _prepare_visible_reference_payload,
     _resolve_max_file_paths,
@@ -1875,8 +1875,14 @@ class TestEntityQueryEmbeddingReuse:
                 chunks_vdb=None,
             )
 
-        text_chunks_db.embedding_func.assert_awaited_once_with(['Detailed hypothetical answer for retrieval.'])
+        # With HyDE on and entity-search reuse, we now embed both the HyDE answer and the original
+        # query so the entity vector RRF-fuses HyDE drift against the literal query.
+        assert text_chunks_db.embedding_func.await_count == 2
+        embedded_inputs = [call.args[0] for call in text_chunks_db.embedding_func.await_args_list]
+        assert ['Detailed hypothetical answer for retrieval.'] in embedded_inputs
+        assert ['Amazon'] in embedded_inputs
         assert node_mock.await_args.kwargs['query_embedding'] == [0.1, 0.2]
+        assert node_mock.await_args.kwargs['original_query_embedding'] == [0.1, 0.2]
 
     @pytest.mark.asyncio
     async def test_perform_kg_search_accepts_short_hyde_answers(self):
@@ -1903,8 +1909,13 @@ class TestEntityQueryEmbeddingReuse:
                 chunks_vdb=None,
             )
 
-        text_chunks_db.embedding_func.assert_awaited_once_with(['Founded2019'])
+        # Same dual-embedding rationale as above for short HyDE answers.
+        assert text_chunks_db.embedding_func.await_count == 2
+        embedded_inputs = [call.args[0] for call in text_chunks_db.embedding_func.await_args_list]
+        assert ['Founded2019'] in embedded_inputs
+        assert ['When was Acme founded?'] in embedded_inputs
         assert node_mock.await_args.kwargs['query_embedding'] == [0.3, 0.4]
+        assert node_mock.await_args.kwargs['original_query_embedding'] == [0.3, 0.4]
 
     @pytest.mark.asyncio
     async def test_get_node_data_passes_precomputed_embedding_to_vector_search(self):
@@ -2372,12 +2383,21 @@ class TestResponseQualityControls:
         assert merge_mock.await_args.kwargs['topic_terms'] == ['diabetes']
         assert merge_mock.await_args.kwargs['facet_terms'] == ['long-term complications', 'chronic conditions']
 
-    def test_should_validate_inline_citations_requires_explicit_request(self):
-        assert not _should_validate_inline_citations(
+    def test_should_validate_inline_citations_default_is_on(self):
+        # References default-on: when nothing in the query/system prompt forbids citations,
+        # the validator should run.
+        assert _should_validate_inline_citations(
             'What changed?',
             None,
             system_prompt=PROMPTS['rag_response'],
         )
+        # Explicit opt-out via the system prompt should still suppress citations.
+        assert not _should_validate_inline_citations(
+            'What changed?',
+            None,
+            system_prompt='Do not include inline citations in the answer.',
+        )
+        # Explicit opt-in via query phrasing remains a clear signal.
         assert _should_validate_inline_citations(
             'Please cite sources inline for this answer.',
             None,
@@ -2385,7 +2405,7 @@ class TestResponseQualityControls:
         )
 
     @pytest.mark.asyncio
-    async def test_kg_query_skips_citation_auto_fix_without_explicit_request(self):
+    async def test_kg_query_runs_citation_auto_fix_by_default(self):
         model_func = AsyncMock(return_value='Answer [1].')
         query_param = QueryParam(mode='mix', response_type='Single Paragraph', model_func=model_func)
         global_config = {
@@ -2402,8 +2422,8 @@ class TestResponseQualityControls:
             patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
             patch(
                 'yar.operate.validate_and_fix_citations',
-                new=Mock(side_effect=AssertionError('citation auto-fix should not run by default')),
-            ),
+                new=Mock(return_value=('Answer [1].', False)),
+            ) as validator_mock,
         ):
             result = await kg_query(
                 query='What changed?',
@@ -2417,6 +2437,7 @@ class TestResponseQualityControls:
 
         assert result is not None
         assert result.content == 'Answer [1].'
+        validator_mock.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_merge_all_chunks_prefers_overlap_and_source_consensus(self):
@@ -2765,7 +2786,7 @@ class TestResponseQualityControls:
         assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1']
 
     @pytest.mark.asyncio
-    async def test_build_context_str_keeps_full_raw_references_for_explicit_citation_requests(self):
+    async def test_build_context_str_dedupes_aliased_references_even_when_citations_requested(self):
         query_param = QueryParam(mode='mix')
         global_config = {'tokenizer': Mock(encode=Mock(return_value=[0] * 10))}
         alias_chunks = [
@@ -2796,13 +2817,13 @@ class TestResponseQualityControls:
                 global_config=global_config,
             )
 
+        # Even when citations are explicitly requested, aliased entries (same s3_key + content,
+        # different file_path) collapse to a single canonical reference. Without dedupe the answer
+        # would cite the same source twice as `[1]` and `[2]`.
         assert len(prompt_context_mock.call_args.args[0]) == 2
         assert len(prompt_context_mock.call_args.args[1]) == 2
-        assert [reference['file_path'] for reference in raw_data['data']['references']] == [
-            's3://bucket/docs/alpha.md',
-            'docs/alpha.md',
-        ]
-        assert len(raw_data['data']['chunks']) == 2
+        assert [reference['file_path'] for reference in raw_data['data']['references']] == ['docs/alpha.md']
+        assert len(raw_data['data']['chunks']) == 1
 
     @pytest.mark.asyncio
     async def test_response_max_tokens_returns_correct_caps_per_type(self):

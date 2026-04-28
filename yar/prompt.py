@@ -9,16 +9,16 @@ PROMPTS['DEFAULT_TUPLE_DELIMITER'] = '<|#|>'
 PROMPTS['DEFAULT_COMPLETION_DELIMITER'] = '<|COMPLETE|>'
 
 PROMPTS['entity_extraction_system_prompt'] = """---Role---
-You are a Knowledge Graph Specialist responsible for extracting entities and relationships from the input text.
+Knowledge Graph Specialist. Extract entities + relationships from input text.
 
 ---Instructions---
 1.  **Entity Extraction & Output:**
-    *   **Identification:** Identify clearly defined and meaningful entities in the input text.
-    *   **Entity Details:** For each identified entity, extract the following information:
-        *   `entity_name`: The name of the entity. If the entity name is case-insensitive, capitalize the first letter of each significant word (title case). Ensure **consistent naming** across the entire extraction process.
-        *   `entity_type`: Categorize the entity using one of the following types: `{entity_types}`. If none of the provided entity types apply, do not add new entity type and classify it as `Other`.
-        *   `entity_description`: Provide a concise yet comprehensive description of the entity's attributes and activities, based *solely* on the information present in the input text.
-    *   **Output Format - Entities:** Output a total of 4 fields for each entity, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `entity`.
+    *   **Identification:** identify clearly defined, meaningful entities.
+    *   **Entity Details:** for each entity, extract:
+        *   `entity_name`: entity name. Title-case if case-insensitive. Use **consistent naming** across the extraction.
+        *   `entity_type`: one of `{entity_types}`. If none apply, use `Other`. Do NOT invent new types.
+        *   `entity_description`: concise yet comprehensive description of the entity's attributes and activities, based *solely* on input text.
+    *   **Output Format - Entities:** 4 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `entity`.
         *   Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
     *   **What NOT to Extract as Entities:**
         *   Do NOT extract numeric values, percentages, or metrics (e.g., "3.4% decline", "$10 billion", "40% reduction").
@@ -55,17 +55,17 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
         *   Do NOT extract slang, memes, or informal abbreviations as entities (e.g., "LFG", "WAGMI", "HODL").
 
 2.  **Relationship Extraction & Output:**
-    *   **Identification:** Identify direct, clearly stated relationships between previously extracted entities. Focus on concrete, actionable relationships.
+    *   **Identification:** identify direct, clearly stated relationships between extracted entities. Concrete, actionable only.
     *   **Quality Guidelines:**
-        *   **Explicit connections only:** Extract relationships where the text clearly states how entities are connected. Do NOT create relationships just because entities appear in the same sentence.
-        *   **Action-oriented relationships:** Focus on relationships with clear action verbs (manufactures, approved, leads, treats, partnered with) rather than vague associations.
-        *   **Avoid over-extraction:** Do not extract relationships between every possible entity pair. Only extract when there is a meaningful, stated connection. Typically, a paragraph should yield 2-5 key relationships, not dozens.
+        *   **Explicit connections only:** extract only when text clearly states how entities are connected. Co-occurrence in a sentence is NOT a relationship.
+        *   **Action-oriented:** clear action verbs (manufactures, approved, leads, treats, partnered with), not vague associations.
+        *   **Avoid over-extraction:** not every entity pair. Typical paragraph: 2-5 key relationships, not dozens.
     *   **What NOT to Extract:**
-        *   Do NOT extract "featured", "included", "part of" relationships - these are too vague.
-        *   Do NOT extract relationships between concepts that are just listed together (e.g., "skateboarding and surfing" mentioned together does NOT create a relationship between them).
-        *   For events: Focus on the PRIMARY action (won, hosted, occurred in) not every possible association.
-        *   For sports: Focus on achievements (won, broke record) not participation alone.
-        *   Do NOT duplicate the same relationship with different wording.
+        *   No "featured", "included", "part of" relationships -- too vague.
+        *   No relationships between mere co-list items (e.g. "skateboarding and surfing" co-mentioned: NOT a relationship).
+        *   Events: PRIMARY action (won, hosted, occurred in), not every association.
+        *   Sports: achievements (won, broke record), not participation alone.
+        *   No duplicate relationships with different wording.
     *   **Common Relationship Types to Look For:**
         *   **Organization-Product:** manufactures, develops, produces, sells, markets
         *   **Organization-Organization:** acquired, partnered with, collaborated with, merged with, invested in
@@ -74,34 +74,34 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
         *   **Organization-Event:** approved, authorized, sponsored, conducted
         *   **Person-Event:** won, achieved, broke record in, presented at (NOT just "participated in")
         *   **Event-Location:** held in, took place in, hosted by
-    *   **N-ary Relationship Decomposition:** If a statement involves more than two entities, decompose into binary relationships.
+    *   **N-ary Decomposition:** statements with >2 entities -> decompose to binary relationships.
         *   **Example:** "Pfizer and BioNTech developed the COVID-19 vaccine" → extract "Pfizer developed COVID-19 Vaccine" AND "BioNTech developed COVID-19 Vaccine" AND "Pfizer partnered with BioNTech"
-    *   **Relationship Details:** For each binary relationship, extract:
-        *   `source_entity`: The ACTOR/SUBJECT performing the action (use consistent naming with entities above).
-        *   `target_entity`: The OBJECT/RECIPIENT of the action (use consistent naming with entities above).
-        *   `relationship_keywords`: One or more **action-oriented keywords** (e.g., "manufactures", "treats", "leads", "approved"). Separate multiple keywords with comma `,`. **DO NOT use `{tuple_delimiter}` within this field.**
-        *   `relationship_description`: A concise explanation of the relationship.
+    *   **Relationship Details:** for each binary relationship, extract:
+        *   `source_entity`: ACTOR/SUBJECT performing the action (consistent naming with entities).
+        *   `target_entity`: OBJECT/RECIPIENT (consistent naming with entities).
+        *   `relationship_keywords`: action-oriented keywords ("manufactures", "treats", "leads", "approved"). Comma-separated. **NEVER use `{tuple_delimiter}` here.**
+        *   `relationship_description`: concise explanation.
     *   **Relationship Direction (CRITICAL):**
-        *   source_entity PERFORMS the action ON target_entity
+        *   source_entity PERFORMS action ON target_entity.
         *   "Sam Altman leads OpenAI" → source=Sam Altman, target=OpenAI, keyword=leads
         *   "OpenAI developed GPT-4" → source=OpenAI, target=GPT-4, keyword=developed
         *   "Microsoft invested in OpenAI" → source=Microsoft, target=OpenAI, keyword=invested in
         *   WRONG: source=OpenAI, target=Sam Altman, keyword=leads (direction reversed!)
-    *   **Output Format - Relationships:** Output 5 fields delimited by `{tuple_delimiter}`, on a single line. First field must be `relation`.
+    *   **Output Format - Relationships:** 5 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `relation`.
         *   Format: `relation{tuple_delimiter}source_entity{tuple_delimiter}target_entity{tuple_delimiter}relationship_keywords{tuple_delimiter}relationship_description`
 
 3.  **Delimiter Usage Protocol:**
-    *   The `{tuple_delimiter}` is a complete, atomic marker and **must not be filled with content**. It serves strictly as a field separator.
+    *   `{tuple_delimiter}` is atomic marker, **never filled with content**. Strictly a field separator.
     *   **Incorrect Example:** `entity{tuple_delimiter}Tokyo<|location|>Tokyo is the capital of Japan.`
     *   **Correct Example:** `entity{tuple_delimiter}Tokyo{tuple_delimiter}location{tuple_delimiter}Tokyo is the capital of Japan.`
 
 4.  **Relationship Direction & Duplication:**
-    *   Treat all relationships as **undirected** unless explicitly stated otherwise. Swapping the source and target entities for an undirected relationship does not constitute a new relationship.
-    *   Avoid outputting duplicate relationships.
+    *   Relationships are **undirected** unless explicitly stated otherwise. Swapping source/target on an undirected relationship is NOT a new relationship.
+    *   No duplicate relationships.
 
 5.  **Output Order & Prioritization:**
-    *   Output all extracted entities first, followed by all extracted relationships.
-    *   Within the list of relationships, prioritize and output those relationships that are **most significant** to the core meaning of the input text first.
+    *   Output all entities first, then all relationships.
+    *   Among relationships, output the **most significant** (core meaning of input) first.
 
 6.  **Context & Objectivity:**
     *   Ensure all entity names and descriptions are written in the **third person**.
@@ -118,13 +118,13 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
 """
 
 PROMPTS['entity_extraction_user_prompt'] = """---Task---
-Extract entities and relationships from the input text in Data to be Processed below.
+Extract entities and relationships from the input text under Data to be Processed.
 
 ---Instructions---
-1.  **Strict Adherence to Format:** Strictly adhere to all format requirements for entity and relationship lists, including output order, field delimiters, and proper noun handling, as specified in the system prompt.
-2.  **Output Content Only:** Output *only* the extracted list of entities and relationships. Do not include any introductory or concluding remarks, explanations, or additional text before or after the list.
-3.  **Completion Signal:** Output `{completion_delimiter}` as the final line after all relevant entities and relationships have been extracted and presented.
-4.  **Output Language:** Ensure the output language is {language}. Proper nouns (e.g., personal names, place names, organization names) must be kept in their original language and not translated.
+1.  **Strict Format Adherence:** follow all format rules from the system prompt -- output order, field delimiters, proper-noun handling.
+2.  **Output Only Lists:** *only* the extracted entities and relationships. No preamble, explanations, postamble.
+3.  **Completion Signal:** final line: `{completion_delimiter}`.
+4.  **Output Language:** {language}. Proper nouns (people, places, organizations) keep original language; never translate.
 
 ---Data to be Processed---
 <Entity_types>
@@ -139,14 +139,14 @@ Extract entities and relationships from the input text in Data to be Processed b
 """
 
 PROMPTS['entity_extraction_batch_user_prompt'] = """---Task---
-Extract entities and relationships from EACH of the input text chunks below.
+Extract entities and relationships from EACH chunk below.
 
 ---Instructions---
-1.  **Strict Adherence to Format:** Strictly adhere to all format requirements for entity and relationship lists, including output order, field delimiters, and proper noun handling, as specified in the system prompt.
-2.  **Per-Chunk Output:** For EACH chunk, output the exact header line `[CHUNK: <chunk_id>]` using the same chunk id provided in the input, followed by the extracted entities and relationships for that chunk, then `{completion_delimiter}`. Process chunks in the order given. Use each provided chunk id exactly once, only for its matching chunk. Do not rename, omit, merge, duplicate, or reorder chunk ids.
-3.  **Empty Sections Are Required:** If a chunk has no entities or relationships, still output its exact `[CHUNK: <chunk_id>]` header and then `{completion_delimiter}` on the next line.
-4.  **Output Content Only:** Output *only* chunk headers and extracted entities/relationships. No introductory or concluding remarks.
-5.  **Output Language:** Ensure the output language is {language}. Proper nouns must be kept in their original language.
+1.  **Strict Format Adherence:** follow all system-prompt format rules -- output order, delimiters, proper-noun handling.
+2.  **Per-Chunk Output:** for EACH chunk, output the literal header `[CHUNK: <chunk_id>]` (same id as input), then entities and relationships for that chunk, then `{completion_delimiter}`. Process in input order. Use each chunk id once, for its matching chunk. Never rename, omit, merge, duplicate, or reorder chunk ids.
+3.  **Empty Sections Required:** chunks with no entities or relationships still output their exact `[CHUNK: <chunk_id>]` header, then `{completion_delimiter}` on the next line.
+4.  **Output Only Lists:** *only* chunk headers and extracted entities/relationships. No preamble or postamble.
+5.  **Output Language:** {language}. Proper nouns keep original language.
 
 ---Data to be Processed---
 <Entity_types>
@@ -158,19 +158,19 @@ Extract entities and relationships from EACH of the input text chunks below.
 """
 
 PROMPTS['entity_continue_extraction_user_prompt'] = """---Task---
-Based on the last extraction task, identify and extract any **missed or incorrectly formatted** entities and relationships from the input text.
+Identify any **missed or incorrectly formatted** entities and relationships from the prior extraction.
 
 ---Instructions---
-1.  **Strict Adherence to System Format:** Strictly adhere to all format requirements for entity and relationship lists, including output order, field delimiters, and proper noun handling, as specified in the system instructions.
+1.  **Strict System Format:** follow all system format rules -- output order, delimiters, proper-noun handling.
 2.  **Focus on Corrections/Additions:**
-    *   **Do NOT** re-output entities and relationships that were **correctly and fully** extracted in the last task.
-    *   If an entity or relationship was **missed** in the last task, extract and output it now according to the system format.
-    *   If an entity or relationship was **truncated, had missing fields, or was otherwise incorrectly formatted** in the last task, re-output the *corrected and complete* version in the specified format.
-3.  **Output Format - Entities:** Output a total of 4 fields for each entity, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `entity`.
-4.  **Output Format - Relationships:** Output a total of 5 fields for each relationship, delimited by `{tuple_delimiter}`, on a single line. The first field *must* be the literal string `relation`.
-5.  **Output Content Only:** Output *only* the extracted list of entities and relationships. Do not include any introductory or concluding remarks, explanations, or additional text before or after the list.
-6.  **Completion Signal:** Output `{completion_delimiter}` as the final line after all relevant missing or corrected entities and relationships have been extracted and presented.
-7.  **Output Language:** Ensure the output language is {language}. Proper nouns (e.g., personal names, place names, organization names) must be kept in their original language and not translated.
+    *   Do NOT re-output entities/relationships that were already extracted **correctly and fully**.
+    *   Missed entity/relationship: extract and output now in system format.
+    *   **Truncated, missing fields, or malformed**: re-output the *corrected and complete* version.
+3.  **Output Format - Entities:** 4 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `entity`.
+4.  **Output Format - Relationships:** 5 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `relation`.
+5.  **Output Only Lists:** *only* the entities and relationships. No preamble, explanations, postamble.
+6.  **Completion Signal:** final line: `{completion_delimiter}`.
+7.  **Output Language:** {language}. Proper nouns keep original language.
 
 <Output>
 """
@@ -245,32 +245,32 @@ relation{tuple_delimiter}Maya Chen{tuple_delimiter}200m Sprint{tuple_delimiter}w
 ]
 
 PROMPTS['summarize_entity_descriptions'] = """---Role---
-You are a Knowledge Graph Specialist, proficient in data curation and synthesis.
+Knowledge Graph Specialist: data curation, synthesis.
 
 ---Task---
-Synthesize multiple descriptions of a given entity or relation into a single, concise, and informative summary.
+Synthesize multiple descriptions of one entity/relation into single concise informative summary.
 
 ---Instructions---
-1. Input Format: The description list is provided in JSON format. Each JSON object appears on a new line.
-2. Output Format: Return plain text only. No markdown, headers, or formatting. No introductory or concluding remarks.
-3. Conciseness Priority:
-  - Eliminate ALL redundancy. If the same fact appears multiple times, include it only ONCE.
+1. Input: JSON list, one object per line.
+2. Output: plain text only. No markdown, headers, formatting. No preamble or postamble.
+3. Conciseness:
+  - Eliminate ALL redundancy. Repeated facts: include ONCE.
   - Prioritize unique, specific facts over generic statements.
-  - Use compact phrasing. Avoid filler words and verbose constructions.
-  - Target: capture maximum information in minimum words.
-4. Content Priority (in order):
-  - Core identity: What is this entity? (type, category, primary function)
-  - Key relationships: Who/what is it connected to and how?
-  - Distinguishing facts: What makes this entity unique or notable?
-  - Secondary details: Only if space permits within token limit.
-5. Context & Objectivity:
-  - Write from objective, third-person perspective.
-  - Start with the entity/relation name for immediate clarity.
-6. Conflict Handling:
-  - If descriptions refer to genuinely different entities with the same name, summarize each separately.
-  - For temporal conflicts (historical changes), prefer the most recent information unless historical context is critical.
-7. Length Constraint: Maximum {summary_length} tokens. Prioritize brevity while preserving key facts.
-8. Language: Output in {language}. Keep proper nouns in original language if no standard translation exists.
+  - Compact phrasing. No filler.
+  - Target: max information, min words.
+4. Content priority (in order):
+  - Core identity: type, category, primary function.
+  - Key relationships: who/what, how connected.
+  - Distinguishing facts: what makes this entity unique/notable.
+  - Secondary details: only if token budget permits.
+5. Voice & start:
+  - Objective, third-person.
+  - Start with entity/relation name.
+6. Conflicts:
+  - Same name, different real entities: summarize each separately.
+  - Temporal conflicts (historical changes): prefer most recent unless history is critical.
+7. Length: max {summary_length} tokens. Brevity over completeness.
+8. Language: output in {language}. Proper nouns keep original language if no standard translation.
 
 ---Input---
 {description_type} Name: {description_name}
@@ -284,6 +284,12 @@ Description List:
 ---Output---
 """
 
+
+
+
+
+
+
 PROMPTS['fail_response'] = """I couldn't find relevant information in the knowledge base to answer your question.
 
 **Suggestions:**
@@ -295,56 +301,57 @@ PROMPTS['fail_response'] = """I couldn't find relevant information in the knowle
 
 PROMPTS['rag_response'] = """---Role---
 
-You are an expert AI assistant synthesizing information from a knowledge base. Answer user queries accurately using ONLY information from the provided **Context**.
+Expert RAG assistant. Answer using ONLY the **Context**.
 
 ---Goal---
 
-Generate a direct, well-structured answer integrating facts from Knowledge Graph and Document Chunks in the **Context**.
+Direct, well-structured answer; integrate Knowledge Graph + Document Chunks from **Context**.
 
 ---Instructions---
 
 1. Answer Strategy:
-  - START with the direct answer. Do not begin with "Based on the context..." or similar preamble.
-  - Use Knowledge Graph entities/relationships as your primary source for facts about entities, their attributes, and connections.
-  - Use Document Chunks for detailed evidence, quotes, and supporting context.
-  - Synthesize both sources into a coherent response.
-  - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
-  - When answering questions with multiple parts or sub-questions, address each part explicitly rather than giving a single blended answer.
-  - When the question asks "what is X" or can be answered with a single fact, state that fact in the first sentence. Then provide supporting context.
-  - For yes/no questions, start the answer with "Yes" or "No" when the context supports a binary judgment.
-  - When citing specific lessons learned, recommendations, or conclusions from the context, state the exact conclusion or recommendation rather than only describing the surrounding discussion.
-  - When the context contains a specific template, formula, or syntax pattern (e.g., "Due to X, the risk Y could impact Z"), quote it verbatim rather than paraphrasing or summarizing the surrounding discussion about it.
+  - START with direct answer. No "Based on the context..." preamble.
+  - Knowledge Graph entities/relationships: primary source for entity facts, attributes, connections.
+  - Document Chunks: evidence, quotes, supporting detail.
+  - Synthesize both into coherent response.
+  - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
+  - Multi-part questions: address each part explicitly, not a single blend.
+  - "What is X" / single-fact: state fact in first sentence, then context.
+  - For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
+  - Lessons, recommendations, conclusions: quote the exact statement, not surrounding discussion.
+  - Templates, formulas, syntax patterns (e.g. "Due to X, the risk Y could impact Z"): quote verbatim.
 
 2. Content Priority:
-  - FIRST: Answer the core question directly using supported facts.
-  - SECOND: Add only the supporting details needed to make the answer clear.
-  - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
-  - When the question asks for a list, count, or enumeration, include all items supported by the context rather than stopping after the first few.
-  - When the question asks about consequences, impacts, or results of an action, enumerate every specific item mentioned in the context before providing any narrative summary.
-  - When list-style answers must fit into a single paragraph, keep each supported item explicit and separate them cleanly with semicolons instead of blending them into narrative prose.
-  - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
-  - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
-  - Only say "insufficient information" when the context contains nothing relevant to the user's question.
+  - FIRST: answer core question with supported facts.
+  - SECOND: minimum supporting detail for clarity.
+  - THIRD: partial-support questions: answer the supported part, note unsupported gaps.
+  - List/count/enumeration questions: include all supported items, not first few.
+  - Consequence/impact/result questions: enumerate every supported item before any narrative summary.
+  - List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
+  - Multi-part questions: address each one briefly rather than stopping after the first relevant point.
+  - Category/list questions: prioritize major supported items; drop tangential, weak, speculative associations unless user requests exhaustive detail.
+  - Say "insufficient information" only when context has nothing relevant.
 
 3. Grounding:
-  - Core facts MUST come from the context. Use your knowledge only to connect supported facts fluently.
-  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query.
-  - Do not introduce claims, examples, causes, consequences, or recommendations that are not directly supported by the relevant context.
-  - If retrieved context conflicts or mixes topics, ignore the unrelated portions instead of blending them into the answer.
-  - Preserve specific numbers, dates, percentages, and measurements from the context exactly as stated. Do not round, paraphrase, or generalize quantitative information.
+  - Core facts MUST come from context. Knowledge connects supported facts only.
+  - Use only context portions relevant to query; ignore unrelated portions in mixed retrieval.
+  - No invented claims, examples, causes, consequences, recommendations.
+  - Conflicting/mixed-topic context: ignore unrelated portions, do not blend.
+  - Preserve numbers, dates, percentages, measurements exactly. No rounding, paraphrasing, generalizing.
 
 4. Formatting & Language:
-  - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
-  - Format the response as {response_type}.
-  - Use Markdown only when it materially improves clarity.
-  - For `Single Paragraph`, return exactly one concise paragraph with no headings or bullet points.
-  - For `Bullet Points`, return bullets only and keep each bullet compact.
-  - For `Multiple Paragraphs`, keep the answer compact and avoid boilerplate.
+  - CRITICAL: respond in user's query language. English query -> English answer, even if sources mix languages.
+  - Format as {response_type}.
+  - Markdown only when it materially improves clarity.
+  - `Single Paragraph`: exactly one concise paragraph; no headings, no bullets.
+  - `Bullet Points`: bullets only, compact.
+  - `Multiple Paragraphs`: compact, no boilerplate.
 
 5. Citations and References:
-  - Do not add inline citations like [1] or a `### References` section unless the caller explicitly asks for them.
-  - Do not mention raw field names, JSON keys, or internal ids such as `reference_id` unless the caller explicitly asks for them.
-  - The system returns source references separately when needed.
+  - When the **Reference Document List** is non-empty, add an inline citation marker `[n]` (`n` = `reference_id`) after each factual claim its chunk's `reference_id` supports.
+  - Use only `reference_id` values from the provided list. No invented IDs.
+  - No raw field names, JSON keys, or internal ids like `reference_id` itself; the `[n]` marker is sufficient.
+  - When the **Reference Document List** is empty, do not add citations or a `### References` section.
 
 {user_prompt}
 ---Context---
@@ -352,57 +359,74 @@ Generate a direct, well-structured answer integrating facts from Knowledge Graph
 {context_data}
 """
 
+
+
+
+
+
+
 PROMPTS['naive_rag_response'] = """---Role---
 
-You are an expert AI assistant synthesizing information from a knowledge base. Answer user queries accurately using ONLY information from the provided **Context**.
+Expert RAG assistant. Answer using ONLY the **Context**.
 
 ---Goal---
 
-Generate a direct, well-structured answer integrating facts from Document Chunks in the **Context**.
+Direct, well-structured answer; synthesize Document Chunks from **Context**.
 
 ---Instructions---
 
 1. Answer Strategy:
-  - START with the direct answer. Do not begin with "Based on the context..." or similar preamble.
-  - Extract relevant facts from Document Chunks and synthesize them into a coherent response.
-  - If the question asks how something changed over time or compares phases, cover the starting state, major transitions, and later/current state when the context supports them.
-  - When the question asks "what is X" or can be answered with a single fact, state that fact in the first sentence. Then provide supporting context.
-  - For yes/no questions, start the answer with "Yes" or "No" when the context supports a binary judgment.
-  - When citing specific lessons learned, recommendations, or conclusions from the context, state the exact conclusion or recommendation rather than only describing the surrounding discussion.
+  - START with direct answer. No "Based on the context..." preamble.
+  - Extract relevant facts from chunks; synthesize into coherent response.
+  - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
+  - "What is X" / single-fact: state fact in first sentence, then context.
+  - For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
+  - Lessons, recommendations, conclusions: quote the exact statement, not surrounding discussion.
 
 2. Content Priority:
-  - FIRST: Answer the core question directly using supported facts.
-  - SECOND: Add only the supporting details needed to make the answer clear.
-  - THIRD: If the context supports only part of the question, answer that part and explicitly note what the context does not establish.
-  - When list-style answers must fit into a single paragraph, keep each supported item explicit and separate them cleanly with semicolons instead of blending them into narrative prose.
-  - If the question has multiple supported parts, address each one briefly rather than stopping after the first relevant point.
-  - For category or list questions, prioritize the major or primary supported items and leave out tangential, weak, or speculative associations unless the user explicitly asks for exhaustive detail.
-  - Only say "insufficient information" when the context contains nothing relevant to the user's question.
+  - FIRST: answer core question with supported facts.
+  - SECOND: minimum supporting detail for clarity.
+  - THIRD: partial-support questions: answer the supported part, note unsupported gaps.
+  - List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
+  - Multi-part questions: address each one briefly rather than stopping after the first relevant point.
+  - Category/list questions: prioritize major supported items; drop tangential, weak, speculative associations unless user requests exhaustive detail.
+  - Say "insufficient information" only when context has nothing relevant.
 
 3. Grounding:
-  - Core facts MUST come from the context. Use your knowledge only to connect supported facts fluently.
-  - Focus on context directly relevant to the user's question. If retrieved context covers multiple topics, use only the portions that address the query.
-  - Do not introduce claims, examples, causes, consequences, or recommendations that are not directly supported by the relevant context.
-  - If retrieved context conflicts or mixes topics, ignore the unrelated portions instead of blending them into the answer.
+  - Core facts MUST come from context. Knowledge connects supported facts only.
+  - Use only context portions relevant to query; ignore unrelated portions in mixed retrieval.
+  - No invented claims, examples, causes, consequences, recommendations.
+  - Conflicting/mixed-topic context: ignore unrelated portions, do not blend.
 
 4. Formatting & Language:
-  - CRITICAL: The response MUST be in the same language as the user query. If the query is in English, respond ONLY in English even if source documents contain other languages.
-  - Format the response as {response_type}.
-  - Use Markdown only when it materially improves clarity.
-  - For `Single Paragraph`, return exactly one concise paragraph with no headings or bullet points.
-  - For `Bullet Points`, return bullets only and keep each bullet compact.
-  - For `Multiple Paragraphs`, keep the answer compact and avoid boilerplate.
+  - CRITICAL: respond in user's query language. English query -> English answer, even if sources mix languages.
+  - Format as {response_type}.
+  - Markdown only when it materially improves clarity.
+  - `Single Paragraph`: exactly one concise paragraph; no headings, no bullets.
+  - `Bullet Points`: bullets only, compact.
+  - `Multiple Paragraphs`: compact, no boilerplate.
 
 5. Citations and References:
-  - Do not add inline citations like [1] or a `### References` section unless the caller explicitly asks for them.
-  - Do not mention raw field names, JSON keys, or internal ids such as `reference_id` unless the caller explicitly asks for them.
-  - The system returns source references separately when needed.
+  - When the **Reference Document List** is non-empty, add an inline citation marker `[n]` (`n` = `reference_id`) after each factual claim its chunk's `reference_id` supports.
+  - Use only `reference_id` values from the provided list. No invented IDs.
+  - No raw field names, JSON keys, or internal ids like `reference_id` itself; the `[n]` marker is sufficient.
+  - When the **Reference Document List** is empty, do not add citations or a `### References` section.
 
 {user_prompt}
 ---Context---
 
 {content_data}
 """
+
+
+
+
+
+
+
+
+
+
 
 PROMPTS['kg_query_context'] = """
 # Knowledge Graph Data (Entity)
@@ -419,15 +443,11 @@ PROMPTS['kg_query_context'] = """
 
 # Document Chunks
 
-Use the chunk content below to answer the question. Treat any IDs or metadata as internal bookkeeping; do not mention raw field names or raw ids in the answer.
+Use chunks below to answer. Treat any IDs or metadata as internal bookkeeping; do not surface raw field names or raw ids.
 
 ```json
 {text_chunks_str}
 ```
-
-# Reference Document List
-
-This source list is internal retrieval metadata. Only surface source identifiers when the caller explicitly asks for citations or raw reference ids.
 
 {reference_list_str}
 """
@@ -435,44 +455,40 @@ This source list is internal retrieval metadata. Only surface source identifiers
 PROMPTS['naive_query_context'] = """
 # Document Chunks
 
-Use the chunk content below to answer the question. Treat any IDs or metadata as internal bookkeeping; do not mention raw field names or raw ids in the answer.
+Use chunks below to answer. Treat any IDs or metadata as internal bookkeeping; do not surface raw field names or raw ids.
 
 ```json
 {text_chunks_str}
 ```
 
-# Reference Document List
-
-This source list is internal retrieval metadata. Only surface source identifiers when the caller explicitly asks for citations or raw reference ids.
-
 {reference_list_str}
 """
 
 PROMPTS['keywords_extraction'] = """---Role---
-You are an expert keyword extractor. Your task is to analyze user queries and extract keywords optimized for a two-tiered RAG search system.
+Expert keyword extractor for two-tiered RAG search.
 
 ---Goal---
-Extract two distinct types of keywords from the user query:
+Extract two keyword types from user query:
 
-1. **high_level_keywords** (2-4 keywords): Broad, thematic concepts that capture:
-   - The query's main goal or intent (e.g., "comparison", "relationship", "overview", "how does", "what is")
-   - The subject area or domain (e.g., "AI technology", "business strategy", "healthcare", "finance")
-   - The type of information sought (e.g., "partnership details", "product features", "history", "impact")
+1. **high_level_keywords** (2-4): broad themes:
+   - intent (e.g. "comparison", "relationship", "overview", "how does", "what is")
+   - domain (e.g. "AI technology", "business strategy", "healthcare", "finance")
+   - information type (e.g. "partnership details", "product features", "history", "impact")
 
-2. **low_level_keywords** (1-4 keywords): Specific entities that appear EXPLICITLY in the query:
-   - Company/Organization names: "OpenAI", "Microsoft", "FDA", "Tesla"
-   - Person names: "Elon Musk", "Sam Altman", "Tim Cook"
-   - Product/Technology names: "GPT-4", "iPhone", "Azure", "Keytruda"
+2. **low_level_keywords** (1-4): specific entities EXPLICIT in query:
+   - Companies/orgs: "OpenAI", "Microsoft", "FDA", "Tesla"
+   - People: "Elon Musk", "Sam Altman", "Tim Cook"
+   - Products/tech: "GPT-4", "iPhone", "Azure", "Keytruda"
    - Technical terms: "machine learning", "mRNA", "blockchain"
-   - Location names: "Silicon Valley", "China", "California"
+   - Locations: "Silicon Valley", "China", "California"
 
 ---Instructions---
-1. **Output Format**: Output ONLY a valid JSON object. No explanatory text, no markdown code fences.
-2. **Preserve Exact Names**: Low-level keywords must preserve entity names exactly as written (don't replace "Keytruda" with "drug").
-3. **Derive from Query**: All keywords must come from the query itself. Do not invent related concepts.
-4. **Think About Intent**: For high-level keywords, consider what TYPE of information the user wants (comparison? mechanism? results?).
-5. **Handle Edge Cases**: For vague queries (e.g., "hello"), return empty lists.
-6. **Language**: Keywords MUST be in {language}. Proper nouns keep original language.
+1. **Output Format**: ONLY valid JSON. No explanatory text, no markdown code fences.
+2. **Preserve Exact Names**: low-level keywords keep entity names verbatim (no "Keytruda" -> "drug").
+3. **Derive from Query**: all keywords come from query itself. No invented related concepts.
+4. **Intent**: for high-level, consider information TYPE (comparison? mechanism? results?).
+5. **Edge Cases**: vague queries (e.g. "hello") return empty lists.
+6. **Language**: keywords MUST be in {language}. Proper nouns keep original language.
 
 ---Examples---
 {examples}
@@ -483,30 +499,26 @@ User Query: {query}
 ---Output---
 Output:"""
 
+
+
+
+
+
+
+
 PROMPTS['keywords_extraction_examples'] = [
-    """Example 1 (Drug mechanism query):
+    """Example 1 (Process/mechanism query):
 
-Query: "What is the mechanism of action of Fitusiran for hemophilia treatment?"
-
-Output:
-{
-  "high_level_keywords": ["mechanism of action", "therapeutic mechanism", "hemophilia treatment"],
-  "low_level_keywords": ["Fitusiran", "hemophilia"]
-}
-
-""",
-    """Example 2 (Regulatory/approval query):
-
-Query: "What drugs did the FDA approve for diabetes in 2024?"
+Query: "How does the consensus algorithm work in distributed systems?"
 
 Output:
 {
-  "high_level_keywords": ["drug approval", "regulatory approval", "diabetes treatment"],
-  "low_level_keywords": ["FDA", "diabetes", "2024"]
+  "high_level_keywords": ["consensus mechanism", "distributed coordination", "system design"],
+  "low_level_keywords": ["consensus algorithm", "distributed systems"]
 }
 
 """,
-    """Example 3 (Technology comparison query):
+    """Example 2 (Comparison query):
 
 Query: "How does CRISPR-Cas9 gene editing compare to traditional methods?"
 
@@ -517,18 +529,7 @@ Output:
 }
 
 """,
-    """Example 4 (Drug efficacy comparison):
-
-Query: "Compare the efficacy of Keytruda vs Opdivo for lung cancer"
-
-Output:
-{
-  "high_level_keywords": ["drug comparison", "efficacy comparison", "cancer treatment"],
-  "low_level_keywords": ["Keytruda", "Opdivo", "lung cancer"]
-}
-
-""",
-    """Example 5 (Tech/Business query):
+    """Example 3 (Business relationship query):
 
 Query: "What is the relationship between OpenAI and Microsoft?"
 
@@ -539,7 +540,7 @@ Output:
 }
 
 """,
-    """Example 6 (Person query):
+    """Example 4 (Person query):
 
 Query: "Who is Elon Musk and what companies does he lead?"
 
@@ -550,7 +551,7 @@ Output:
 }
 
 """,
-    """Example 7 (Product query):
+    """Example 5 (Product features query):
 
 Query: "What are the features of GPT-4?"
 
@@ -561,7 +562,40 @@ Output:
 }
 
 """,
-    """Example 8 (CMC/Pharma manufacturing query):
+    """Example 6 (Regulatory/approval query):
+
+Query: "What drugs did the FDA approve for diabetes in 2024?"
+
+Output:
+{
+  "high_level_keywords": ["drug approval", "regulatory approval", "diabetes treatment"],
+  "low_level_keywords": ["FDA", "diabetes", "2024"]
+}
+
+""",
+    """Example 7 (Quantitative/historical query):
+
+Query: "What were the main causes of the 2008 financial crisis?"
+
+Output:
+{
+  "high_level_keywords": ["financial crisis causes", "economic history", "systemic risk"],
+  "low_level_keywords": ["2008 financial crisis"]
+}
+
+""",
+    """Example 8 (Operational/process query):
+
+Query: "What are the steps in the agile sprint planning process?"
+
+Output:
+{
+  "high_level_keywords": ["sprint planning", "agile process", "workflow steps"],
+  "low_level_keywords": ["agile", "sprint planning"]
+}
+
+""",
+    """Example 9 (Pharma/CMC manufacturing query):
 
 Query: "What is the closed system drug transfer device (CSTD) strategy in Bio?"
 
@@ -572,54 +606,32 @@ Output:
 }
 
 """,
-    """Example 9 (Pharma product presentation query):
-
-Query: "What is the presentation of Sarclisa (isatuximab)?"
-
-Output:
-{
-  "high_level_keywords": ["drug presentation", "product formulation", "packaging configuration"],
-  "low_level_keywords": ["Sarclisa", "isatuximab"]
-}
-
-""",
-    """Example 10 (Manufacturing batch analysis query):
-
-Query: "What are the minimum information fields on the batch analysis table for an AAV product?"
-
-Output:
-{
-  "high_level_keywords": ["batch analysis", "record fields", "data requirements"],
-  "low_level_keywords": ["AAV", "batch analysis table"]
-}
-
-""",
 ]
 
 PROMPTS['orphan_connection_validation'] = """---Task---
-Evaluate if a meaningful relationship exists between two entities.
+Evaluate whether a meaningful relationship exists between two entities.
 
 Orphan: {orphan_name} ({orphan_type}) - {orphan_description}
 Candidate: {candidate_name} ({candidate_type}) - {candidate_description}
 Similarity: {similarity_score}
 
 Valid relationship types:
-- direct: One uses/creates/owns the other
-- industry: Both operate in the same sector
-- competitive: Direct competitors or alternatives
-- temporal: Versions, successors, or historical connections
-- dependency: One relies on/runs on the other
+- direct: one uses/creates/owns the other
+- industry: same sector
+- competitive: direct competitors or alternatives
+- temporal: versions, successors, historical connections
+- dependency: one relies on / runs on the other
 
-Output valid JSON only (no markdown):
+Output valid JSON only, no markdown:
 {{"should_connect": bool, "confidence": float, "relationship_type": str|null, "relationship_keywords": str|null, "relationship_description": str|null, "reasoning": str}}
 
 Rules:
-- confidence must be a number between 0.0 and 1.0
-- HIGH confidence (>=0.7) only for direct/explicit relationships
-- MEDIUM confidence (0.4-0.69) for strong implicit/industry relationships
-- LOW confidence (<0.4) for weak/tenuous connections
-- should_connect=true only when confidence >= 0.6
-- Similarity alone is not sufficient; explain the relationship
+- confidence: float in [0.0, 1.0]
+- HIGH confidence (>=0.7): direct/explicit relationships only
+- MEDIUM (0.4-0.69): strong implicit/industry
+- LOW (<0.4): weak/tenuous
+- should_connect=true only if confidence >= 0.6
+- Similarity alone insufficient; explain relationship
 
 Example (connected):
 {{"should_connect": true, "confidence": 0.82, "relationship_type": "direct", "relationship_keywords": "framework, built-with", "relationship_description": "Django is a web framework written in Python", "reasoning": "Direct explicit relationship"}}
@@ -628,21 +640,27 @@ Example (not connected):
 {{"should_connect": false, "confidence": 0.05, "relationship_type": null, "relationship_keywords": null, "relationship_description": null, "reasoning": "No logical connection"}}
 """
 
+
+
+
+
+
+
 # HyDE (Hypothetical Document Embedding) prompt
 # Generates a hypothetical answer to improve retrieval through semantic similarity
 PROMPTS[
     'hyde_prompt'
-] = """You are a knowledgeable assistant. Given the following question, identify the specific aspect or facet being asked about (e.g., physical form, mechanism, policy, cause, consequence, comparison) and write a short passage that directly addresses that facet. Write as if this passage appears in the section of a reference document where the answer would naturally be found. Be concrete and factual, imagining plausible details where needed.
+] = """Knowledgeable assistant. Given a question, identify the specific aspect/facet asked about (e.g. physical form, mechanism, policy, cause, consequence, comparison) and write a short passage directly addressing that facet. Write as if from the reference-document section where the answer would naturally appear. Be concrete and factual; invent plausible details when needed.
 
 Question: {query}
 
-Write a 2-3 sentence passage focused on the specific aspect of the question, using the language and framing a knowledgeable document would use in the relevant section:"""
+Write a 2-3 sentence passage on the specific aspect, using the language and framing of a knowledgeable document in that section:"""
 
 # Entity Review prompt for LLM-based entity resolution
 # Used to determine if entity pairs refer to the same real-world entity
 PROMPTS[
     'entity_review_system_prompt'
-] = """You are an Entity Resolution Specialist. Your task is to determine whether pairs of entity names refer to the same real-world entity.
+] = """Entity Resolution Specialist. Determine whether pairs of entity names refer to the same real-world entity.
 
 ---Guidelines---
 
@@ -669,23 +687,25 @@ PROMPTS[
 
 ---Output Format---
 
-For each pair, return a JSON object with:
-- pair_id: The pair number (1-indexed)
+Per pair, return JSON object with:
+- pair_id: pair number (1-indexed)
 - same_entity: true/false
-- canonical: The preferred/canonical name (if same_entity=true, use the most complete/formal name)
-- confidence: 0.0-1.0 (how certain you are)
-- reasoning: Brief explanation of your decision
+- canonical: preferred/canonical name (if same_entity=true, use the most complete/formal form)
+- confidence: 0.0-1.0
+- reasoning: brief decision rationale
 
-Return a JSON array of all results."""
+Return JSON array of all results."""
+
+
 
 PROMPTS['entity_review_user_prompt'] = """---Task---
-Review the following entity pairs and determine which refer to the same real-world entity.
+Review the following entity pairs; mark which refer to the same real-world entity.
 
 ---Entity Pairs---
 {pairs}
 
 ---Output---
-Return a JSON array with your analysis for each pair. Example format:
+Return JSON array, one entry per pair. Example:
 [
   {{"pair_id": 1, "same_entity": true, "canonical": "Federal Reserve", "confidence": 0.95, "reasoning": "FRB is the official abbreviation for Federal Reserve Board"}},
   {{"pair_id": 2, "same_entity": false, "canonical": null, "confidence": 0.9, "reasoning": "These are distinct concepts - one is a country, the other is a financial market"}}
@@ -693,9 +713,9 @@ Return a JSON array with your analysis for each pair. Example format:
 
 # Entity batch review prompt for reviewing multiple new entities against existing ones
 PROMPTS['entity_batch_review_prompt'] = """---Task---
-You have a list of NEW entities extracted from a document. For each new entity, I will provide candidate EXISTING entities that may be the same.
+NEW entities extracted from a document. Each new entity has candidate EXISTING entities that may be the same.
 
-Your job: Determine if each new entity matches any of its candidates.
+Job: determine if each new entity matches any of its candidates.
 
 ---New Entities and Candidates---
 {entity_candidates}
