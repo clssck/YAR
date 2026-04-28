@@ -1,38 +1,35 @@
-# Node.js - THE BIG ONE (200MB+)
+# Node.js — the big one (200MB+)
 **/node_modules
 
-# Python-related files and directories
-__pycache__
+# Python build artefacts
 **/__pycache__
 *.pyc
 *.pyo
-.cache
-
-# Virtual environment directories
-.venv/
-venv/
-
-# Env
-env/
-*.env*
-.env_example
-
-# Distribution / build files
-site
-dist/
-build/
+.cache/
 .eggs/
 *.egg-info/
 *.tgz
 *.tar.gz
+build/
+dist/
+site/
 
-# Exclude siles and folders
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Env files (covers .env, .env.example, .env_example, …)
+*.env*
+
+# Compose / Docker / build descriptors — never copied into the image
 *.yml
+*.yaml
 .dockerignore
 Dockerfile
 Makefile
 
-# Exclude other projects
+# Source-tree areas the runtime image does not need
 /tests
 /scripts
 /data
@@ -41,36 +38,39 @@ Makefile
 /output_complete
 /rag_storage
 /inputs
+/eval_docs
 
-# Python version manager file
+# Python version manager
 .python-version
 
-# Reports
-*.coverage/
+# Logs and reports
 *.log
-log/
+*.log.*
+*.coverage/
 *.logfire
+log/
 
-# Cache
-.cache/
-.mypy_cache
-.pytest_cache
-.ruff_cache
-.gradio
-.logfire
+# Tool caches
+.gradio/
+.history/
+.kreuzberg/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.logfire/
 temp/
 
-# MacOS-related files
+# OS / IDE
 .DS_Store
+.idea/
+.vscode/
 
-# VS Code settings (local configuration files)
-.vscode
-
-# file
+# Misc
 TODO.md
 
-# Exclude Git-related files
+# Git metadata
 .git
 .github
 .gitignore
+.gitattributes
 .pre-commit-config.yaml

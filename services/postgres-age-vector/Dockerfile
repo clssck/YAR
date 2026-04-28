@@ -1,26 +1,45 @@
-# Start from pgvector image (has vector extension pre-built correctly)
-FROM pgvector/pgvector:0.8.1-pg17-trixie
+# PostgreSQL 18 with pgvector + Apache AGE.
+#
+# Build deps are installed, used to compile AGE, then purged in the same
+# layer so the final image only carries the runtime artefacts (~250 MB
+# saved vs. an unpurged build).
 
-# Install build dependencies for AGE
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    git \
-    postgresql-server-dev-17 \
-    libreadline-dev \
-    zlib1g-dev \
-    flex \
-    bison \
+ARG PG_MAJOR=18
+ARG PGVECTOR_TAG=0.8.2-pg18-trixie
+ARG AGE_TAG=PG18/v1.7.0-rc0
+
+FROM pgvector/pgvector:${PGVECTOR_TAG}
+
+ARG PG_MAJOR
+ARG AGE_TAG
+
+RUN set -eux \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        postgresql-server-dev-${PG_MAJOR} \
+        libreadline-dev \
+        zlib1g-dev \
+        flex \
+        bison \
+    && git clone --depth 1 --branch "${AGE_TAG}" https://github.com/apache/age.git /tmp/age \
+    && make -C /tmp/age \
+    && make -C /tmp/age install \
+    && rm -rf /tmp/age \
+    && apt-get purge -y --auto-remove \
+        build-essential \
+        git \
+        postgresql-server-dev-${PG_MAJOR} \
+        libreadline-dev \
+        zlib1g-dev \
+        flex \
+        bison \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Apache AGE 1.6.0 for PG17
-RUN cd /tmp \
-    && git clone --branch release/PG17/1.6.0 https://github.com/apache/age.git \
-    && cd age \
-    && make \
-    && make install \
-    && rm -rf /tmp/age
-
-# Add initialization script to create extensions
-RUN echo "CREATE EXTENSION IF NOT EXISTS vector;" > /docker-entrypoint-initdb.d/01-vector.sql \
-    && echo "CREATE EXTENSION IF NOT EXISTS age;" > /docker-entrypoint-initdb.d/02-age.sql \
-    && echo "SET search_path = ag_catalog, public;" >> /docker-entrypoint-initdb.d/02-age.sql
+# Initialise extensions on first cluster start.
+RUN printf '%s\n' \
+        'CREATE EXTENSION IF NOT EXISTS vector;' \
+        'CREATE EXTENSION IF NOT EXISTS age;' \
+        "SET search_path = ag_catalog, public;" \
+    > /docker-entrypoint-initdb.d/01-extensions.sql

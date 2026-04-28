@@ -26,7 +26,7 @@ services:
   postgres:
     container_name: yar-postgres
     build:
-      context: ./docker/postgres-age-vector
+      context: ./services/postgres-age-vector
       dockerfile: Dockerfile
     environment:
       POSTGRES_DB: yar
@@ -69,7 +69,7 @@ services:
   # RustFS - S3-compatible document storage
   # ══════════════════════════════════════════════════════════════════════════════
   rustfs:
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.0-alpha.99  # Pin to alpha; bump intentionally
     container_name: yar-rustfs
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9100:9000'  # S3 API (mapped to 9100 to avoid conflicts)
@@ -92,7 +92,6 @@ services:
 
   # ══════════════════════════════════════════════════════════════════════════════
   # LiteLLM Proxy - Unified LLM + Embedding gateway (AWS Bedrock)
-  # Only starts with: docker compose --profile work up -d
   # ══════════════════════════════════════════════════════════════════════════════
   litellm:
     container_name: yar-litellm
