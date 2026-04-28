@@ -60,11 +60,22 @@ T = TypeVar('T')
 AGE_MAX_UNWIND_BATCH_SIZE = 5000
 
 # Hybrid search (BM25 + vector) configuration
-# RRF_K: Reciprocal Rank Fusion constant (standard: 60, default: 40, lower = more weight to top ranks)
+# RRF_K: Reciprocal Rank Fusion constant. Cormack et al. (SIGIR 2009) recommend k=60 as a
+# robust default. We deliberately use 40 because YAR's first-stage rankers (vector + BM25) are
+# both well-calibrated for our pharma/CMC eval corpus, so we want the fused list to weight
+# top-of-list agreement more decisively. A smaller k makes the fusion more aggressive at the head
+# (rank 1 from one source dominates rank 5 from another) at the cost of being less robust to
+# noisy individual rankings. If you change this, re-run the retrieval eval — it materially shifts
+# top-k composition.
 RRF_K = int(os.getenv('YAR_RRF_K', '40'))
-# TS_RANK_CD_FLAG: PostgreSQL ts_rank_cd normalization flags (32 = normalize by document length)
+# TS_RANK_CD_FLAG: PostgreSQL ts_rank_cd normalization flags (32 = normalize by document length).
+# Length normalization keeps short paragraphs from dominating BM25 simply by being short. The other
+# common flags: 0 = no normalization, 1 = log-length, 2 = length, 4 = mean harmonic distance,
+# 8 = unique words, 16 = log unique words. 32 (length-normalize, fairer across chunks) is the right
+# default for our chunker which produces variable-length sections.
 TS_RANK_CD_FLAG = int(os.getenv('YAR_TS_RANK_FLAG', '32'))
-# Fetch multipliers for hybrid search (fetch more than top_k to allow RRF fusion)
+# Fetch multipliers for hybrid search (fetch more than top_k to allow RRF fusion to surface
+# chunks that one source ranked low but another ranked high).
 VECTOR_FETCH_MULTIPLIER = float(os.getenv('YAR_VECTOR_FETCH_MULT', '2.0'))
 BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('YAR_BM25_FETCH_MULT', '2.0'))
 
@@ -144,6 +155,9 @@ def _validate_fts_language(language: str) -> str:
     if language not in _VALID_FTS_LANGUAGES:
         raise ValueError(f'Invalid FTS language: {language!r}. Must be one of: {sorted(_VALID_FTS_LANGUAGES)}')
     return language
+
+
+from yar.kg.bm25_sql import build_bm25_sql  # re-exported for callers historically using postgres_impl
 
 
 def normalize_vector_param(vector: Any, *, field_name: str = 'Embedding vector') -> list[float]:
@@ -3738,6 +3752,7 @@ class PGVectorStorage(BaseVectorStorage):
         original_query_embedding: list[float] | None = None,
         bm25_weight: float = 0.3,
         language: str = 'english',
+        phrase_terms: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Combine vector similarity search with BM25 full-text search using RRF.
 
@@ -3756,6 +3771,9 @@ class PGVectorStorage(BaseVectorStorage):
                         Note: RRF naturally handles ranking, this affects how many BM25
                         results to retrieve (more weight = retrieve more BM25 results).
             language: Language for BM25 text search (default: 'english')
+            phrase_terms: Optional multi-word phrases (e.g. "closed system drug transfer device")
+                        OR'd into the BM25 tsquery via ``phraseto_tsquery``. Lets BM25 prefer chunks
+                        where the words appear in sequence rather than scattered.
 
         Returns:
             List of chunks with content, metadata, and rrf_score
@@ -3772,42 +3790,25 @@ class PGVectorStorage(BaseVectorStorage):
         vector_fetch_k = int(top_k * VECTOR_FETCH_MULTIPLIER)
         bm25_fetch_k = int(top_k * (BM25_FETCH_BASE_MULTIPLIER + bm25_weight))  # Scale by weight
 
-        # Build BM25 SQL query
-        # Choose query parser based on syntax (same logic as full_text_search)
-        advanced_syntax_chars = ('"', ' OR ', ' AND ', ' NOT ')
-        if any(c in query for c in advanced_syntax_chars) or query.startswith('-'):
-            ts_query_func = 'websearch_to_tsquery'
-        else:
-            ts_query_func = 'plainto_tsquery'
+        bm25_sql, normalized_phrases = build_bm25_sql(
+            query=query,
+            language=language,
+            phrase_terms=phrase_terms,
+            heading_weight_enabled=os.getenv('YAR_BM25_HEADING_WEIGHT_BOOST', 'false').lower()
+            in ('1', 'true', 'yes'),
+        )
 
-        bm25_sql = f"""
-            SELECT
-                id,
-                full_doc_id,
-                chunk_order_index,
-                tokens,
-                content,
-                file_path,
-                s3_key,
-                ts_rank_cd(
-                    to_tsvector('{language}', content),
-                    {ts_query_func}('{language}', $1),
-                    {TS_RANK_CD_FLAG}
-                ) AS bm25_score
-            FROM YAR_DOC_CHUNKS
-            WHERE workspace = $2
-              AND to_tsvector('{language}', content) @@ {ts_query_func}('{language}', $1)
-            ORDER BY bm25_score DESC
-            LIMIT $3
-        """
+
+
 
         # Run vector searches and BM25 search in parallel for better performance
         db = self._db_required()
 
         async def run_bm25() -> list[dict[str, Any]]:
+            params = [query, self.workspace, bm25_fetch_k, *normalized_phrases]
             results = await db.query(
                 bm25_sql,
-                params=[query, self.workspace, bm25_fetch_k],
+                params=params,
                 multirows=True,
             )
             return results if results else []
