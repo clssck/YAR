@@ -41,6 +41,7 @@ from yar.operate import (
     extract_keywords_only,
     get_keywords_from_query,
     kg_query,
+    rewrite_query_with_history,
 )
 from yar.prompt import PROMPTS
 from yar.utils import process_chunks_unified
@@ -3138,3 +3139,129 @@ class TestResponseQualityControls:
         )
 
         assert normalized == 'In type C meeting [1].'
+
+
+@pytest.mark.offline
+class TestRewriteQueryWithHistory:
+    """Tests for rewrite_query_with_history."""
+
+    @pytest.mark.asyncio
+    async def test_no_history_returns_none(self):
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            None,
+            use_model_func=AsyncMock(return_value='unused'),
+            llm_timeout=10.0,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_empty_history_returns_none(self):
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [],
+            use_model_func=AsyncMock(return_value='unused'),
+            llm_timeout=10.0,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_model_func_returns_none(self):
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [{'role': 'user', 'content': 'Tell me about Drug X phase 1'}],
+            use_model_func=None,
+            llm_timeout=10.0,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_rewrites_pronoun_query(self):
+        model_func = AsyncMock(return_value='What is the phase 2 trial of Drug X?')
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [
+                {'role': 'user', 'content': 'Tell me about Drug X phase 1'},
+                {'role': 'assistant', 'content': 'Phase 1 of Drug X showed safety in 50 patients.'},
+            ],
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result == 'What is the phase 2 trial of Drug X?'
+        # Prompt should embed both the query and a formatted history block.
+        prompt_arg = model_func.await_args.args[0]
+        assert 'What about phase 2?' in prompt_arg
+        assert 'Tell me about Drug X phase 1' in prompt_arg
+        assert 'Phase 1 of Drug X showed safety in 50 patients.' in prompt_arg
+
+    @pytest.mark.asyncio
+    async def test_strips_quotes_from_model_output(self):
+        model_func = AsyncMock(return_value='"What is the phase 2 trial of Drug X?"')
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [{'role': 'user', 'content': 'Tell me about Drug X'}],
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result == 'What is the phase 2 trial of Drug X?'
+
+    @pytest.mark.asyncio
+    async def test_rejects_overly_long_rewrite(self):
+        # Suspiciously long output (>6x original AND >600 chars) is treated as a model failure.
+        bogus = 'noise ' * 200
+        model_func = AsyncMock(return_value=bogus)
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [{'role': 'user', 'content': 'Drug X phase 1'}],
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_rewrite_matches_original(self):
+        model_func = AsyncMock(return_value='What about phase 2?')
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [{'role': 'user', 'content': 'Drug X'}],
+            use_model_func=model_func,
+            llm_timeout=10.0,
+        )
+        # No-op rewrite signals the caller to fall back; same as None.
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_none(self):
+        async def slow(*_args, **_kwargs):
+            await asyncio.sleep(5)
+            return 'too slow'
+
+        result = await rewrite_query_with_history(
+            'What about phase 2?',
+            [{'role': 'user', 'content': 'Drug X'}],
+            use_model_func=slow,
+            llm_timeout=0.01,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_truncates_history_to_max_turns(self):
+        # Build 20 history turns; only the last 6 should appear in the prompt.
+        history = [
+            {'role': 'user' if i % 2 == 0 else 'assistant', 'content': f'turn-{i}'}
+            for i in range(20)
+        ]
+        model_func = AsyncMock(return_value='resolved query')
+        await rewrite_query_with_history(
+            'follow-up',
+            history,
+            use_model_func=model_func,
+            llm_timeout=10.0,
+            max_history_turns=6,
+        )
+        prompt_arg = model_func.await_args.args[0]
+        # Most recent 6 turns (14..19) should appear; older ones should not.
+        assert 'turn-19' in prompt_arg
+        assert 'turn-14' in prompt_arg
+        assert 'turn-13' not in prompt_arg
+        assert 'turn-0' not in prompt_arg

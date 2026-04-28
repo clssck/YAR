@@ -4464,6 +4464,66 @@ async def _get_vector_context(
         return []
 
 
+async def rewrite_query_with_history(
+    query: str,
+    conversation_history: list[dict[str, str]] | None,
+    *,
+    use_model_func: Callable[..., Awaitable[str]] | None,
+    llm_timeout: float,
+    max_history_turns: int = 6,
+) -> str | None:
+    """Rewrite ``query`` as a standalone question using ``conversation_history``.
+
+    Returns the rewritten query when the LLM produces a reasonable result, ``None`` otherwise.
+    Callers fall back to the original query on ``None``.
+
+    The history is truncated to the most recent ``max_history_turns`` entries to bound prompt size.
+    Each entry is expected as ``{'role': 'user' | 'assistant', 'content': str}``; entries that don't
+    match are skipped.
+    """
+    if not query or not use_model_func or not conversation_history:
+        return None
+
+    formatted_turns: list[str] = []
+    for entry in conversation_history[-max_history_turns:]:
+        if not isinstance(entry, dict):
+            continue
+        role = str(entry.get('role') or '').strip().lower()
+        content = str(entry.get('content') or '').strip()
+        if not content or role not in {'user', 'assistant'}:
+            continue
+        prefix = 'User' if role == 'user' else 'Assistant'
+        formatted_turns.append(f'{prefix}: {content}')
+
+    if not formatted_turns:
+        return None
+
+    history_block = '\n'.join(formatted_turns)
+    prompt = PROMPTS['conversation_query_rewrite'].format(history=history_block, query=query)
+    try:
+        response = cast(str, await asyncio.wait_for(use_model_func(prompt), timeout=llm_timeout))
+    except asyncio.TimeoutError:
+        logger.warning(f'Conversation rewrite: timed out after {llm_timeout}s, using original query')
+        return None
+    except Exception as e:
+        logger.warning(f'Conversation rewrite: failed: {e}, using original query')
+        return None
+
+    rewritten = response.strip() if isinstance(response, str) else ''
+    # Strip simple wrapping the model sometimes adds despite the rule.
+    if rewritten.startswith(('"', "'", '`')) and rewritten.endswith(('"', "'", '`')):
+        rewritten = rewritten[1:-1].strip()
+    if not rewritten or len(rewritten) > max(len(query) * 6, 600):
+        # Empty or suspiciously long output: distrust and fall back.
+        logger.debug(f'Conversation rewrite: rejected output ({len(rewritten)} chars), using original query')
+        return None
+    if rewritten == query:
+        return None  # No-op rewrite; signal to caller
+    logger.info(f'Conversation rewrite: {query!r} -> {rewritten!r}')
+    return rewritten
+
+
+
 async def _generate_hyde_answer(
     query: str,
     *,

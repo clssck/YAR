@@ -90,6 +90,7 @@ from yar.operate import (
     merge_nodes_and_edges,
     naive_query,
     rebuild_knowledge_from_chunks,
+    rewrite_query_with_history,
 )
 from yar.prompt import PROMPTS
 from yar.type_defs import GlobalConfig, KnowledgeGraph, resolve_entity_extract_max_async
@@ -2463,6 +2464,24 @@ class YAR:
         if effective_mode != data_param.mode:
             logger.info('[aquery_data] Routed %s query to %s for: %s', data_param.mode, effective_mode, query[:80])
 
+        rewritten_query = query.strip()
+        if (
+            os.getenv('YAR_CONVERSATION_REWRITE', 'true').lower() in ('1', 'true', 'yes')
+            and effective_param.conversation_history
+        ):
+            rewrite_model_func = effective_param.model_func or global_config.get('llm_model_func')
+            if rewrite_model_func is not None:
+                rewritten = await rewrite_query_with_history(
+                    rewritten_query,
+                    list(effective_param.conversation_history),
+                    use_model_func=cast(
+                        Callable[..., Awaitable[str]],
+                        partial(rewrite_model_func, _priority=4),
+                    ),
+                    llm_timeout=float(global_config.get('llm_timeout', 60)),
+                )
+                if rewritten:
+                    rewritten_query = rewritten
         query_result = None
         final_data: dict[str, Any] = {
             'status': 'failure',
@@ -2481,7 +2500,7 @@ class YAR:
         if effective_param.mode in ['local', 'global', 'hybrid', 'mix']:
             logger.debug(f'[aquery_data] Using kg_query for mode: {effective_param.mode}')
             query_result = await kg_query(
-                query.strip(),
+                rewritten_query,
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
@@ -2495,7 +2514,7 @@ class YAR:
         elif effective_param.mode == 'naive':
             logger.debug(f'[aquery_data] Using naive_query for mode: {effective_param.mode}')
             query_result = await naive_query(
-                query.strip(),
+                rewritten_query,
                 self.chunks_vdb,
                 effective_param,
                 global_config,
@@ -2592,12 +2611,34 @@ class YAR:
         if effective_mode != param.mode:
             logger.info('[aquery_llm] Routed %s query to %s for: %s', param.mode, effective_mode, query[:80])
 
+        # Rewrite the query into a self-contained question when conversation_history is non-empty.
+        # Pronouns and elliptical references ('what about phase 2?') would otherwise reach
+        # keyword extraction / HyDE / vector search without their referent. Skip via env var.
+        rewritten_query = query.strip()
+        if (
+            os.getenv('YAR_CONVERSATION_REWRITE', 'true').lower() in ('1', 'true', 'yes')
+            and effective_param.conversation_history
+        ):
+            rewrite_model_func = effective_param.model_func or global_config.get('llm_model_func')
+            if rewrite_model_func is not None:
+                rewritten = await rewrite_query_with_history(
+                    rewritten_query,
+                    list(effective_param.conversation_history),
+                    use_model_func=cast(
+                        Callable[..., Awaitable[str]],
+                        partial(rewrite_model_func, _priority=4),
+                    ),
+                    llm_timeout=float(global_config.get('llm_timeout', 60)),
+                )
+                if rewritten:
+                    rewritten_query = rewritten
+
         try:
             query_result = None
 
             if effective_param.mode in ['local', 'global', 'hybrid', 'mix']:
                 query_result = await kg_query(
-                    query.strip(),
+                    rewritten_query,
                     self.chunk_entity_relation_graph,
                     self.entities_vdb,
                     self.relationships_vdb,
@@ -2610,7 +2651,7 @@ class YAR:
                 )
             elif effective_param.mode == 'naive':
                 query_result = await naive_query(
-                    query.strip(),
+                    rewritten_query,
                     self.chunks_vdb,
                     effective_param,
                     global_config,
