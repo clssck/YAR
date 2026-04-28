@@ -1,0 +1,5 @@
+question,expectedResponse,gold_chunk_ids,gold_doc_id,notes
+"What is the recommended risk syntax?","Due to ... the risk ... could impact ...","chunk_abc123;chunk_def456","lessons_learned.pdf","high-priority"
+"How does the closed system drug transfer device work?","","","cstd_strategy.md","doc-level only"
+"What is mRNA?","","chunk_xyz789","","chunk-level only"
+"What's the weather today?","","","","unlabeled -- no metrics computed"
