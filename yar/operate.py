@@ -51,7 +51,7 @@ from yar.constants import (
 from yar.exceptions import PipelineCancelledException
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
-from yar.retrieval import resolve_entity_filter
+from yar.retrieval import expand_query_aliases, resolve_entity_filter
 from yar.type_defs import GlobalConfig, resolve_entity_extract_max_async
 from yar.utils import (
     CacheData,
@@ -89,6 +89,19 @@ from yar.utils import (
 # allows to use different .env file for each yar instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / '.env', override=False)
+
+
+# Stop-words filtered from ll_keywords as a single-token entry. Kept tight: only the most common
+# fillers that the LLM occasionally returns ('the system', 'an example'). Do NOT broaden into
+# domain-meaningful tokens (e.g. 'do', 'not' carry meaning when present in a multi-word query).
+_LL_KEYWORD_STOPWORDS: frozenset[str] = frozenset({
+    'a', 'an', 'the',
+    'and', 'or', 'but',
+    'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'this', 'that', 'these', 'those',
+    'it', 'its',
+})
 
 
 def _resolve_max_file_paths(global_config: GlobalConfig) -> int:
@@ -4276,6 +4289,25 @@ async def extract_keywords_only(
     hl_keywords = keywords_data.get('high_level_keywords', [])
     ll_keywords = keywords_data.get('low_level_keywords', [])
 
+    # Stop-word hygiene: filter single-token stop-words from ll_keywords. The LLM mostly avoids
+    # these but slips on edge cases ('What is the system?' -> ll=['the system'] sometimes). Multi-word
+    # phrases containing stop-words (e.g. 'out of stock') are kept intact -- only single tokens that
+    # are pure stop-words get dropped.
+    if isinstance(ll_keywords, list):
+        ll_keywords = [
+            term
+            for term in ll_keywords
+            if not (isinstance(term, str) and term.strip().casefold() in _LL_KEYWORD_STOPWORDS)
+        ]
+
+    # Augment ll_keywords with canonical/alias forms for any entity in the alias config that matches
+    if isinstance(ll_keywords, list):
+        existing = {term.casefold().strip() for term in ll_keywords if isinstance(term, str)}
+        for expanded in expand_query_aliases(text):
+            if expanded.casefold().strip() not in existing:
+                ll_keywords.append(expanded)
+                existing.add(expanded.casefold().strip())
+
     # 6. Cache only the processed keywords with cache type
     if hl_keywords or ll_keywords:
         cache_data = {
@@ -4712,6 +4744,50 @@ async def _perform_kg_search(
         )
     ]
 
+    # Confidence floor: if no entity in the retrieval is close to relevant by similarity, drop the
+    # entire entity contribution rather than feeding noisy entity context to the LLM. The chunks
+    # path will still surface evidence; this just stops weak entity hits from biasing the merge.
+    # Tunable via YAR_ENTITY_CONFIDENCE_FLOOR (default 0.45). Disable by setting to 0.
+    entity_confidence_floor = max(_safe_float(os.getenv('YAR_ENTITY_CONFIDENCE_FLOOR'), 0.45), 0.0)
+    if entity_confidence_floor > 0.0 and final_entities:
+        max_similarity = max(
+            _clamp_unit(
+                max(
+                    _safe_float(entity.get('score')),
+                    _safe_float(entity.get('similarity')),
+                    _safe_float(entity.get('cosine_similarity')),
+                    1.0 / (1.0 + max(_safe_float(entity.get('distance')), 0.0)) if 'distance' in entity else 0.0,
+                )
+            )
+            for entity in final_entities
+        )
+        if max_similarity < entity_confidence_floor:
+            logger.info(
+                f'Entity confidence floor: max similarity {max_similarity:.3f} < {entity_confidence_floor:.3f}; '
+                f'dropping {len(final_entities)} weak entity hits, falling back to chunks.'
+            )
+            final_entities = []
+
+    # Entity-type preference: WH-question phrasing ("who founded X", "which company") signals a
+    # preferred entity-type set. We do NOT filter -- the similarity score still wins overall -- but
+    # within the merged list we stable-sort matching types to the front so the LLM sees them first.
+    intent_profile = analyze_query_intent(query or '')
+    preferred_entity_types = [str(t).casefold() for t in (intent_profile.get('preferred_entity_types') or [])]
+    if preferred_entity_types and final_entities:
+        def _type_match_rank(entity: dict[str, Any]) -> int:
+            entity_type = str(entity.get('entity_type', '')).casefold()
+            if not entity_type:
+                return len(preferred_entity_types)
+            try:
+                return preferred_entity_types.index(entity_type)
+            except ValueError:
+                return len(preferred_entity_types)
+        final_entities = sorted(final_entities, key=_type_match_rank)
+        logger.debug(
+            f'Entity-type preference reorder: preferred={preferred_entity_types}, '
+            f'top_type={str(final_entities[0].get("entity_type", "?"))!r}'
+        )
+
     merged_relations: dict[tuple[str, str], tuple[float, int, int, dict[str, Any]]] = {}
     for source_priority, source_relations in enumerate((local_relations, global_relations)):
         for index, relation in enumerate(source_relations):
@@ -4734,10 +4810,22 @@ async def _perform_kg_search(
             key=lambda x: (-x[0], x[1], x[2]),
         )
     ]
+    total_hits = len(final_entities) + len(final_relations) + len(vector_chunks)
     logger.info(
         f'Raw search results: {len(final_entities)} entities, '
         f'{len(final_relations)} relations, {len(vector_chunks)} vector chunks'
     )
+    if total_hits == 0:
+        # All retrieval sources returned empty. Per repo convention this is the missing-ingestion
+        # signal, not a ranking bug. Log at WARNING so it surfaces in production logs.
+        logger.warning(
+            'Retrieval returned ZERO hits across vector + entity + relation sources for query: %r '
+            '(ll_keywords=%r, hl_keywords=%r). This typically means the relevant document is not '
+            'ingested, not that ranking is broken.',
+            (query or '')[:200],
+            (ll_keywords or '')[:200],
+            (hl_keywords or '')[:200],
+        )
 
     return {
         'final_entities': final_entities,
@@ -5608,6 +5696,12 @@ async def _build_query_context(
         'merged_chunks_count': len(merged_chunks),
         'final_chunks_count': len(raw_data.get('data', {}).get('chunks', [])),
         'source_breakdown': source_breakdown_summary,
+        'zero_hits': (
+            len(search_result.get('final_entities', []))
+            + len(search_result.get('final_relations', []))
+            + len(search_result.get('vector_chunks', []))
+        )
+        == 0,
     }
 
     logger.debug(f'[_build_query_context] Context length: {len(context) if context else 0}')
@@ -6498,14 +6592,63 @@ async def _get_edge_data(
         f'Query edges: {keywords} (top_k:{query_param.top_k}, cosine:{relationships_vdb.cosine_better_than_threshold})'
     )
 
-    try:
-        results = await relationships_vdb.query(keywords, top_k=query_param.top_k)
-    except Exception as e:
-        logger.error(f'Relationship vector search failed for keywords "{str(keywords)[:50]}...": {e}')
+    # Mirror the per-term + round-robin pattern from _get_node_data: when hl_keywords are heterogeneous
+    # (e.g. ['mechanism', 'regulation', 'comparison']) a single combined VDB query buries any individual
+    # term's top hits. Per-term queries preserve term-specific top results, then round-robin merge.
+    keywords_str = keywords if isinstance(keywords, str) else ', '.join(keywords)
+    search_terms = _split_keyword_terms(keywords_str)
+    if not search_terms:
+        search_terms = [keywords_str] if keywords_str else []
+    if not search_terms:
         return [], []
 
-    if not len(results):
-        return [], []
+    per_term_results: list[list[dict[str, Any]]] = []
+    for term in search_terms:
+        try:
+            per_term_results.append(
+                await relationships_vdb.query(term, top_k=query_param.top_k) or []
+            )
+        except Exception as e:
+            logger.error(f'Relationship vector search failed for term "{term[:50]}...": {e}')
+            per_term_results.append([])
+
+    results: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    term_offsets = [0] * len(per_term_results)
+    while len(results) < query_param.top_k:
+        added = False
+        for term_index, term_results in enumerate(per_term_results):
+            while term_offsets[term_index] < len(term_results):
+                candidate = term_results[term_offsets[term_index]]
+                term_offsets[term_index] += 1
+                pair_key = (str(candidate.get('src_id', '')), str(candidate.get('tgt_id', '')))
+                if not pair_key[0] or not pair_key[1] or pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                results.append(candidate)
+                added = True
+                break
+            if len(results) >= query_param.top_k:
+                break
+        if not added:
+            break
+
+    # Fallback: if per-term split returned nothing, retry once with the joined keyword string.
+    if not results and len(search_terms) > 1:
+        try:
+            full_results = await relationships_vdb.query(keywords_str, top_k=query_param.top_k) or []
+        except Exception as e:
+            logger.error(f'Relationship vector search failed for joined keywords "{keywords_str[:50]}...": {e}')
+            full_results = []
+        for candidate in full_results:
+            pair_key = (str(candidate.get('src_id', '')), str(candidate.get('tgt_id', '')))
+            if not pair_key[0] or not pair_key[1] or pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            results.append(candidate)
+            if len(results) >= query_param.top_k:
+                break
+
 
     # Prepare edge pairs in two forms:
     # For the batch edge properties function, use dicts.

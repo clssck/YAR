@@ -2064,7 +2064,7 @@ class TestPerformKgSearchBranchExecution:
         with (
             patch(
                 'yar.operate._get_node_data',
-                new=AsyncMock(return_value=([{'entity_name': 'OnlyLocal'}], [{'src_tgt': ('a', 'b')}])),
+                new=AsyncMock(return_value=([{'entity_name': 'OnlyLocal', 'similarity': 0.9}], [{'src_tgt': ('a', 'b')}])),
             ) as node_mock,
             patch('yar.operate._get_edge_data', new=AsyncMock(return_value=([], []))) as edge_mock,
         ):
@@ -2098,7 +2098,7 @@ class TestPerformKgSearchBranchExecution:
                 new=AsyncMock(
                     return_value=(
                         [{'src_id': 'x', 'tgt_id': 'y', 'score': 0.5}],
-                        [{'entity_name': 'OnlyGlobal'}],
+                        [{'entity_name': 'OnlyGlobal', 'similarity': 0.9}],
                     )
                 ),
             ) as edge_mock,
@@ -2130,11 +2130,11 @@ class TestPerformKgSearchBranchExecution:
         with (
             patch(
                 'yar.operate._get_node_data',
-                new=AsyncMock(return_value=([{'entity_name': 'LocalModeEntity'}], [])),
+                new=AsyncMock(return_value=([{'entity_name': 'LocalModeEntity', 'similarity': 0.9}], [])),
             ) as node_mock,
             patch(
                 'yar.operate._get_edge_data',
-                new=AsyncMock(return_value=([{'src_id': 'g', 'tgt_id': 'h'}], [{'entity_name': 'GlobalModeEntity'}])),
+                new=AsyncMock(return_value=([{'src_id': 'g', 'tgt_id': 'h'}], [{'entity_name': 'GlobalModeEntity', 'similarity': 0.9}])),
             ) as edge_mock,
         ):
             local_result = await _perform_kg_search(

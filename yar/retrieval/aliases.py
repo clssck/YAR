@@ -170,3 +170,36 @@ def _find_matching_canonicals(query: str, rules: tuple[_AliasRule, ...]) -> list
                 matches.append(rule.canonical)
 
     return matches
+
+
+def expand_query_aliases(query: str) -> list[str]:
+    """Return canonical and alias forms for every alias rule that matches the query.
+
+    Used at keyword-extraction time to surface the alternate forms of an entity the user mentioned
+    (e.g. user typed 'FDA' -> we also feed 'US Food and Drug Administration' to BM25 and the entity
+    VDB). Output preserves the canonical first, then aliases in config order, deduplicated.
+    """
+    normalized_query = _normalize_text(query)
+    if not normalized_query:
+        return []
+
+    rules = _load_alias_rules()
+    if not rules:
+        return []
+
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for rule in rules:
+        if not any(pattern.search(normalized_query) for pattern in rule.patterns):
+            continue
+        # Canonical first so it ranks above aliases when fed to keyword extraction.
+        candidates: list[str] = [rule.canonical]
+        candidates.extend(alias for alias in rule.aliases if alias != rule.canonical)
+        for candidate in candidates:
+            key = _normalize_text(candidate)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            expanded.append(candidate)
+
+    return expanded
