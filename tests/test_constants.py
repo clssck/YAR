@@ -378,7 +378,9 @@ class TestEmbeddingConfiguration:
 
     def test_default_embedding_similarity_threshold(self):
         """Test DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD is a valid similarity threshold."""
-        assert DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD == 0.95
+        # Raised from 0.95 to 0.995: 0.95 was unsafe across distinct retrieval queries (different
+        # questions could share a cached embedding). 0.995 keeps reuse to near-identical strings only.
+        assert DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD == 0.995
         assert isinstance(DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD, float)
         assert 0 <= DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD <= 1
 

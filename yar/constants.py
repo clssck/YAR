@@ -104,7 +104,7 @@ DEFAULT_MAX_PARALLEL_INSERT = 2  # Default maximum parallel insert operations
 # Embedding configuration defaults
 DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 8  # Default max async for embedding functions
 DEFAULT_EMBEDDING_BATCH_NUM = 10  # Default batch size for embedding computations
-DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD = 0.95  # Minimum similarity score to use cached embeddings
+DEFAULT_EMBEDDING_SIMILARITY_THRESHOLD = 0.995  # Minimum similarity score to reuse a cached embedding. 0.995 keeps reuse to near-identical strings; 0.95 was unsafe across distinct retrieval queries.
 
 # Migration and batch processing defaults
 DEFAULT_MIGRATION_BATCH_SIZE = 500  # Batch size for chunk tracking migration
