@@ -327,7 +327,7 @@ def parse_args() -> argparse.Namespace:
     args.embedding_token_limit = get_env_value('EMBEDDING_TOKEN_LIMIT', None, int, special_none=True)
 
     # Entity Resolution configuration (LLM-based)
-    args.entity_resolution_enabled = get_env_value('ENTITY_RESOLUTION_ENABLED', False, bool)
+    args.entity_resolution_enabled = get_env_value('ENTITY_RESOLUTION_ENABLED', True, bool)
     args.entity_resolution_batch_size = get_env_value('ENTITY_RESOLUTION_BATCH_SIZE', 200, int)
     args.entity_resolution_candidates_per_entity = get_env_value('ENTITY_RESOLUTION_CANDIDATES_PER_ENTITY', 15, int)
     args.entity_resolution_min_confidence = get_env_value('ENTITY_RESOLUTION_MIN_CONFIDENCE', 0.85, float)
