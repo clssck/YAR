@@ -847,7 +847,7 @@ class DocProcessingStatus:
     """Document processing status data structure"""
 
     content_summary: str
-    """First 100 chars of document content, used for preview"""
+    """Content-derived document summary used for previews"""
     content_length: int
     """Total length of document"""
     file_path: str

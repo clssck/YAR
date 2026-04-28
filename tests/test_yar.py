@@ -1262,6 +1262,40 @@ class TestYARPublicMethods:
     @patch('yar.kg.verify_storage_implementation')
     @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
+    async def test_apipeline_enqueue_documents_uses_content_summary_not_filename(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Document list summaries should come from content, not file stems."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+        )
+
+        rag.doc_status.filter_keys = AsyncMock(side_effect=lambda keys: set(keys))
+        rag.doc_status.upsert = AsyncMock()
+        rag.full_docs.upsert = AsyncMock()
+        rag.full_docs.index_done_callback = AsyncMock()
+
+        await rag.apipeline_enqueue_documents(
+            input=['<!-- PAGE 1 -->\n# Actual CMC summary\nThis deck explains goal-setting best practices.'],
+            file_paths=['Opaque_File_Name.pptx'],
+            track_id='enqueue_track_abc',
+        )
+
+        upsert_payload = rag.doc_status.upsert.call_args[0][0]
+        status_record = next(iter(upsert_payload.values()))
+        assert status_record['content_summary'].startswith('Actual CMC summary')
+        assert 'Opaque_File_Name' not in status_record['content_summary']
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
     async def test_apipeline_enqueue_documents_creates_duplicate_records(
         self,
         mock_check_env,

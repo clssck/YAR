@@ -2146,19 +2146,40 @@ async def use_llm_func_with_cache(
 
 
 def get_content_summary(content: str, max_length: int = 250) -> str:
-    """Get summary of document content
-
-    Args:
-        content: Original document content
-        max_length: Maximum length of summary
-
-    Returns:
-        Truncated content with ellipsis if needed
-    """
+    """Return a short, content-derived document summary for previews."""
     content = content.strip()
-    if len(content) <= max_length:
-        return content
-    return content[:max_length] + '...'
+    if not content:
+        return ''
+
+    # Vision/PDF extraction can prepend page markers, markdown heading syntax,
+    # and HTML table tags. Strip those artifacts so document lists show content,
+    # not extraction bookkeeping or filenames.
+    cleaned = re.sub(r'<!--\s*PAGE\s+\d+\s*-->', ' ', content, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
+    cleaned = re.sub(r'\[[Ii]mage\s+\d+:[^\]]*\]', ' ', cleaned)
+
+    fragments: list[str] = []
+    for raw_line in cleaned.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r'^#{1,6}\s*', '', line)
+        line = re.sub(r'^[-*+]\s+', '', line)
+        line = re.sub(r'\s+', ' ', line).strip()
+        if not line or set(line) <= {'|', '-', ':'}:
+            continue
+        fragments.append(line)
+        if sum(len(fragment) for fragment in fragments) >= max_length * 2:
+            break
+
+    summary = ' '.join(fragments) if fragments else re.sub(r'\s+', ' ', content)
+    if len(summary) <= max_length:
+        return summary
+
+    cutoff = summary.rfind(' ', 0, max_length)
+    if cutoff < max_length * 0.6:
+        cutoff = max_length
+    return summary[:cutoff].rstrip(' ,;:') + '...'
 
 
 # Characters to strip for security (invisible/control characters)
