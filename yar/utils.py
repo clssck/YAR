@@ -3420,9 +3420,13 @@ async def process_chunks_unified(
         term for raw_term in (topic_terms or []) if (term := _normalize_lexical_term(str(raw_term)))
     ]
     if any(' ' in term for term in normalized_topic_terms):
-        # Exact low-level phrases are deliberate hints from the caller. Let them
-        # outrank higher base retrieval scores from generic phase/study chunks when
-        # the chunk text actually carries the requested phrase.
+        # Multi-word ll_keyword phrases are deliberate caller hints (e.g. extracted entity names).
+        # When such a phrase appears verbatim in the chunk text we want it to outrank chunks
+        # whose vector/BM25 score is higher but lack the literal phrase; generic phase/study
+        # chunks otherwise dominate. The cliff (0.2 -> 0.75) is intentionally large because the
+        # signal it gates on ('caller-provided multi-word phrase appears verbatim') is rare and
+        # high-precision; small boosts (~0.4) under-weight it. If you tune this, also revisit
+        # LEXICAL_BOOST_WEIGHT for the no-phrase case so the two regimes trade off cleanly.
         lexical_boost_weight = max(lexical_boost_weight, 0.75)
     if lexical_boost_enabled and lexical_boost_weight > 0.0 and len(unique_chunks) > 1:
         rare_terms = _derive_rare_terms(query, topic_terms=topic_terms, facet_terms=facet_terms)
@@ -3444,38 +3448,37 @@ async def process_chunks_unified(
     )
     intent_profile = analyze_query_intent(query)
     effective_chunk_limit = configured_chunk_limit
-    adaptive_chunk_focus_enabled = source_type in {'naive', 'vector', 'hybrid'}
-    if adaptive_chunk_focus_enabled:
-        recommended_chunk_limit = int(intent_profile.get('recommended_chunk_limit') or 0)
-        if recommended_chunk_limit > 0:
-            effective_chunk_limit = min(configured_chunk_limit, recommended_chunk_limit)
-        per_document_limit = int(intent_profile.get('per_document_limit') or 0)
-        if per_document_limit > 0:
-            focused_chunks = _apply_per_document_chunk_focus(
-                unique_chunks,
-                total_limit=effective_chunk_limit,
-                per_document_limit=per_document_limit,
-                allow_single_document_expansion=bool(intent_profile.get('allow_single_document_expansion')),
+    recommended_chunk_limit = int(intent_profile.get('recommended_chunk_limit') or 0)
+    if recommended_chunk_limit > 0 and source_type in {'naive', 'vector', 'hybrid'}:
+        effective_chunk_limit = min(configured_chunk_limit, recommended_chunk_limit)
+
+    # Per-document cap: if intent profile names a value, honor it; otherwise fall back to a
+    # generic diversity cap proportional to the configured chunk_top_k. Without a fallback the
+    # default profile (kind='default', limit=0) lets a single document occupy every slot, which
+    # buries cross-document matches.
+    per_document_limit = int(intent_profile.get('per_document_limit') or 0)
+    if per_document_limit <= 0 and effective_chunk_limit > 0:
+        per_document_limit = max(2, effective_chunk_limit // 5)
+    if per_document_limit > 0:
+        focused_chunks = _apply_per_document_chunk_focus(
+            unique_chunks,
+            total_limit=effective_chunk_limit,
+            per_document_limit=per_document_limit,
+            allow_single_document_expansion=bool(intent_profile.get('allow_single_document_expansion')),
+        )
+        if len(focused_chunks) != len(unique_chunks) or effective_chunk_limit < configured_chunk_limit:
+            logger.debug(
+                'Adaptive chunk focus: %s query kept %s/%s chunks (configured_top_k=%s, per_document_limit=%s, source=%s)',
+                intent_profile['kind'],
+                len(focused_chunks),
+                len(unique_chunks),
+                configured_chunk_limit,
+                per_document_limit,
+                source_type,
             )
-            if len(focused_chunks) != len(unique_chunks) or effective_chunk_limit < configured_chunk_limit:
-                logger.debug(
-                    'Adaptive chunk focus: %s query kept %s/%s chunks (configured_top_k=%s, per_document_limit=%s, source=%s)',
-                    intent_profile['kind'],
-                    len(focused_chunks),
-                    len(unique_chunks),
-                    configured_chunk_limit,
-                    per_document_limit,
-                    source_type,
-                )
-            unique_chunks = focused_chunks
-        elif effective_chunk_limit < len(unique_chunks):
-            unique_chunks = unique_chunks[:effective_chunk_limit]
-    elif (
-        query_param.chunk_top_k is not None
-        and query_param.chunk_top_k > 0
-        and len(unique_chunks) > query_param.chunk_top_k
-    ):
-        unique_chunks = unique_chunks[: query_param.chunk_top_k]
+        unique_chunks = focused_chunks
+    elif effective_chunk_limit < len(unique_chunks):
+        unique_chunks = unique_chunks[:effective_chunk_limit]
 
     if query_param.chunk_top_k is not None and query_param.chunk_top_k > 0:
         logger.debug(
