@@ -36,6 +36,7 @@ from yar.constants import (
     SOURCE_IDS_LIMIT_METHOD_FIFO,
 )
 from yar.utils import (
+    _mmr_reorder,
     _normalize_math_alphanumerics,
     _sanitize_string_for_json,
     apply_source_ids_limit,
@@ -1112,4 +1113,117 @@ def test_process_chunks_unified_falls_back_to_full_budget_when_keys_missing() ->
 
     assert [chunk['chunk_id'] for chunk in missing_keys_chunks] == [
         chunk['chunk_id'] for chunk in explicit_limit_chunks
+    ]
+
+
+def _make_mmr_chunks() -> list[dict[str, Any]]:
+    return [
+        {
+            'chunk_id': 'duplicate-a',
+            'content': (
+                'Process validation batch release protocol requires sterility assurance '
+                'controls and stability data review.'
+            ),
+            'file_path': 'doc-a.md',
+            'retrieval_score': 0.9,
+        },
+        {
+            'chunk_id': 'duplicate-b',
+            'content': (
+                'Process validation batch release protocol requires sterility assurance '
+                'controls and stability data review update.'
+            ),
+            'file_path': 'doc-b.md',
+            'retrieval_score': 0.85,
+        },
+        {
+            'chunk_id': 'distinct',
+            'content': (
+                'Warehouse alarms cold storage excursion investigation covers label '
+                'reconciliation and shipping lane quarantine.'
+            ),
+            'file_path': 'doc-c.md',
+            'retrieval_score': 0.7,
+        },
+    ]
+
+
+def _run_process_chunks_for_mmr(chunks: list[dict[str, Any]]) -> list[dict]:
+    return asyncio.run(
+        process_chunks_unified(
+            query='Describe manufacturing controls for release stability details',
+            unique_chunks=chunks,
+            query_param=QueryParam(chunk_top_k=3, enable_rerank=False),
+            global_config={},
+            source_type='mixed',
+        )
+    )
+
+
+def test_mmr_reorder_preserves_order_with_full_relevance() -> None:
+    chunks = [
+        {
+            'chunk_id': 'first',
+            'content': 'Alpha batch release controls',
+            'merge_score': 0.9,
+        },
+        {
+            'chunk_id': 'second',
+            'content': 'Beta warehouse alarm controls',
+            'merge_score': 0.8,
+        },
+        {
+            'chunk_id': 'third',
+            'content': 'Gamma stability review controls',
+            'merge_score': 0.7,
+        },
+    ]
+
+    reordered = _mmr_reorder(chunks, lambda_=1.0)
+
+    assert [chunk['chunk_id'] for chunk in reordered] == ['first', 'second', 'third']
+
+
+def test_mmr_reorder_breaks_up_near_duplicates() -> None:
+    reordered = _mmr_reorder(_make_mmr_chunks(), lambda_=0.7)
+    reordered_ids = [chunk['chunk_id'] for chunk in reordered]
+
+    assert reordered_ids.index('distinct') < reordered_ids.index('duplicate-b')
+
+
+def test_mmr_reorder_handles_missing_content() -> None:
+    chunks = [
+        {'chunk_id': 'missing', 'merge_score': 0.99},
+        {
+            'chunk_id': 'present',
+            'content': 'Distinct release evidence',
+            'merge_score': 0.5,
+        },
+    ]
+
+    reordered = _mmr_reorder(chunks, lambda_=0.7)
+
+    assert [chunk['chunk_id'] for chunk in reordered] == ['present', 'missing']
+
+
+def test_process_chunks_unified_applies_mmr_by_default(monkeypatch) -> None:
+    monkeypatch.delenv('YAR_MMR_LAMBDA', raising=False)
+    monkeypatch.setenv('ENABLE_LEXICAL_BOOST', 'false')
+
+    processed = _run_process_chunks_for_mmr(_make_mmr_chunks())
+    processed_ids = [chunk['chunk_id'] for chunk in processed]
+
+    assert processed_ids.index('distinct') < processed_ids.index('duplicate-b')
+
+
+def test_process_chunks_unified_disables_mmr_when_lambda_one(monkeypatch) -> None:
+    monkeypatch.setenv('YAR_MMR_LAMBDA', '1.0')
+    monkeypatch.setenv('ENABLE_LEXICAL_BOOST', 'false')
+
+    processed = _run_process_chunks_for_mmr(_make_mmr_chunks())
+
+    assert [chunk['chunk_id'] for chunk in processed] == [
+        'duplicate-a',
+        'duplicate-b',
+        'distinct',
     ]

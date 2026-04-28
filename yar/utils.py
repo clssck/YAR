@@ -2921,6 +2921,116 @@ def _extract_lexical_tokens(text: str) -> list[str]:
     return _LEXICAL_TERM_PATTERN.findall(_normalize_lexical_text(text))
 
 
+def _chunk_text_tokens(content: str) -> set[str]:
+    """Tokenize chunk content for textual MMR similarity.
+
+    Lowercased, alphanumeric tokens only.
+    """
+    return {
+        token
+        for token in re.findall(r'[a-z0-9]+', content.lower())
+        if token not in _LEXICAL_STOPWORDS
+    }
+
+
+def _mmr_reorder(
+    chunks: list[dict[str, Any]],
+    *,
+    relevance_key: str | None = 'merge_score',
+    lambda_: float = 0.7,
+    max_keep: int | None = None,
+) -> list[dict[str, Any]]:
+    """Reorder chunks by Maximal Marginal Relevance over textual content.
+
+    For each step, picks the chunk that maximises
+        lambda_ * relevance - (1 - lambda_) * max_similarity_to_selected
+    where similarity is Jaccard over the lowercased token sets of `content`.
+    ``lambda_=0.0`` is allowed for pure diversity after the first relevance seed;
+    ``lambda_=1.0`` is pure relevance.
+
+    The original order is restored if the input has fewer than 2 chunks. Chunks without
+    `content` are kept in their original relative position at the tail.
+    """
+    if len(chunks) < 2:
+        return chunks
+
+    mmr_lambda = min(max(lambda_, 0.0), 1.0)
+    scored_chunks: list[tuple[int, dict[str, Any], set[str], float]] = []
+    empty_content_chunks: list[tuple[int, dict[str, Any]]] = []
+
+    for index, chunk in enumerate(chunks):
+        content = chunk.get('content')
+        if not content:
+            empty_content_chunks.append((index, chunk))
+            continue
+
+        token_set = _chunk_text_tokens(str(content))
+        if not token_set:
+            empty_content_chunks.append((index, chunk))
+            continue
+
+        # Relevance signal: explicit field if present, else position-based (input is assumed sorted by
+        # the upstream pipeline -- chunk at index 0 is most relevant). Position-based fallback keeps
+        # MMR consistent with prior reorderings (e.g. _apply_lexical_chunk_boost) that don't write a
+        # 'merge_score' or 'retrieval_score' field but did set the order.
+        if relevance_key is None:
+            # Position-only mode: input order is the authoritative relevance signal (used by the
+            # in-pipeline call site after lexical boost has re-ordered chunks).
+            relevance = 1.0 - (index / max(len(chunks), 1))
+            scored_chunks.append((index, chunk, token_set, relevance))
+            continue
+        explicit_relevance = chunk.get(relevance_key)
+        if explicit_relevance is None:
+            explicit_relevance = chunk.get('retrieval_score')
+        if explicit_relevance is None:
+            relevance = 1.0 - (index / max(len(chunks), 1))
+        else:
+            relevance = _safe_float(explicit_relevance, 0.0) or 0.0
+        scored_chunks.append((index, chunk, token_set, relevance))
+
+    if len(scored_chunks) < 2:
+        reordered_chunks = [chunk for _, chunk, _, _ in scored_chunks] + [
+            chunk for _, chunk in empty_content_chunks
+        ]
+        if max_keep is not None:
+            return reordered_chunks[:max(max_keep, 0)]
+        return reordered_chunks
+
+    def jaccard_similarity(left: set[str], right: set[str]) -> float:
+        if not left or not right:
+            return 0.0
+        return len(left & right) / len(left | right)
+
+    remaining_chunks = scored_chunks.copy()
+    selected_chunks: list[tuple[int, dict[str, Any], set[str], float]] = []
+    first_chunk = max(remaining_chunks, key=lambda item: (item[3], -item[0]))
+    selected_chunks.append(first_chunk)
+    remaining_chunks.remove(first_chunk)
+
+    while remaining_chunks:
+        best_position = max(
+            range(len(remaining_chunks)),
+            key=lambda position: (
+                mmr_lambda * remaining_chunks[position][3]
+                - (1.0 - mmr_lambda)
+                * max(
+                    jaccard_similarity(remaining_chunks[position][2], selected_chunk[2])
+                    for selected_chunk in selected_chunks
+                ),
+                remaining_chunks[position][3],
+                -remaining_chunks[position][0],
+            ),
+        )
+        selected_chunks.append(remaining_chunks.pop(best_position))
+
+    reordered_chunks = [chunk for _, chunk, _, _ in selected_chunks] + [
+        chunk for _, chunk in empty_content_chunks
+    ]
+    if max_keep is not None:
+        return reordered_chunks[:max(max_keep, 0)]
+    return reordered_chunks
+
+
 def _is_specific_lexical_term(term: str) -> bool:
     if not term:
         return False
@@ -3545,6 +3655,23 @@ async def process_chunks_unified(
             effective_chunk_limit,
             source_type,
         )
+
+    # Diversity reorder: penalise near-duplicate content chunks (e.g. boilerplate repeated
+    # across doc versions) before token truncation gives them slots they would not earn.
+    # versions) before the token truncation gives them slots they would not earn on their own.
+    # Conservative default lambda=0.7 (relevance-dominant); env-tunable via YAR_MMR_LAMBDA.
+    if len(unique_chunks) > 1:
+        try:
+            mmr_lambda = float(os.getenv('YAR_MMR_LAMBDA', '0.7'))
+        except ValueError:
+            mmr_lambda = 0.7
+        mmr_lambda = min(max(mmr_lambda, 0.0), 1.0)
+        if mmr_lambda < 1.0:  # lambda=1.0 disables diversity entirely (pure relevance)
+            # The chunks reaching MMR have already been re-ordered by lexical boost and per-document
+            # focus -- their *position* is the authoritative relevance signal at this point. Passing
+            # a non-existent relevance_key forces _mmr_reorder onto its position-based fallback,
+            # so diversity does not undo earlier lexical-boost reorderings.
+            unique_chunks = _mmr_reorder(unique_chunks, lambda_=mmr_lambda, relevance_key=None)
 
     # 6. Token-based final truncation
     tokenizer = global_config.get('tokenizer')
