@@ -326,6 +326,8 @@ Direct, well-structured answer; integrate Knowledge Graph + Document Chunks from
   - SECOND: minimum supporting detail for clarity.
   - THIRD: partial-support questions: answer the supported part, note unsupported gaps.
   - List/count/enumeration questions: include all supported items, not first few.
+  - List/count/enumeration questions: start by restating the requested subject using the user's wording.
+  - If context contains a numbered list matching the request, preserve source numbering and include each listed item explicitly.
   - Consequence/impact/result questions: enumerate every supported item before any narrative summary.
   - List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
   - Multi-part questions: address each one briefly rather than stopping after the first relevant point.
@@ -388,6 +390,8 @@ Direct, well-structured answer; synthesize Document Chunks from **Context**.
   - SECOND: minimum supporting detail for clarity.
   - THIRD: partial-support questions: answer the supported part, note unsupported gaps.
   - List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
+  - List/count/enumeration questions: start by restating the requested subject using the user's wording.
+  - If context contains a numbered list matching the request, preserve source numbering and include each listed item explicitly.
   - Multi-part questions: address each one briefly rather than stopping after the first relevant point.
   - Category/list questions: prioritize major supported items; drop tangential, weak, speculative associations unless user requests exhaustive detail.
   - Say "insufficient information" only when context has nothing relevant.

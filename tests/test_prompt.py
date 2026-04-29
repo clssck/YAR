@@ -245,6 +245,10 @@ class TestRAGResponsePrompts:
         assert 'For yes/no questions, start the answer with "Yes" or "No"' in naive_prompt
         assert 'keep each supported item explicit and separate them cleanly with semicolons' in rag_prompt
         assert 'keep each supported item explicit and separate them cleanly with semicolons' in naive_prompt
+        assert "start by restating the requested subject using the user's wording" in rag_prompt
+        assert "start by restating the requested subject using the user's wording" in naive_prompt
+        assert 'preserve source numbering and include each listed item explicitly' in rag_prompt
+        assert 'preserve source numbering and include each listed item explicitly' in naive_prompt
 
 
 class TestQueryContextPrompts:

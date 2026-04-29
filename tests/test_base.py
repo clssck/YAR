@@ -894,6 +894,8 @@ class TestEvaluationHarnessHelpers:
         assert 'Never answer with only Yes or No' in payload['user_prompt']
         assert 'brief evidence-based sentence' in payload['user_prompt']
         assert 'closely paraphrases the key supporting phrase' in payload['user_prompt']
+        assert 'list/count/enumeration questions' in payload['user_prompt']
+        assert 'copy the list item labels and key sub-bullets closely' in payload['user_prompt']
         assert 'Do not add your own caution' in payload['user_prompt']
         assert 'keep it pending' in payload['user_prompt']
 
@@ -1293,6 +1295,8 @@ class TestEvaluationHarnessHelpers:
         assert result['status'] == 'success'
         assert result['metrics']['faithfulness'] == 1.0
         assert result['metrics']['answer_relevance'] == 0.5
+        assert result['raw_metrics']['answer_relevance'] == 0.5
+        assert result['raw_ragas_score'] == 0.6875
         assert progress_counter['completed'] == 1
 
     @pytest.mark.asyncio

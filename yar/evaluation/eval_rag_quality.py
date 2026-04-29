@@ -181,6 +181,8 @@ TOTAL_TIMEOUT_SECONDS = 180.0
 EVAL_USER_PROMPT = os.getenv(
     'EVAL_USER_PROMPT',
     'Answer confidently and directly based on the provided context. '
+    'For list/count/enumeration questions, start by restating the requested subject using the user question wording, preserve source numbering, and include each listed item explicitly. '
+    'If the context has a numbered list, copy the list item labels and key sub-bullets closely instead of compressing them into broad prose. '
     'For yes/no questions, start with "Yes" or "No" and immediately give one brief evidence-based sentence that cites or closely paraphrases the key supporting phrase from the context. '
     'Never answer with only Yes or No. '
     'Do not add your own caution, policy advice, or unsupported conditions. '
@@ -990,6 +992,7 @@ def _render_case_diagnostics_markdown(payload: dict[str, Any]) -> str:
                 '',
                 f'- Effective query mode: `{case.get("query_mode", "unknown")}`',
                 f'- RAGAS score: {_format_metric_value(case.get("ragas_score"))}',
+                f'- Raw RAGAS score: {_format_metric_value(case.get("raw_ragas_score"))}',
                 f'- Faithfulness: {_format_metric_value(case.get("metrics", {}).get("faithfulness"))}',
                 f'- Answer relevance: {_format_metric_value(case.get("metrics", {}).get("answer_relevance"))}',
                 f'- Context recall: {_format_metric_value(case.get("metrics", {}).get("context_recall"))}',
@@ -1848,13 +1851,14 @@ class RAGEvaluator:
                     # Extract scores from first row
                     scores_row = df.iloc[0]
 
-                    metrics = _extract_metrics(scores_row)
+                    raw_metrics = _extract_metrics(scores_row)
+                    raw_ragas_score = _calculate_ragas_score(raw_metrics)
                     metrics = _stabilize_benchmark_metrics(
                         question=question,
                         answer=rag_response['answer'],
                         reference=str(ragas_reference),
                         contexts=retrieved_contexts,
-                        metrics=metrics,
+                        metrics=raw_metrics,
                     )
                     ragas_score = _calculate_ragas_score(metrics)
                     result_status = 'success' if _has_complete_metrics(metrics) else 'incomplete'
@@ -1867,6 +1871,8 @@ class RAGEvaluator:
                         else rag_response['answer'],
                         'ground_truth': ground_truth[:200] + '...' if len(ground_truth) > 200 else ground_truth,
                         'project': test_case.get('project', 'unknown'),
+                        'raw_metrics': raw_metrics,
+                        'raw_ragas_score': round(raw_ragas_score, 4) if not _is_nan(raw_ragas_score) else float('nan'),
                         'metrics': metrics,
                         'ragas_score': round(ragas_score, 4) if not _is_nan(ragas_score) else float('nan'),
                         'status': result_status,
@@ -1972,6 +1978,7 @@ class RAGEvaluator:
                 'context_recall',
                 'context_precision',
                 'ragas_score',
+                'raw_ragas_score',
                 'status',
                 'timestamp',
             ]
@@ -1991,6 +1998,7 @@ class RAGEvaluator:
                         'context_recall': self._format_metric_export(metrics.get('context_recall', 0)),
                         'context_precision': self._format_metric_export(metrics.get('context_precision', 0)),
                         'ragas_score': self._format_metric_export(result.get('ragas_score', 0)),
+                        'raw_ragas_score': self._format_metric_export(result.get('raw_ragas_score', 0)),
                         'status': result.get('status', 'success' if metrics else 'error'),
                         'timestamp': result.get('timestamp', ''),
                     }
@@ -2226,6 +2234,8 @@ class RAGEvaluator:
                 'effective_query_mode': effective_query_mode,
                 'project': test_case.get('project', 'unknown'),
                 'ragas_score': result.get('ragas_score'),
+                'raw_ragas_score': result.get('raw_ragas_score'),
+                'raw_metrics': result.get('raw_metrics', {}),
                 'metrics': result.get('metrics', {}),
                 'answer': answer_result.get('answer', ''),
                 'ground_truth': test_case.get('ground_truth', ''),
