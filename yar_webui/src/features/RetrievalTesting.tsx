@@ -378,9 +378,6 @@ export default function RetrievalTesting() {
         ...sendableSettings,
         query: trimmedQuery,
         response_type: 'Multiple Paragraphs',
-        conversation_history: prevMessages
-          .filter((m) => m.isError !== true && (m.role === 'user' || m.role === 'assistant'))
-          .map((m) => ({ role: m.role, content: m.role === 'assistant' ? (m.displayContent ?? m.content) : m.content })),
         ...(effectiveMode ? { mode: effectiveMode } : {}),
       }
 

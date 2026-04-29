@@ -205,11 +205,6 @@ export type QueryRequest = {
   max_relation_tokens?: number
   /** Maximum total tokens budget for the entire query context (entities + relations + chunks + system prompt). */
   max_total_tokens?: number
-  /**
-   * Stores past conversation history to maintain context.
-   * Format: [{"role": "user/assistant", "content": "message"}].
-   */
-  conversation_history?: Message[]
   /** User-provided prompt for the query. If provided, this will be used instead of the default value from prompt template. */
   user_prompt?: string
   /** Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is False. */

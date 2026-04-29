@@ -129,11 +129,6 @@ class QueryParam:
     ll_keywords: list[str] = field(default_factory=list)
     """List of low-level keywords to refine retrieval focus."""
 
-    # History messages are sent to the LLM and can influence keyword extraction for retrieval.
-    conversation_history: list[dict[str, str]] = field(default_factory=list)
-    """Stores past conversation history to maintain context.
-    Format: [{"role": "user/assistant", "content": "message"}].
-    """
 
     model_func: Callable[..., Awaitable[Any]] | None = None
     """Optional override for the LLM model function to use for this specific query.

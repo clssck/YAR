@@ -288,23 +288,6 @@ class TestQueryParametersFunctional:
         )
         assert response.status_code == 200
 
-    async def test_conversation_history_passed_to_rag(self, client, mock_rag):
-        """Test conversation history is accepted by the API."""
-        history = [
-            {"role": "user", "content": "What is AI?"},
-            {"role": "assistant", "content": "AI is artificial intelligence."},
-        ]
-
-        response = await client.post(
-            "/query",
-            json={
-                "query": "Tell me more about it",
-                "mode": "hybrid",
-                "conversation_history": history,
-            },
-        )
-        assert response.status_code == 200
-
     async def test_custom_keywords_enhance_search(self, client, mock_rag):
         """Test custom keywords are accepted by the API."""
         response = await client.post(

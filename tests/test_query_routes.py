@@ -230,28 +230,6 @@ class TestQueryRequestModel:
         with pytest.raises(ValidationError):
             QueryRequest(query='test query', mode='invalid_mode')  # type: ignore[arg-type]
 
-    def test_query_request_conversation_history_valid(self):
-        """Test valid conversation history format."""
-        from yar.api.routers.query_routes import QueryRequest
-
-        history = [
-            {'role': 'user', 'content': 'Hello'},
-            {'role': 'assistant', 'content': 'Hi there!'},
-        ]
-        req = QueryRequest(query='Continue please', conversation_history=history)
-        assert req.conversation_history is not None
-        assert len(req.conversation_history) == 2
-
-    def test_query_request_conversation_history_missing_role(self):
-        """Test that conversation history without role is rejected."""
-        from pydantic import ValidationError
-
-        from yar.api.routers.query_routes import QueryRequest
-
-        history = [{'content': 'Hello'}]  # missing 'role'
-        with pytest.raises(ValidationError):
-            QueryRequest(query='test query', conversation_history=history)
-
     def test_query_request_to_query_params(self):
         """Test conversion to QueryParam preserves query-engine fields."""
         from yar.api.routers.query_routes import QueryRequest
@@ -1122,34 +1100,6 @@ class TestQueryIntegration:
         awaited_call = mock_rag.aquery_llm.await_args
         assert awaited_call.args[0] == 'Tell me more'
         assert awaited_call.kwargs['param'].stream is False
-
-    @pytest.mark.asyncio
-    async def test_query_with_conversation_history(self, client, mock_rag):
-        """Test query with conversation history context."""
-        mock_rag.aquery_llm.return_value = {
-            'llm_response': {'content': 'More details about AI...'},
-            'data': {'references': []},
-        }
-
-        response = await client.post(
-            '/query',
-            json={
-                'query': 'Tell me more',
-                'conversation_history': [
-                    {'role': 'user', 'content': 'What is AI?'},
-                    {'role': 'assistant', 'content': 'AI is...'},
-                ],
-            },
-        )
-
-        assert response.status_code == 200
-        # Verify the RAG was called with proper params
-        mock_rag.aquery_llm.assert_called_once()
-        call_kwargs = mock_rag.aquery_llm.call_args
-        assert call_kwargs.kwargs['param'].conversation_history == [
-            {'role': 'user', 'content': 'What is AI?'},
-            {'role': 'assistant', 'content': 'AI is...'},
-        ]
 
     @pytest.mark.asyncio
     async def test_query_with_custom_keywords(self, client, mock_rag):

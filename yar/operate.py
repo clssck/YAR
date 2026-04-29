@@ -4137,7 +4137,6 @@ async def kg_query(
             await use_model_func(
                 user_query,
                 system_prompt=sys_prompt,
-                history_messages=query_param.conversation_history,
                 enable_cot=True,
                 stream=query_param.stream,
                 max_tokens=response_max_tokens,
@@ -4235,23 +4234,8 @@ async def get_keywords_from_query(
     if query_param.hl_keywords or query_param.ll_keywords:
         return query_param.hl_keywords, query_param.ll_keywords
 
-    # Extract keywords using extract_keywords_only function which already supports conversation history
     hl_keywords, ll_keywords = await extract_keywords_only(query, query_param, global_config, hashing_kv)
     return hl_keywords, ll_keywords
-
-
-def _conversation_history_cache_hash(conversation_history: list[dict[str, Any]] | None) -> str:
-    """Return a compact, stable hash for keyword extraction conversation history."""
-    if not conversation_history:
-        return ''
-
-    normalized_history = json.dumps(
-        conversation_history,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(',', ':'),
-    )
-    return compute_args_hash(normalized_history)
 
 
 async def extract_keywords_only(
@@ -4270,7 +4254,6 @@ async def extract_keywords_only(
     examples = '\n'.join(PROMPTS['keywords_extraction_examples'])
 
     language = global_config['addon_params'].get('language', DEFAULT_SUMMARY_LANGUAGE)
-    conversation_history_hash = _conversation_history_cache_hash(param.conversation_history)
 
     # 2. Handle cache if needed - add cache type for keywords
     hash_args: list[Any] = [
@@ -4278,8 +4261,6 @@ async def extract_keywords_only(
         text,
         language,
     ]
-    if conversation_history_hash:
-        hash_args.append(conversation_history_hash)
 
     args_hash = compute_args_hash(*hash_args)
     cached_result = None
@@ -4366,8 +4347,6 @@ async def extract_keywords_only(
                 'user_prompt': param.user_prompt or '',
                 'enable_rerank': param.enable_rerank,
             }
-            if conversation_history_hash:
-                queryparam_dict['conversation_history_hash'] = conversation_history_hash
             await save_to_cache(
                 hashing_kv,
                 CacheData(
@@ -4504,63 +4483,7 @@ async def _get_vector_context(
         return []
 
 
-async def rewrite_query_with_history(
-    query: str,
-    conversation_history: list[dict[str, str]] | None,
-    *,
-    use_model_func: Callable[..., Awaitable[str]] | None,
-    llm_timeout: float,
-    max_history_turns: int = 6,
-) -> str | None:
-    """Rewrite ``query`` as a standalone question using ``conversation_history``.
 
-    Returns the rewritten query when the LLM produces a reasonable result, ``None`` otherwise.
-    Callers fall back to the original query on ``None``.
-
-    The history is truncated to the most recent ``max_history_turns`` entries to bound prompt size.
-    Each entry is expected as ``{'role': 'user' | 'assistant', 'content': str}``; entries that don't
-    match are skipped.
-    """
-    if not query or not use_model_func or not conversation_history:
-        return None
-
-    formatted_turns: list[str] = []
-    for entry in conversation_history[-max_history_turns:]:
-        if not isinstance(entry, dict):
-            continue
-        role = str(entry.get('role') or '').strip().lower()
-        content = str(entry.get('content') or '').strip()
-        if not content or role not in {'user', 'assistant'}:
-            continue
-        prefix = 'User' if role == 'user' else 'Assistant'
-        formatted_turns.append(f'{prefix}: {content}')
-
-    if not formatted_turns:
-        return None
-
-    history_block = '\n'.join(formatted_turns)
-    prompt = PROMPTS['conversation_query_rewrite'].format(history=history_block, query=query)
-    try:
-        response = cast(str, await asyncio.wait_for(use_model_func(prompt), timeout=llm_timeout))
-    except asyncio.TimeoutError:
-        logger.warning(f'Conversation rewrite: timed out after {llm_timeout}s, using original query')
-        return None
-    except Exception as e:
-        logger.warning(f'Conversation rewrite: failed: {e}, using original query')
-        return None
-
-    rewritten = response.strip() if isinstance(response, str) else ''
-    # Strip simple wrapping the model sometimes adds despite the rule.
-    if rewritten.startswith(('"', "'", '`')) and rewritten.endswith(('"', "'", '`')):
-        rewritten = rewritten[1:-1].strip()
-    if not rewritten or len(rewritten) > max(len(query) * 6, 600):
-        # Empty or suspiciously long output: distrust and fall back.
-        logger.debug(f'Conversation rewrite: rejected output ({len(rewritten)} chars), using original query')
-        return None
-    if rewritten == query:
-        return None  # No-op rewrite; signal to caller
-    logger.info(f'Conversation rewrite: {query!r} -> {rewritten!r}')
-    return rewritten
 
 
 async def _generate_hyde_answer(
@@ -7390,7 +7313,6 @@ async def naive_query(
             await use_model_func(
                 user_query,
                 system_prompt=sys_prompt,
-                history_messages=query_param.conversation_history,
                 enable_cot=True,
                 stream=query_param.stream,
                 max_tokens=response_max_tokens,

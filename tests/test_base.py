@@ -506,7 +506,6 @@ class TestYARQueryMethods:
             max_total_tokens=789,
             hl_keywords=['high'],
             ll_keywords=['low'],
-            conversation_history=[{'role': 'user', 'content': 'Earlier context'}],
             model_func=AsyncMock(return_value='custom model'),
             user_prompt='Be precise',
             enable_rerank=True,
@@ -536,7 +535,6 @@ class TestYARQueryMethods:
         assert cloned_param.enable_bm25_fusion is True
         assert cloned_param.bm25_weight == 0.55
         assert cloned_param.entity_filter == 'Fitusiran'
-        assert cloned_param.conversation_history == [{'role': 'user', 'content': 'Earlier context'}]
         assert cloned_param.user_prompt == 'Be precise'
         assert cloned_param.model_func is original_param.model_func
         assert original_param.only_need_context is False

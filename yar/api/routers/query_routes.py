@@ -326,11 +326,6 @@ class QueryRequest(BaseModel):
         description='List of low-level keywords to refine retrieval focus. Leave empty to use the LLM to generate the keywords.',
     )
 
-    conversation_history: list[dict[str, Any]] | None = Field(
-        default=None,
-        description="Stores past conversation history to maintain context. Format: [{'role': 'user/assistant', 'content': 'message'}].",
-    )
-
     user_prompt: str | None = Field(
         default=None,
         max_length=100_000,
@@ -404,41 +399,12 @@ class QueryRequest(BaseModel):
             raise ValueError('Query text must be at least 3 non-whitespace characters.')
         return stripped_query
 
-    @field_validator('conversation_history', mode='after')
-    @classmethod
-    def conversation_history_role_check(
-        cls, conversation_history: list[dict[str, Any]] | None
-    ) -> list[dict[str, Any]] | None:
-        if conversation_history is None:
-            return None
-        for msg in conversation_history:
-            if 'role' not in msg:
-                raise ValueError("Each message must have a 'role' key.")
-            if not isinstance(msg['role'], str) or not msg['role'].strip():
-                raise ValueError("Each message 'role' must be a non-empty string.")
-            if 'content' not in msg:
-                raise ValueError("Each message must have a 'content' key.")
-            if not isinstance(msg['content'], str):
-                raise ValueError("Each message 'content' must be a string.")
-            if len(msg['content']) > 50_000:
-                raise ValueError('Conversation message content exceeds maximum length of 50000 characters')
-        return conversation_history
-
     @field_validator('hl_keywords', 'll_keywords', mode='after')
     @classmethod
     def keywords_length_check(cls, keywords: list[str]) -> list[str]:
         if len(keywords) > 100:
             raise ValueError('At most 100 keywords allowed.')
         return keywords
-
-    @field_validator('conversation_history', mode='after')
-    @classmethod
-    def conversation_history_length_check(
-        cls, conversation_history: list[dict[str, Any]] | None
-    ) -> list[dict[str, Any]] | None:
-        if conversation_history is not None and len(conversation_history) > 200:
-            raise ValueError('At most 200 conversation history messages allowed.')
-        return conversation_history
 
     def to_query_params(self, is_stream: bool) -> 'QueryParam':
         """Converts a QueryRequest instance into a QueryParam instance."""
@@ -785,8 +751,6 @@ def create_query_routes(
         - **mix**: Integrates knowledge graph retrieval with vector search (recommended)
         - **bypass**: Direct LLM query without knowledge retrieval
 
-        conversation_history is sent to the LLM and can also influence retrieval via keyword extraction in multi-turn queries.
-
         **Usage Examples:**
 
         Basic query:
@@ -818,17 +782,6 @@ def create_query_routes(
         }
         ```
 
-        Conversation with history:
-        ```json
-        {
-            "query": "Can you give me more details?",
-            "conversation_history": [
-                {"role": "user", "content": "What is AI?"},
-                {"role": "assistant", "content": "AI is artificial intelligence..."}
-            ]
-        }
-        ```
-
         Args:
             request (QueryRequest): The request object containing query parameters:
                 - **query**: The question or prompt to process (min 3 characters)
@@ -836,7 +789,6 @@ def create_query_routes(
                 - **include_references**: Whether to include source citations
                 - **response_type**: Format preference (e.g., "Multiple Paragraphs")
                 - **top_k**: Number of top entities/relations to retrieve
-                - **conversation_history**: Previous dialogue context
                 - **max_total_tokens**: Token budget for the entire response
 
         Returns:
@@ -997,8 +949,6 @@ def create_query_routes(
         - **mix**: Integrated knowledge graph + vector retrieval (recommended)
         - **bypass**: Direct LLM query without knowledge retrieval
 
-        conversation_history is sent to the LLM and can also influence retrieval via keyword extraction in multi-turn queries.
-
         **Usage Examples**
 
         Real-time streaming query:
@@ -1028,18 +978,6 @@ def create_query_routes(
             "mode": "hybrid",
             "stream": false,
             "response_type": "Multiple Paragraphs"
-        }
-        ```
-
-        Conversation with context:
-        ```json
-        {
-            "query": "Can you elaborate on that?",
-            "stream": true,
-            "conversation_history": [
-                {"role": "user", "content": "What is neural network?"},
-                {"role": "assistant", "content": "A neural network is..."}
-            ]
         }
         ```
 
@@ -1073,7 +1011,6 @@ def create_query_routes(
                 - **include_references**: Whether to include source citations
                 - **response_type**: Format preference (e.g., "Multiple Paragraphs")
                 - **top_k**: Number of top entities/relations to retrieve
-                - **conversation_history**: Previous dialogue context for multi-turn conversations
                 - **max_total_tokens**: Token budget for the entire response
 
         Returns:

@@ -661,33 +661,6 @@ Question: {query}
 Write a 2-3 sentence passage on the specific aspect, using the language and framing of a knowledgeable document in that section:"""
 
 
-# Conversation rewrite prompt
-# Rewrites the latest user query as a standalone question using prior conversation context.
-# Used at retrieval time when conversation_history is non-empty so downstream keyword extraction,
-# HyDE, and vector search work on a self-contained query rather than a context-dependent fragment.
-PROMPTS[
-    'conversation_query_rewrite'
-] = """Rewrite the latest user query as a standalone question using prior conversation history.
-
-Rules:
-- Output ONLY the rewritten query. No preamble, no explanation, no quoting.
-- Resolve pronouns (it, this, that, them, these, those, he, she, they) using the most recent referent in history.
-- Resolve elliptical references ("what about phase 2?", "how about for India?") by adding the topic from history.
-- Preserve every concrete entity, number, date, and qualifier from the original query verbatim.
-- If the query is already self-contained (no pronouns, no elliptical references), output it unchanged.
-- Keep the rewritten query in the same language as the original.
-- Output a single sentence; do not add a trailing period if the original lacked one.
-
----Conversation History---
-{history}
-
----Latest Query---
-{query}
-
----Standalone Rewrite---
-"""
-
-
 # Sub-question decomposition prompt for multi-facet HyDE.
 # When a query covers multiple facets (e.g. "Compare X and Y for safety and efficacy"), one HyDE
 # passage covers only one facet and biases retrieval. The decomposer splits the query into 1-3
