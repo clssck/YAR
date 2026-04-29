@@ -1,6 +1,10 @@
 import { KeyboardIcon } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import {
+  ONBOARDING_KEY,
+  ONBOARDING_RESET_EVENT,
+} from '@/components/graph/OnboardingHints'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
@@ -146,6 +150,21 @@ export function KeyboardShortcutHelp() {
           <p className="text-xs text-muted-foreground text-center">
             {t('shortcutHelp.hint')}
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                localStorage.removeItem(ONBOARDING_KEY)
+              } catch {
+                // localStorage unavailable; replay event still triggers tour
+              }
+              setOpen(false)
+              window.dispatchEvent(new Event(ONBOARDING_RESET_EVENT))
+            }}
+            className="mt-3 w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {t('shortcutHelp.replayOnboarding', 'Replay onboarding tour')}
+          </button>
         </div>
       </DialogContent>
     </Dialog>

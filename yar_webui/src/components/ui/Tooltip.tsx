@@ -24,14 +24,6 @@ const TooltipContent = React.forwardRef<
     align?: 'start' | 'center' | 'end'
   }
 >(({ className, side = 'left', align = 'start', children, ...props }, ref) => {
-  const contentRef = React.useRef<HTMLDivElement>(null)
-
-  React.useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.scrollTop = 0
-    }
-  }, [])
-
   return (
     <TooltipPrimitive.Content
       ref={ref}
@@ -51,4 +43,4 @@ const TooltipContent = React.forwardRef<
 })
 TooltipContent.displayName = TooltipPrimitive.Content.displayName
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }

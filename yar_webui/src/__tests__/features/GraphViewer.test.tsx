@@ -98,6 +98,8 @@ mock.module('@/components/graph/LegendButton', () => ({
 
 mock.module('@/components/graph/OnboardingHints', () => ({
   default: () => <div data-testid="onboarding-hints">Hints</div>,
+  ONBOARDING_KEY: 'yar-graph-onboarding-complete',
+  ONBOARDING_RESET_EVENT: 'yar-onboarding-reset',
 }))
 
 mock.module('@/components/graph/OrphanConnectionControl', () => ({
@@ -600,9 +602,8 @@ describe('GraphViewer Component Rendering', () => {
       currentTab: 'knowledge-graph',
       showFileName: false,
       documentsPageSize: 10,
+    }
   }
-  }
-
 
   describe('Basic Rendering', () => {
     test('renders without crashing', () => {
@@ -686,11 +687,11 @@ describe('GraphViewer Component Rendering', () => {
       expect(queryByTestId('onboarding-hints')).toBeNull()
     })
 
-    test('does not render onboarding hints when graph is empty', () => {
+    test('renders onboarding hints even when graph is empty', () => {
       resetMockState()
       mockGraphState.graphIsEmpty = true
       const { queryByTestId } = render(<GraphViewer />)
-      expect(queryByTestId('onboarding-hints')).toBeNull()
+      expect(queryByTestId('onboarding-hints')).not.toBeNull()
     })
   })
 

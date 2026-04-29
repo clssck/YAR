@@ -213,6 +213,18 @@
       "title": "YAR Server Settings",
       "description": "View current system status and connection information"
     },
+    "onboarding": {
+      "searchTitle": "Search Nodes",
+      "searchDesc": "Use Cmd+K (or Ctrl+K) to quickly search and focus on any node in the graph.",
+      "controlsTitle": "Graph Controls",
+      "controlsDesc": "Use the control panel to change layouts, zoom, and toggle settings. Press +/- to zoom, 0 to reset.",
+      "interactionsTitle": "Node Interactions",
+      "interactionsDesc": "Click any node to see its properties. Press P to toggle the panel, Escape to deselect.",
+      "skip": "Don't show again",
+      "next": "Next",
+      "done": "Got it!",
+      "close": "Close onboarding"
+    },
     "orphanConnection": {
       "title": "Connect Orphan Entities",
       "description": "Connect orphan entities to the knowledge graph",
@@ -652,6 +664,7 @@
     "openHelp": "Open keyboard shortcuts help",
     "noShortcuts": "No shortcuts registered",
     "hint": "Press Shift+? to open this dialog anytime",
+    "replayOnboarding": "Replay onboarding tour",
     "category": {
       "global": "Global",
       "navigation": "Navigation",

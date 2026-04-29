@@ -295,7 +295,7 @@ const GraphViewer = () => {
         <SettingsDisplay />
 
         {/* Onboarding hints for first-time users */}
-        {!isFetching && !graphIsEmpty && <OnboardingHints />}
+        {!isFetching && <OnboardingHints />}
 
         {/* Graph stats display - top right on mobile, bottom right on desktop */}
         {!isFetching && !graphIsEmpty && nodeCount > 0 && (
