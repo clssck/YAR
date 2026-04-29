@@ -1012,7 +1012,7 @@ class TestEvaluationHarnessHelpers:
             )
 
         assert result['answer'] == 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
-        assert result['contexts'] == ['Shipment to depot 1-3 months before Start packaging.']
+        assert result['contexts'] == ['Source: doc.pdf\n\nShipment to depot 1-3 months before Start packaging.']
 
     def test_load_test_dataset_rejects_legacy_dataset_mode(self, tmp_path):
         """Datasets should no longer embed per-case modes now that the harness takes an explicit sidecar."""
