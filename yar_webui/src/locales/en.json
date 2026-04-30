@@ -183,7 +183,14 @@
       "showButton": "Show",
       "hideButton": "Hide",
       "showFileNameTooltip": "Show file name",
-      "hideFileNameTooltip": "Hide file name"
+      "hideFileNameTooltip": "Hide file name",
+      "tokensUnit_one": "{{count}} token",
+      "tokensUnit_other": "{{count}} tokens",
+      "chunksUnit_one": "{{count}} chunk",
+      "chunksUnit_other": "{{count}} chunks",
+      "trackIdLabel": "Track ID:",
+      "metadataLabel": "Metadata:",
+      "errorLabel": "Error:"
     },
     "pipelineStatus": {
       "title": "Pipeline Status",

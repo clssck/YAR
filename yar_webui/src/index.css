@@ -217,3 +217,43 @@
   border-color: rgba(255, 0, 0, 0.4);
   color: #ef4444;
 }
+
+/* Pipeline busy pulse — used by the Pipeline status toggle in DocumentManager */
+@keyframes pipeline-pulse {
+  0% {
+    background-color: rgb(255 0 0 / 0.1);
+    border-color: rgb(255 0 0 / 0.2);
+  }
+  50% {
+    background-color: rgb(255 0 0 / 0.2);
+    border-color: rgb(255 0 0 / 0.4);
+  }
+  100% {
+    background-color: rgb(255 0 0 / 0.1);
+    border-color: rgb(255 0 0 / 0.2);
+  }
+}
+
+@keyframes pipeline-pulse-dark {
+  0% {
+    background-color: rgb(255 0 0 / 0.2);
+    border-color: rgb(255 0 0 / 0.4);
+  }
+  50% {
+    background-color: rgb(255 0 0 / 0.3);
+    border-color: rgb(255 0 0 / 0.6);
+  }
+  100% {
+    background-color: rgb(255 0 0 / 0.2);
+    border-color: rgb(255 0 0 / 0.4);
+  }
+}
+
+.pipeline-busy {
+  animation: pipeline-pulse 2s infinite;
+  border: 1px solid;
+}
+
+.dark .pipeline-busy {
+  animation: pipeline-pulse-dark 2s infinite;
+}
