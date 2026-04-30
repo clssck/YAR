@@ -7,9 +7,7 @@ test.describe('Component Demo Page', () => {
   })
 
   test('page loads with all component sections', async ({ page }) => {
-    await expect(
-      page.getByRole('heading', { name: 'Component Demo' }),
-    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Component Demo' })).toBeVisible()
     await expect(page.getByTestId('status-badge-demo')).toBeVisible()
     await expect(page.getByTestId('collapsible-section-demo')).toBeVisible()
     await expect(page.getByTestId('loading-state-demo')).toBeVisible()
@@ -42,16 +40,12 @@ test.describe('StatusBadge Component', () => {
     // Check document presets section exists
     await expect(demo.getByText('Document Status Presets:')).toBeVisible()
     // Check at least one preset is visible
-    await expect(
-      demo.locator('[aria-label*="Processed"]').first(),
-    ).toBeVisible()
+    await expect(demo.locator('[aria-label*="Processed"]').first()).toBeVisible()
   })
 
   test('processing badge has spinning animation', async ({ page }) => {
     const demo = page.getByTestId('status-badge-demo')
-    const processingBadge = demo
-      .locator('[aria-label="Status: Processing"]')
-      .first()
+    const processingBadge = demo.locator('[aria-label="Status: Processing"]').first()
     const icon = processingBadge.locator('svg')
 
     await expect(icon).toHaveClass(/animate-spin/)
@@ -60,12 +54,8 @@ test.describe('StatusBadge Component', () => {
   test('has accessible aria-labels', async ({ page }) => {
     const demo = page.getByTestId('status-badge-demo')
 
-    await expect(
-      demo.locator('[aria-label="Status: Success"]').first(),
-    ).toBeVisible()
-    await expect(
-      demo.locator('[aria-label="Status: Error"]').first(),
-    ).toBeVisible()
+    await expect(demo.locator('[aria-label="Status: Success"]').first()).toBeVisible()
+    await expect(demo.locator('[aria-label="Status: Error"]').first()).toBeVisible()
   })
 })
 
@@ -77,7 +67,7 @@ test.describe('CollapsibleSection Component', () => {
   test('toggles open/closed on click', async ({ page }) => {
     const demo = page.getByTestId('collapsible-section-demo')
     const startsClosedButton = demo.getByRole('button', {
-      name: /Starts Closed/,
+      name: /Starts Closed/
     })
 
     // Initially closed
@@ -95,10 +85,10 @@ test.describe('CollapsibleSection Component', () => {
   test('controlled section responds to external button', async ({ page }) => {
     const demo = page.getByTestId('collapsible-section-demo')
     const controlledButton = demo.getByRole('button', {
-      name: /Controlled Section/,
+      name: /Controlled Section/
     })
     const toggleButton = demo.getByRole('button', {
-      name: 'Toggle from outside',
+      name: 'Toggle from outside'
     })
 
     // Initially open
@@ -245,17 +235,13 @@ test.describe('Responsive Behavior', () => {
     const demo = page.getByTestId('responsive-demo')
 
     // Start at desktop
-    await expect(
-      demo.locator('code').filter({ hasText: /lg|xl/ }).first(),
-    ).toBeVisible()
+    await expect(demo.locator('code').filter({ hasText: /lg|xl/ }).first()).toBeVisible()
 
     // Resize to mobile
     await page.setViewportSize({ width: 375, height: 667 })
 
     // Should update to mobile breakpoint
-    await expect(
-      demo.locator('code').filter({ hasText: /xs|sm/ }).first(),
-    ).toBeVisible()
+    await expect(demo.locator('code').filter({ hasText: /xs|sm/ }).first()).toBeVisible()
   })
 })
 

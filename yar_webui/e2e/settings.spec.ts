@@ -18,8 +18,7 @@ test.describe('Theme Toggle', () => {
     // Get initial theme state from html class
     const html = page.locator('html')
     const initialClass = await html.getAttribute('class')
-    const wasLight =
-      initialClass?.includes('light') || !initialClass?.includes('dark')
+    const wasLight = initialClass?.includes('light') || !initialClass?.includes('dark')
 
     // Find and click theme toggle button (last button in header with svg)
     const themeButton = page
@@ -45,8 +44,7 @@ test.describe('Theme Toggle', () => {
 
     // Get initial state
     const initialClass = await html.getAttribute('class')
-    const wasLight =
-      initialClass?.includes('light') || !initialClass?.includes('dark')
+    const wasLight = initialClass?.includes('light') || !initialClass?.includes('dark')
 
     // First toggle
     await themeButton.click()
@@ -99,9 +97,7 @@ test.describe('Keyboard Shortcuts Help', () => {
     await expect(dialog).toBeVisible()
 
     // Should have category headers (Global, Navigation, etc.)
-    await expect(
-      dialog.getByText(/Global|Navigation|Documents|Graph|Chat/i).first(),
-    ).toBeVisible()
+    await expect(dialog.getByText(/Global|Navigation|Documents|Graph|Chat/i).first()).toBeVisible()
   })
 
   test('can close with Escape key', async ({ page }) => {
@@ -121,8 +117,6 @@ test.describe('Keyboard Shortcuts Help', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
-    await expect(
-      dialog.getByRole('heading', { name: /Keyboard Shortcuts/i }),
-    ).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: /Keyboard Shortcuts/i })).toBeVisible()
   })
 })

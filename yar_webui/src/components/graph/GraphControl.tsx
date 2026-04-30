@@ -17,18 +17,14 @@ const isButtonPressed = (ev: MouseEvent | TouchEvent) => {
   return false
 }
 
-const GraphControl = ({
-  disableHoverEffect,
-}: {
-  disableHoverEffect?: boolean
-}) => {
+const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) => {
   const sigma = useSigma<NodeType, EdgeType>()
   const registerEvents = useRegisterEvents<NodeType, EdgeType>()
   const setSettings = useSetSettings<NodeType, EdgeType>()
 
   const maxIterations = useSettingsStore.use.graphLayoutMaxIterations()
   const { assign: assignLayout } = useLayoutForceAtlas2({
-    iterations: maxIterations,
+    iterations: maxIterations
   })
 
   const { theme } = useTheme()
@@ -46,14 +42,13 @@ const GraphControl = ({
 
   // Track system theme changes when theme is set to 'system'
   const [_systemThemeIsDark, setSystemThemeIsDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches
   )
 
   useEffect(() => {
     if (theme === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-      const handler = (e: MediaQueryListEvent) =>
-        setSystemThemeIsDark(e.matches)
+      const handler = (e: MediaQueryListEvent) => setSystemThemeIsDark(e.matches)
       mediaQuery.addEventListener('change', handler)
       return () => mediaQuery.removeEventListener('change', handler)
     }
@@ -66,7 +61,7 @@ const GraphControl = ({
     focusedNode: null as string | null,
     selectedEdge: null as string | null,
     focusedEdge: null as string | null,
-    hideUnselectedEdges,
+    hideUnselectedEdges
   })
 
   // Cache computed neighbors for the focused node (Set for O(1) lookup)
@@ -75,22 +70,21 @@ const GraphControl = ({
     neighbors: Set<string>
   }>({
     nodeId: null,
-    neighbors: new Set(),
+    neighbors: new Set()
   })
 
   // Memoize theme-derived values to avoid recomputing in reducers
   const themeColors = useMemo(() => {
     const isDarkTheme =
       theme === 'dark' ||
-      (theme === 'system' &&
-        window.document.documentElement.classList.contains('dark'))
+      (theme === 'system' && window.document.documentElement.classList.contains('dark'))
     return {
       isDarkTheme,
       labelColor: isDarkTheme ? Constants.labelColorDarkTheme : undefined,
       edgeColor: isDarkTheme ? Constants.edgeColorDarkTheme : undefined,
       edgeHighlightColor: isDarkTheme
         ? Constants.edgeColorHighlightedDarkTheme
-        : Constants.edgeColorHighlightedLightTheme,
+        : Constants.edgeColorHighlightedLightTheme
     }
   }, [theme])
 
@@ -101,7 +95,7 @@ const GraphControl = ({
       focusedNode,
       selectedEdge,
       focusedEdge,
-      hideUnselectedEdges,
+      hideUnselectedEdges
     }
 
     // Invalidate and rebuild neighbor cache if focused node changed
@@ -113,7 +107,7 @@ const GraphControl = ({
           // Build Set once for O(1) lookups in reducer
           neighborsCache.current = {
             nodeId: targetNode,
-            neighbors: new Set(graph.neighbors(targetNode)),
+            neighbors: new Set(graph.neighbors(targetNode))
           }
         } else {
           neighborsCache.current = { nodeId: null, neighbors: new Set() }
@@ -127,14 +121,7 @@ const GraphControl = ({
     if (sigma) {
       sigma.refresh()
     }
-  }, [
-    selectedNode,
-    focusedNode,
-    selectedEdge,
-    focusedEdge,
-    hideUnselectedEdges,
-    sigma,
-  ])
+  }, [selectedNode, focusedNode, selectedEdge, focusedEdge, hideUnselectedEdges, sigma])
   // ==================== END OPTIMIZATION ====================
 
   /**
@@ -145,15 +132,11 @@ const GraphControl = ({
     if (sigmaGraph && sigma) {
       try {
         if (typeof sigma.setGraph === 'function') {
-          sigma.setGraph(
-            sigmaGraph as unknown as AbstractGraph<NodeType, EdgeType>,
-          )
+          sigma.setGraph(sigmaGraph as unknown as AbstractGraph<NodeType, EdgeType>)
         } else {
           // Type assertion for backward compatibility with older sigma versions
           ;(sigma as unknown as { graph: typeof sigmaGraph }).graph = sigmaGraph
-          console.warn(
-            'Sigma missing setGraph function, set graph property directly',
-          )
+          console.warn('Sigma missing setGraph function, set graph property directly')
         }
       } catch (error) {
         console.error('Error setting graph on sigma instance:', error)
@@ -181,13 +164,8 @@ const GraphControl = ({
    * Register events
    */
   useEffect(() => {
-    const {
-      setFocusedNode,
-      setSelectedNode,
-      setFocusedEdge,
-      setSelectedEdge,
-      clearSelection,
-    } = useGraphStore.getState()
+    const { setFocusedNode, setSelectedNode, setFocusedEdge, setSelectedEdge, clearSelection } =
+      useGraphStore.getState()
 
     interface NodeEvent {
       node: string
@@ -197,10 +175,7 @@ const GraphControl = ({
       edge: string
       event: { original: MouseEvent | TouchEvent }
     }
-    type EventHandler =
-      | ((e: NodeEvent) => void)
-      | ((e: EdgeEvent) => void)
-      | (() => void)
+    type EventHandler = ((e: NodeEvent) => void) | ((e: EdgeEvent) => void) | (() => void)
 
     const events: Record<string, EventHandler> = {
       enterNode: (event: NodeEvent) => {
@@ -223,7 +198,7 @@ const GraphControl = ({
           setSelectedEdge(null)
         }
       },
-      clickStage: () => clearSelection(),
+      clickStage: () => clearSelection()
     }
 
     if (enableEdgeEvents) {
@@ -274,9 +249,7 @@ const GraphControl = ({
         graph.forEachEdge((edge) => {
           const weight = graph.getEdgeAttribute(edge, 'originalWeight') || 1
           if (typeof weight === 'number') {
-            const scaledSize =
-              minEdgeSize +
-              sizeScale * ((weight - minWeight) / weightRange) ** 0.5
+            const scaledSize = minEdgeSize + sizeScale * ((weight - minWeight) / weightRange) ** 0.5
             graph.setEdgeAttribute(edge, 'size', scaledSize)
           }
         })
@@ -298,8 +271,7 @@ const GraphControl = ({
     (node: string, data: NodeType) => {
       const graph = sigma.getGraph()
       const { labelColor, isDarkTheme } = themeColors
-      const { selectedNode, focusedNode, selectedEdge, focusedEdge } =
-        selectionRef.current
+      const { selectedNode, focusedNode, selectedEdge, focusedEdge } = selectionRef.current
 
       if (!graph.hasNode(node)) {
         return { ...data, highlighted: false, labelColor }
@@ -329,8 +301,7 @@ const GraphControl = ({
 
       if (_focusedNode && graph.hasNode(_focusedNode)) {
         // O(1) lookup using cached Set instead of O(n) array.includes()
-        const isNeighbor =
-          node === _focusedNode || neighborsCache.current.neighbors.has(node)
+        const isNeighbor = node === _focusedNode || neighborsCache.current.neighbors.has(node)
 
         if (isNeighbor) {
           newData.highlighted = true
@@ -359,20 +330,15 @@ const GraphControl = ({
 
       return newData
     },
-    [sigma, disableHoverEffect, themeColors],
+    [sigma, disableHoverEffect, themeColors]
   )
 
   const edgeReducer = useCallback(
     (edge: string, data: EdgeType) => {
       const graph = sigma.getGraph()
       const { labelColor, edgeColor, edgeHighlightColor } = themeColors
-      const {
-        selectedNode,
-        focusedNode,
-        selectedEdge,
-        focusedEdge,
-        hideUnselectedEdges,
-      } = selectionRef.current
+      const { selectedNode, focusedNode, selectedEdge, focusedEdge, hideUnselectedEdges } =
+        selectionRef.current
 
       if (!graph.hasEdge(edge)) {
         return { ...data, hidden: false, labelColor, color: edgeColor }
@@ -394,10 +360,8 @@ const GraphControl = ({
           newData.color = edgeHighlightColor
         }
       } else {
-        const _selectedEdge =
-          selectedEdge && graph.hasEdge(selectedEdge) ? selectedEdge : null
-        const _focusedEdge =
-          focusedEdge && graph.hasEdge(focusedEdge) ? focusedEdge : null
+        const _selectedEdge = selectedEdge && graph.hasEdge(selectedEdge) ? selectedEdge : null
+        const _focusedEdge = focusedEdge && graph.hasEdge(focusedEdge) ? focusedEdge : null
 
         if (_selectedEdge || _focusedEdge) {
           if (edge === _selectedEdge) {
@@ -412,7 +376,7 @@ const GraphControl = ({
 
       return newData
     },
-    [sigma, disableHoverEffect, themeColors],
+    [sigma, disableHoverEffect, themeColors]
   )
 
   // Set reducers only when they actually change (not on every hover)
@@ -422,16 +386,9 @@ const GraphControl = ({
       renderEdgeLabels,
       renderLabels,
       nodeReducer,
-      edgeReducer,
+      edgeReducer
     })
-  }, [
-    setSettings,
-    enableEdgeEvents,
-    renderEdgeLabels,
-    renderLabels,
-    nodeReducer,
-    edgeReducer,
-  ])
+  }, [setSettings, enableEdgeEvents, renderEdgeLabels, renderLabels, nodeReducer, edgeReducer])
 
   // ==================== KEYBOARD SHORTCUTS ====================
   // Escape: Clear selection
@@ -440,7 +397,7 @@ const GraphControl = ({
     callback: useCallback(() => {
       useGraphStore.getState().clearSelection()
     }, []),
-    description: 'Deselect node or edge',
+    description: 'Deselect node or edge'
   })
 
   // + or =: Zoom in
@@ -452,7 +409,7 @@ const GraphControl = ({
         camera.animatedZoom({ duration: 200 })
       }
     }, [sigma]),
-    description: 'Zoom in',
+    description: 'Zoom in'
   })
 
   // -: Zoom out
@@ -464,7 +421,7 @@ const GraphControl = ({
         camera.animatedUnzoom({ duration: 200 })
       }
     }, [sigma]),
-    description: 'Zoom out',
+    description: 'Zoom out'
   })
 
   // 0: Reset zoom to fit graph
@@ -476,7 +433,7 @@ const GraphControl = ({
         camera.animatedReset({ duration: 300 })
       }
     }, [sigma]),
-    description: 'Reset zoom',
+    description: 'Reset zoom'
   })
 
   // P: Toggle properties panel
@@ -484,10 +441,10 @@ const GraphControl = ({
     key: 'p',
     callback: useCallback(() => {
       useSettingsStore.setState((prev) => ({
-        showPropertyPanel: !prev.showPropertyPanel,
+        showPropertyPanel: !prev.showPropertyPanel
       }))
     }, []),
-    description: 'Toggle properties panel',
+    description: 'Toggle properties panel'
   })
 
   // S: Toggle search bar
@@ -495,10 +452,10 @@ const GraphControl = ({
     key: 's',
     callback: useCallback(() => {
       useSettingsStore.setState((prev) => ({
-        showNodeSearchBar: !prev.showNodeSearchBar,
+        showNodeSearchBar: !prev.showNodeSearchBar
       }))
     }, []),
-    description: 'Toggle search bar',
+    description: 'Toggle search bar'
   })
   // ==================== END KEYBOARD SHORTCUTS ====================
 

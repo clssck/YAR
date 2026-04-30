@@ -11,7 +11,7 @@ const SettingsDisplay = () => {
   const graphMaxNodes = useSettingsStore.use.graphMaxNodes()
 
   return (
-    <div className="absolute bottom-4 left-[calc(1rem+2.5rem)] flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="text-muted-foreground absolute bottom-4 left-[calc(1rem+2.5rem)] flex items-center gap-2 text-xs">
       <div>
         {t('graphPanel.sideBar.settings.depth')}: {graphQueryMaxDepth}
       </div>

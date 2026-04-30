@@ -9,18 +9,16 @@ test.describe('Citation Deduplication', () => {
     test.setTimeout(120000)
   })
 
-  test('API response should not have duplicate references', async ({
-    request,
-  }) => {
+  test('API response should not have duplicate references', async ({ request }) => {
     // Use non-streaming endpoint for simpler testing
     const response = await request.post('http://localhost:9621/query', {
       headers: { 'Content-Type': 'application/json' },
       data: {
         query: 'What is the process development strategy?',
         mode: 'hybrid',
-        include_references: true,
+        include_references: true
       },
-      timeout: 90000,
+      timeout: 90000
     })
 
     expect(response.ok()).toBeTruthy()
@@ -31,14 +29,10 @@ test.describe('Citation Deduplication', () => {
     console.log('Response length:', responseText.length)
 
     // Extract reference lines from the References section
-    const refsMatch = responseText.match(
-      /### References\s*\n([\s\S]*?)(?:\n\n|$)/i,
-    )
+    const refsMatch = responseText.match(/### References\s*\n([\s\S]*?)(?:\n\n|$)/i)
     if (refsMatch) {
       const refsSection = refsMatch[1]
-      const refLines = refsSection
-        .split('\n')
-        .filter((line: string) => line.trim().startsWith('-'))
+      const refLines = refsSection.split('\n').filter((line: string) => line.trim().startsWith('-'))
 
       console.log('Found reference lines:', refLines.length)
       console.log('References:', refLines)
@@ -52,29 +46,21 @@ test.describe('Citation Deduplication', () => {
 
       // Check for duplicates
       for (const [ref, count] of refCounts) {
-        console.log(
-          `Reference "${ref.substring(0, 50)}..." appears ${count} times`,
-        )
+        console.log(`Reference "${ref.substring(0, 50)}..." appears ${count} times`)
         expect(count).toBe(1)
       }
     }
 
     // Also check that the references array (metadata) has unique reference_ids
     if (data.references) {
-      const refIds = data.references.map(
-        (r: { reference_id: string }) => r.reference_id,
-      )
+      const refIds = data.references.map((r: { reference_id: string }) => r.reference_id)
       const uniqueRefIds = [...new Set(refIds)]
-      console.log(
-        `References array: ${refIds.length} total, ${uniqueRefIds.length} unique`,
-      )
+      console.log(`References array: ${refIds.length} total, ${uniqueRefIds.length} unique`)
       expect(refIds.length).toBe(uniqueRefIds.length)
     }
   })
 
-  test('streaming API should have unique sources in citations_metadata', async ({
-    request,
-  }) => {
+  test('streaming API should have unique sources in citations_metadata', async ({ request }) => {
     // Make a streaming request
     const response = await request.post('http://localhost:9621/query/stream', {
       headers: { 'Content-Type': 'application/json' },
@@ -83,9 +69,9 @@ test.describe('Citation Deduplication', () => {
         mode: 'hybrid',
         stream: true,
         include_references: true,
-        citation_mode: 'footnotes',
+        citation_mode: 'footnotes'
       },
-      timeout: 90000,
+      timeout: 90000
     })
 
     expect(response.ok()).toBeTruthy()
@@ -101,13 +87,9 @@ test.describe('Citation Deduplication', () => {
 
         // Check initial references array
         if (parsed.references) {
-          const refIds = parsed.references.map(
-            (r: { reference_id: string }) => r.reference_id,
-          )
+          const refIds = parsed.references.map((r: { reference_id: string }) => r.reference_id)
           const uniqueRefIds = [...new Set(refIds)]
-          console.log(
-            `Initial references: ${refIds.length} total, ${uniqueRefIds.length} unique`,
-          )
+          console.log(`Initial references: ${refIds.length} total, ${uniqueRefIds.length} unique`)
           expect(refIds.length).toBe(uniqueRefIds.length)
         }
 
@@ -115,22 +97,18 @@ test.describe('Citation Deduplication', () => {
         if (parsed.citations_metadata) {
           foundCitationsMetadata = true
           const sources = parsed.citations_metadata.sources || []
-          const sourceRefIds = sources.map(
-            (s: { reference_id: string }) => s.reference_id,
-          )
+          const sourceRefIds = sources.map((s: { reference_id: string }) => s.reference_id)
           const uniqueSourceRefIds = [...new Set(sourceRefIds)]
 
           console.log(
-            `Citation sources: ${sourceRefIds.length} total, ${uniqueSourceRefIds.length} unique`,
+            `Citation sources: ${sourceRefIds.length} total, ${uniqueSourceRefIds.length} unique`
           )
           expect(sourceRefIds.length).toBe(uniqueSourceRefIds.length)
 
           // Check footnotes for duplicates
           const footnotes = parsed.citations_metadata.footnotes || []
           const uniqueFootnotes = [...new Set(footnotes)]
-          console.log(
-            `Footnotes: ${footnotes.length} total, ${uniqueFootnotes.length} unique`,
-          )
+          console.log(`Footnotes: ${footnotes.length} total, ${uniqueFootnotes.length} unique`)
           expect(footnotes.length).toBe(uniqueFootnotes.length)
         }
       } catch {

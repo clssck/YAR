@@ -49,17 +49,11 @@ export const defaultQueryLabel = '*'
 export const supportedFileTypes = {
   // Office documents
   'application/pdf': ['.pdf'],
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [
-    '.docx',
-  ],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
   'application/msword': ['.doc'],
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [
-    '.xlsx',
-  ],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   'application/vnd.ms-excel': ['.xls'],
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': [
-    '.pptx',
-  ],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
   'application/vnd.ms-powerpoint': ['.ppt'],
   'application/vnd.oasis.opendocument.text': ['.odt'],
   'application/vnd.oasis.opendocument.spreadsheet': ['.ods'],
@@ -82,11 +76,11 @@ export const supportedFileTypes = {
   'text/tab-separated-values': ['.tsv'],
   // Email
   'message/rfc822': ['.eml'],
-  'application/vnd.ms-outlook': ['.msg'],
+  'application/vnd.ms-outlook': ['.msg']
 }
 
 export const SiteInfo = {
   name: 'YAR',
   home: '/',
-  github: 'https://github.com/HKUDS/YAR',
+  github: 'https://github.com/HKUDS/YAR'
 }

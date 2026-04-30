@@ -7,37 +7,37 @@ const loadingContainerVariants = cva('flex items-center', {
   variants: {
     variant: {
       inline: 'gap-2',
-      overlay:
-        'fixed inset-0 z-50 bg-background/80 backdrop-blur-sm justify-center flex-col gap-3',
+      overlay: 'fixed inset-0 z-50 bg-background/80 backdrop-blur-sm justify-center flex-col gap-3',
       centered: 'justify-center flex-col gap-3 py-8',
-      minimal: 'gap-1.5',
+      minimal: 'gap-1.5'
     },
     size: {
       sm: '',
       default: '',
-      lg: '',
-    },
+      lg: ''
+    }
   },
   defaultVariants: {
     variant: 'inline',
-    size: 'default',
-  },
+    size: 'default'
+  }
 })
 
 const spinnerSizeMap = {
   sm: 'h-3 w-3',
   default: 'h-4 w-4',
-  lg: 'h-6 w-6',
+  lg: 'h-6 w-6'
 }
 
 const textSizeMap = {
   sm: 'text-xs',
   default: 'text-sm',
-  lg: 'text-base',
+  lg: 'text-base'
 }
 
 export interface LoadingStateProps
-  extends React.OutputHTMLAttributes<HTMLOutputElement>,
+  extends
+    React.OutputHTMLAttributes<HTMLOutputElement>,
     VariantProps<typeof loadingContainerVariants> {
   /** Message to display while loading */
   message?: string
@@ -75,28 +75,20 @@ export default function LoadingState({
     >
       {showSpinner && (
         <Loader2
-          className={cn(
-            'animate-spin text-muted-foreground',
-            spinnerSizeMap[sizeKey],
-          )}
+          className={cn('animate-spin text-muted-foreground', spinnerSizeMap[sizeKey])}
           aria-hidden="true"
         />
       )}
 
       {message && (
-        <span className={cn('text-muted-foreground', textSizeMap[sizeKey])}>
-          {message}
-        </span>
+        <span className={cn('text-muted-foreground', textSizeMap[sizeKey])}>{message}</span>
       )}
 
       {hasProgress && (
         <div className="w-full max-w-xs">
           <Progress value={progress} className="h-1.5" />
           <span
-            className={cn(
-              'text-muted-foreground mt-1 block text-center',
-              textSizeMap[sizeKey],
-            )}
+            className={cn('text-muted-foreground mt-1 block text-center', textSizeMap[sizeKey])}
           >
             {Math.round(progress)}%
           </span>
@@ -105,9 +97,7 @@ export default function LoadingState({
 
       {/* Screen reader only live region */}
       <span className="sr-only" aria-live="polite">
-        {hasProgress
-          ? `Loading: ${Math.round(progress)}% complete`
-          : 'Loading...'}
+        {hasProgress ? `Loading: ${Math.round(progress)}% complete` : 'Loading...'}
       </span>
     </output>
   )
@@ -117,10 +107,7 @@ export default function LoadingState({
  * Skeleton placeholder for content that's loading.
  * Use this for layout-preserving loading states.
  */
-export function Skeleton({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn('animate-pulse rounded-md bg-muted', className)}
@@ -133,13 +120,7 @@ export function Skeleton({
 /**
  * Skeleton loader for text content
  */
-export function SkeletonText({
-  lines = 3,
-  className,
-}: {
-  lines?: number
-  className?: string
-}) {
+export function SkeletonText({ lines = 3, className }: { lines?: number; className?: string }) {
   return (
     <div className={cn('space-y-2', className)} aria-hidden="true">
       {Array.from({ length: lines }).map((_, i, arr) => (
@@ -158,10 +139,7 @@ export function SkeletonText({
 export function PulsingDot({ className }: { className?: string }) {
   return (
     <span
-      className={cn(
-        'inline-block h-2 w-2 rounded-full bg-primary animate-pulse',
-        className,
-      )}
+      className={cn('inline-block h-2 w-2 rounded-full bg-primary animate-pulse', className)}
       aria-hidden="true"
     />
   )

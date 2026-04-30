@@ -10,20 +10,13 @@ import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import EmptyState, {
   EmptyDocuments,
   EmptyGraph,
-  EmptySearchResults,
+  EmptySearchResults
 } from '@/components/ui/EmptyState'
 import LastUpdated from '@/components/ui/LastUpdated'
-import LoadingState, {
-  PulsingDot,
-  Skeleton,
-  SkeletonText,
-} from '@/components/ui/LoadingState'
+import LoadingState, { PulsingDot, Skeleton, SkeletonText } from '@/components/ui/LoadingState'
 import StatusBadge, { DocumentStatusBadge } from '@/components/ui/StatusBadge'
 import { useResponsive } from '@/hooks/useBreakpoint'
-import {
-  formatShortcut,
-  useKeyboardShortcuts,
-} from '@/hooks/useKeyboardShortcut'
+import { formatShortcut, useKeyboardShortcuts } from '@/hooks/useKeyboardShortcut'
 
 export default function ComponentDemo() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(true)
@@ -39,10 +32,10 @@ export default function ComponentDemo() {
       modifiers: { meta: true },
       callback: () =>
         toast('Keyboard shortcut triggered!', {
-          description: '⌘T was pressed',
+          description: '⌘T was pressed'
         }),
-      description: 'Test shortcut',
-    },
+      description: 'Test shortcut'
+    }
   ])
 
   const handleRefresh = async () => {
@@ -54,17 +47,12 @@ export default function ComponentDemo() {
   }
 
   return (
-    <div
-      className="container mx-auto p-6 space-y-8 max-w-4xl"
-      data-testid="component-demo"
-    >
+    <div className="container mx-auto max-w-4xl space-y-8 p-6" data-testid="component-demo">
       <header className="space-y-2">
         <h1 className="text-3xl font-bold">Component Demo</h1>
         <p className="text-muted-foreground">
           Visual showcase of foundation UI components. Current breakpoint:{' '}
-          <code className="bg-muted px-1.5 py-0.5 rounded text-sm">
-            {breakpoint}
-          </code>
+          <code className="bg-muted rounded px-1.5 py-0.5 text-sm">{breakpoint}</code>
           {isMobile && ' (Mobile)'}
           {isTablet && ' (Tablet)'}
           {isDesktop && ' (Desktop)'}
@@ -86,9 +74,7 @@ export default function ComponentDemo() {
             <StatusBadge label="Processing" status="processing" />
           </div>
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Document Status Presets:
-            </p>
+            <p className="text-muted-foreground text-sm">Document Status Presets:</p>
             <div className="flex flex-wrap gap-2">
               <DocumentStatusBadge.Processed />
               <DocumentStatusBadge.Processing />
@@ -98,7 +84,7 @@ export default function ComponentDemo() {
             </div>
           </div>
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Size Variants:</p>
+            <p className="text-muted-foreground text-sm">Size Variants:</p>
             <div className="flex items-center gap-2">
               <StatusBadge label="Small" status="info" size="sm" />
               <StatusBadge label="Default" status="info" size="default" />
@@ -106,7 +92,7 @@ export default function ComponentDemo() {
             </div>
           </div>
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Without Icon:</p>
+            <p className="text-muted-foreground text-sm">Without Icon:</p>
             <StatusBadge label="No Icon" status="success" showIcon={false} />
           </div>
         </CardContent>
@@ -119,21 +105,17 @@ export default function ComponentDemo() {
         </CardHeader>
         <CardContent className="space-y-2">
           <CollapsibleSection title="Basic Section" defaultOpen={true}>
-            <p className="text-sm text-muted-foreground">
-              This section is open by default.
-            </p>
+            <p className="text-muted-foreground text-sm">This section is open by default.</p>
           </CollapsibleSection>
 
           <CollapsibleSection title="With Badge Count" badge={5}>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               This section has a badge showing a count.
             </p>
           </CollapsibleSection>
 
           <CollapsibleSection title="With String Badge" badge="new">
-            <p className="text-sm text-muted-foreground">
-              Badge can also be a string.
-            </p>
+            <p className="text-muted-foreground text-sm">Badge can also be a string.</p>
           </CollapsibleSection>
 
           <CollapsibleSection
@@ -141,9 +123,8 @@ export default function ComponentDemo() {
             open={collapsibleOpen}
             onOpenChange={setCollapsibleOpen}
           >
-            <p className="text-sm text-muted-foreground">
-              This section is controlled. Current state:{' '}
-              {collapsibleOpen ? 'Open' : 'Closed'}
+            <p className="text-muted-foreground text-sm">
+              This section is controlled. Current state: {collapsibleOpen ? 'Open' : 'Closed'}
             </p>
             <Button
               variant="outline"
@@ -156,9 +137,7 @@ export default function ComponentDemo() {
           </CollapsibleSection>
 
           <CollapsibleSection title="Starts Closed" defaultOpen={false}>
-            <p className="text-sm text-muted-foreground">
-              This section starts closed.
-            </p>
+            <p className="text-muted-foreground text-sm">This section starts closed.</p>
           </CollapsibleSection>
         </CardContent>
       </Card>
@@ -170,16 +149,13 @@ export default function ComponentDemo() {
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Inline (default):</p>
+            <p className="text-muted-foreground text-sm">Inline (default):</p>
             <LoadingState message="Loading data..." />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">With Progress:</p>
-            <LoadingState
-              message="Uploading files..."
-              progress={loadingProgress}
-            />
+            <p className="text-muted-foreground text-sm">With Progress:</p>
+            <LoadingState message="Uploading files..." progress={loadingProgress} />
             <input
               type="range"
               min="0"
@@ -191,19 +167,19 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Minimal:</p>
+            <p className="text-muted-foreground text-sm">Minimal:</p>
             <LoadingState variant="minimal" message="Saving..." />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Centered:</p>
-            <div className="border rounded-lg h-32 relative">
+            <p className="text-muted-foreground text-sm">Centered:</p>
+            <div className="relative h-32 rounded-lg border">
               <LoadingState variant="centered" message="Loading graph..." />
             </div>
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Size Variants:</p>
+            <p className="text-muted-foreground text-sm">Size Variants:</p>
             <div className="flex items-center gap-4">
               <LoadingState size="sm" message="Small" />
               <LoadingState size="default" message="Default" />
@@ -212,20 +188,18 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Skeleton:</p>
+            <p className="text-muted-foreground text-sm">Skeleton:</p>
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-1/2" />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              SkeletonText (3 lines):
-            </p>
+            <p className="text-muted-foreground text-sm">SkeletonText (3 lines):</p>
             <SkeletonText lines={3} />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">PulsingDot:</p>
+            <p className="text-muted-foreground text-sm">PulsingDot:</p>
             <div className="flex items-center gap-2">
               <span>Status</span>
               <PulsingDot />
@@ -241,9 +215,7 @@ export default function ComponentDemo() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              With Refresh Button:
-            </p>
+            <p className="text-muted-foreground text-sm">With Refresh Button:</p>
             <LastUpdated
               timestamp={lastUpdate}
               onRefresh={handleRefresh}
@@ -252,22 +224,17 @@ export default function ComponentDemo() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Custom Label:</p>
+            <p className="text-muted-foreground text-sm">Custom Label:</p>
             <LastUpdated timestamp={Date.now() - 3600000} label="Synced" />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Without Refresh Button:
-            </p>
-            <LastUpdated
-              timestamp={Date.now() - 60000}
-              showRefreshButton={false}
-            />
+            <p className="text-muted-foreground text-sm">Without Refresh Button:</p>
+            <LastUpdated timestamp={Date.now() - 60000} showRefreshButton={false} />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Never Updated:</p>
+            <p className="text-muted-foreground text-sm">Never Updated:</p>
             <LastUpdated timestamp={null} onRefresh={handleRefresh} />
           </div>
         </CardContent>
@@ -279,43 +246,36 @@ export default function ComponentDemo() {
           <CardTitle>EmptyState</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="border rounded-lg">
+          <div className="rounded-lg border">
             <EmptyState
               title="No items found"
               description="Try adjusting your search or filter to find what you're looking for."
               action={{
                 label: 'Clear Filters',
-                onClick: () => toast('Filters cleared!'),
+                onClick: () => toast('Filters cleared!')
               }}
               size="sm"
             />
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Preset: EmptyDocuments
-            </p>
-            <div className="border rounded-lg">
+            <p className="text-muted-foreground text-sm">Preset: EmptyDocuments</p>
+            <div className="rounded-lg border">
               <EmptyDocuments onUpload={() => toast('Upload clicked!')} />
             </div>
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Preset: EmptyGraph</p>
-            <div className="border rounded-lg">
+            <p className="text-muted-foreground text-sm">Preset: EmptyGraph</p>
+            <div className="rounded-lg border">
               <EmptyGraph onLoadData={() => toast('Load graph clicked!')} />
             </div>
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Preset: EmptySearchResults
-            </p>
-            <div className="border rounded-lg">
-              <EmptySearchResults
-                query="test query"
-                onClear={() => toast('Search cleared!')}
-              />
+            <p className="text-muted-foreground text-sm">Preset: EmptySearchResults</p>
+            <div className="rounded-lg border">
+              <EmptySearchResults query="test query" onClear={() => toast('Search cleared!')} />
             </div>
           </div>
         </CardContent>
@@ -327,41 +287,37 @@ export default function ComponentDemo() {
           <CardTitle>Keyboard Shortcuts</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Press{' '}
-            <code className="bg-muted px-1.5 py-0.5 rounded">
+            <code className="bg-muted rounded px-1.5 py-0.5">
               {formatShortcut('t', { meta: true })}
             </code>{' '}
             to trigger a toast notification.
           </p>
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              formatShortcut examples:
-            </p>
+            <p className="text-muted-foreground text-sm">formatShortcut examples:</p>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">
+                <code className="bg-muted rounded px-1.5 py-0.5">
                   {formatShortcut('k', { meta: true })}
                 </code>
-                <span className="ml-2 text-muted-foreground">Search</span>
+                <span className="text-muted-foreground ml-2">Search</span>
               </div>
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">
+                <code className="bg-muted rounded px-1.5 py-0.5">
                   {formatShortcut('s', { meta: true, shift: true })}
                 </code>
-                <span className="ml-2 text-muted-foreground">Save All</span>
+                <span className="text-muted-foreground ml-2">Save All</span>
               </div>
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">
-                  {formatShortcut('Escape')}
-                </code>
-                <span className="ml-2 text-muted-foreground">Close</span>
+                <code className="bg-muted rounded px-1.5 py-0.5">{formatShortcut('Escape')}</code>
+                <span className="text-muted-foreground ml-2">Close</span>
               </div>
               <div>
-                <code className="bg-muted px-1.5 py-0.5 rounded">
+                <code className="bg-muted rounded px-1.5 py-0.5">
                   {formatShortcut('Enter', { ctrl: true })}
                 </code>
-                <span className="ml-2 text-muted-foreground">Submit</span>
+                <span className="text-muted-foreground ml-2">Submit</span>
               </div>
             </div>
           </div>
@@ -377,30 +333,22 @@ export default function ComponentDemo() {
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-muted-foreground">breakpoint:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
-                {breakpoint}
-              </code>
+              <code className="bg-muted ml-2 rounded px-1.5 py-0.5">{breakpoint}</code>
             </div>
             <div>
               <span className="text-muted-foreground">isMobile:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
-                {String(isMobile)}
-              </code>
+              <code className="bg-muted ml-2 rounded px-1.5 py-0.5">{String(isMobile)}</code>
             </div>
             <div>
               <span className="text-muted-foreground">isTablet:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
-                {String(isTablet)}
-              </code>
+              <code className="bg-muted ml-2 rounded px-1.5 py-0.5">{String(isTablet)}</code>
             </div>
             <div>
               <span className="text-muted-foreground">isDesktop:</span>
-              <code className="ml-2 bg-muted px-1.5 py-0.5 rounded">
-                {String(isDesktop)}
-              </code>
+              <code className="bg-muted ml-2 rounded px-1.5 py-0.5">{String(isDesktop)}</code>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-4">
+          <p className="text-muted-foreground mt-4 text-xs">
             Resize the window to see values change.
           </p>
         </CardContent>

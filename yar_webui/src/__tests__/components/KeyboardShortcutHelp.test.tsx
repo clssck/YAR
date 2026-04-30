@@ -10,15 +10,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 // regardless of mock leakage from other test files.
 mock.module('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
-  }),
+    t: (key: string, fallback?: string) => fallback ?? key
+  })
 }))
 
 import { fireEvent, render, waitFor } from '@testing-library/react'
-import {
-  ONBOARDING_KEY,
-  ONBOARDING_RESET_EVENT,
-} from '@/components/graph/OnboardingHints'
+import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/OnboardingHints'
 import KeyboardShortcutHelp from '@/components/KeyboardShortcutHelp'
 
 const openHelpDialog = (root: HTMLElement) => {
@@ -39,10 +36,7 @@ afterEach(() => {
 
 describe('KeyboardShortcutHelp', () => {
   test('replay button clears onboarding key and dispatches reset event', async () => {
-    localStorage.setItem(
-      ONBOARDING_KEY,
-      JSON.stringify({ completed: true, lastStep: 0 }),
-    )
+    localStorage.setItem(ONBOARDING_KEY, JSON.stringify({ completed: true, lastStep: 0 }))
 
     let dispatched = 0
     const handler = () => {
@@ -57,9 +51,7 @@ describe('KeyboardShortcutHelp', () => {
       // Radix Dialog renders into a portal; query the document root.
       let replayBtn: HTMLButtonElement | null = null
       await waitFor(() => {
-        replayBtn = document.body.querySelector(
-          'button.mt-3.w-full',
-        ) as HTMLButtonElement | null
+        replayBtn = document.body.querySelector('button.mt-3.w-full') as HTMLButtonElement | null
         expect(replayBtn).not.toBeNull()
         expect(replayBtn?.textContent?.trim()).toBe('Replay onboarding tour')
       })
@@ -86,9 +78,7 @@ describe('KeyboardShortcutHelp', () => {
 
       let replayBtn: HTMLButtonElement | null = null
       await waitFor(() => {
-        replayBtn = document.body.querySelector(
-          'button.mt-3.w-full',
-        ) as HTMLButtonElement | null
+        replayBtn = document.body.querySelector('button.mt-3.w-full') as HTMLButtonElement | null
         expect(replayBtn).not.toBeNull()
       })
 

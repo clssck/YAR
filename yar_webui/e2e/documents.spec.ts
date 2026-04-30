@@ -121,7 +121,7 @@ test.describe('Document Table', () => {
       let foundHeaders = 0
       for (const header of headers) {
         const headerCell = table.getByRole('columnheader', {
-          name: new RegExp(header, 'i'),
+          name: new RegExp(header, 'i')
         })
         if ((await headerCell.count()) > 0) {
           foundHeaders++
@@ -145,9 +145,7 @@ test.describe('Document Table', () => {
       await expect(confirmDialog).toBeVisible({ timeout: 3000 })
 
       // Should have warning text
-      await expect(
-        confirmDialog.getByText(/WARNING|cannot be undone|permanent/i),
-      ).toBeVisible()
+      await expect(confirmDialog.getByText(/WARNING|cannot be undone|permanent/i)).toBeVisible()
 
       // Close without confirming
       await page.keyboard.press('Escape')
@@ -170,13 +168,11 @@ test.describe('Document Status Indicators', () => {
 
   test('refresh button exists', async ({ page }) => {
     // Look for refresh functionality
-    const refreshButton = page
-      .getByRole('button', { name: /Refresh|Reset/i })
-      .or(
-        page.locator('button').filter({
-          has: page.locator('svg.lucide-refresh-cw, svg.lucide-rotate-ccw'),
-        }),
-      )
+    const refreshButton = page.getByRole('button', { name: /Refresh|Reset/i }).or(
+      page.locator('button').filter({
+        has: page.locator('svg.lucide-refresh-cw, svg.lucide-rotate-ccw')
+      })
+    )
 
     if ((await refreshButton.count()) > 0) {
       await expect(refreshButton.first()).toBeVisible()
@@ -201,10 +197,7 @@ test.describe('Pipeline Status', () => {
   test('pipeline status button opens status dialog', async ({ page }) => {
     const pipelineButton = page.getByRole('button', { name: /Pipeline/i })
 
-    if (
-      (await pipelineButton.count()) > 0 &&
-      (await pipelineButton.isEnabled())
-    ) {
+    if ((await pipelineButton.count()) > 0 && (await pipelineButton.isEnabled())) {
       await pipelineButton.click()
 
       // Should open pipeline status dialog

@@ -12,22 +12,18 @@ interface TabVisibilityProviderProps {
  * Provider component for the TabVisibility context
  * Manages the visibility state of tabs throughout the application
  */
-export const TabVisibilityProvider: React.FC<TabVisibilityProviderProps> = ({
-  children,
-}) => {
+export const TabVisibilityProvider: React.FC<TabVisibilityProviderProps> = ({ children }) => {
   // Subscribe to current tab to trigger re-render when tab changes
   const currentTab = useSettingsStore.use.currentTab()
   void currentTab
 
   // Initialize visibility state with all tabs visible
-  const [visibleTabs, setVisibleTabs] = useState<Record<string, boolean>>(
-    () => ({
-      documents: true,
-      'knowledge-graph': true,
-      retrieval: true,
-      api: true,
-    }),
-  )
+  const [visibleTabs, setVisibleTabs] = useState<Record<string, boolean>>(() => ({
+    documents: true,
+    'knowledge-graph': true,
+    retrieval: true,
+    api: true
+  }))
 
   // Keep all tabs visible because we use CSS to control TAB visibility instead of React
   useEffect(() => {
@@ -36,7 +32,7 @@ export const TabVisibilityProvider: React.FC<TabVisibilityProviderProps> = ({
       documents: true,
       'knowledge-graph': true,
       retrieval: true,
-      api: true,
+      api: true
     }))
   }, [])
 
@@ -47,18 +43,16 @@ export const TabVisibilityProvider: React.FC<TabVisibilityProviderProps> = ({
       setTabVisibility: (tabId: string, isVisible: boolean) => {
         setVisibleTabs((prev) => ({
           ...prev,
-          [tabId]: isVisible,
+          [tabId]: isVisible
         }))
       },
-      isTabVisible: (tabId: string) => !!visibleTabs[tabId],
+      isTabVisible: (tabId: string) => !!visibleTabs[tabId]
     }),
-    [visibleTabs],
+    [visibleTabs]
   )
 
   return (
-    <TabVisibilityContext.Provider value={contextValue}>
-      {children}
-    </TabVisibilityContext.Provider>
+    <TabVisibilityContext.Provider value={contextValue}>{children}</TabVisibilityContext.Provider>
   )
 }
 

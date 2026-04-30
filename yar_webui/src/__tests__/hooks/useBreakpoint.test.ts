@@ -9,7 +9,7 @@ import {
   useMediaQuery,
   useResponsive,
   useResponsiveValue,
-  useWindowSize,
+  useWindowSize
 } from '../../hooks/useBreakpoint'
 
 describe('useBreakpoint', () => {
@@ -23,7 +23,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: originalInnerWidth,
+      value: originalInnerWidth
     })
   })
 
@@ -31,7 +31,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -42,7 +42,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -53,7 +53,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 640,
+      value: 640
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -64,7 +64,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 768,
+      value: 768
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -75,7 +75,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -86,7 +86,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1280,
+      value: 1280
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -97,7 +97,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1536,
+      value: 1536
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -108,7 +108,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -118,7 +118,7 @@ describe('useBreakpoint', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1024,
+        value: 1024
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -130,7 +130,7 @@ describe('useBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useBreakpoint())
@@ -139,7 +139,7 @@ describe('useBreakpoint', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 640,
+        value: 640
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -149,7 +149,7 @@ describe('useBreakpoint', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1024,
+        value: 1024
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -159,7 +159,7 @@ describe('useBreakpoint', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1536,
+        value: 1536
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -180,14 +180,14 @@ describe('useBreakpoint', () => {
       [768, 'md'],
       [1024, 'lg'],
       [1280, 'xl'],
-      [1536, '2xl'],
+      [1536, '2xl']
     ]
 
     testCases.forEach(([width, expected]) => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: width,
+        value: width
       })
 
       const { result, unmount } = renderHook(() => useBreakpoint())
@@ -208,7 +208,7 @@ describe('useIsAboveBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: originalInnerWidth,
+      value: originalInnerWidth
     })
   })
 
@@ -216,7 +216,7 @@ describe('useIsAboveBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() => useIsAboveBreakpoint('md'))
@@ -227,7 +227,7 @@ describe('useIsAboveBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useIsAboveBreakpoint('md'))
@@ -238,7 +238,7 @@ describe('useIsAboveBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useIsAboveBreakpoint('md'))
@@ -248,7 +248,7 @@ describe('useIsAboveBreakpoint', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 768,
+        value: 768
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -263,7 +263,7 @@ describe('useIsAboveBreakpoint', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: BREAKPOINTS[bp],
+        value: BREAKPOINTS[bp]
       })
 
       const { result, unmount } = renderHook(() => useIsAboveBreakpoint(bp))
@@ -276,13 +276,12 @@ describe('useIsAboveBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 900,
+      value: 900
     })
 
     const { result, rerender } = renderHook(
-      ({ breakpoint }: { breakpoint: Breakpoint }) =>
-        useIsAboveBreakpoint(breakpoint),
-      { initialProps: { breakpoint: 'md' as Breakpoint } },
+      ({ breakpoint }: { breakpoint: Breakpoint }) => useIsAboveBreakpoint(breakpoint),
+      { initialProps: { breakpoint: 'md' as Breakpoint } }
     )
 
     expect(result.current).toBe(true)
@@ -306,7 +305,7 @@ describe('useIsBelowBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: originalInnerWidth,
+      value: originalInnerWidth
     })
   })
 
@@ -314,7 +313,7 @@ describe('useIsBelowBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useIsBelowBreakpoint('md'))
@@ -325,7 +324,7 @@ describe('useIsBelowBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() => useIsBelowBreakpoint('md'))
@@ -336,7 +335,7 @@ describe('useIsBelowBreakpoint', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 768,
+      value: 768
     })
 
     const { result: aboveResult } = renderHook(() => useIsAboveBreakpoint('md'))
@@ -357,7 +356,7 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: originalInnerWidth,
+      value: originalInnerWidth
     })
   })
 
@@ -365,7 +364,7 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() =>
@@ -373,8 +372,8 @@ describe('useResponsiveValue', () => {
         xs: 1,
         sm: 2,
         md: 3,
-        lg: 4,
-      }),
+        lg: 4
+      })
     )
 
     expect(result.current).toBe(4)
@@ -384,15 +383,15 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() =>
       useResponsiveValue({
         xs: 1,
         sm: 2,
-        md: 3,
-      }),
+        md: 3
+      })
     )
 
     expect(result.current).toBe(3)
@@ -402,14 +401,14 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() =>
       useResponsiveValue({
         xs: 'mobile',
-        md: 'tablet',
-      }),
+        md: 'tablet'
+      })
     )
 
     expect(result.current).toBe('mobile')
@@ -419,14 +418,14 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() =>
       useResponsiveValue({
         md: 'tablet',
-        lg: 'desktop',
-      }),
+        lg: 'desktop'
+      })
     )
 
     expect(result.current).toBeUndefined()
@@ -436,15 +435,15 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() =>
       useResponsiveValue({
         xs: 'mobile',
         md: 'tablet',
-        lg: 'desktop',
-      }),
+        lg: 'desktop'
+      })
     )
 
     expect(result.current).toBe('mobile')
@@ -453,7 +452,7 @@ describe('useResponsiveValue', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1024,
+        value: 1024
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -465,14 +464,14 @@ describe('useResponsiveValue', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() =>
       useResponsiveValue({
         xs: { cols: 1 },
-        lg: { cols: 4 },
-      }),
+        lg: { cols: 4 }
+      })
     )
 
     expect(result.current).toEqual({ cols: 4 })
@@ -490,7 +489,7 @@ describe('useResponsive', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: originalInnerWidth,
+      value: originalInnerWidth
     })
   })
 
@@ -498,7 +497,7 @@ describe('useResponsive', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 640,
+      value: 640
     })
 
     const { result } = renderHook(() => useResponsive())
@@ -515,7 +514,7 @@ describe('useResponsive', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 768,
+      value: 768
     })
 
     const { result } = renderHook(() => useResponsive())
@@ -532,7 +531,7 @@ describe('useResponsive', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
 
     const { result } = renderHook(() => useResponsive())
@@ -549,7 +548,7 @@ describe('useResponsive', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1536,
+      value: 1536
     })
 
     const { result } = renderHook(() => useResponsive())
@@ -565,7 +564,7 @@ describe('useResponsive', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 500,
+      value: 500
     })
 
     const { result } = renderHook(() => useResponsive())
@@ -575,7 +574,7 @@ describe('useResponsive', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1024,
+        value: 1024
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -598,12 +597,12 @@ describe('useWindowSize', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: originalInnerWidth,
+      value: originalInnerWidth
     })
     Object.defineProperty(window, 'innerHeight', {
       writable: true,
       configurable: true,
-      value: originalInnerHeight,
+      value: originalInnerHeight
     })
   })
 
@@ -611,12 +610,12 @@ describe('useWindowSize', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 1024,
+      value: 1024
     })
     Object.defineProperty(window, 'innerHeight', {
       writable: true,
       configurable: true,
-      value: 768,
+      value: 768
     })
 
     const { result } = renderHook(() => useWindowSize())
@@ -629,12 +628,12 @@ describe('useWindowSize', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 800,
+      value: 800
     })
     Object.defineProperty(window, 'innerHeight', {
       writable: true,
       configurable: true,
-      value: 600,
+      value: 600
     })
 
     const { result } = renderHook(() => useWindowSize())
@@ -643,7 +642,7 @@ describe('useWindowSize', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1280,
+        value: 1280
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -655,12 +654,12 @@ describe('useWindowSize', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 800,
+      value: 800
     })
     Object.defineProperty(window, 'innerHeight', {
       writable: true,
       configurable: true,
-      value: 600,
+      value: 600
     })
 
     const { result } = renderHook(() => useWindowSize())
@@ -669,7 +668,7 @@ describe('useWindowSize', () => {
       Object.defineProperty(window, 'innerHeight', {
         writable: true,
         configurable: true,
-        value: 900,
+        value: 900
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -681,12 +680,12 @@ describe('useWindowSize', () => {
     Object.defineProperty(window, 'innerWidth', {
       writable: true,
       configurable: true,
-      value: 800,
+      value: 800
     })
     Object.defineProperty(window, 'innerHeight', {
       writable: true,
       configurable: true,
-      value: 600,
+      value: 600
     })
 
     const { result } = renderHook(() => useWindowSize())
@@ -695,12 +694,12 @@ describe('useWindowSize', () => {
       Object.defineProperty(window, 'innerWidth', {
         writable: true,
         configurable: true,
-        value: 1920,
+        value: 1920
       })
       Object.defineProperty(window, 'innerHeight', {
         writable: true,
         configurable: true,
-        value: 1080,
+        value: 1080
       })
       window.dispatchEvent(new Event('resize'))
     })
@@ -717,9 +716,7 @@ describe('useMediaQuery', () => {
   })
 
   test('updates when media query matches', () => {
-    const { result } = renderHook(() =>
-      useMediaQuery('(prefers-reduced-motion: reduce)'),
-    )
+    const { result } = renderHook(() => useMediaQuery('(prefers-reduced-motion: reduce)'))
 
     expect(typeof result.current).toBe('boolean')
   })
@@ -729,7 +726,7 @@ describe('useMediaQuery', () => {
       '(min-width: 768px)',
       '(max-width: 640px)',
       '(prefers-reduced-motion: reduce)',
-      '(orientation: portrait)',
+      '(orientation: portrait)'
     ]
 
     queries.forEach((query) => {

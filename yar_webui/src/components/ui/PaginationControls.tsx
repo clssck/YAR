@@ -2,20 +2,14 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronsLeftIcon,
-  ChevronsRightIcon,
+  ChevronsRightIcon
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import Button from './Button'
 import Input from './Input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './Select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select'
 
 export type PaginationControlsProps = {
   currentPage: number
@@ -34,7 +28,7 @@ const PAGE_SIZE_OPTIONS = [
   { value: 20, label: '20' },
   { value: 50, label: '50' },
   { value: 100, label: '100' },
-  { value: 200, label: '200' },
+  { value: 200, label: '200' }
 ]
 
 export default function PaginationControls({
@@ -46,7 +40,7 @@ export default function PaginationControls({
   onPageSizeChange,
   isLoading = false,
   compact = false,
-  className,
+  className
 }: PaginationControlsProps) {
   const { t } = useTranslation()
   const [inputPage, setInputPage] = useState(currentPage.toString())
@@ -79,7 +73,7 @@ export default function PaginationControls({
         handlePageInputSubmit()
       }
     },
-    [handlePageInputSubmit],
+    [handlePageInputSubmit]
   )
 
   // Handle page size change
@@ -90,7 +84,7 @@ export default function PaginationControls({
         onPageSizeChange(newPageSize)
       }
     },
-    [onPageSizeChange],
+    [onPageSizeChange]
   )
 
   // Navigation handlers
@@ -147,9 +141,7 @@ export default function PaginationControls({
               disabled={isLoading}
               className="h-8 w-12 text-center text-sm"
             />
-            <span className="text-sm text-muted-foreground">
-              / {totalPages}
-            </span>
+            <span className="text-muted-foreground text-sm">/ {totalPages}</span>
           </div>
 
           <Button
@@ -185,11 +177,11 @@ export default function PaginationControls({
 
   return (
     <div className={cn('flex items-center justify-between gap-4', className)}>
-      <div className="text-sm text-muted-foreground">
+      <div className="text-muted-foreground text-sm">
         {t('pagination.showing', {
           start: Math.min((currentPage - 1) * pageSize + 1, totalCount),
           end: Math.min(currentPage * pageSize, totalCount),
-          total: totalCount,
+          total: totalCount
         })}
       </div>
 

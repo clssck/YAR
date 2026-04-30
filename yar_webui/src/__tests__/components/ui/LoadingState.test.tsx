@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { render } from '@testing-library/react'
-import LoadingState, {
-  PulsingDot,
-  Skeleton,
-  SkeletonText,
-} from '@/components/ui/LoadingState'
+import LoadingState, { PulsingDot, Skeleton, SkeletonText } from '@/components/ui/LoadingState'
 
 describe('LoadingState', () => {
   describe('Rendering', () => {
@@ -98,9 +94,7 @@ describe('LoadingState', () => {
     })
 
     test('applies text size for default variant', () => {
-      const { container } = render(
-        <LoadingState size="default" message="Loading" />,
-      )
+      const { container } = render(<LoadingState size="default" message="Loading" />)
       const span = container.querySelector('span:not(.sr-only)')
       expect(span?.className).toContain('text-sm')
     })
@@ -133,32 +127,32 @@ describe('LoadingState', () => {
 
     test('displays progress percentage', () => {
       const { container } = render(<LoadingState progress={75} />)
-      const percentage = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('75%'),
+      const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('75%')
       )
       expect(percentage?.textContent).toBe('75%')
     })
 
     test('rounds progress percentage', () => {
       const { container } = render(<LoadingState progress={33.7} />)
-      const percentage = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('34%'),
+      const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('34%')
       )
       expect(percentage?.textContent).toBe('34%')
     })
 
     test('displays 0% when progress is 0', () => {
       const { container } = render(<LoadingState progress={0} />)
-      const percentage = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('0%'),
+      const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('0%')
       )
       expect(percentage?.textContent).toBe('0%')
     })
 
     test('displays 100% when progress is 100', () => {
       const { container } = render(<LoadingState progress={100} />)
-      const percentage = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('100%'),
+      const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('100%')
       )
       expect(percentage?.textContent).toBe('100%')
     })
@@ -172,9 +166,7 @@ describe('LoadingState', () => {
     })
 
     test('uses provided ariaLabel', () => {
-      const { container } = render(
-        <LoadingState ariaLabel="Loading documents" />,
-      )
+      const { container } = render(<LoadingState ariaLabel="Loading documents" />)
       const output = container.querySelector('output')
       expect(output?.getAttribute('aria-label')).toBe('Loading documents')
     })
@@ -232,18 +224,14 @@ describe('LoadingState', () => {
     })
 
     test('merges custom className with variant classes', () => {
-      const { container } = render(
-        <LoadingState variant="centered" className="custom-class" />,
-      )
+      const { container } = render(<LoadingState variant="centered" className="custom-class" />)
       const output = container.querySelector('output')
       expect(output?.className).toContain('justify-center')
       expect(output?.className).toContain('custom-class')
     })
 
     test('accepts additional HTML attributes', () => {
-      const { container } = render(
-        <LoadingState data-testid="loading" role="status" />,
-      )
+      const { container } = render(<LoadingState data-testid="loading" role="status" />)
       const output = container.querySelector('output')
       expect(output?.getAttribute('data-testid')).toBe('loading')
       expect(output?.getAttribute('role')).toBe('status')
@@ -252,14 +240,12 @@ describe('LoadingState', () => {
 
   describe('Complex Scenarios', () => {
     test('renders with message and progress', () => {
-      const { container } = render(
-        <LoadingState message="Uploading files..." progress={60} />,
+      const { container } = render(<LoadingState message="Uploading files..." progress={60} />)
+      const message = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('Uploading')
       )
-      const message = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('Uploading'),
-      )
-      const percentage = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('60%'),
+      const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('60%')
       )
       expect(message?.textContent).toBe('Uploading files...')
       expect(percentage?.textContent).toBe('60%')
@@ -267,21 +253,16 @@ describe('LoadingState', () => {
 
     test('renders overlay with message and progress', () => {
       const { container } = render(
-        <LoadingState
-          variant="overlay"
-          message="Processing..."
-          progress={30}
-          showSpinner={true}
-        />,
+        <LoadingState variant="overlay" message="Processing..." progress={30} showSpinner={true} />
       )
       const output = container.querySelector('output')
       expect(output?.className).toContain('fixed')
 
-      const message = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('Processing'),
+      const message = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('Processing')
       )
-      const percentage = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('30%'),
+      const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('30%')
       )
       expect(message?.textContent).toBe('Processing...')
       expect(percentage?.textContent).toBe('30%')
@@ -289,17 +270,13 @@ describe('LoadingState', () => {
 
     test('renders minimal variant without spinner', () => {
       const { container } = render(
-        <LoadingState
-          variant="minimal"
-          message="Syncing..."
-          showSpinner={false}
-        />,
+        <LoadingState variant="minimal" message="Syncing..." showSpinner={false} />
       )
       const spinner = container.querySelector('svg[class*="animate-spin"]')
       expect(spinner).toBeFalsy()
 
-      const message = Array.from(container.querySelectorAll('span')).find(
-        (span) => span.textContent?.includes('Syncing'),
+      const message = Array.from(container.querySelectorAll('span')).find((span) =>
+        span.textContent?.includes('Syncing')
       )
       expect(message?.textContent).toBe('Syncing...')
     })
@@ -354,25 +331,19 @@ describe('SkeletonText', () => {
   describe('Rendering', () => {
     test('renders with default 3 lines', () => {
       const { container } = render(<SkeletonText />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       expect(skeletons.length).toBe(3)
     })
 
     test('renders custom number of lines', () => {
       const { container } = render(<SkeletonText lines={5} />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       expect(skeletons.length).toBe(5)
     })
 
     test('renders single line', () => {
       const { container } = render(<SkeletonText lines={1} />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       expect(skeletons.length).toBe(1)
     })
 
@@ -384,18 +355,14 @@ describe('SkeletonText', () => {
 
     test('last line has reduced width', () => {
       const { container } = render(<SkeletonText lines={3} />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       const lastSkeleton = skeletons[skeletons.length - 1]
       expect(lastSkeleton?.className).toContain('w-3/4')
     })
 
     test('all lines except last have full width', () => {
       const { container } = render(<SkeletonText lines={3} />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       expect(skeletons[0]?.className).toContain('w-full')
       expect(skeletons[1]?.className).toContain('w-full')
       expect(skeletons[2]?.className).toContain('w-3/4')
@@ -403,9 +370,7 @@ describe('SkeletonText', () => {
 
     test('all lines have consistent height', () => {
       const { container } = render(<SkeletonText lines={4} />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       skeletons.forEach((skeleton) => {
         expect(skeleton?.className).toContain('h-4')
       })
@@ -425,9 +390,7 @@ describe('SkeletonText', () => {
 
     test('generates unique keys for each skeleton', () => {
       const { container } = render(<SkeletonText lines={3} />)
-      const skeletons = container.querySelectorAll(
-        'div[class*="animate-pulse"]',
-      )
+      const skeletons = container.querySelectorAll('div[class*="animate-pulse"]')
       expect(skeletons.length).toBe(3)
     })
   })
@@ -489,7 +452,7 @@ describe('Integration Tests', () => {
         progress={45}
         showSpinner={true}
         ariaLabel="System initialization"
-      />,
+      />
     )
 
     const output = container.querySelector('output')
@@ -499,13 +462,13 @@ describe('Integration Tests', () => {
     const spinner = container.querySelector('svg')
     expect(spinner?.className).toContain('h-6')
 
-    const message = Array.from(container.querySelectorAll('span')).find(
-      (span) => span.textContent?.includes('Initializing'),
+    const message = Array.from(container.querySelectorAll('span')).find((span) =>
+      span.textContent?.includes('Initializing')
     )
     expect(message?.textContent).toBe('Initializing system...')
 
-    const percentage = Array.from(container.querySelectorAll('span')).find(
-      (span) => span.textContent?.includes('45%'),
+    const percentage = Array.from(container.querySelectorAll('span')).find((span) =>
+      span.textContent?.includes('45%')
     )
     expect(percentage?.textContent).toBe('45%')
   })
@@ -514,12 +477,8 @@ describe('Integration Tests', () => {
     const { container: titleContainer } = render(<SkeletonText lines={1} />)
     const { container: paragraphContainer } = render(<SkeletonText lines={5} />)
 
-    const titleSkeletons = titleContainer.querySelectorAll(
-      'div[class*="animate-pulse"]',
-    )
-    const paragraphSkeletons = paragraphContainer.querySelectorAll(
-      'div[class*="animate-pulse"]',
-    )
+    const titleSkeletons = titleContainer.querySelectorAll('div[class*="animate-pulse"]')
+    const paragraphSkeletons = paragraphContainer.querySelectorAll('div[class*="animate-pulse"]')
 
     expect(titleSkeletons.length).toBe(1)
     expect(paragraphSkeletons.length).toBe(5)
@@ -530,8 +489,8 @@ describe('Integration Tests', () => {
       <div>
         <LoadingState variant="inline" message="Loading..." size="sm" />
         <PulsingDot />
-        <Skeleton className="h-32 w-full mt-4" />
-      </div>,
+        <Skeleton className="mt-4 h-32 w-full" />
+      </div>
     )
 
     const output = container.querySelector('output')

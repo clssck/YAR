@@ -27,16 +27,16 @@ i18n.use(initReactI18next).init({
     zh: { translation: zh },
     fr: { translation: fr },
     ar: { translation: ar },
-    zh_TW: { translation: zh_TW },
+    zh_TW: { translation: zh_TW }
   },
   lng: getStoredLanguage(), // Use stored language settings
   fallbackLng: 'en',
   interpolation: {
-    escapeValue: false,
+    escapeValue: false
   },
   // Configuration to handle missing translations
   returnEmptyString: false,
-  returnNull: false,
+  returnNull: false
 })
 
 // Subscribe to language changes (deferred to avoid TDZ issues during module initialization)

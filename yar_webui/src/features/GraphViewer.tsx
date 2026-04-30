@@ -1,18 +1,11 @@
 // import { MiniMap } from '@react-sigma/minimap'
 import { SigmaContainer, useRegisterEvents, useSigma } from '@react-sigma/core'
-import {
-  createEdgeCurveProgram,
-  EdgeCurvedArrowProgram,
-} from '@sigma/edge-curve'
+import { createEdgeCurveProgram, EdgeCurvedArrowProgram } from '@sigma/edge-curve'
 import { createNodeBorderProgram, NodeBorderProgram } from '@sigma/node-border'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Sigma } from 'sigma'
-import {
-  EdgeArrowProgram,
-  NodeCircleProgram,
-  NodePointProgram,
-} from 'sigma/rendering'
+import { EdgeArrowProgram, NodeCircleProgram, NodePointProgram } from 'sigma/rendering'
 import type { Settings as SigmaSettings } from 'sigma/settings'
 import FocusOnNode from '@/components/graph/FocusOnNode'
 import FullScreenControl from '@/components/graph/FullScreenControl'
@@ -46,8 +39,8 @@ const OrphanNodeProgram = createNodeBorderProgram({
     // Outer thick border ring (white gap)
     { color: { attribute: 'color' }, size: { value: 0.4, mode: 'relative' } },
     // Inner contrasting ring
-    { color: { value: '#374151' }, size: { value: 0.15, mode: 'relative' } },
-  ],
+    { color: { value: '#374151' }, size: { value: 0.15, mode: 'relative' } }
+  ]
 })
 
 // Function to create sigma settings based on theme
@@ -59,28 +52,28 @@ const createSigmaSettings = (isDarkTheme: boolean): Partial<SigmaSettings> => ({
   edgeProgramClasses: {
     arrow: EdgeArrowProgram,
     curvedArrow: EdgeCurvedArrowProgram,
-    curvedNoArrow: createEdgeCurveProgram(),
+    curvedNoArrow: createEdgeCurveProgram()
   },
   nodeProgramClasses: {
     default: NodeBorderProgram,
     circle: NodeCircleProgram,
     point: NodePointProgram,
     // Orphan nodes (degree = 0) render as triangles for visual distinction
-    orphan: OrphanNodeProgram,
+    orphan: OrphanNodeProgram
   },
   labelGridCellSize: 60,
   labelRenderedSizeThreshold: 12,
   enableEdgeEvents: true,
   labelColor: {
     color: isDarkTheme ? labelColorDarkTheme : labelColorLightTheme,
-    attribute: 'labelColor',
+    attribute: 'labelColor'
   },
   edgeLabelColor: {
     color: isDarkTheme ? labelColorDarkTheme : labelColorLightTheme,
-    attribute: 'labelColor',
+    attribute: 'labelColor'
   },
   edgeLabelSize: 8,
-  labelSize: 12,
+  labelSize: 12
   // minEdgeThickness: 2
   // labelFont: 'Lato, sans-serif'
 })
@@ -91,10 +84,7 @@ const FocusSync = () => {
   const focusedNode = useGraphStore.use.focusedNode()
   const moveToSelectedNode = useGraphStore.use.moveToSelectedNode()
 
-  const autoFocusedNode = useMemo(
-    () => focusedNode ?? selectedNode,
-    [focusedNode, selectedNode],
-  )
+  const autoFocusedNode = useMemo(() => focusedNode ?? selectedNode, [focusedNode, selectedNode])
 
   return <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
 }
@@ -138,7 +128,7 @@ const GraphEvents = () => {
         if (mouseEvent.buttons !== 0 && !sigma.getCustomBBox()) {
           sigma.setCustomBBox(sigma.getBBox())
         }
-      },
+      }
     })
   }, [registerEvents, sigma, draggedNode])
 
@@ -243,7 +233,7 @@ const GraphViewer = () => {
             'bg-background/60 absolute backdrop-blur-lg border-2 rounded-xl',
             isCompact
               ? 'bottom-2 left-1/2 -translate-x-1/2 flex flex-row items-center gap-0.5 p-1'
-              : 'bottom-2 left-2 flex flex-col p-1',
+              : 'bottom-2 left-2 flex flex-col p-1'
           )}
         >
           {/* Layout group */}
@@ -287,7 +277,7 @@ const GraphViewer = () => {
 
         {/* Legend - bottom right (hidden on mobile) */}
         {showLegend && !isCompact && (
-          <div className="absolute bottom-10 right-2 z-0">
+          <div className="absolute right-2 bottom-10 z-0">
             <Legend className="bg-background/60 backdrop-blur-lg" />
           </div>
         )}
@@ -302,19 +292,15 @@ const GraphViewer = () => {
           <div
             className={cn(
               'absolute z-0 bg-background/60 backdrop-blur-lg rounded-lg px-2 py-1 text-xs text-muted-foreground border',
-              isCompact ? 'top-2 right-2' : 'bottom-2 right-2 px-3 py-1.5',
+              isCompact ? 'top-2 right-2' : 'bottom-2 right-2 px-3 py-1.5'
             )}
           >
             <span className="font-medium">{nodeCount.toLocaleString()}</span>
             <span className={cn('mx-1', isCompact && 'hidden sm:inline')}>
               {t('graphPanel.stats.nodes', 'nodes')}
             </span>
-            {!isCompact && (
-              <span className="text-muted-foreground/50 mx-1">|</span>
-            )}
-            {isCompact && (
-              <span className="text-muted-foreground/50 mx-0.5">/</span>
-            )}
+            {!isCompact && <span className="text-muted-foreground/50 mx-1">|</span>}
+            {isCompact && <span className="text-muted-foreground/50 mx-0.5">/</span>}
             <span className="font-medium">{edgeCount.toLocaleString()}</span>
             <span className={cn('mx-1', isCompact && 'hidden sm:inline')}>
               {t('graphPanel.stats.edges', 'edges')}
@@ -325,20 +311,20 @@ const GraphViewer = () => {
 
       {/* Loading overlay - shown when data is loading or theme is switching */}
       {(isFetching || isThemeSwitching) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm z-10">
+        <div className="bg-background/80 absolute inset-0 z-10 flex flex-col items-center justify-center backdrop-blur-sm">
           {/* Skeleton graph placeholder */}
-          <div className="relative w-64 h-64 mb-6">
+          <div className="relative mb-6 h-64 w-64">
             {/* Skeleton nodes in a pattern */}
-            <Skeleton className="absolute top-8 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full" />
-            <Skeleton className="absolute top-20 left-8 w-6 h-6 rounded-full opacity-70" />
-            <Skeleton className="absolute top-20 right-8 w-6 h-6 rounded-full opacity-70" />
-            <Skeleton className="absolute bottom-20 left-12 w-5 h-5 rounded-full opacity-50" />
-            <Skeleton className="absolute bottom-20 right-12 w-5 h-5 rounded-full opacity-50" />
-            <Skeleton className="absolute bottom-8 left-1/2 -translate-x-1/2 w-7 h-7 rounded-full opacity-60" />
+            <Skeleton className="absolute top-8 left-1/2 h-8 w-8 -translate-x-1/2 rounded-full" />
+            <Skeleton className="absolute top-20 left-8 h-6 w-6 rounded-full opacity-70" />
+            <Skeleton className="absolute top-20 right-8 h-6 w-6 rounded-full opacity-70" />
+            <Skeleton className="absolute bottom-20 left-12 h-5 w-5 rounded-full opacity-50" />
+            <Skeleton className="absolute right-12 bottom-20 h-5 w-5 rounded-full opacity-50" />
+            <Skeleton className="absolute bottom-8 left-1/2 h-7 w-7 -translate-x-1/2 rounded-full opacity-60" />
             {/* Skeleton edges */}
-            <Skeleton className="absolute top-16 left-1/4 w-16 h-0.5 rotate-45 opacity-30" />
-            <Skeleton className="absolute top-16 right-1/4 w-16 h-0.5 -rotate-45 opacity-30" />
-            <Skeleton className="absolute top-1/2 left-1/2 -translate-x-1/2 w-24 h-0.5 opacity-30" />
+            <Skeleton className="absolute top-16 left-1/4 h-0.5 w-16 rotate-45 opacity-30" />
+            <Skeleton className="absolute top-16 right-1/4 h-0.5 w-16 -rotate-45 opacity-30" />
+            <Skeleton className="absolute top-1/2 left-1/2 h-0.5 w-24 -translate-x-1/2 opacity-30" />
           </div>
           <LoadingState
             variant="centered"

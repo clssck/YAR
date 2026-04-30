@@ -8,9 +8,7 @@ test.describe('Navigation', () => {
   test('renders main navigation tabs', async ({ page }) => {
     // Check that main navigation tabs are visible
     await expect(page.getByRole('tab', { name: /Documents/i })).toBeVisible()
-    await expect(
-      page.getByRole('tab', { name: /Knowledge Graph/i }),
-    ).toBeVisible()
+    await expect(page.getByRole('tab', { name: /Knowledge Graph/i })).toBeVisible()
     await expect(page.getByRole('tab', { name: /Retrieval/i })).toBeVisible()
     await expect(page.getByRole('tab', { name: /API/i })).toBeVisible()
   })

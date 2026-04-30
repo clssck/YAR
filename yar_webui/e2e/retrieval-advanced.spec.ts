@@ -12,9 +12,7 @@ test.describe('Retrieval Input Validation', () => {
     await input.press('Enter')
 
     // Should show error toast or message about invalid mode
-    await expect(
-      page.getByText(/Invalid query mode|Only supports/i),
-    ).toBeVisible({ timeout: 3000 })
+    await expect(page.getByText(/Invalid query mode|Only supports/i)).toBeVisible({ timeout: 3000 })
   })
 
   test('clears input after successful submit attempt', async ({ page }) => {
@@ -46,9 +44,7 @@ test.describe('Retrieval Input Validation', () => {
     expect(value).toContain('\n')
   })
 
-  test('send button is always enabled (validation on submit)', async ({
-    page,
-  }) => {
+  test('send button is always enabled (validation on submit)', async ({ page }) => {
     // Note: The app validates on submit, not via disabled state
     const sendButton = page.getByRole('button', { name: /Send/i })
 
@@ -84,7 +80,7 @@ test.describe('Mode Selector Behavior', () => {
     await page.getByRole('tab', { name: /Documents/i }).click()
     await expect(page.getByRole('tab', { name: /Documents/i })).toHaveAttribute(
       'data-state',
-      'active',
+      'active'
     )
 
     // Switch back to Retrieval
@@ -99,18 +95,9 @@ test.describe('Mode Selector Behavior', () => {
     await modeSelect.click()
 
     // All modes should be visible
-    const expectedModes = [
-      'Naive',
-      'Local',
-      'Global',
-      'Hybrid',
-      'Mix',
-      'Bypass',
-    ]
+    const expectedModes = ['Naive', 'Local', 'Global', 'Hybrid', 'Mix', 'Bypass']
     for (const mode of expectedModes) {
-      await expect(
-        page.getByRole('option', { name: new RegExp(mode, 'i') }),
-      ).toBeVisible()
+      await expect(page.getByRole('option', { name: new RegExp(mode, 'i') })).toBeVisible()
     }
   })
 })

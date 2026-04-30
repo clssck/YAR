@@ -3,11 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import {
-  cancelPipeline,
-  getPipelineStatus,
-  type PipelineStatusResponse,
-} from '@/api/yar'
+import { cancelPipeline, getPipelineStatus, type PipelineStatusResponse } from '@/api/yar'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +12,7 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialogTitle
 } from '@/components/ui/AlertDialog'
 import Button from '@/components/ui/Button'
 import {
@@ -24,7 +20,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from '@/components/ui/Dialog'
 import { cn, errorMessage } from '@/lib/utils'
 
@@ -35,10 +31,7 @@ interface PipelineStatusDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-export default function PipelineStatusDialog({
-  open,
-  onOpenChange,
-}: PipelineStatusDialogProps) {
+export default function PipelineStatusDialog({ open, onOpenChange }: PipelineStatusDialogProps) {
   const { t } = useTranslation()
   const [status, setStatus] = useState<PipelineStatusResponse | null>(null)
   const [position, setPosition] = useState<DialogPosition>('center')
@@ -70,9 +63,7 @@ export default function PipelineStatusDialog({
     if (!container) return
 
     const isAtBottom =
-      Math.abs(
-        container.scrollHeight - container.scrollTop - container.clientHeight,
-      ) < 1
+      Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 1
 
     if (isAtBottom) {
       setIsUserScrolled(false)
@@ -92,8 +83,8 @@ export default function PipelineStatusDialog({
       } catch (err) {
         toast.error(
           t('documentPanel.pipelineStatus.errors.fetchFailed', {
-            error: errorMessage(err),
-          }),
+            error: errorMessage(err)
+          })
         )
       }
     }
@@ -116,8 +107,8 @@ export default function PipelineStatusDialog({
     } catch (err) {
       toast.error(
         t('documentPanel.pipelineStatus.cancelFailed', {
-          error: errorMessage(err),
-        }),
+          error: errorMessage(err)
+        })
       )
     }
   }
@@ -132,7 +123,7 @@ export default function PipelineStatusDialog({
           'sm:max-w-[800px] transition-all duration-200 fixed',
           position === 'left' && '!left-[25%] !translate-x-[-50%] !mx-4',
           position === 'center' && '!left-1/2 !-translate-x-1/2',
-          position === 'right' && '!left-[75%] !translate-x-[-50%] !mx-4',
+          position === 'right' && '!left-[75%] !translate-x-[-50%] !mx-4'
         )}
       >
         <DialogDescription className="sr-only">
@@ -141,19 +132,17 @@ export default function PipelineStatusDialog({
             : t('documentPanel.pipelineStatus.noActiveJob')}
         </DialogDescription>
         <DialogHeader className="flex flex-row items-center">
-          <DialogTitle className="flex-1">
-            {t('documentPanel.pipelineStatus.title')}
-          </DialogTitle>
+          <DialogTitle className="flex-1">{t('documentPanel.pipelineStatus.title')}</DialogTitle>
 
           {/* Position control buttons */}
-          <div className="flex items-center gap-2 mr-8">
+          <div className="mr-8 flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
               className={cn(
                 'h-6 w-6',
                 position === 'left' &&
-                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600',
+                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600'
               )}
               onClick={() => setPosition('left')}
             >
@@ -165,7 +154,7 @@ export default function PipelineStatusDialog({
               className={cn(
                 'h-6 w-6',
                 position === 'center' &&
-                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600',
+                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600'
               )}
               onClick={() => setPosition('center')}
             >
@@ -177,7 +166,7 @@ export default function PipelineStatusDialog({
               className={cn(
                 'h-6 w-6',
                 position === 'right' &&
-                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600',
+                  'bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600'
               )}
               onClick={() => setPosition('right')}
             >
@@ -193,9 +182,7 @@ export default function PipelineStatusDialog({
             {/* Left side: Status indicators */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className="text-sm font-medium">
-                  {t('documentPanel.pipelineStatus.busy')}:
-                </div>
+                <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.busy')}:</div>
                 <div
                   className={`h-2 w-2 rounded-full ${status?.busy ? 'bg-green-500' : 'bg-gray-300'}`}
                 />
@@ -238,10 +225,9 @@ export default function PipelineStatusDialog({
           </div>
 
           {/* Job Information */}
-          <div className="rounded-md border p-3 space-y-2">
+          <div className="space-y-2 rounded-md border p-3">
             <div>
-              {t('documentPanel.pipelineStatus.jobName')}:{' '}
-              {status?.job_name || '-'}
+              {t('documentPanel.pipelineStatus.jobName')}: {status?.job_name || '-'}
             </div>
             <div className="flex justify-between">
               <span>
@@ -253,7 +239,7 @@ export default function PipelineStatusDialog({
                       day: 'numeric',
                       hour: 'numeric',
                       minute: 'numeric',
-                      second: 'numeric',
+                      second: 'numeric'
                     })
                   : '-'}
               </span>
@@ -274,13 +260,13 @@ export default function PipelineStatusDialog({
             <div
               ref={historyRef}
               onScroll={handleScroll}
-              className="font-mono text-xs rounded-md bg-zinc-800 text-zinc-100 p-3 overflow-y-auto overflow-x-hidden min-h-[7.5em] max-h-[40vh]"
+              className="max-h-[40vh] min-h-[7.5em] overflow-x-hidden overflow-y-auto rounded-md bg-zinc-800 p-3 font-mono text-xs text-zinc-100"
             >
               {status?.history_messages?.length
                 ? status.history_messages.map((msg, idx) => (
                     <div
                       key={`msg-${idx}-${msg.slice(0, 32)}`}
-                      className="whitespace-pre-wrap break-all"
+                      className="break-all whitespace-pre-wrap"
                     >
                       {msg}
                     </div>

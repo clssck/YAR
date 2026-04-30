@@ -13,9 +13,7 @@ import { getCountValue, hasActiveDocumentsStatus } from '@/utils/documentUtils'
 // =============================================================================
 
 describe('DocumentManager Utility Functions', () => {
-
   describe('getCountValue behavior', () => {
-
     test('returns first matching key value', () => {
       const counts = { PROCESSING: 5, PENDING: 3 }
       expect(getCountValue(counts, 'PROCESSING', 'processing')).toBe(5)
@@ -64,8 +62,8 @@ describe('DocumentManager Utility Functions', () => {
         hasActiveDocumentsStatus({
           PROCESSING: 0,
           PENDING: 0,
-          PREPROCESSED: 0,
-        }),
+          PREPROCESSED: 0
+        })
       ).toBe(false)
     })
 
@@ -82,13 +80,9 @@ describe('DocumentManager Utility Functions', () => {
     // Recreate function for testing
     const getDisplayFileName = (
       doc: { id: string; file_path?: string },
-      maxLength = 20,
+      maxLength = 20
     ): string => {
-      if (
-        !doc.file_path ||
-        typeof doc.file_path !== 'string' ||
-        doc.file_path.trim() === ''
-      ) {
+      if (!doc.file_path || typeof doc.file_path !== 'string' || doc.file_path.trim() === '') {
         return doc.id
       }
       const parts = doc.file_path.split('/')
@@ -96,9 +90,7 @@ describe('DocumentManager Utility Functions', () => {
       if (!fileName || fileName.trim() === '') {
         return doc.id
       }
-      return fileName.length > maxLength
-        ? `${fileName.slice(0, maxLength)}...`
-        : fileName
+      return fileName.length > maxLength ? `${fileName.slice(0, maxLength)}...` : fileName
     }
 
     test('extracts filename from path', () => {
@@ -124,7 +116,7 @@ describe('DocumentManager Utility Functions', () => {
     test('truncates long filenames', () => {
       const doc = {
         id: 'doc-123',
-        file_path: '/path/to/very_long_document_name_here.pdf',
+        file_path: '/path/to/very_long_document_name_here.pdf'
       }
       const result = getDisplayFileName(doc, 20)
       expect(result).toBe('very_long_document_n...')
@@ -156,9 +148,7 @@ describe('DocumentManager Utility Functions', () => {
     // Simplified version for testing
     type PropertyValue = string | number | boolean | null
 
-    const formatMetadata = (
-      metadata: Record<string, PropertyValue>,
-    ): string => {
+    const formatMetadata = (metadata: Record<string, PropertyValue>): string => {
       const formattedMetadata: Record<string, PropertyValue> = { ...metadata }
 
       if (
@@ -253,18 +243,8 @@ describe('StatusTimeline Component', () => {
   // We need to test StatusTimeline behavior, but it's a private component
   // So we test it through the exported DocumentManager or recreate it
 
-  const TIMELINE_STAGES = [
-    'pending',
-    'preprocessed',
-    'processing',
-    'processed',
-  ] as const
-  type DocStatus =
-    | 'pending'
-    | 'preprocessed'
-    | 'processing'
-    | 'processed'
-    | 'failed'
+  const TIMELINE_STAGES = ['pending', 'preprocessed', 'processing', 'processed'] as const
+  type DocStatus = 'pending' | 'preprocessed' | 'processing' | 'processed' | 'failed'
 
   describe('Timeline Stage Logic', () => {
     const getStageIndex = (status: DocStatus): number => {
@@ -314,15 +294,9 @@ describe('StatusTimeline Component', () => {
     })
 
     test('stages follow correct order', () => {
-      expect(getStageIndex('pending')).toBeLessThan(
-        getStageIndex('preprocessed'),
-      )
-      expect(getStageIndex('preprocessed')).toBeLessThan(
-        getStageIndex('processing'),
-      )
-      expect(getStageIndex('processing')).toBeLessThan(
-        getStageIndex('processed'),
-      )
+      expect(getStageIndex('pending')).toBeLessThan(getStageIndex('preprocessed'))
+      expect(getStageIndex('preprocessed')).toBeLessThan(getStageIndex('processing'))
+      expect(getStageIndex('processing')).toBeLessThan(getStageIndex('processed'))
     })
   })
 })
@@ -336,12 +310,7 @@ describe('Sort Types', () => {
   type SortDirection = 'asc' | 'desc'
 
   test('valid sort fields', () => {
-    const validFields: SortField[] = [
-      'created_at',
-      'updated_at',
-      'id',
-      'file_path',
-    ]
+    const validFields: SortField[] = ['created_at', 'updated_at', 'id', 'file_path']
     validFields.forEach((field) => {
       expect(['created_at', 'updated_at', 'id', 'file_path']).toContain(field)
     })
@@ -360,13 +329,7 @@ describe('Sort Types', () => {
 // =============================================================================
 
 describe('Status Filter', () => {
-  type StatusFilter =
-    | 'pending'
-    | 'preprocessed'
-    | 'processing'
-    | 'processed'
-    | 'failed'
-    | 'all'
+  type StatusFilter = 'pending' | 'preprocessed' | 'processing' | 'processed' | 'failed' | 'all'
 
   test('all status filter values are valid', () => {
     const filters: StatusFilter[] = [
@@ -375,19 +338,13 @@ describe('Status Filter', () => {
       'preprocessed',
       'processing',
       'processed',
-      'failed',
+      'failed'
     ]
     expect(filters).toHaveLength(6)
   })
 
   test('all includes all status values', () => {
-    const statuses = [
-      'pending',
-      'preprocessed',
-      'processing',
-      'processed',
-      'failed',
-    ]
+    const statuses = ['pending', 'preprocessed', 'processing', 'processed', 'failed']
     const filter: StatusFilter = 'all'
     // 'all' filter should match all statuses conceptually
     expect(filter).toBe('all')

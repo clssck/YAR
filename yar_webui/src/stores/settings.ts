@@ -9,19 +9,13 @@ const DEV_STORAGE_CONFIG = import.meta.env.DEV
       kv_storage: 'PGKVStorage',
       doc_status_storage: 'PGDocStatusStorage',
       graph_storage: 'PGGraphStorage',
-      vector_storage: 'PGVectorStorage',
+      vector_storage: 'PGVectorStorage'
     }
   : null
 
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
-type Tab =
-  | 'documents'
-  | 'knowledge-graph'
-  | 'retrieval'
-  | 'api'
-  | 'table-explorer'
-  | 'storage'
+type Tab = 'documents' | 'knowledge-graph' | 'retrieval' | 'api' | 'table-explorer' | 'storage'
 
 interface SettingsState {
   // Document manager settings
@@ -171,7 +165,7 @@ const useSettingsStoreBase = create<SettingsState>()(
         enable_rerank: false,
         citation_mode: 'none',
         citation_threshold: 0.7,
-        show_references_section: true,
+        show_references_section: true
       },
 
       setTheme: (theme: Theme) => set({ theme }),
@@ -182,16 +176,15 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       setGraphLayoutMaxIterations: (iterations: number) =>
         set({
-          graphLayoutMaxIterations: iterations,
+          graphLayoutMaxIterations: iterations
         }),
 
       setQueryLabel: (queryLabel: string) =>
         set({
-          queryLabel,
+          queryLabel
         }),
 
-      setGraphQueryMaxDepth: (depth: number) =>
-        set({ graphQueryMaxDepth: depth }),
+      setGraphQueryMaxDepth: (depth: number) => set({ graphQueryMaxDepth: depth }),
 
       setGraphMaxNodes: (nodes: number, triggerRefresh = false) => {
         const state = useSettingsStore.getState()
@@ -217,8 +210,7 @@ const useSettingsStoreBase = create<SettingsState>()(
         }
       },
 
-      setBackendMaxGraphNodes: (maxNodes: number | null) =>
-        set({ backendMaxGraphNodes: maxNodes }),
+      setBackendMaxGraphNodes: (maxNodes: number | null) => set({ backendMaxGraphNodes: maxNodes }),
 
       setGraphMinDegree: (degree: number, triggerRefresh = false) => {
         const state = useSettingsStore.getState()
@@ -268,22 +260,19 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       setMaxEdgeSize: (size: number) => set({ maxEdgeSize: size }),
 
-      setEnableHealthCheck: (enable: boolean) =>
-        set({ enableHealthCheck: enable }),
+      setEnableHealthCheck: (enable: boolean) => set({ enableHealthCheck: enable }),
 
       setApiKey: (apiKey: string | null) => set({ apiKey }),
 
-      setStorageConfig: (config: Partial<YarConfiguration>) =>
-        set({ storageConfig: config }),
+      setStorageConfig: (config: Partial<YarConfiguration>) => set({ storageConfig: config }),
 
       setCurrentTab: (tab: Tab) => set({ currentTab: tab }),
 
-      setRetrievalHistory: (history: Message[]) =>
-        set({ retrievalHistory: history }),
+      setRetrievalHistory: (history: Message[]) => set({ retrievalHistory: history }),
 
       updateQuerySettings: (settings: Partial<QueryRequest>) => {
         set((state) => ({
-          querySettings: { ...state.querySettings, ...settings },
+          querySettings: { ...state.querySettings, ...settings }
         }))
       },
 
@@ -316,16 +305,14 @@ const useSettingsStoreBase = create<SettingsState>()(
         })
       },
 
-      setUserPromptHistory: (history: string[]) =>
-        set({ userPromptHistory: history }),
+      setUserPromptHistory: (history: string[]) => set({ userPromptHistory: history }),
 
       // Search label dropdown refresh trigger (not persisted)
       searchLabelDropdownRefreshTrigger: 0,
       triggerSearchLabelDropdownRefresh: () =>
         set((state) => ({
-          searchLabelDropdownRefreshTrigger:
-            state.searchLabelDropdownRefreshTrigger + 1,
-        })),
+          searchLabelDropdownRefreshTrigger: state.searchLabelDropdownRefreshTrigger + 1
+        }))
     }),
     {
       name: 'settings-storage',
@@ -344,8 +331,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       },
       migrate: (persistedState: unknown, version: number) => {
         // Cast to the expected state type for migration operations
-        const state = persistedState as Partial<SettingsState> &
-          Record<string, unknown>
+        const state = persistedState as Partial<SettingsState> & Record<string, unknown>
         if (version < 2) {
           state.showEdgeLabel = false
         }
@@ -371,7 +357,7 @@ const useSettingsStoreBase = create<SettingsState>()(
             top_k: 10,
             only_need_context: false,
             only_need_prompt: false,
-            stream: true,
+            stream: true
           } as Omit<QueryRequest, 'query'>
           state.retrievalHistory = []
         }
@@ -419,7 +405,7 @@ const useSettingsStoreBase = create<SettingsState>()(
             max_entity_tokens: 10000,
             max_relation_tokens: 10000,
             max_total_tokens: 32000,
-            enable_rerank: false,
+            enable_rerank: false
           }
         }
         if (version < 16) {
@@ -468,8 +454,7 @@ const useSettingsStoreBase = create<SettingsState>()(
         if (version < 25) {
           if (state.querySettings) {
             // Remove deprecated history_turns property from old versions
-            delete (state.querySettings as Record<string, unknown>)
-              .history_turns
+            delete (state.querySettings as Record<string, unknown>).history_turns
           }
         }
         if (version < 26) {
@@ -478,9 +463,9 @@ const useSettingsStoreBase = create<SettingsState>()(
           }
         }
         return state
-      },
-    },
-  ),
+      }
+    }
+  )
 )
 
 const useSettingsStore = createSelectors(useSettingsStoreBase)

@@ -40,7 +40,7 @@ export function getHistory(): SearchHistoryItem[] {
     // Version compatibility check
     if (parsed.version !== VERSION) {
       console.warn(
-        `Search history version mismatch. Expected ${VERSION}, got ${parsed.version}. Clearing history.`,
+        `Search history version mismatch. Expected ${VERSION}, got ${parsed.version}. Clearing history.`
       )
       clearHistory()
       return []
@@ -82,9 +82,7 @@ export function addToHistory(label: string): void {
     const trimmedLabel = label.trim()
 
     // Find existing item
-    const existingIndex = history.findIndex(
-      (item) => item.label === trimmedLabel,
-    )
+    const existingIndex = history.findIndex((item) => item.label === trimmedLabel)
 
     if (existingIndex >= 0) {
       // Update existing item
@@ -100,7 +98,7 @@ export function addToHistory(label: string): void {
       history.unshift({
         label: trimmedLabel,
         lastAccessed: now,
-        accessCount: 1,
+        accessCount: 1
       })
     }
 
@@ -112,7 +110,7 @@ export function addToHistory(label: string): void {
     // Save to localStorage
     const data: SearchHistoryData = {
       items: history,
-      version: VERSION,
+      version: VERSION
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -136,25 +134,21 @@ export function clearHistory(): void {
  * Initialize history with default popular labels if empty
  * @param popularLabels Array of popular labels to use as defaults
  */
-export async function initializeWithDefaults(
-  popularLabels: string[],
-): Promise<void> {
+export async function initializeWithDefaults(popularLabels: string[]): Promise<void> {
   const history = getHistory()
 
   if (history.length === 0 && popularLabels.length > 0) {
     try {
       const now = Date.now()
-      const defaultItems: SearchHistoryItem[] = popularLabels.map(
-        (label, index) => ({
-          label: label.trim(),
-          lastAccessed: now - index, // Ensure proper ordering
-          accessCount: 0, // Mark as default/popular items
-        }),
-      )
+      const defaultItems: SearchHistoryItem[] = popularLabels.map((label, index) => ({
+        label: label.trim(),
+        lastAccessed: now - index, // Ensure proper ordering
+        accessCount: 0 // Mark as default/popular items
+      }))
 
       const data: SearchHistoryData = {
         items: defaultItems,
-        version: VERSION,
+        version: VERSION
       }
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -217,14 +211,12 @@ export function removeLabel(label: string): void {
   try {
     const history = getHistory()
     const trimmedLabel = label.trim()
-    const filteredHistory = history.filter(
-      (item) => item.label !== trimmedLabel,
-    )
+    const filteredHistory = history.filter((item) => item.label !== trimmedLabel)
 
     if (filteredHistory.length !== history.length) {
       const data: SearchHistoryData = {
         items: filteredHistory,
-        version: VERSION,
+        version: VERSION
       }
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -260,7 +252,7 @@ export function getStats(): {
     totalItems: history.length,
     recentSearches: recentCount,
     popularRecommendations: popularCount,
-    storageSize,
+    storageSize
   }
 }
 
@@ -275,5 +267,5 @@ export const SearchHistoryManager = {
   getHistoryLabels,
   hasLabel,
   removeLabel,
-  getStats,
+  getStats
 }

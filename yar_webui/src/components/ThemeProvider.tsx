@@ -14,7 +14,7 @@ type ThemeProviderState = {
 const initialState: ThemeProviderState = {
   theme: 'system',
   resolvedTheme: 'light',
-  setTheme: () => null,
+  setTheme: () => null
 }
 
 const ThemeProviderContext = createContext<ThemeProviderState>(initialState)
@@ -22,19 +22,14 @@ const ThemeProviderContext = createContext<ThemeProviderState>(initialState)
 /**
  * Component that provides the theme state and setter function to its children.
  */
-export default function ThemeProvider({
-  children,
-  ...props
-}: ThemeProviderProps) {
+export default function ThemeProvider({ children, ...props }: ThemeProviderProps) {
   const theme = useSettingsStore.use.theme()
   const setTheme = useSettingsStore.use.setTheme()
 
   // Compute resolved theme (what's actually applied)
   const resolvedTheme = useMemo((): 'light' | 'dark' => {
     if (theme === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light'
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
     }
     return theme
   }, [theme])
@@ -62,7 +57,7 @@ export default function ThemeProvider({
   const value = {
     theme,
     resolvedTheme,
-    setTheme,
+    setTheme
   }
 
   return (

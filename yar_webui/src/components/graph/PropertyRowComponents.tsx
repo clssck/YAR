@@ -24,7 +24,7 @@ interface EditIconProps {
 export const EditIcon = ({ onClick }: EditIconProps) => (
   <div>
     <PencilIcon
-      className="h-3 w-3 text-muted-foreground hover:text-foreground cursor-pointer"
+      className="text-muted-foreground hover:text-foreground h-3 w-3 cursor-pointer"
       onClick={onClick}
     />
   </div>
@@ -36,24 +36,17 @@ interface PropertyValueProps {
   tooltip?: string
 }
 
-export const PropertyValue = ({
-  value,
-  onClick,
-  tooltip,
-}: PropertyValueProps) => {
+export const PropertyValue = ({ value, onClick, tooltip }: PropertyValueProps) => {
   // Convert PropertyValue to display string
   const displayValue = typeof value === 'string' ? value : JSON.stringify(value)
 
   return (
     <div className="flex items-center gap-1 overflow-hidden">
       <Text
-        className="hover:bg-primary/20 rounded p-1 overflow-hidden text-ellipsis whitespace-nowrap"
+        className="hover:bg-primary/20 overflow-hidden rounded p-1 text-ellipsis whitespace-nowrap"
         tooltipClassName="max-w-80 -translate-x-15"
         text={displayValue}
-        tooltip={
-          tooltip ||
-          (typeof value === 'string' ? value : JSON.stringify(value, null, 2))
-        }
+        tooltip={tooltip || (typeof value === 'string' ? value : JSON.stringify(value, null, 2))}
         side="left"
         onClick={onClick}
       />

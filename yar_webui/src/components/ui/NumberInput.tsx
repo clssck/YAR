@@ -5,8 +5,7 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { cn } from '@/lib/utils'
 
-export interface NumberInputProps
-  extends Omit<NumericFormatProps, 'value' | 'onValueChange'> {
+export interface NumberInputProps extends Omit<NumericFormatProps, 'value' | 'onValueChange'> {
   stepper?: number
   thousandSeparator?: string
   placeholder?: string
@@ -39,25 +38,19 @@ const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       value: controlledValue,
       ...props
     },
-    ref,
+    ref
   ) => {
-    const [value, setValue] = useState<number | undefined>(
-      controlledValue ?? defaultValue,
-    )
+    const [value, setValue] = useState<number | undefined>(controlledValue ?? defaultValue)
 
     const handleIncrement = useCallback(() => {
       setValue((prev) =>
-        prev === undefined
-          ? (stepper ?? 1)
-          : Math.min(prev + (stepper ?? 1), max),
+        prev === undefined ? (stepper ?? 1) : Math.min(prev + (stepper ?? 1), max)
       )
     }, [stepper, max])
 
     const handleDecrement = useCallback(() => {
       setValue((prev) =>
-        prev === undefined
-          ? -(stepper ?? 1)
-          : Math.max(prev - (stepper ?? 1), min),
+        prev === undefined ? -(stepper ?? 1) : Math.max(prev - (stepper ?? 1), min)
       )
     }, [stepper, min])
 
@@ -67,12 +60,8 @@ const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       }
     }, [controlledValue])
 
-    const handleChange = (values: {
-      value: string
-      floatValue: number | undefined
-    }) => {
-      const newValue =
-        values.floatValue === undefined ? undefined : values.floatValue
+    const handleChange = (values: { value: string; floatValue: number | undefined }) => {
+      const newValue = values.floatValue === undefined ? undefined : values.floatValue
       setValue(newValue)
       if (onValueChange) {
         onValueChange(newValue)
@@ -107,9 +96,7 @@ const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           min={min}
           suffix={suffix}
           prefix={prefix}
-          customInput={(props) => (
-            <Input {...props} className={cn('w-full', className)} />
-          )}
+          customInput={(props) => <Input {...props} className={cn('w-full', className)} />}
           placeholder={placeholder}
           className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           getInputRef={ref}
@@ -137,7 +124,7 @@ const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
         </div>
       </div>
     )
-  },
+  }
 )
 
 NumberInput.displayName = 'NumberInput'

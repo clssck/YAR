@@ -2,7 +2,7 @@ import axios, { type AxiosError } from 'axios'
 import {
   backendBaseUrl,
   popularLabelsDefaultLimit,
-  searchLabelsDefaultLimit,
+  searchLabelsDefaultLimit
 } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { navigationService } from '@/services/navigation'
@@ -129,13 +129,7 @@ export type YarDocumentsScanProgress = {
  * - "mix": Integrates knowledge graph and vector retrieval.
  * - "bypass": Bypasses knowledge retrieval and directly uses the LLM.
  */
-export type QueryMode =
-  | 'naive'
-  | 'local'
-  | 'global'
-  | 'hybrid'
-  | 'mix'
-  | 'bypass'
+export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass'
 
 /**
  * Citation marker with position data for frontend insertion
@@ -261,12 +255,7 @@ export type DeleteDocResponse = {
   doc_id: string
 }
 
-export type DocStatus =
-  | 'pending'
-  | 'processing'
-  | 'preprocessed'
-  | 'processed'
-  | 'failed'
+export type DocStatus = 'pending' | 'processing' | 'preprocessed' | 'processed' | 'failed'
 
 export type DocStatusResponse = {
   id: string
@@ -366,8 +355,8 @@ export const RequireApiKeyError = 'API Key required'
 const axiosInstance = axios.create({
   baseURL: backendBaseUrl,
   headers: {
-    'Content-Type': 'application/json',
-  },
+    'Content-Type': 'application/json'
+  }
 })
 
 // Interceptor: add api key and check authentication
@@ -395,16 +384,15 @@ axiosInstance.interceptors.response.use(
       }
       throw new Error(
         `${error.response.status} ${error.response.statusText}\n${JSON.stringify(
-          error.response.data,
-        )}\n${error.config?.url}`,
+          error.response.data
+        )}\n${error.config?.url}`
       )
     }
     throw error
-  },
+  }
 )
 
 const GRAPH_REQUEST_TIMEOUT_MS = 10000
-
 
 // API methods
 export const queryGraphs = async (
@@ -413,18 +401,17 @@ export const queryGraphs = async (
   maxNodes: number,
   minDegree = 0,
   includeOrphans = false,
-  signal?: AbortSignal,
- ): Promise<YarGraphType> => {
+  signal?: AbortSignal
+): Promise<YarGraphType> => {
   const response = await axiosInstance.get(
     `/graphs?label=${encodeURIComponent(label)}&max_depth=${maxDepth}&max_nodes=${maxNodes}&min_degree=${minDegree}&include_orphans=${includeOrphans}`,
     {
       signal,
-      timeout: GRAPH_REQUEST_TIMEOUT_MS,
-    },
+      timeout: GRAPH_REQUEST_TIMEOUT_MS
+    }
   )
   return response.data
 }
-
 
 export const getGraphLabels = async (): Promise<string[]> => {
   const response = await axiosInstance.get('/graph/label/list')
@@ -432,34 +419,30 @@ export const getGraphLabels = async (): Promise<string[]> => {
 }
 
 export const getPopularLabels = async (
-  limit: number = popularLabelsDefaultLimit,
+  limit: number = popularLabelsDefaultLimit
 ): Promise<string[]> => {
-  const response = await axiosInstance.get(
-    `/graph/label/popular?limit=${limit}`,
-  )
+  const response = await axiosInstance.get(`/graph/label/popular?limit=${limit}`)
   return response.data
 }
 
 export const searchLabels = async (
   query: string,
-  limit: number = searchLabelsDefaultLimit,
+  limit: number = searchLabelsDefaultLimit
 ): Promise<string[]> => {
   const response = await axiosInstance.get(
-    `/graph/label/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+    `/graph/label/search?q=${encodeURIComponent(query)}&limit=${limit}`
   )
   return response.data
 }
 
-export const checkHealth = async (): Promise<
-  YarStatus | { status: 'error'; message: string }
-> => {
+export const checkHealth = async (): Promise<YarStatus | { status: 'error'; message: string }> => {
   try {
     const response = await axiosInstance.get('/health')
     return response.data
   } catch (error) {
     return {
       status: 'error',
-      message: errorMessage(error),
+      message: errorMessage(error)
     }
   }
 }
@@ -469,21 +452,17 @@ export const scanNewDocuments = async (): Promise<ScanResponse> => {
   return response.data
 }
 
-export const reprocessFailedDocuments =
-  async (): Promise<ReprocessFailedResponse> => {
-    const response = await axiosInstance.post('/documents/reprocess_failed')
-    return response.data
-  }
+export const reprocessFailedDocuments = async (): Promise<ReprocessFailedResponse> => {
+  const response = await axiosInstance.post('/documents/reprocess_failed')
+  return response.data
+}
 
-export const getDocumentsScanProgress =
-  async (): Promise<YarDocumentsScanProgress> => {
-    const response = await axiosInstance.get('/documents/scan-progress')
-    return response.data
-  }
+export const getDocumentsScanProgress = async (): Promise<YarDocumentsScanProgress> => {
+  const response = await axiosInstance.get('/documents/scan-progress')
+  return response.data
+}
 
-export const queryText = async (
-  request: QueryRequest,
-): Promise<QueryResponse> => {
+export const queryText = async (request: QueryRequest): Promise<QueryResponse> => {
   const response = await axiosInstance.post('/query', request)
   return response.data
 }
@@ -505,7 +484,10 @@ export type StreamReference = {
  * Prefer presigned URLs when available; otherwise fall back to the API's
  * S3 content proxy (`/s3/content/{key}`) for protected objects.
  */
-export const getDocumentUrl = (ref: { s3_key: string | null; presigned_url: string | null }): string | null => {
+export const getDocumentUrl = (ref: {
+  s3_key: string | null
+  presigned_url: string | null
+}): string | null => {
   if (ref.presigned_url) {
     return ref.presigned_url
   }
@@ -521,12 +503,12 @@ export const queryTextStream = async (
   onError?: (error: string) => void,
   onCitations?: (metadata: CitationsMetadata) => void,
   onReferences?: (references: StreamReference[]) => void,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ) => {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     Accept: 'application/x-ndjson',
-    ...getAuthHeaders(),
+    ...getAuthHeaders()
   }
 
   try {
@@ -534,7 +516,7 @@ export const queryTextStream = async (
       method: 'POST',
       headers: headers,
       body: JSON.stringify(request),
-      signal,
+      signal
     })
 
     if (!response.ok) {
@@ -559,7 +541,7 @@ export const queryTextStream = async (
       // Format error message similar to axios interceptor for consistency
       const url = `${backendBaseUrl}/query/stream`
       throw new Error(
-        `${response.status} ${response.statusText}\n${JSON.stringify({ error: errorBody })}\n${url}`,
+        `${response.status} ${response.statusText}\n${JSON.stringify({ error: errorBody })}\n${url}`
       )
     }
 
@@ -601,11 +583,7 @@ export const queryTextStream = async (
             ) {
               onError(`Citation error: ${parsed.citation_error}`)
             }
-            if (
-              'citations_metadata' in parsed &&
-              parsed.citations_metadata &&
-              onCitations
-            ) {
+            if ('citations_metadata' in parsed && parsed.citations_metadata && onCitations) {
               // Handle consolidated citations_metadata object
               onCitations(parsed.citations_metadata as CitationsMetadata)
             }
@@ -639,18 +617,10 @@ export const queryTextStream = async (
         if ('error' in parsed && typeof parsed.error === 'string' && onError) {
           onError(parsed.error)
         }
-        if (
-          'citation_error' in parsed &&
-          typeof parsed.citation_error === 'string' &&
-          onError
-        ) {
+        if ('citation_error' in parsed && typeof parsed.citation_error === 'string' && onError) {
           onError(`Citation error: ${parsed.citation_error}`)
         }
-        if (
-          'citations_metadata' in parsed &&
-          parsed.citations_metadata &&
-          onCitations
-        ) {
+        if ('citations_metadata' in parsed && parsed.citations_metadata && onCitations) {
           onCitations(parsed.citations_metadata as CitationsMetadata)
         }
         if ('references' in parsed) {
@@ -691,8 +661,7 @@ export const queryTextStream = async (
 
       switch (statusCode) {
         case 403:
-          userMessage =
-            'You do not have permission to access this resource (403 Forbidden)'
+          userMessage = 'You do not have permission to access this resource (403 Forbidden)'
           console.error('Permission denied for stream request:', message)
           break
         case 404:
@@ -700,8 +669,7 @@ export const queryTextStream = async (
           console.error('Resource not found for stream request:', message)
           break
         case 429:
-          userMessage =
-            'Too many requests, please try again later (429 Too Many Requests)'
+          userMessage = 'Too many requests, please try again later (429 Too Many Requests)'
           console.error('Rate limited for stream request:', message)
           break
         case 500:
@@ -712,11 +680,7 @@ export const queryTextStream = async (
           console.error('Server error for stream request:', message)
           break
         default:
-          console.error(
-            'Stream request failed with status code:',
-            statusCode,
-            message,
-          )
+          console.error('Stream request failed with status code:', statusCode, message)
       }
 
       if (onError) {
@@ -733,9 +697,7 @@ export const queryTextStream = async (
     ) {
       console.error('Network error for stream request:', message)
       if (onError) {
-        onError(
-          'Network connection error, please check your internet connection',
-        )
+        onError('Network connection error, please check your internet connection')
       }
       return
     }
@@ -764,9 +726,7 @@ export const insertText = async (text: string): Promise<DocActionResponse> => {
   return response.data
 }
 
-export const insertTexts = async (
-  texts: string[],
-): Promise<DocActionResponse> => {
+export const insertTexts = async (texts: string[]): Promise<DocActionResponse> => {
   const response = await axiosInstance.post('/documents/texts', { texts })
   return response.data
 }
@@ -776,7 +736,7 @@ export type ChunkingPreset = 'semantic' | 'recursive' | ''
 export const uploadDocument = async (
   file: File,
   onUploadProgress?: (percentCompleted: number) => void,
-  chunkingPreset?: ChunkingPreset,
+  chunkingPreset?: ChunkingPreset
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
@@ -786,7 +746,7 @@ export const uploadDocument = async (
 
   const response = await axiosInstance.post('/documents/upload', formData, {
     headers: {
-      'Content-Type': 'multipart/form-data',
+      'Content-Type': 'multipart/form-data'
     },
     // prettier-ignore
     onUploadProgress:
@@ -797,7 +757,7 @@ export const uploadDocument = async (
             )
             onUploadProgress(percentCompleted)
           }
-        : undefined,
+        : undefined
   })
   return response.data
 }
@@ -805,7 +765,7 @@ export const uploadDocument = async (
 export const batchUploadDocuments = async (
   files: File[],
   onUploadProgress?: (fileName: string, percentCompleted: number) => void,
-  chunkingPreset?: ChunkingPreset,
+  chunkingPreset?: ChunkingPreset
 ): Promise<DocActionResponse[]> => {
   return await Promise.all(
     files.map(async (file) => {
@@ -814,9 +774,9 @@ export const batchUploadDocuments = async (
         (percentCompleted) => {
           onUploadProgress?.(file.name, percentCompleted)
         },
-        chunkingPreset,
+        chunkingPreset
       )
-    }),
+    })
   )
 }
 
@@ -836,12 +796,12 @@ export const clearCache = async (): Promise<{
 export const deleteDocuments = async (
   docIds: string[],
   deleteFile = false,
-  deleteLLMCache = false,
+  deleteLLMCache = false
 ): Promise<DeleteDocResponse> => {
   const response = await axiosInstance.post('/documents/delete_document', {
     doc_ids: docIds,
     delete_file: deleteFile,
-    delete_llm_cache: deleteLLMCache,
+    delete_llm_cache: deleteLLMCache
   })
   return response.data
 }
@@ -852,19 +812,17 @@ export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
     const response = await axiosInstance.get('/auth-status', {
       timeout: 5000, // 5 second timeout
       headers: {
-        Accept: 'application/json', // Explicitly request JSON
-      },
+        Accept: 'application/json' // Explicitly request JSON
+      }
     })
 
     // Check if response is HTML (which indicates a redirect or wrong endpoint)
     const contentType = response.headers['content-type'] || ''
     if (contentType.includes('text/html')) {
-      console.warn(
-        'Received HTML response instead of JSON for auth-status endpoint',
-      )
+      console.warn('Received HTML response instead of JSON for auth-status endpoint')
       return {
         auth_configured: true,
-        auth_mode: 'enabled',
+        auth_mode: 'enabled'
       }
     }
 
@@ -877,10 +835,7 @@ export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
     ) {
       // For unconfigured auth, ensure we have an access token
       if (!response.data.auth_configured) {
-        if (
-          response.data.access_token &&
-          typeof response.data.access_token === 'string'
-        ) {
+        if (response.data.access_token && typeof response.data.access_token === 'string') {
           return response.data
         } else {
           console.warn('Auth not configured but no valid access token provided')
@@ -897,14 +852,14 @@ export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
     // Default to auth configured if response is invalid
     return {
       auth_configured: true,
-      auth_mode: 'enabled',
+      auth_mode: 'enabled'
     }
   } catch (error) {
     // If the request fails, assume authentication is configured
     console.error('Failed to get auth status:', errorMessage(error))
     return {
       auth_configured: true,
-      auth_mode: 'enabled',
+      auth_mode: 'enabled'
     }
   }
 }
@@ -922,18 +877,15 @@ export const cancelPipeline = async (): Promise<{
   return response.data
 }
 
-export const loginToServer = async (
-  username: string,
-  password: string,
-): Promise<LoginResponse> => {
+export const loginToServer = async (username: string, password: string): Promise<LoginResponse> => {
   const formData = new FormData()
   formData.append('username', username)
   formData.append('password', password)
 
   const response = await axiosInstance.post('/login', formData, {
     headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+      'Content-Type': 'multipart/form-data'
+    }
   })
 
   return response.data
@@ -951,13 +903,13 @@ export const updateEntity = async (
   entityName: string,
   updatedData: Record<string, PropertyValue>,
   allowRename = false,
-  allowMerge = false,
+  allowMerge = false
 ): Promise<EntityUpdateResponse> => {
   const response = await axiosInstance.post('/graph/entity/edit', {
     entity_name: entityName,
     updated_data: updatedData,
     allow_rename: allowRename,
-    allow_merge: allowMerge,
+    allow_merge: allowMerge
   })
   return response.data
 }
@@ -972,12 +924,12 @@ export const updateEntity = async (
 export const updateRelation = async (
   sourceEntity: string,
   targetEntity: string,
-  updatedData: Record<string, PropertyValue>,
+  updatedData: Record<string, PropertyValue>
 ): Promise<DocActionResponse> => {
   const response = await axiosInstance.post('/graph/relation/edit', {
     source_id: sourceEntity,
     target_id: targetEntity,
-    updated_data: updatedData,
+    updated_data: updatedData
   })
   return response.data
 }
@@ -1031,13 +983,13 @@ export const connectOrphanEntities = async (
   maxCandidates = 3,
   similarityThreshold?: number,
   confidenceThreshold?: number,
-  crossConnect?: boolean,
+  crossConnect?: boolean
 ): Promise<OrphanConnectionResponse> => {
   const response = await axiosInstance.post('/graph/orphans/connect', {
     max_candidates: maxCandidates,
     similarity_threshold: similarityThreshold,
     confidence_threshold: confidenceThreshold,
-    cross_connect: crossConnect,
+    cross_connect: crossConnect
   })
   return response.data
 }
@@ -1046,11 +998,10 @@ export const connectOrphanEntities = async (
  * Get the current status of the orphan connection background pipeline
  * @returns Promise with current pipeline status
  */
-export const getOrphanConnectionStatus =
-  async (): Promise<OrphanConnectionStatus> => {
-    const response = await axiosInstance.get('/graph/orphans/status')
-    return response.data
-  }
+export const getOrphanConnectionStatus = async (): Promise<OrphanConnectionStatus> => {
+  const response = await axiosInstance.get('/graph/orphans/status')
+  return response.data
+}
 
 /**
  * Start orphan connection as a background job
@@ -1063,10 +1014,10 @@ export const getOrphanConnectionStatus =
  */
 export const startOrphanConnection = async (
   maxCandidates = 3,
-  maxDegree = 0,
+  maxDegree = 0
 ): Promise<{ status: string }> => {
   const response = await axiosInstance.post('/graph/orphans/start', null, {
-    params: { max_candidates: maxCandidates, max_degree: maxDegree },
+    params: { max_candidates: maxCandidates, max_degree: maxDegree }
   })
   return response.data
 }
@@ -1085,12 +1036,10 @@ export const cancelOrphanConnection = async (): Promise<{ status: string }> => {
  * @param entityName The entity name to check
  * @returns Promise with boolean indicating if the entity exists
  */
-export const checkEntityNameExists = async (
-  entityName: string,
-): Promise<boolean> => {
+export const checkEntityNameExists = async (entityName: string): Promise<boolean> => {
   try {
     const response = await axiosInstance.get(
-      `/graph/entity/exists?name=${encodeURIComponent(entityName)}`,
+      `/graph/entity/exists?name=${encodeURIComponent(entityName)}`
     )
     return response.data.exists
   } catch (error) {
@@ -1104,12 +1053,8 @@ export const checkEntityNameExists = async (
  * @param trackId The tracking ID returned from upload, text, or texts endpoints
  * @returns Promise with the track status response containing documents and summary
  */
-export const getTrackStatus = async (
-  trackId: string,
-): Promise<TrackStatusResponse> => {
-  const response = await axiosInstance.get(
-    `/documents/track_status/${encodeURIComponent(trackId)}`,
-  )
+export const getTrackStatus = async (trackId: string): Promise<TrackStatusResponse> => {
+  const response = await axiosInstance.get(`/documents/track_status/${encodeURIComponent(trackId)}`)
   return response.data
 }
 
@@ -1119,7 +1064,7 @@ export const getTrackStatus = async (
  * @returns Promise with paginated documents response
  */
 export const getDocumentsPaginated = async (
-  request: DocumentsRequest,
+  request: DocumentsRequest
 ): Promise<PaginatedDocsResponse> => {
   const response = await axiosInstance.post('/documents/paginated', request)
   return response.data
@@ -1129,11 +1074,10 @@ export const getDocumentsPaginated = async (
  * Get counts of documents by status
  * @returns Promise with status counts response
  */
-export const getDocumentStatusCounts =
-  async (): Promise<StatusCountsResponse> => {
-    const response = await axiosInstance.get('/documents/status_counts')
-    return response.data
-  }
+export const getDocumentStatusCounts = async (): Promise<StatusCountsResponse> => {
+  const response = await axiosInstance.get('/documents/status_counts')
+  return response.data
+}
 
 export type TableSchema = {
   ddl: string
@@ -1154,7 +1098,7 @@ const mockTables = [
   'yar_entities',
   'yar_relations',
   'yar_entity_aliases',
-  'yar_llm_cache',
+  'yar_llm_cache'
 ]
 
 const mockSchemas: Record<string, string> = {
@@ -1184,7 +1128,7 @@ const mockSchemas: Record<string, string> = {
   method VARCHAR(50),
   confidence FLOAT,
   created_at TIMESTAMP DEFAULT NOW()
-);`,
+);`
 }
 
 const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
@@ -1195,7 +1139,7 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       content_summary: 'Research paper on AI...',
       content_length: 15420,
       status: 'processed',
-      created_at: '2024-01-15T10:30:00Z',
+      created_at: '2024-01-15T10:30:00Z'
     },
     {
       id: 'doc_002',
@@ -1203,7 +1147,7 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       content_summary: 'Technical documentation...',
       content_length: 8750,
       status: 'processed',
-      created_at: '2024-01-16T14:22:00Z',
+      created_at: '2024-01-16T14:22:00Z'
     },
     {
       id: 'doc_003',
@@ -1211,8 +1155,8 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       content_summary: 'Meeting notes from Q4...',
       content_length: 3200,
       status: 'pending',
-      created_at: '2024-01-17T09:15:00Z',
-    },
+      created_at: '2024-01-17T09:15:00Z'
+    }
   ],
   yar_entities: [
     {
@@ -1221,7 +1165,7 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       entity_name: 'OpenAI',
       entity_type: 'Organization',
       description: 'AI research company',
-      created_at: '2024-01-15T10:30:00Z',
+      created_at: '2024-01-15T10:30:00Z'
     },
     {
       id: 2,
@@ -1229,7 +1173,7 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       entity_name: 'GPT-4',
       entity_type: 'Product',
       description: 'Large language model',
-      created_at: '2024-01-15T10:31:00Z',
+      created_at: '2024-01-15T10:31:00Z'
     },
     {
       id: 3,
@@ -1237,8 +1181,8 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       entity_name: 'San Francisco',
       entity_type: 'Location',
       description: 'City in California',
-      created_at: '2024-01-15T10:32:00Z',
-    },
+      created_at: '2024-01-15T10:32:00Z'
+    }
   ],
   yar_entity_aliases: [
     {
@@ -1248,7 +1192,7 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       canonical_entity: 'OpenAI',
       method: 'exact',
       confidence: 1.0,
-      created_at: '2024-01-15T10:30:00Z',
+      created_at: '2024-01-15T10:30:00Z'
     },
     {
       id: 2,
@@ -1257,7 +1201,7 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       canonical_entity: 'GPT-4',
       method: 'fuzzy',
       confidence: 0.92,
-      created_at: '2024-01-15T10:31:00Z',
+      created_at: '2024-01-15T10:31:00Z'
     },
     {
       id: 3,
@@ -1266,9 +1210,9 @@ const mockTableData: Record<string, Record<string, PropertyValue>[]> = {
       canonical_entity: 'San Francisco',
       method: 'llm',
       confidence: 0.85,
-      created_at: '2024-01-15T10:32:00Z',
-    },
-  ],
+      created_at: '2024-01-15T10:32:00Z'
+    }
+  ]
 }
 
 const SAFE_TABLE_NAME_REGEX = /^[a-zA-Z0-9_.-]+$/
@@ -1281,9 +1225,7 @@ export const getTableList = async (): Promise<string[]> => {
   return response.data
 }
 
-export const getTableSchema = async (
-  tableName: string,
-): Promise<TableSchema> => {
+export const getTableSchema = async (tableName: string): Promise<TableSchema> => {
   if (!tableName || typeof tableName !== 'string') {
     throw new Error('Invalid table name')
   }
@@ -1292,19 +1234,17 @@ export const getTableSchema = async (
   }
   if (import.meta.env.DEV) {
     return {
-      ddl: mockSchemas[tableName] || `-- Schema not available for ${tableName}`,
+      ddl: mockSchemas[tableName] || `-- Schema not available for ${tableName}`
     }
   }
-  const response = await axiosInstance.get(
-    `/tables/${encodeURIComponent(tableName)}/schema`,
-  )
+  const response = await axiosInstance.get(`/tables/${encodeURIComponent(tableName)}/schema`)
   return response.data
 }
 
 export const getTableData = async (
   tableName: string,
   page: number,
-  pageSize: number,
+  pageSize: number
 ): Promise<TableDataResponse> => {
   if (!tableName || typeof tableName !== 'string') {
     throw new Error('Invalid table name')
@@ -1319,9 +1259,7 @@ export const getTableData = async (
     pageSize < 1 ||
     pageSize > 1000
   ) {
-    throw new Error(
-      'Page must be >= 1 and page size must be between 1 and 1000',
-    )
+    throw new Error('Page must be >= 1 and page size must be between 1 and 1000')
   }
 
   if (import.meta.env.DEV) {
@@ -1334,15 +1272,12 @@ export const getTableData = async (
       total: data.length,
       page: page,
       page_size: pageSize,
-      total_pages: Math.ceil(data.length / pageSize),
+      total_pages: Math.ceil(data.length / pageSize)
     }
   }
-  const response = await axiosInstance.get(
-    `/tables/${encodeURIComponent(tableName)}/data`,
-    {
-      params: { page, page_size: pageSize },
-    },
-  )
+  const response = await axiosInstance.get(`/tables/${encodeURIComponent(tableName)}/data`, {
+    params: { page, page_size: pageSize }
+  })
   return response.data
 }
 
@@ -1363,7 +1298,6 @@ export type S3ListResponse = {
   folders: string[]
   objects: S3ObjectInfo[]
 }
-
 
 export type S3UploadResponse = {
   key: string
@@ -1392,11 +1326,10 @@ export type S3FolderStatsResponse = {
  */
 export const s3List = async (prefix = ''): Promise<S3ListResponse> => {
   const response = await axiosInstance.get('/s3/list', {
-    params: { prefix },
+    params: { prefix }
   })
   return response.data
 }
-
 
 export type S3ContentRequestOptions = {
   download?: boolean
@@ -1411,16 +1344,13 @@ export type S3ContentRequestOptions = {
  */
 export const s3GetContentBlob = async (
   key: string,
-  options: S3ContentRequestOptions = {},
+  options: S3ContentRequestOptions = {}
 ): Promise<Blob> => {
-  const response = await axiosInstance.get(
-    `/s3/content/${encodeURIComponent(key)}`,
-    {
-      params: options.download ? { download: true } : undefined,
-      responseType: 'blob',
-      signal: options.signal,
-    },
-  )
+  const response = await axiosInstance.get(`/s3/content/${encodeURIComponent(key)}`, {
+    params: options.download ? { download: true } : undefined,
+    responseType: 'blob',
+    signal: options.signal
+  })
   return response.data as Blob
 }
 
@@ -1432,7 +1362,7 @@ export const s3GetContentBlob = async (
  */
 export const s3GetContentText = async (
   key: string,
-  options: S3ContentRequestOptions = {},
+  options: S3ContentRequestOptions = {}
 ): Promise<string> => {
   const blob = await s3GetContentBlob(key, options)
   return blob.text()
@@ -1444,17 +1374,14 @@ export const s3GetContentText = async (
  * @param file - File to upload
  * @returns Upload result with key and presigned URL
  */
-export const s3Upload = async (
-  prefix: string,
-  file: File,
-): Promise<S3UploadResponse> => {
+export const s3Upload = async (prefix: string, file: File): Promise<S3UploadResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('prefix', prefix)
   const response = await axiosInstance.post('/s3/upload', formData, {
     headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+      'Content-Type': 'multipart/form-data'
+    }
   })
   return response.data
 }
@@ -1465,9 +1392,7 @@ export const s3Upload = async (
  * @returns Deletion confirmation
  */
 export const s3Delete = async (key: string): Promise<S3DeleteResponse> => {
-  const response = await axiosInstance.delete(
-    `/s3/object/${encodeURIComponent(key)}`,
-  )
+  const response = await axiosInstance.delete(`/s3/object/${encodeURIComponent(key)}`)
   return response.data
 }
 
@@ -1479,13 +1404,10 @@ export const s3Delete = async (key: string): Promise<S3DeleteResponse> => {
  */
 export const s3FolderStats = async (
   prefix: string,
-  previewLimit = 10,
+  previewLimit = 10
 ): Promise<S3FolderStatsResponse> => {
-  const response = await axiosInstance.get(
-    `/s3/folder-stats/${encodeURIComponent(prefix)}`,
-    {
-      params: { preview_limit: previewLimit },
-    },
-  )
+  const response = await axiosInstance.get(`/s3/folder-stats/${encodeURIComponent(prefix)}`, {
+    params: { preview_limit: previewLimit }
+  })
   return response.data
 }

@@ -23,7 +23,7 @@ export default function UserPromptInputWithHistory({
   id,
   history,
   onSelectFromHistory,
-  onDeleteFromHistory,
+  onDeleteFromHistory
 }: UserPromptInputWithHistoryProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(-1)
@@ -34,10 +34,7 @@ export default function UserPromptInputWithHistory({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false)
         setSelectedIndex(-1)
       }
@@ -64,9 +61,7 @@ export default function UserPromptInputWithHistory({
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
-          setSelectedIndex((prev) =>
-            prev < history.length - 1 ? prev + 1 : prev,
-          )
+          setSelectedIndex((prev) => (prev < history.length - 1 ? prev + 1 : prev))
           break
         case 'ArrowUp':
           e.preventDefault()
@@ -91,7 +86,7 @@ export default function UserPromptInputWithHistory({
           break
       }
     },
-    [isOpen, selectedIndex, history, onSelectFromHistory],
+    [isOpen, selectedIndex, history, onSelectFromHistory]
   )
 
   const handleInputClick = () => {
@@ -139,7 +134,7 @@ export default function UserPromptInputWithHistory({
         setSelectedIndex((prev) => prev - 1)
       }
     },
-    [onDeleteFromHistory, history.length, selectedIndex],
+    [onDeleteFromHistory, history.length, selectedIndex]
   )
 
   return (
@@ -160,23 +155,19 @@ export default function UserPromptInputWithHistory({
           onClick={handleInputClick}
           placeholder={placeholder}
           autoComplete="off"
-          className={cn(
-            isHovered && history.length > 0 ? 'pr-5' : 'pr-2',
-            'w-full',
-            className,
-          )}
+          className={cn(isHovered && history.length > 0 ? 'pr-5' : 'pr-2', 'w-full', className)}
         />
         {isHovered && history.length > 0 && (
           <button
             type="button"
             onClick={handleInputClick}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-0 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
             tabIndex={-1}
           >
             <ChevronDown
               className={cn(
                 'h-3 w-3 transition-transform duration-200 text-muted-foreground',
-                isOpen && 'rotate-180',
+                isOpen && 'rotate-180'
               )}
             />
           </button>
@@ -185,7 +176,7 @@ export default function UserPromptInputWithHistory({
 
       {/* Dropdown */}
       {isOpen && history.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-96 overflow-auto min-w-0">
+        <div className="absolute top-full right-0 left-0 z-50 mt-0.5 max-h-96 min-w-0 overflow-auto rounded-md border border-gray-300 bg-gray-100 shadow-lg dark:border-gray-600 dark:bg-gray-800">
           {history.map((prompt, index) => (
             <div
               key={`prompt-${prompt.slice(0, 32)}-${index}`}
@@ -193,13 +184,13 @@ export default function UserPromptInputWithHistory({
                 'flex items-center justify-between pl-3 pr-1 py-2 text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors',
                 'border-b border-gray-100 dark:border-gray-600 last:border-b-0',
                 'focus-within:bg-gray-100 dark:focus-within:bg-gray-700',
-                selectedIndex === index && 'bg-gray-100 dark:bg-gray-700',
+                selectedIndex === index && 'bg-gray-100 dark:bg-gray-700'
               )}
             >
               <button
                 type="button"
                 onClick={() => handleDropdownItemClick(prompt)}
-                className="flex-1 text-left truncate focus:outline-none mr-0"
+                className="mr-0 flex-1 truncate text-left focus:outline-none"
                 title={prompt}
               >
                 {prompt}
@@ -208,10 +199,10 @@ export default function UserPromptInputWithHistory({
                 <button
                   type="button"
                   onClick={(e) => handleDeleteHistoryItem(index, e)}
-                  className="flex-shrink-0 p-0 rounded hover:bg-red-100 dark:hover:bg-red-800 transition-colors focus:outline-none ml-auto"
+                  className="ml-auto flex-shrink-0 rounded p-0 transition-colors hover:bg-red-100 focus:outline-none dark:hover:bg-red-800"
                   title="Delete this history item"
                 >
-                  <X className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                  <X className="text-muted-foreground hover:text-destructive h-3 w-3" />
                 </button>
               )}
             </div>

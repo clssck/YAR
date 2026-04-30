@@ -19,20 +19,17 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
     return {
       success: false,
       method: 'fallback',
-      error: 'No text provided',
+      error: 'No text provided'
     }
   }
 
   // Strategy 1: Modern Clipboard API (preferred)
-  if (
-    navigator.clipboard &&
-    typeof navigator.clipboard.writeText === 'function'
-  ) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     try {
       await navigator.clipboard.writeText(text)
       return {
         success: true,
-        method: 'clipboard-api',
+        method: 'clipboard-api'
       }
     } catch (error) {
       console.warn('Clipboard API failed:', error)
@@ -65,7 +62,7 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
   return {
     success: false,
     method: 'fallback',
-    error: 'All copy methods failed. Please copy the text manually.',
+    error: 'All copy methods failed. Please copy the text manually.'
   }
 }
 
@@ -93,20 +90,20 @@ async function copyWithExecCommand(text: string): Promise<CopyResult> {
       if (successful) {
         resolve({
           success: true,
-          method: 'execCommand',
+          method: 'execCommand'
         })
       } else {
         resolve({
           success: false,
           method: 'execCommand',
-          error: 'execCommand returned false',
+          error: 'execCommand returned false'
         })
       }
     } catch (error) {
       resolve({
         success: false,
         method: 'execCommand',
-        error: error instanceof Error ? error.message : 'execCommand failed',
+        error: error instanceof Error ? error.message : 'execCommand failed'
       })
     } finally {
       document.body.removeChild(textarea)
@@ -139,7 +136,7 @@ async function copyWithManualSelection(text: string): Promise<CopyResult> {
 
       // Try to trigger copy event
       const copyEvent = new ClipboardEvent('copy', {
-        clipboardData: new DataTransfer(),
+        clipboardData: new DataTransfer()
       })
 
       if (copyEvent.clipboardData) {
@@ -148,22 +145,21 @@ async function copyWithManualSelection(text: string): Promise<CopyResult> {
 
         resolve({
           success: true,
-          method: 'manual-select',
+          method: 'manual-select'
         })
       } else {
         // Fallback: keep text selected for manual copy
         resolve({
           success: false,
           method: 'manual-select',
-          error: 'Manual selection prepared, but automatic copy failed',
+          error: 'Manual selection prepared, but automatic copy failed'
         })
       }
     } catch (error) {
       resolve({
         success: false,
         method: 'manual-select',
-        error:
-          error instanceof Error ? error.message : 'Manual selection failed',
+        error: error instanceof Error ? error.message : 'Manual selection failed'
       })
     } finally {
       // Clean up after a short delay to allow copy operation
@@ -181,8 +177,7 @@ async function copyWithManualSelection(text: string): Promise<CopyResult> {
  */
 export function isClipboardSupported(): boolean {
   return !!(
-    (navigator.clipboard &&
-      typeof navigator.clipboard.writeText === 'function') ||
+    (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') ||
     typeof document !== 'undefined'
   )
 }
@@ -195,10 +190,7 @@ export function getBestClipboardMethod():
   | 'execCommand'
   | 'manual-select'
   | 'none' {
-  if (
-    navigator.clipboard &&
-    typeof navigator.clipboard.writeText === 'function'
-  ) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     return 'clipboard-api'
   }
 

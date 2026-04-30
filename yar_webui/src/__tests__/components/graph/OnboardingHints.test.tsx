@@ -16,14 +16,14 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 // process-wide). Our component uses inline fallbacks as ground truth.
 mock.module('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
-  }),
+    t: (key: string, fallback?: string) => fallback ?? key
+  })
 }))
 
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import OnboardingHints, {
   ONBOARDING_KEY,
-  ONBOARDING_RESET_EVENT,
+  ONBOARDING_RESET_EVENT
 } from '@/components/graph/OnboardingHintsImpl'
 
 beforeEach(() => {
@@ -36,10 +36,7 @@ afterEach(() => {
 
 describe('OnboardingHints', () => {
   test('renders nothing when structured state marks completed', async () => {
-    localStorage.setItem(
-      ONBOARDING_KEY,
-      JSON.stringify({ completed: true, lastStep: 0 }),
-    )
+    localStorage.setItem(ONBOARDING_KEY, JSON.stringify({ completed: true, lastStep: 0 }))
     const { container } = render(<OnboardingHints />)
     // Dialog is gated synchronously; no async tick needed.
     expect(container.querySelector('[role="dialog"]')).toBeNull()
@@ -62,12 +59,8 @@ describe('OnboardingHints', () => {
     const describedBy = dialog.getAttribute('aria-describedby')
     expect(labelledBy).toBeTruthy()
     expect(describedBy).toBeTruthy()
-    expect(dialog.querySelector(`#${labelledBy}`)?.textContent).toBe(
-      'Search Nodes',
-    )
-    expect(dialog.querySelector(`#${describedBy}`)?.textContent).toContain(
-      'Cmd+K',
-    )
+    expect(dialog.querySelector(`#${labelledBy}`)?.textContent).toBe('Search Nodes')
+    expect(dialog.querySelector(`#${describedBy}`)?.textContent).toContain('Cmd+K')
     // Non-blocking — graph remains interactive
     expect(dialog.getAttribute('aria-modal')).toBe('false')
   })
@@ -81,9 +74,10 @@ describe('OnboardingHints', () => {
     await waitFor(() => {
       expect(container.querySelector('[role="dialog"]')).toBeNull()
     })
-    const stored = JSON.parse(
-      localStorage.getItem(ONBOARDING_KEY) ?? 'null',
-    ) as { completed: boolean; lastStep: number } | null
+    const stored = JSON.parse(localStorage.getItem(ONBOARDING_KEY) ?? 'null') as {
+      completed: boolean
+      lastStep: number
+    } | null
     expect(stored?.completed).toBe(true)
   })
 
@@ -96,9 +90,10 @@ describe('OnboardingHints', () => {
     await waitFor(() => {
       expect(container.querySelector('[role="dialog"]')).toBeNull()
     })
-    const stored = JSON.parse(
-      localStorage.getItem(ONBOARDING_KEY) ?? 'null',
-    ) as { completed: boolean; lastStep: number } | null
+    const stored = JSON.parse(localStorage.getItem(ONBOARDING_KEY) ?? 'null') as {
+      completed: boolean
+      lastStep: number
+    } | null
     expect(stored?.completed).toBe(true)
   })
 
@@ -124,9 +119,7 @@ describe('OnboardingHints', () => {
     nextBtn = getByRole('button', { name: 'Next' })
     fireEvent.click(nextBtn)
     await waitFor(() => {
-      expect(container.querySelector('h4')?.textContent).toBe(
-        'Node Interactions',
-      )
+      expect(container.querySelector('h4')?.textContent).toBe('Node Interactions')
     })
     stored = JSON.parse(localStorage.getItem(ONBOARDING_KEY) ?? 'null') as {
       completed: boolean
@@ -148,10 +141,7 @@ describe('OnboardingHints', () => {
   })
 
   test('replay event re-shows the panel from step 0 even after completion', async () => {
-    localStorage.setItem(
-      ONBOARDING_KEY,
-      JSON.stringify({ completed: true, lastStep: 0 }),
-    )
+    localStorage.setItem(ONBOARDING_KEY, JSON.stringify({ completed: true, lastStep: 0 }))
     const { container } = render(<OnboardingHints />)
     // Dialog is gated synchronously; no async tick needed.
     expect(container.querySelector('[role="dialog"]')).toBeNull()
@@ -164,10 +154,7 @@ describe('OnboardingHints', () => {
   })
 
   test('resumes at lastStep when state is interrupted (not completed)', async () => {
-    localStorage.setItem(
-      ONBOARDING_KEY,
-      JSON.stringify({ completed: false, lastStep: 1 }),
-    )
+    localStorage.setItem(ONBOARDING_KEY, JSON.stringify({ completed: false, lastStep: 1 }))
     const { container } = render(<OnboardingHints />)
     await waitFor(() => {
       expect(container.querySelector('[role="dialog"]')).not.toBeNull()

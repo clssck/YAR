@@ -4,20 +4,10 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import seedrandom from 'seedrandom'
 import { toast } from 'sonner'
-import {
-  queryGraphs,
-  type YarEdgeType,
-  type YarGraphType,
-  type YarNodeType,
-} from '@/api/yar'
+import { queryGraphs, type YarEdgeType, type YarGraphType, type YarNodeType } from '@/api/yar'
 import * as Constants from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
-import {
-  type RawEdgeType,
-  RawGraph,
-  type RawNodeType,
-  useGraphStore,
-} from '@/stores/graph'
+import { type RawEdgeType, RawGraph, type RawNodeType, useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
 import { DEFAULT_NODE_COLOR, resolveNodeColor } from '@/utils/graphColor'
@@ -60,8 +50,7 @@ const validateGraph = (graph: RawGraph) => {
 
   // Check if nodes and edges are arrays
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    if (debug)
-      console.log('Graph validation failed: nodes or edges is not an array')
+    if (debug) console.log('Graph validation failed: nodes or edges is not an array')
     return false
   }
 
@@ -92,10 +81,7 @@ const validateGraph = (graph: RawGraph) => {
     const source = graph.getNode(edge.source)
     const target = graph.getNode(edge.target)
     if (source === undefined || target === undefined) {
-      if (debug)
-        console.log(
-          'Graph validation failed: edge references non-existent node',
-        )
+      if (debug) console.log('Graph validation failed: edge references non-existent node')
       return false
     }
   }
@@ -127,14 +113,13 @@ const isGraphRequestCanceled = (error: unknown, signal?: AbortSignal) => {
   return axiosLikeError.code === 'ERR_CANCELED'
 }
 
-
 const fetchGraph = async (
   label: string,
   maxDepth: number,
   maxNodes: number,
   minDegree = 0,
   includeOrphans = false,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ) => {
   let rawData: YarGraphType | null = null
 
@@ -149,24 +134,15 @@ const fetchGraph = async (
     // Debug logging - only in development
     if (import.meta.env.DEV && localStorage.getItem('DEBUG_GRAPH')) {
       console.log(
-        `Fetching graph label: ${queryLabel}, depth: ${maxDepth}, nodes: ${maxNodes}, minDegree: ${minDegree}, includeOrphans: ${includeOrphans}`,
+        `Fetching graph label: ${queryLabel}, depth: ${maxDepth}, nodes: ${maxNodes}, minDegree: ${minDegree}, includeOrphans: ${includeOrphans}`
       )
     }
-    rawData = await queryGraphs(
-      queryLabel,
-      maxDepth,
-      maxNodes,
-      minDegree,
-      includeOrphans,
-      signal,
-    )
+    rawData = await queryGraphs(queryLabel, maxDepth, maxNodes, minDegree, includeOrphans, signal)
   } catch (e) {
     if (isGraphRequestCanceled(e, signal)) {
       throw e
     }
-    useBackendState
-      .getState()
-      .setErrorMessage(errorMessage(e), 'Query Graphs Error!')
+    useBackendState.getState().setErrorMessage(errorMessage(e), 'Query Graphs Error!')
     throw e
   }
 
@@ -228,8 +204,7 @@ const fetchGraph = async (
       const scale = Constants.maxNodeSize - Constants.minNodeSize
       for (const node of mutableNodes) {
         node.size = Math.round(
-          Constants.minNodeSize +
-            scale * ((node.degree - minDegreeVal) / range) ** 0.5,
+          Constants.minNodeSize + scale * ((node.degree - minDegreeVal) / range) ** 0.5
         )
       }
     }
@@ -290,7 +265,7 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
       borderColor: Constants.nodeBorderColor,
       borderSize: 0.2,
       // Store db_degree for hidden connections indicator
-      db_degree: rawNode.properties?.db_degree ?? 0,
+      db_degree: rawNode.properties?.db_degree ?? 0
     })
   }
 
@@ -311,26 +286,20 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
     }
 
     // Get weight from edge properties or default to 1
-    const weight =
-      rawEdge.properties?.weight !== undefined
-        ? Number(rawEdge.properties.weight)
-        : 1
+    const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
 
     try {
       rawEdge.dynamicId = graph.addEdge(rawEdge.source, rawEdge.target, {
         label: rawEdge.properties?.keywords || undefined,
         size: weight, // Set initial size based on weight
         originalWeight: weight, // Store original weight for recalculation
-        type: 'curvedNoArrow', // Explicitly set edge type to no arrow
+        type: 'curvedNoArrow' // Explicitly set edge type to no arrow
       })
       addedEdges.add(edgeKey)
     } catch (e) {
       // Silently skip duplicate edges - this is expected for bidirectional graph data
       if (!(e instanceof Error) || !e.message.includes('already exists')) {
-        console.warn(
-          `Failed to add edge ${rawEdge.source} -> ${rawEdge.target}:`,
-          e,
-        )
+        console.warn(`Failed to add edge ${rawEdge.source} -> ${rawEdge.target}:`, e)
       }
     }
   }
@@ -352,8 +321,7 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
     const sizeScale = maxEdgeSize - minEdgeSize
     graph.forEachEdge((edge) => {
       const weight = graph.getEdgeAttribute(edge, 'originalWeight') || 1
-      const scaledSize =
-        minEdgeSize + sizeScale * ((weight - minWeight) / weightRange) ** 0.5
+      const scaledSize = minEdgeSize + sizeScale * ((weight - minWeight) / weightRange) ** 0.5
       graph.setEdgeAttribute(edge, 'size', scaledSize)
     })
   } else {
@@ -391,14 +359,14 @@ const useLightrangeGraph = () => {
     (nodeId: string) => {
       return rawGraph?.getNode(nodeId) || null
     },
-    [rawGraph],
+    [rawGraph]
   )
 
   const getEdge = useCallback(
     (edgeId: string, dynamicId = true) => {
       return rawGraph?.getEdge(edgeId, dynamicId) || null
     },
-    [rawGraph],
+    [rawGraph]
   )
 
   // Track if a fetch is in progress to prevent multiple simultaneous fetches
@@ -422,20 +390,21 @@ const useLightrangeGraph = () => {
     const fetchController = new AbortController()
     // Skip if fetch is already in progress
     if (fetchInProgressRef.current) {
-      return () => { cancelled = true }
+      return () => {
+        cancelled = true
+      }
     }
 
     // Empty queryLabel should be only handle once(avoid infinite loop)
     if (!queryLabel && emptyDataHandledRef.current) {
-      return () => { cancelled = true }
+      return () => {
+        cancelled = true
+      }
     }
 
     // Only fetch data when graphDataFetchAttempted is false (avoids re-fetching on vite dev mode)
     // GraphDataFetchAttempted must set to false when queryLabel is changed
-    if (
-      !useGraphStore.getState().isFetching &&
-      !useGraphStore.getState().graphDataFetchAttempted
-    ) {
+    if (!useGraphStore.getState().isFetching && !useGraphStore.getState().graphDataFetchAttempted) {
       // Set flags
       fetchInProgressRef.current = true
       useGraphStore.getState().setGraphDataFetchAttempted(true)
@@ -471,7 +440,7 @@ const useLightrangeGraph = () => {
           currentMaxNodes,
           currentMinDegree,
           currentIncludeOrphans,
-          fetchController.signal,
+          fetchController.signal
         )
       } else {
         // 2. If query label is empty, set data to null
@@ -489,20 +458,13 @@ const useLightrangeGraph = () => {
           if (data?.nodes) {
             data.nodes.forEach((node) => {
               // Use entity_type instead of type
-              const nodeEntityType = node.properties?.entity_type as
-                | string
-                | undefined
+              const nodeEntityType = node.properties?.entity_type as string | undefined
               node.color = getNodeColorByType(nodeEntityType)
             })
           }
 
           if (result?.is_truncated) {
-            toast.info(
-              t(
-                'graphPanel.dataIsTruncated',
-                'Graph data is truncated to Max Nodes',
-              ),
-            )
+            toast.info(t('graphPanel.dataIsTruncated', 'Graph data is truncated to Max Nodes'))
           }
 
           // Reset state
@@ -521,7 +483,7 @@ const useLightrangeGraph = () => {
               y: 0.5,
               size: 15,
               borderColor: Constants.nodeBorderColor,
-              borderSize: 0.2,
+              borderSize: 0.2
             })
 
             // Set graph to store
@@ -533,9 +495,7 @@ const useLightrangeGraph = () => {
 
             // Check if the empty graph is due to 401 authentication error
             const errorMessage = useBackendState.getState().message
-            const isAuthError = errorMessage?.includes(
-              'Authentication required',
-            )
+            const isAuthError = errorMessage?.includes('Authentication required')
 
             // Only clear queryLabel if it's not an auth error and current label is not empty
             if (!isAuthError && currentQueryLabel) {
@@ -570,10 +530,7 @@ const useLightrangeGraph = () => {
           state.setIsFetching(false)
 
           // Mark empty data as handled if data is empty and query label is empty
-          if (
-            (!data || !data.nodes || data.nodes.length === 0) &&
-            !currentQueryLabel
-          ) {
+          if ((!data || !data.nodes || data.nodes.length === 0) && !currentQueryLabel) {
             emptyDataHandledRef.current = true
           }
         })
@@ -600,14 +557,7 @@ const useLightrangeGraph = () => {
       fetchController.abort()
       fetchInProgressRef.current = false
     }
-  }, [
-    queryLabel,
-    maxQueryDepth,
-    maxNodes,
-    minDegree,
-    includeOrphans,
-    t,
-  ])
+  }, [queryLabel, maxQueryDepth, maxNodes, minDegree, includeOrphans, t])
 
   // Handle node expansion
   useEffect(() => {
@@ -633,13 +583,7 @@ const useLightrangeGraph = () => {
         // This ensures we get all hidden connections, even orphan neighbors
         const expandDepth = useSettingsStore.getState().graphExpandDepth
         const maxNodes = useSettingsStore.getState().graphMaxNodes
-        const extendedGraph = await queryGraphs(
-          label,
-          expandDepth,
-          maxNodes,
-          0,
-          true,
-        )
+        const extendedGraph = await queryGraphs(label, expandDepth, maxNodes, 0, true)
 
         if (!extendedGraph || !extendedGraph.nodes || !extendedGraph.edges) {
           console.error('Failed to fetch extended graph')
@@ -651,9 +595,7 @@ const useLightrangeGraph = () => {
         for (const node of extendedGraph.nodes) {
           // Generate random color values
           const rng = seedrandom(node.id)
-          const nodeEntityType = node.properties?.entity_type as
-            | string
-            | undefined
+          const nodeEntityType = node.properties?.entity_type as string | undefined
           const color = getNodeColorByType(nodeEntityType)
 
           // Create a properly typed RawNodeType
@@ -665,7 +607,7 @@ const useLightrangeGraph = () => {
             x: rng(), // Random position, will be adjusted later
             y: rng(), // Random position, will be adjusted later
             color: color, // Random color
-            degree: 0, // Initial degree, will be calculated later
+            degree: 0 // Initial degree, will be calculated later
           })
         }
 
@@ -679,7 +621,7 @@ const useLightrangeGraph = () => {
             target: edge.target,
             type: edge.type,
             properties: edge.properties,
-            dynamicId: '', // Will be set when adding to sigma graph
+            dynamicId: '' // Will be set when adding to sigma graph
           })
         }
 
@@ -688,7 +630,7 @@ const useLightrangeGraph = () => {
         sigmaGraph.forEachNode((node) => {
           nodePositions[node] = {
             x: sigmaGraph.getNodeAttribute(node, 'x'),
-            y: sigmaGraph.getNodeAttribute(node, 'y'),
+            y: sigmaGraph.getNodeAttribute(node, 'y')
           }
         })
 
@@ -715,8 +657,7 @@ const useLightrangeGraph = () => {
 
         // Calculate edge weights from existing graph
         sigmaGraph.forEachEdge((edge) => {
-          const weight =
-            sigmaGraph.getEdgeAttribute(edge, 'originalWeight') || 1
+          const weight = sigmaGraph.getEdgeAttribute(edge, 'originalWeight') || 1
           minWeight = Math.min(minWeight, weight)
           maxWeight = Math.max(maxWeight, weight)
         })
@@ -732,7 +673,7 @@ const useLightrangeGraph = () => {
           const isConnected = processedEdges.some(
             (edge) =>
               (edge.source === nodeId && edge.target === node.id) ||
-              (edge.target === nodeId && edge.source === node.id),
+              (edge.target === nodeId && edge.source === node.id)
           )
 
           if (isConnected) {
@@ -746,37 +687,29 @@ const useLightrangeGraph = () => {
         const nodesWithDiscardedEdges = new Set<string>()
 
         for (const edge of processedEdges) {
-          const sourceExists =
-            existingNodeIds.has(edge.source) || nodesToAdd.has(edge.source)
-          const targetExists =
-            existingNodeIds.has(edge.target) || nodesToAdd.has(edge.target)
+          const sourceExists = existingNodeIds.has(edge.source) || nodesToAdd.has(edge.source)
+          const targetExists = existingNodeIds.has(edge.target) || nodesToAdd.has(edge.target)
 
           if (sourceExists && targetExists) {
             edgesToAdd.add(edge.id)
             // Add degrees for both new and existing nodes
             if (nodesToAdd.has(edge.source)) {
-              nodeDegrees.set(
-                edge.source,
-                (nodeDegrees.get(edge.source) || 0) + 1,
-              )
+              nodeDegrees.set(edge.source, (nodeDegrees.get(edge.source) || 0) + 1)
             } else if (existingNodeIds.has(edge.source)) {
               // Track degree increments for existing nodes
               existingNodeDegreeIncrements.set(
                 edge.source,
-                (existingNodeDegreeIncrements.get(edge.source) || 0) + 1,
+                (existingNodeDegreeIncrements.get(edge.source) || 0) + 1
               )
             }
 
             if (nodesToAdd.has(edge.target)) {
-              nodeDegrees.set(
-                edge.target,
-                (nodeDegrees.get(edge.target) || 0) + 1,
-              )
+              nodeDegrees.set(edge.target, (nodeDegrees.get(edge.target) || 0) + 1)
             } else if (existingNodeIds.has(edge.target)) {
               // Track degree increments for existing nodes
               existingNodeDegreeIncrements.set(
                 edge.target,
-                (existingNodeDegreeIncrements.get(edge.target) || 0) + 1,
+                (existingNodeDegreeIncrements.get(edge.target) || 0) + 1
               )
             }
           } else {
@@ -785,19 +718,13 @@ const useLightrangeGraph = () => {
               nodesWithDiscardedEdges.add(edge.source)
             } else if (nodesToAdd.has(edge.source)) {
               nodesWithDiscardedEdges.add(edge.source)
-              nodeDegrees.set(
-                edge.source,
-                (nodeDegrees.get(edge.source) || 0) + 1,
-              ) // +1 for discarded edge
+              nodeDegrees.set(edge.source, (nodeDegrees.get(edge.source) || 0) + 1) // +1 for discarded edge
             }
             if (sigmaGraph.hasNode(edge.target)) {
               nodesWithDiscardedEdges.add(edge.target)
             } else if (nodesToAdd.has(edge.target)) {
               nodesWithDiscardedEdges.add(edge.target)
-              nodeDegrees.set(
-                edge.target,
-                (nodeDegrees.get(edge.target) || 0) + 1,
-              ) // +1 for discarded edge
+              nodeDegrees.set(edge.target, (nodeDegrees.get(edge.target) || 0) + 1) // +1 for discarded edge
             }
           }
         }
@@ -807,7 +734,7 @@ const useLightrangeGraph = () => {
           sigmaGraph: UndirectedGraph,
           nodesWithDiscardedEdges: Set<string>,
           minDegree: number,
-          maxDegree: number,
+          maxDegree: number
         ) => {
           // Calculate derived values inside the function
           const range = maxDegree - minDegree || 1 // Avoid division by zero
@@ -822,8 +749,7 @@ const useLightrangeGraph = () => {
               const limitedDegree = Math.min(newDegree, maxDegree + 1)
 
               const newSize = Math.round(
-                Constants.minNodeSize +
-                  scale * ((limitedDegree - minDegree) / range) ** 0.5,
+                Constants.minNodeSize + scale * ((limitedDegree - minDegree) / range) ** 0.5
               )
 
               sigmaGraph.setNodeAttribute(nodeId, 'size', newSize)
@@ -835,7 +761,7 @@ const useLightrangeGraph = () => {
         const updateEdgeSizes = (
           sigmaGraph: UndirectedGraph,
           minWeight: number,
-          maxWeight: number,
+          maxWeight: number
         ) => {
           // Update edge sizes
           const minEdgeSize = useSettingsStore.getState().minEdgeSize
@@ -844,23 +770,15 @@ const useLightrangeGraph = () => {
           const sizeScale = maxEdgeSize - minEdgeSize
 
           sigmaGraph.forEachEdge((edge) => {
-            const weight =
-              sigmaGraph.getEdgeAttribute(edge, 'originalWeight') || 1
-            const scaledSize =
-              minEdgeSize +
-              sizeScale * ((weight - minWeight) / weightRange) ** 0.5
+            const weight = sigmaGraph.getEdgeAttribute(edge, 'originalWeight') || 1
+            const scaledSize = minEdgeSize + sizeScale * ((weight - minWeight) / weightRange) ** 0.5
             sigmaGraph.setEdgeAttribute(edge, 'size', scaledSize)
           })
         }
 
         // If no new connectable nodes found, show toast and return
         if (nodesToAdd.size === 0) {
-          updateNodeSizes(
-            sigmaGraph,
-            nodesWithDiscardedEdges,
-            minDegree,
-            maxDegree,
-          )
+          updateNodeSizes(sigmaGraph, nodesWithDiscardedEdges, minDegree, maxDegree)
           toast.info(t('graphPanel.propertiesView.node.noNewNodes'))
           return
         }
@@ -872,10 +790,7 @@ const useLightrangeGraph = () => {
         }
 
         // 2. Consider degree increments for existing nodes
-        for (const [
-          nodeId,
-          increment,
-        ] of existingNodeDegreeIncrements.entries()) {
+        for (const [nodeId, increment] of existingNodeDegreeIncrements.entries()) {
           const currentDegree = sigmaGraph.degree(nodeId)
           const projectedDegree = currentDegree + increment
           maxDegree = Math.max(maxDegree, projectedDegree)
@@ -886,12 +801,11 @@ const useLightrangeGraph = () => {
 
         // SAdd nodes and edges to the graph
         // Calculate camera ratio and spread factor once before the loop
-        const cameraRatio =
-          useGraphStore.getState().sigmaInstance?.getCamera().ratio || 1
+        const cameraRatio = useGraphStore.getState().sigmaInstance?.getCamera().ratio || 1
         const spreadFactor =
           Math.max(
             Math.sqrt(nodeToExpand.size) * 4, // Base on node size
-            Math.sqrt(nodesToAdd.size) * 3, // Scale with number of nodes
+            Math.sqrt(nodesToAdd.size) * 3 // Scale with number of nodes
           ) / cameraRatio // Adjust for zoom level
         const rng = seedrandom(Date.now().toString())
         const randomAngle = rng() * 2 * Math.PI
@@ -906,25 +820,19 @@ const useLightrangeGraph = () => {
           // Limit nodeDegree to maxDegree + 1 to prevent new nodes from being too large
           const limitedDegree = Math.min(nodeDegree, maxDegree + 1)
           const nodeSize = Math.round(
-            Constants.minNodeSize +
-              scale * ((limitedDegree - minDegree) / range) ** 0.5,
+            Constants.minNodeSize + scale * ((limitedDegree - minDegree) / range) ** 0.5
           )
 
           // Calculate angle for polar coordinates
-          const angle =
-            2 *
-            Math.PI *
-            (Array.from(nodesToAdd).indexOf(nodeId) / nodesToAdd.size)
+          const angle = 2 * Math.PI * (Array.from(nodesToAdd).indexOf(nodeId) / nodesToAdd.size)
 
           // Calculate final position
           const x =
             nodePositions[nodeId]?.x ||
-            nodePositions[nodeToExpand.id].x +
-              Math.cos(randomAngle + angle) * spreadFactor
+            nodePositions[nodeToExpand.id].x + Math.cos(randomAngle + angle) * spreadFactor
           const y =
             nodePositions[nodeId]?.y ||
-            nodePositions[nodeToExpand.id].y +
-              Math.sin(randomAngle + angle) * spreadFactor
+            nodePositions[nodeToExpand.id].y + Math.sin(randomAngle + angle) * spreadFactor
 
           // Add the new node to the sigma graph with calculated position
           sigmaGraph.addNode(nodeId, {
@@ -934,7 +842,7 @@ const useLightrangeGraph = () => {
             y: y,
             size: nodeSize,
             borderColor: Constants.nodeBorderColor,
-            borderSize: 0.2,
+            borderSize: 0.2
           })
 
           // Add the node to the raw graph
@@ -972,9 +880,7 @@ const useLightrangeGraph = () => {
 
           // Get weight from edge properties or default to 1
           const weight =
-            newEdge.properties?.weight !== undefined
-              ? Number(newEdge.properties.weight)
-              : 1
+            newEdge.properties?.weight !== undefined ? Number(newEdge.properties.weight) : 1
 
           // Update min and max weight values
           minWeight = Math.min(minWeight, weight)
@@ -982,29 +888,18 @@ const useLightrangeGraph = () => {
 
           // Add the edge to the sigma graph
           try {
-            newEdge.dynamicId = sigmaGraph.addEdge(
-              newEdge.source,
-              newEdge.target,
-              {
-                label: newEdge.properties?.keywords || undefined,
-                size: weight, // Set initial size based on weight
-                originalWeight: weight, // Store original weight for recalculation
-                type: 'curvedNoArrow', // Explicitly set edge type to no arrow
-              },
-            )
+            newEdge.dynamicId = sigmaGraph.addEdge(newEdge.source, newEdge.target, {
+              label: newEdge.properties?.keywords || undefined,
+              size: weight, // Set initial size based on weight
+              originalWeight: weight, // Store original weight for recalculation
+              type: 'curvedNoArrow' // Explicitly set edge type to no arrow
+            })
           } catch (e) {
             // Silently skip duplicate edges
-            if (
-              !(e instanceof Error) ||
-              !e.message.includes('already exists')
-            ) {
-              console.warn(
-                `Failed to add edge ${newEdge.source} -> ${newEdge.target}:`,
-                e,
-              )
+            if (!(e instanceof Error) || !e.message.includes('already exists')) {
+              console.warn(`Failed to add edge ${newEdge.source} -> ${newEdge.target}:`, e)
             }
-            newEdge.dynamicId =
-              sigmaGraph.edge(newEdge.source, newEdge.target) || ''
+            newEdge.dynamicId = sigmaGraph.edge(newEdge.source, newEdge.target) || ''
           }
 
           // Add the edge to the raw graph
@@ -1014,8 +909,7 @@ const useLightrangeGraph = () => {
             // Update edgeIdMap
             rawGraph.edgeIdMap[newEdge.id] = rawGraph.edges.length - 1
             // Update dynamic edge map
-            rawGraph.edgeDynamicIdMap[newEdge.dynamicId] =
-              rawGraph.edges.length - 1
+            rawGraph.edgeDynamicIdMap[newEdge.dynamicId] = rawGraph.edges.length - 1
           } else {
             // Edge already exists in rawGraph - this is expected for bidirectional data
           }
@@ -1028,12 +922,7 @@ const useLightrangeGraph = () => {
         useGraphStore.getState().resetSearchEngine()
 
         // Update sizes for all nodes and edges
-        updateNodeSizes(
-          sigmaGraph,
-          nodesWithDiscardedEdges,
-          minDegree,
-          maxDegree,
-        )
+        updateNodeSizes(sigmaGraph, nodesWithDiscardedEdges, minDegree, maxDegree)
         updateEdgeSizes(sigmaGraph, minWeight, maxWeight)
 
         // Final update for the expanded node
@@ -1041,8 +930,7 @@ const useLightrangeGraph = () => {
           const finalDegree = sigmaGraph.degree(nodeId)
           const limitedDegree = Math.min(finalDegree, maxDegree + 1)
           const newSize = Math.round(
-            Constants.minNodeSize +
-              scale * ((limitedDegree - minDegree) / range) ** 0.5,
+            Constants.minNodeSize + scale * ((limitedDegree - minDegree) / range) ** 0.5
           )
           sigmaGraph.setNodeAttribute(nodeId, 'size', newSize)
           nodeToExpand.size = newSize
@@ -1064,28 +952,25 @@ const useLightrangeGraph = () => {
   }, [nodeToExpand, sigmaGraph, rawGraph, t])
 
   // Helper function to get all nodes that will be deleted
-  const getNodesThatWillBeDeleted = useCallback(
-    (nodeId: string, graph: UndirectedGraph) => {
-      const nodesToDelete = new Set<string>([nodeId])
+  const getNodesThatWillBeDeleted = useCallback((nodeId: string, graph: UndirectedGraph) => {
+    const nodesToDelete = new Set<string>([nodeId])
 
-      // Find all nodes that would become isolated after deletion
-      graph.forEachNode((node) => {
-        if (node === nodeId) return // Skip the node being deleted
+    // Find all nodes that would become isolated after deletion
+    graph.forEachNode((node) => {
+      if (node === nodeId) return // Skip the node being deleted
 
-        // Get all neighbors of this node
-        const neighbors = graph.neighbors(node)
+      // Get all neighbors of this node
+      const neighbors = graph.neighbors(node)
 
-        // If this node has only one neighbor and that neighbor is the node being deleted,
-        // this node will become isolated, so we should delete it too
-        if (neighbors.length === 1 && neighbors[0] === nodeId) {
-          nodesToDelete.add(node)
-        }
-      })
+      // If this node has only one neighbor and that neighbor is the node being deleted,
+      // this node will become isolated, so we should delete it too
+      if (neighbors.length === 1 && neighbors[0] === nodeId) {
+        nodesToDelete.add(node)
+      }
+    })
 
-      return nodesToDelete
-    },
-    [],
-  )
+    return nodesToDelete
+  }, [])
 
   // Handle node pruning
   useEffect(() => {
@@ -1123,8 +1008,7 @@ const useLightrangeGraph = () => {
           if (nodeIndex !== undefined) {
             // Find all edges connected to this node
             const edgesToRemove = rawGraph.edges.filter(
-              (edge) =>
-                edge.source === nodeToDelete || edge.target === nodeToDelete,
+              (edge) => edge.source === nodeToDelete || edge.target === nodeToDelete
             )
 
             // Remove edges from raw graph
@@ -1171,8 +1055,8 @@ const useLightrangeGraph = () => {
         if (nodesToDelete.size > 1) {
           toast.info(
             t('graphPanel.propertiesView.node.nodesRemoved', {
-              count: nodesToDelete.size,
-            }),
+              count: nodesToDelete.size
+            })
           )
         }
       } catch (error) {

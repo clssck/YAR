@@ -12,7 +12,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogTrigger
 } from '@/components/ui/Dialog'
 import Input from '@/components/ui/Input'
 import { errorMessage } from '@/lib/utils'
@@ -33,9 +33,7 @@ interface ClearDocumentsDialogProps {
   onDocumentsCleared?: () => Promise<void>
 }
 
-export default function ClearDocumentsDialog({
-  onDocumentsCleared,
-}: ClearDocumentsDialogProps) {
+export default function ClearDocumentsDialog({ onDocumentsCleared }: ClearDocumentsDialogProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [confirmText, setConfirmText] = useState('')
@@ -90,9 +88,7 @@ export default function ClearDocumentsDialog({
       const result = await clearDocuments()
 
       if (result.status !== 'success') {
-        toast.error(
-          t('documentPanel.clearDocuments.failed', { message: result.message }),
-        )
+        toast.error(t('documentPanel.clearDocuments.failed', { message: result.message }))
         setConfirmText('')
         return
       }
@@ -106,8 +102,8 @@ export default function ClearDocumentsDialog({
         } catch (cacheErr) {
           toast.error(
             t('documentPanel.clearDocuments.cacheClearFailed', {
-              error: errorMessage(cacheErr),
-            }),
+              error: errorMessage(cacheErr)
+            })
           )
         }
       }
@@ -120,9 +116,7 @@ export default function ClearDocumentsDialog({
       // Close dialog after all operations succeed
       setOpen(false)
     } catch (err) {
-      toast.error(
-        t('documentPanel.clearDocuments.error', { error: errorMessage(err) }),
-      )
+      toast.error(t('documentPanel.clearDocuments.error', { error: errorMessage(err) }))
       setConfirmText('')
     } finally {
       // Clear timeout timer
@@ -146,12 +140,9 @@ export default function ClearDocumentsDialog({
           <EraserIcon /> {t('documentPanel.clearDocuments.button')}
         </Button>
       </DialogTrigger>
-      <DialogContent
-        className="sm:max-w-xl"
-        onCloseAutoFocus={(e) => e.preventDefault()}
-      >
+      <DialogContent className="sm:max-w-xl" onCloseAutoFocus={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-red-500 dark:text-red-400 font-bold">
+          <DialogTitle className="flex items-center gap-2 font-bold text-red-500 dark:text-red-400">
             <AlertTriangleIcon className="h-5 w-5" />
             {t('documentPanel.clearDocuments.title')}
           </DialogTitle>
@@ -160,7 +151,7 @@ export default function ClearDocumentsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="text-red-500 dark:text-red-400 font-semibold mb-4">
+        <div className="mb-4 font-semibold text-red-500 dark:text-red-400">
           {t('documentPanel.clearDocuments.warning')}
         </div>
         <div className="mb-4">{t('documentPanel.clearDocuments.confirm')}</div>
@@ -173,9 +164,7 @@ export default function ClearDocumentsDialog({
             <Input
               id="confirm-text"
               value={confirmText}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setConfirmText(e.target.value)
-              }
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmText(e.target.value)}
               placeholder={t('documentPanel.clearDocuments.confirmPlaceholder')}
               className="w-full"
               disabled={isClearing}
@@ -191,21 +180,14 @@ export default function ClearDocumentsDialog({
               }
               disabled={isClearing}
             />
-            <Label
-              htmlFor="clear-cache"
-              className="text-sm font-medium cursor-pointer"
-            >
+            <Label htmlFor="clear-cache" className="cursor-pointer text-sm font-medium">
               {t('documentPanel.clearDocuments.clearCache')}
             </Label>
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={isClearing}
-          >
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={isClearing}>
             {t('common.cancel')}
           </Button>
           <Button

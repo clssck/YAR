@@ -139,7 +139,7 @@ const TYPE_SYNONYMS: Record<string, string> = {
   位置: 'location',
   地址: 'location',
   地理: 'location',
-  地域: 'location',
+  地域: 'location'
 }
 
 const NODE_TYPE_COLORS: Record<string, string> = {
@@ -155,7 +155,7 @@ const NODE_TYPE_COLORS: Record<string, string> = {
   artifact: '#4421af',
   naturalobject: '#b2e061',
   other: '#f4d371',
-  unknown: '#b0b0b0',
+  unknown: '#b0b0b0'
 }
 
 const EXTENDED_COLORS = [
@@ -169,7 +169,7 @@ const EXTENDED_COLORS = [
   '#0f705d',
   '#ff99cc',
   '#6ef7b3',
-  '#cd071e',
+  '#cd071e'
 ]
 
 const PREDEFINED_COLOR_SET = new Set(Object.values(NODE_TYPE_COLORS))
@@ -182,7 +182,7 @@ interface ResolveNodeColorResult {
 
 export const resolveNodeColor = (
   nodeType: string | undefined,
-  currentMap: Map<string, string> | undefined,
+  currentMap: Map<string, string> | undefined
 ): ResolveNodeColorResult => {
   const typeColorMap = currentMap ?? new Map<string, string>()
   const normalizedType = nodeType ? nodeType.toLowerCase() : 'unknown'
@@ -193,7 +193,7 @@ export const resolveNodeColor = (
     return {
       color: typeColorMap.get(cacheKey) || DEFAULT_NODE_COLOR,
       map: typeColorMap,
-      updated: false,
+      updated: false
     }
   }
 
@@ -204,19 +204,15 @@ export const resolveNodeColor = (
     return {
       color,
       map: newMap,
-      updated: true,
+      updated: true
     }
   }
 
   const usedExtendedColors = new Set(
-    Array.from(typeColorMap.values()).filter(
-      (color) => !PREDEFINED_COLOR_SET.has(color),
-    ),
+    Array.from(typeColorMap.values()).filter((color) => !PREDEFINED_COLOR_SET.has(color))
   )
 
-  const unusedColor = EXTENDED_COLORS.find(
-    (color) => !usedExtendedColors.has(color),
-  )
+  const unusedColor = EXTENDED_COLORS.find((color) => !usedExtendedColors.has(color))
   const color = unusedColor || DEFAULT_NODE_COLOR
 
   const newMap = new Map(typeColorMap)
@@ -225,7 +221,7 @@ export const resolveNodeColor = (
   return {
     color,
     map: newMap,
-    updated: true,
+    updated: true
   }
 }
 

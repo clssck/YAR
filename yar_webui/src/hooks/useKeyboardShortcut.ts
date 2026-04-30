@@ -27,10 +27,7 @@ export type ShortcutConfig = {
 /**
  * Check if event matches the shortcut configuration
  */
-function matchesShortcut(
-  event: KeyboardEvent,
-  config: ShortcutConfig,
-): boolean {
+function matchesShortcut(event: KeyboardEvent, config: ShortcutConfig): boolean {
   const { key, modifiers = {} } = config
 
   // Check key (case-insensitive)
@@ -97,7 +94,7 @@ export function useKeyboardShortcut(config: ShortcutConfig) {
         key,
         modifiers,
         description,
-        category,
+        category
       })
       return () => useShortcutStore.getState().unregister(id)
     }
@@ -176,8 +173,7 @@ export function useKeyboardShortcuts(shortcuts: ShortcutConfig[]) {
 export function formatShortcut(
   key: string,
   modifiers?: KeyModifiers,
-  useMacSymbols = typeof navigator !== 'undefined' &&
-    /Mac|iPhone|iPad/.test(navigator.userAgent),
+  useMacSymbols = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
 ): string {
   const parts: string[] = []
 
@@ -200,10 +196,7 @@ export function formatShortcut(
 /**
  * Hook that returns a formatted shortcut string
  */
-export function useShortcutDisplay(
-  key: string,
-  modifiers?: KeyModifiers,
-): string {
+export function useShortcutDisplay(key: string, modifiers?: KeyModifiers): string {
   return formatShortcut(key, modifiers)
 }
 
@@ -212,10 +205,10 @@ export function useShortcutDisplay(
  */
 export function createShortcutHandler(
   shortcut: Omit<ShortcutConfig, 'callback'>,
-  callback: () => void,
+  callback: () => void
 ): ShortcutConfig {
   return {
     ...shortcut,
-    callback,
+    callback
   }
 }

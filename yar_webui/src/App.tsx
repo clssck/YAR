@@ -23,8 +23,8 @@ const TableExplorer = lazy(() => import('@/features/TableExplorer'))
 function TabLoadingSkeleton({ label }: { label: string }) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-      <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
-      <p className="text-sm text-muted-foreground">{label}</p>
+      <Loader2Icon className="text-primary h-8 w-8 animate-spin" />
+      <p className="text-muted-foreground text-sm">{label}</p>
     </div>
   )
 }
@@ -78,9 +78,7 @@ function App() {
           if (result) {
             const healthStatus = useBackendState.getState().status
             if (healthStatus?.configuration) {
-              useSettingsStore
-                .getState()
-                .setStorageConfig(healthStatus.configuration)
+              useSettingsStore.getState().setStorageConfig(healthStatus.configuration)
             }
           }
         }
@@ -142,7 +140,7 @@ function App() {
             status.core_version,
             status.api_version,
             status.webui_title || null,
-            status.webui_description || null,
+            status.webui_description || null
           )
         } else if (
           token &&
@@ -152,9 +150,7 @@ function App() {
             status.webui_description)
         ) {
           // Otherwise use the old token (if it exists)
-          const isGuestMode =
-            status.auth_mode === 'disabled' ||
-            useAuthStore.getState().isGuestMode
+          const isGuestMode = status.auth_mode === 'disabled' || useAuthStore.getState().isGuestMode
           useAuthStore
             .getState()
             .login(
@@ -163,7 +159,7 @@ function App() {
               status.core_version,
               status.api_version,
               status.webui_title || null,
-              status.webui_description || null,
+              status.webui_description || null
             )
         }
 
@@ -192,17 +188,14 @@ function App() {
             | 'retrieval'
             | 'api'
             | 'table-explorer'
-            | 'storage',
+            | 'storage'
         ),
-    [],
+    []
   )
 
   useEffect(() => {
     if (message) {
-      if (
-        message.includes(InvalidApiKeyError) ||
-        message.includes(RequireApiKeyError)
-      ) {
+      if (message.includes(InvalidApiKeyError) || message.includes(RequireApiKeyError)) {
         setApiKeyAlertOpen(true)
       }
     }
@@ -216,12 +209,10 @@ function App() {
           <div className="flex h-screen w-screen flex-col">
             {/* Simplified header during initialization - matches SiteHeader structure */}
             <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex h-10 w-full border-b px-4 backdrop-blur">
-              <div className="min-w-[200px] w-auto flex items-center">
+              <div className="flex w-auto min-w-[200px] items-center">
                 <a href={webuiPrefix} className="flex items-center gap-2">
-                  <ZapIcon className="size-4 text-plum" aria-hidden="true" />
-                  <span className="font-bold md:inline-block">
-                    {SiteInfo.name}
-                  </span>
+                  <ZapIcon className="text-plum size-4" aria-hidden="true" />
+                  <span className="font-bold md:inline-block">{SiteInfo.name}</span>
                 </a>
               </div>
 
@@ -229,13 +220,13 @@ function App() {
               <div className="flex h-10 flex-1 items-center justify-center"></div>
 
               {/* Empty right section to maintain layout */}
-              <nav className="w-[200px] flex items-center justify-end"></nav>
+              <nav className="flex w-[200px] items-center justify-end"></nav>
             </header>
 
             {/* Loading indicator in content area */}
             <div className="flex flex-1 items-center justify-center">
               <div className="text-center">
-                <div className="mb-2 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
+                <div className="border-primary mx-auto mb-2 h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"></div>
                 <p>Initializing...</p>
               </div>
             </div>
@@ -245,7 +236,7 @@ function App() {
           <main className="flex h-screen w-screen overflow-hidden">
             <Tabs
               defaultValue={currentTab}
-              className="!m-0 flex grow flex-col !p-0 overflow-hidden"
+              className="!m-0 flex grow flex-col overflow-hidden !p-0"
               onValueChange={handleTabChange}
             >
               <SiteHeader />
@@ -260,11 +251,7 @@ function App() {
                   value="knowledge-graph"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense
-                    fallback={
-                      <TabLoadingSkeleton label={t('app.loading.graph')} />
-                    }
-                  >
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.graph')} />}>
                     <GraphViewer />
                   </Suspense>
                 </TabsContent>
@@ -278,11 +265,7 @@ function App() {
                   value="api"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense
-                    fallback={
-                      <TabLoadingSkeleton label={t('app.loading.api')} />
-                    }
-                  >
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.api')} />}>
                     <ApiSite />
                   </Suspense>
                 </TabsContent>
@@ -290,11 +273,7 @@ function App() {
                   value="table-explorer"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense
-                    fallback={
-                      <TabLoadingSkeleton label={t('app.loading.tables')} />
-                    }
-                  >
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.tables')} />}>
                     <TableExplorer />
                   </Suspense>
                 </TabsContent>
@@ -302,20 +281,13 @@ function App() {
                   value="storage"
                   className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden"
                 >
-                  <Suspense
-                    fallback={
-                      <TabLoadingSkeleton label={t('app.loading.storage')} />
-                    }
-                  >
+                  <Suspense fallback={<TabLoadingSkeleton label={t('app.loading.storage')} />}>
                     <S3Browser />
                   </Suspense>
                 </TabsContent>
               </div>
             </Tabs>
-            <ApiKeyAlert
-              open={apiKeyAlertOpen}
-              onOpenChange={handleApiKeyAlertOpenChange}
-            />
+            <ApiKeyAlert open={apiKeyAlertOpen} onOpenChange={handleApiKeyAlertOpenChange} />
           </main>
         )}
       </TabVisibilityProvider>

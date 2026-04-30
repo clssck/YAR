@@ -50,7 +50,7 @@ export function useUndoableAction() {
       action,
       onUndo,
       duration = 5000,
-      icon,
+      icon
     }: UndoableActionConfig) => {
       // Cancel any pending action
       if (pendingActionRef.current && !pendingActionRef.current.executed) {
@@ -60,7 +60,7 @@ export function useUndoableAction() {
       // Track this action
       const actionState = {
         cleanup: undefined as (() => void) | undefined,
-        executed: false,
+        executed: false
       }
       pendingActionRef.current = actionState
 
@@ -73,8 +73,7 @@ export function useUndoableAction() {
         actionState.executed = true
       } catch (error) {
         toast.error('Action failed', {
-          description:
-            error instanceof Error ? error.message : 'An error occurred',
+          description: error instanceof Error ? error.message : 'An error occurred'
         })
         return
       }
@@ -93,18 +92,15 @@ export function useUndoableAction() {
                   toast.success('Action undone')
                 } catch (error) {
                   toast.error('Failed to undo', {
-                    description:
-                      error instanceof Error
-                        ? error.message
-                        : 'An error occurred',
+                    description: error instanceof Error ? error.message : 'An error occurred'
                   })
                 }
-              },
+              }
             }
-          : undefined,
+          : undefined
       })
     },
-    [],
+    []
   )
 
   return { executeWithUndo }
@@ -151,7 +147,7 @@ export function useInlineConfirmation() {
       title,
       description,
       confirmText = 'Confirm',
-      cancelText = 'Cancel',
+      cancelText = 'Cancel'
     }: ConfirmationConfig): Promise<boolean> => {
       return new Promise((resolve) => {
         toast(title, {
@@ -159,17 +155,17 @@ export function useInlineConfirmation() {
           duration: 10000, // Longer duration for confirmation
           action: {
             label: confirmText,
-            onClick: () => resolve(true),
+            onClick: () => resolve(true)
           },
           cancel: {
             label: cancelText,
-            onClick: () => resolve(false),
+            onClick: () => resolve(false)
           },
-          onDismiss: () => resolve(false),
+          onDismiss: () => resolve(false)
         })
       })
     },
-    [],
+    []
   )
 
   return { confirm }
@@ -193,10 +189,7 @@ export function useInlineConfirmation() {
  * deleteAction.cancel()
  * ```
  */
-export function createDelayedAction(
-  action: () => void | Promise<void>,
-  delayMs: number,
-) {
+export function createDelayedAction(action: () => void | Promise<void>, delayMs: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   let executed = false
 
@@ -219,7 +212,7 @@ export function createDelayedAction(
       }
     },
     isExecuted: () => executed,
-    isPending: () => timeoutId !== null,
+    isPending: () => timeoutId !== null
   }
 }
 
@@ -255,28 +248,18 @@ export type ProgressToastConfig = {
  * progress.success('Upload complete!')
  * ```
  */
-export function createProgressToast({
-  message,
-  description,
-  options,
-}: ProgressToastConfig) {
+export function createProgressToast({ message, description, options }: ProgressToastConfig) {
   const toastId = toast.loading(message, {
     description,
-    ...options,
+    ...options
   })
 
   return {
     /** Update the toast message and description */
-    update: ({
-      message,
-      description,
-    }: {
-      message?: string
-      description?: string
-    }) => {
+    update: ({ message, description }: { message?: string; description?: string }) => {
       toast.loading(message, {
         id: toastId,
-        description,
+        description
       })
     },
 
@@ -284,7 +267,7 @@ export function createProgressToast({
     success: (message: string, description?: string) => {
       toast.success(message, {
         id: toastId,
-        description,
+        description
       })
     },
 
@@ -292,7 +275,7 @@ export function createProgressToast({
     error: (message: string, description?: string) => {
       toast.error(message, {
         id: toastId,
-        description,
+        description
       })
     },
 
@@ -302,7 +285,7 @@ export function createProgressToast({
     },
 
     /** Get the toast ID for external management */
-    id: toastId,
+    id: toastId
   }
 }
 

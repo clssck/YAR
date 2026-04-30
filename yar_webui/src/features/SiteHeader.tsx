@@ -7,12 +7,7 @@ import KeyboardShortcutHelp from '@/components/KeyboardShortcutHelp'
 import StatusIndicator from '@/components/status/StatusIndicator'
 import Button from '@/components/ui/Button'
 import { TabsList, TabsTrigger } from '@/components/ui/Tabs'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/Tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { webuiPrefix } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { navigationService } from '@/services/navigation'
@@ -31,9 +26,7 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
       value={value}
       className={cn(
         'cursor-pointer px-2 py-1 transition-all',
-        currentTab === value
-          ? '!bg-plum !text-plum-foreground'
-          : 'hover:bg-background/60',
+        currentTab === value ? '!bg-plum !text-plum-foreground' : 'hover:bg-background/60'
       )}
     >
       {children}
@@ -41,9 +34,7 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
   )
 }
 
-function shouldShowTableExplorer(
-  storageConfig: Partial<YarConfiguration> | null,
-) {
+function shouldShowTableExplorer(storageConfig: Partial<YarConfiguration> | null) {
   if (import.meta.env.DEV) return true
   return (
     storageConfig &&
@@ -100,24 +91,20 @@ export default function SiteHeader() {
 
   return (
     <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex h-10 w-full border-b px-4 backdrop-blur">
-      <div className="min-w-[200px] w-auto flex items-center">
+      <div className="flex w-auto min-w-[200px] items-center">
         <a href={webuiPrefix} className="flex items-center gap-2">
-          <PirateFlag className="size-4 text-plum" aria-hidden="true" />
+          <PirateFlag className="text-plum size-4" aria-hidden="true" />
         </a>
         {webuiTitle && (
           <div className="flex items-center">
-            <span className="mx-1 text-xs text-muted-foreground">|</span>
+            <span className="text-muted-foreground mx-1 text-xs">|</span>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="font-medium text-sm cursor-default">
-                    {webuiTitle}
-                  </span>
+                  <span className="cursor-default text-sm font-medium">{webuiTitle}</span>
                 </TooltipTrigger>
                 {webuiDescription && (
-                  <TooltipContent side="bottom">
-                    {webuiDescription}
-                  </TooltipContent>
+                  <TooltipContent side="bottom">{webuiDescription}</TooltipContent>
                 )}
               </Tooltip>
             </TooltipProvider>
@@ -129,7 +116,7 @@ export default function SiteHeader() {
         <TabsNavigation />
       </div>
 
-      <nav className="w-[200px] flex items-center justify-end">
+      <nav className="flex w-[200px] items-center justify-end">
         <div className="flex items-center gap-2">
           {enableHealthCheck && <StatusIndicator />}
           <KeyboardShortcutHelp />

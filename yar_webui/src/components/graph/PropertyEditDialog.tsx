@@ -9,7 +9,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from '@/components/ui/Dialog'
 import LoadingState from '@/components/ui/LoadingState'
 
@@ -34,7 +34,7 @@ const PropertyEditDialog = ({
   propertyName,
   initialValue,
   isSubmitting = false,
-  errorMessage = null,
+  errorMessage = null
 }: PropertyEditDialogProps) => {
   const { t } = useTranslation()
   const [value, setValue] = useState('')
@@ -59,26 +59,26 @@ const PropertyEditDialog = ({
           style: {
             height: '70vh', // Set initial height to 70% of viewport
             minHeight: '20em', // Minimum height ~20 lines
-            resize: 'vertical' as const, // Allow vertical resizing, using 'as const' to fix type
-          },
+            resize: 'vertical' as const // Allow vertical resizing, using 'as const' to fix type
+          }
         }
       case 'entity_id':
         return {
           rows: 2,
           className: '',
-          style: {},
+          style: {}
         }
       case 'keywords':
         return {
           rows: 4,
           className: '',
-          style: {},
+          style: {}
         }
       default:
         return {
           rows: 5,
           className: '',
-          style: {},
+          style: {}
         }
     }
   }
@@ -97,7 +97,7 @@ const PropertyEditDialog = ({
         <DialogHeader>
           <DialogTitle>
             {t('graphPanel.propertiesView.editProperty', {
-              property: translatePropertyName(propertyName),
+              property: translatePropertyName(propertyName)
             })}
           </DialogTitle>
           <DialogDescription>
@@ -107,7 +107,7 @@ const PropertyEditDialog = ({
 
         {/* Display error message if save fails */}
         {errorMessage && (
-          <div className="bg-destructive/15 text-destructive px-4 py-2 rounded-md text-sm">
+          <div className="bg-destructive/15 text-destructive rounded-md px-4 py-2 text-sm">
             {errorMessage}
           </div>
         )}
@@ -137,11 +137,8 @@ const PropertyEditDialog = ({
         </div>
 
         {propertyName === 'entity_id' && (
-          <div className="rounded-md border border-border bg-muted/20 p-3">
-            <label
-              htmlFor="allow-merge"
-              className="flex items-start gap-2 text-sm font-medium"
-            >
+          <div className="border-border bg-muted/20 rounded-md border p-3">
+            <label htmlFor="allow-merge" className="flex items-start gap-2 text-sm font-medium">
               <Checkbox
                 id="allow-merge"
                 checked={allowMerge}
@@ -150,7 +147,7 @@ const PropertyEditDialog = ({
               />
               <div>
                 <span>{t('graphPanel.propertiesView.mergeOptionLabel')}</span>
-                <p className="text-xs font-normal text-muted-foreground">
+                <p className="text-muted-foreground text-xs font-normal">
                   {t('graphPanel.propertiesView.mergeOptionDescription')}
                 </p>
               </div>
@@ -159,21 +156,12 @@ const PropertyEditDialog = ({
         )}
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
+          <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
             {t('common.cancel')}
           </Button>
           <Button type="button" onClick={handleSave} disabled={isSubmitting}>
             {isSubmitting ? (
-              <LoadingState
-                variant="minimal"
-                size="sm"
-                message={t('common.saving')}
-              />
+              <LoadingState variant="minimal" size="sm" message={t('common.saving')} />
             ) : (
               t('common.save')
             )}

@@ -26,10 +26,7 @@ const readState = (): OnboardingState | null => {
     // Backward compatibility with the previous boolean-only flag
     if (raw === 'true') return { completed: true, lastStep: 0 }
     const parsed = JSON.parse(raw) as Partial<OnboardingState>
-    if (
-      typeof parsed?.completed === 'boolean' &&
-      typeof parsed?.lastStep === 'number'
-    ) {
+    if (typeof parsed?.completed === 'boolean' && typeof parsed?.lastStep === 'number') {
       return parsed as OnboardingState
     }
     return null
@@ -60,9 +57,7 @@ const OnboardingHints = () => {
     const state = readState()
     return !state?.completed
   })
-  const [currentStep, setCurrentStep] = useState(
-    () => readState()?.lastStep ?? 0,
-  )
+  const [currentStep, setCurrentStep] = useState(() => readState()?.lastStep ?? 0)
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
@@ -84,28 +79,28 @@ const OnboardingHints = () => {
       title: t('graphPanel.onboarding.searchTitle', 'Search Nodes'),
       description: t(
         'graphPanel.onboarding.searchDesc',
-        'Use Cmd+K (or Ctrl+K) to quickly search and focus on any node in the graph.',
+        'Use Cmd+K (or Ctrl+K) to quickly search and focus on any node in the graph.'
       ),
-      position: 'top-left',
+      position: 'top-left'
     },
     {
       id: 'controls',
       title: t('graphPanel.onboarding.controlsTitle', 'Graph Controls'),
       description: t(
         'graphPanel.onboarding.controlsDesc',
-        'Use the control panel to change layouts, zoom, and toggle settings. Press +/- to zoom, 0 to reset.',
+        'Use the control panel to change layouts, zoom, and toggle settings. Press +/- to zoom, 0 to reset.'
       ),
-      position: 'bottom-left',
+      position: 'bottom-left'
     },
     {
       id: 'interactions',
       title: t('graphPanel.onboarding.interactionsTitle', 'Node Interactions'),
       description: t(
         'graphPanel.onboarding.interactionsDesc',
-        'Click any node to see its properties. Press P to toggle the panel, Escape to deselect.',
+        'Click any node to see its properties. Press P to toggle the panel, Escape to deselect.'
       ),
-      position: 'top-right',
-    },
+      position: 'top-right'
+    }
   ]
 
   const handleSkip = useCallback(() => {
@@ -158,8 +153,8 @@ const OnboardingHints = () => {
       if (!root.contains(active) && active !== root) return
       const focusable = Array.from(
         root.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
       ).filter((el) => !el.hasAttribute('aria-hidden'))
       if (focusable.length === 0) return
       const first = focusable[0]
@@ -190,7 +185,7 @@ const OnboardingHints = () => {
     'top-left': 'sm:top-14 sm:left-4',
     'bottom-left': 'sm:bottom-20 sm:left-4',
     'top-right': 'sm:top-14 sm:right-4',
-    'bottom-right': 'sm:bottom-20 sm:right-4',
+    'bottom-right': 'sm:bottom-20 sm:right-4'
   }
 
   return (
@@ -208,46 +203,43 @@ const OnboardingHints = () => {
         'bottom-4 left-1/2 -translate-x-1/2',
         // Desktop reset + position
         'sm:left-auto sm:right-auto sm:translate-x-0 sm:bottom-auto sm:top-auto',
-        desktopPosition[step.position],
+        desktopPosition[step.position]
       )}
     >
       <button
         type="button"
         onClick={handleSkip}
-        className="absolute top-2 right-2 p-1 rounded-full hover:bg-primary/10 transition-colors"
+        className="hover:bg-primary/10 absolute top-2 right-2 rounded-full p-1 transition-colors"
         aria-label={t('graphPanel.onboarding.close', 'Close onboarding')}
       >
-        <X className="h-4 w-4 text-muted-foreground" />
+        <X className="text-muted-foreground h-4 w-4" />
       </button>
 
       {/* Step indicator */}
-      <div className="flex gap-1 mb-3" aria-hidden="true">
+      <div className="mb-3 flex gap-1" aria-hidden="true">
         {steps.map((s, idx) => (
           <div
             key={s.id}
             className={cn(
               'h-1 flex-1 rounded-full transition-colors',
-              idx <= currentStep ? 'bg-primary' : 'bg-primary/20',
+              idx <= currentStep ? 'bg-primary' : 'bg-primary/20'
             )}
           />
         ))}
       </div>
 
-      <h4 id={titleId} className="font-semibold text-sm mb-1.5">
+      <h4 id={titleId} className="mb-1.5 text-sm font-semibold">
         {step.title}
       </h4>
-      <p
-        id={descId}
-        className="text-xs text-muted-foreground mb-4 leading-relaxed"
-      >
+      <p id={descId} className="text-muted-foreground mb-4 text-xs leading-relaxed">
         {step.description}
       </p>
 
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <button
           type="button"
           onClick={handleSkip}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="text-muted-foreground hover:text-foreground text-xs transition-colors"
         >
           {t('graphPanel.onboarding.skip', "Don't show again")}
         </button>

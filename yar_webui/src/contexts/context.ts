@@ -5,9 +5,8 @@ import type { TabVisibilityContextType } from './types'
 const defaultContext: TabVisibilityContextType = {
   visibleTabs: {},
   setTabVisibility: () => {},
-  isTabVisible: () => false,
+  isTabVisible: () => false
 }
 
 // Create the context
-export const TabVisibilityContext =
-  createContext<TabVisibilityContextType>(defaultContext)
+export const TabVisibilityContext = createContext<TabVisibilityContextType>(defaultContext)

@@ -4,17 +4,11 @@ import { useLayoutCircular } from '@react-sigma/layout-circular'
 import type {
   LayoutHook,
   LayoutWorkerHook,
-  WorkerLayoutControlProps,
+  WorkerLayoutControlProps
 } from '@react-sigma/layout-core'
 import { useLayoutForce, useWorkerLayoutForce } from '@react-sigma/layout-force'
-import {
-  useLayoutForceAtlas2,
-  useWorkerLayoutForceAtlas2,
-} from '@react-sigma/layout-forceatlas2'
-import {
-  useLayoutNoverlap,
-  useWorkerLayoutNoverlap,
-} from '@react-sigma/layout-noverlap'
+import { useLayoutForceAtlas2, useWorkerLayoutForceAtlas2 } from '@react-sigma/layout-forceatlas2'
+import { useLayoutNoverlap, useWorkerLayoutNoverlap } from '@react-sigma/layout-noverlap'
 import { useLayoutRandom } from '@react-sigma/layout-random'
 import { GripIcon, Loader2, PlayIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -23,17 +17,8 @@ import { animateNodes } from 'sigma/utils'
 import { toast } from 'sonner'
 import Badge from '@/components/ui/Badge'
 import { ControlButton } from '@/components/ui/Button'
-import {
-  Command,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/Command'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/Popover'
+import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/Command'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -57,7 +42,7 @@ const WorkerLayoutControl = ({
   autoRunFor,
   mainLayout,
   layoutName,
-  onRunningChange,
+  onRunningChange
 }: ExtendedWorkerLayoutControlProps) => {
   const sigma = useSigma()
   // Use local state to track animation running status
@@ -124,17 +109,10 @@ const WorkerLayoutControl = ({
       // Show completion toast with layout name
       toast.success(
         layoutName
-          ? t(
-              'graphPanel.sideBar.layoutsControl.layoutStoppedNamed',
-              '{{name}} stopped',
-              {
-                name: layoutName,
-              },
-            )
-          : t(
-              'graphPanel.sideBar.layoutsControl.layoutStopped',
-              'Layout stopped',
-            ),
+          ? t('graphPanel.sideBar.layoutsControl.layoutStoppedNamed', '{{name}} stopped', {
+              name: layoutName
+            })
+          : t('graphPanel.sideBar.layoutsControl.layoutStopped', 'Layout stopped')
       )
 
       setIsRunning(false)
@@ -176,18 +154,11 @@ const WorkerLayoutControl = ({
           // Show completion toast with layout name
           toast.success(
             layoutName
-              ? t(
-                  'graphPanel.sideBar.layoutsControl.layoutCompleteNamed',
-                  '{{name}} complete',
-                  {
-                    name: layoutName,
-                  },
-                )
-              : t(
-                  'graphPanel.sideBar.layoutsControl.layoutComplete',
-                  'Layout complete',
-                ),
-            { duration: 2000 },
+              ? t('graphPanel.sideBar.layoutsControl.layoutCompleteNamed', '{{name}} complete', {
+                  name: layoutName
+                })
+              : t('graphPanel.sideBar.layoutsControl.layoutComplete', 'Layout complete'),
+            { duration: 2000 }
           )
         }
       }, 3000)
@@ -204,11 +175,7 @@ const WorkerLayoutControl = ({
 
     // Auto-run if specified
     let timeout: number | null = null
-    if (
-      autoRunFor !== undefined &&
-      autoRunFor > -1 &&
-      sigma.getGraph().order > 0
-    ) {
+    if (autoRunFor !== undefined && autoRunFor > -1 && sigma.getGraph().order > 0) {
       // Initial position update
       updatePositions()
 
@@ -254,22 +221,15 @@ const WorkerLayoutControl = ({
             ? `${t('graphPanel.sideBar.layoutsControl.stopAnimation')} (${iterationCount})`
             : t('graphPanel.sideBar.layoutsControl.startAnimation')
         }
-        className={cn(
-          isRunning &&
-            'ring-2 ring-primary ring-offset-1 ring-offset-background',
-        )}
+        className={cn(isRunning && 'ring-2 ring-primary ring-offset-1 ring-offset-background')}
       >
-        {isRunning ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <PlayIcon />
-        )}
+        {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayIcon />}
       </ControlButton>
       {/* Running indicator badge */}
       {isRunning && (
         <Badge
           variant="default"
-          className="absolute -top-2 -right-2 h-5 min-w-5 px-1 text-[10px] font-medium animate-pulse"
+          className="absolute -top-2 -right-2 h-5 min-w-5 animate-pulse px-1 text-[10px] font-medium"
         >
           {iterationCount}
         </Badge>
@@ -300,8 +260,8 @@ const LayoutsControl = () => {
       expansion: 1.1,
       gridSize: 1,
       ratio: 1,
-      speed: 3,
-    },
+      speed: 3
+    }
   })
   // Add parameters for Force Directed layout to improve convergence
   const layoutForce = useLayoutForce({
@@ -311,8 +271,8 @@ const LayoutsControl = () => {
       repulsion: 0.02, // Lower repulsion force to reduce oscillation
       gravity: 0.02, // Increase gravity to make nodes converge to center faster
       inertia: 0.4, // Lower inertia to add damping effect
-      maxMove: 100, // Limit maximum movement per step to prevent large jumps
-    },
+      maxMove: 100 // Limit maximum movement per step to prevent large jumps
+    }
   })
   const layoutForceAtlas2 = useLayoutForceAtlas2({ iterations: maxIterations })
   const workerNoverlap = useWorkerLayoutNoverlap()
@@ -322,26 +282,26 @@ const LayoutsControl = () => {
   const layouts = useMemo(() => {
     return {
       Circular: {
-        layout: layoutCircular,
+        layout: layoutCircular
       },
       Circlepack: {
-        layout: layoutCirclepack,
+        layout: layoutCirclepack
       },
       Random: {
-        layout: layoutRandom,
+        layout: layoutRandom
       },
       Noverlaps: {
         layout: layoutNoverlap,
-        worker: workerNoverlap,
+        worker: workerNoverlap
       },
       'Force Directed': {
         layout: layoutForce,
-        worker: workerForce,
+        worker: workerForce
       },
       'Force Atlas': {
         layout: layoutForceAtlas2,
-        worker: workerForceAtlas2,
-      },
+        worker: workerForceAtlas2
+      }
     } as { [key: string]: { layout: LayoutHook; worker?: LayoutWorkerHook } }
   }, [
     layoutCirclepack,
@@ -352,7 +312,7 @@ const LayoutsControl = () => {
     layoutRandom,
     workerForce,
     workerNoverlap,
-    workerForceAtlas2,
+    workerForceAtlas2
   ])
 
   const runLayout = useCallback(
@@ -373,7 +333,7 @@ const LayoutsControl = () => {
         console.error('Error running layout:', error)
       }
     },
-    [layouts, sigma],
+    [layouts, sigma]
   )
 
   return (
@@ -383,27 +343,22 @@ const LayoutsControl = () => {
         <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap">
           <Badge
             variant="secondary"
-            className="text-[10px] px-2 py-0.5 animate-pulse bg-primary/10 text-primary border-primary/20"
+            className="bg-primary/10 text-primary border-primary/20 animate-pulse px-2 py-0.5 text-[10px]"
           >
-            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            {t(
-              'graphPanel.sideBar.layoutsControl.running',
-              'Layout running...',
-            )}
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            {t('graphPanel.sideBar.layoutsControl.running', 'Layout running...')}
           </Badge>
         </div>
       )}
       <div>
-        {layouts[layout] &&
-          'worker' in layouts[layout] &&
-          layouts[layout].worker && (
-            <WorkerLayoutControl
-              layout={layouts[layout].worker}
-              mainLayout={layouts[layout].layout}
-              layoutName={layout}
-              onRunningChange={setIsLayoutRunning}
-            />
-          )}
+        {layouts[layout] && 'worker' in layouts[layout] && layouts[layout].worker && (
+          <WorkerLayoutControl
+            layout={layouts[layout].worker}
+            mainLayout={layouts[layout].layout}
+            layoutName={layout}
+            onRunningChange={setIsLayoutRunning}
+          />
+        )}
       </div>
       <div>
         <Popover open={opened} onOpenChange={setOpened}>
@@ -421,7 +376,7 @@ const LayoutsControl = () => {
             sideOffset={8}
             collisionPadding={5}
             sticky="always"
-            className="p-1 min-w-auto"
+            className="min-w-auto p-1"
           >
             <Command>
               <CommandList>
@@ -432,15 +387,10 @@ const LayoutsControl = () => {
                         runLayout(name as LayoutName)
                       }}
                       key={name}
-                      className={cn(
-                        'cursor-pointer text-xs',
-                        name === layout && 'bg-accent',
-                      )}
+                      className={cn('cursor-pointer text-xs', name === layout && 'bg-accent')}
                     >
                       {t(`graphPanel.sideBar.layoutsControl.layouts.${name}`)}
-                      {name === layout && (
-                        <span className="ml-auto text-muted-foreground">✓</span>
-                      )}
+                      {name === layout && <span className="text-muted-foreground ml-auto">✓</span>}
                     </CommandItem>
                   ))}
                 </CommandGroup>

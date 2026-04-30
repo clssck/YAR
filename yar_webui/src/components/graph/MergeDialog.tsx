@@ -6,7 +6,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from '@/components/ui/Dialog'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -28,7 +28,7 @@ const MergeDialog = ({
   mergeDialogOpen,
   mergeDialogInfo,
   onOpenChange,
-  onRefresh,
+  onRefresh
 }: MergeDialogProps) => {
   const { t } = useTranslation()
   const currentQueryLabel = useSettingsStore.use.queryLabel()
@@ -37,26 +37,20 @@ const MergeDialog = ({
     <Dialog open={mergeDialogOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {t('graphPanel.propertiesView.mergeDialog.title')}
-          </DialogTitle>
+          <DialogTitle>{t('graphPanel.propertiesView.mergeDialog.title')}</DialogTitle>
           <DialogDescription>
             {t('graphPanel.propertiesView.mergeDialog.description', {
               source: mergeDialogInfo?.sourceEntity ?? '',
-              target: mergeDialogInfo?.targetEntity ?? '',
+              target: mergeDialogInfo?.targetEntity ?? ''
             })}
           </DialogDescription>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           {t('graphPanel.propertiesView.mergeDialog.refreshHint')}
         </p>
         <DialogFooter className="mt-4 flex-col gap-2 sm:flex-row sm:justify-end">
           {currentQueryLabel !== mergeDialogInfo?.sourceEntity && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onRefresh(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => onRefresh(false)}>
               {t('graphPanel.propertiesView.mergeDialog.keepCurrentStart')}
             </Button>
           )}

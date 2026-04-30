@@ -70,9 +70,7 @@ test.describe('Retrieval Panel', () => {
 
   test('shows empty state message', async ({ page }) => {
     // Should show prompt to start retrieval
-    await expect(
-      page.getByText(/Start a retrieval by typing your query/i),
-    ).toBeVisible()
+    await expect(page.getByText(/Start a retrieval by typing your query/i)).toBeVisible()
   })
 })
 

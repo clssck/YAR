@@ -13,9 +13,7 @@ test.describe('Query Settings - All Parameters', () => {
     // Verify all 6 modes are available
     const modes = ['Naive', 'Local', 'Global', 'Hybrid', 'Mix', 'Bypass']
     for (const mode of modes) {
-      await expect(
-        page.getByRole('option', { name: new RegExp(mode, 'i') }),
-      ).toBeVisible()
+      await expect(page.getByRole('option', { name: new RegExp(mode, 'i') })).toBeVisible()
     }
   })
 
@@ -108,12 +106,8 @@ test.describe('Quick Presets', () => {
   test('has quick preset buttons', async ({ page }) => {
     // Look for preset buttons (Fast, Balanced, Thorough)
     const fastButton = page.locator('button').filter({ hasText: /Fast/i })
-    const balancedButton = page
-      .locator('button')
-      .filter({ hasText: /Balanced/i })
-    const thoroughButton = page
-      .locator('button')
-      .filter({ hasText: /Thorough/i })
+    const balancedButton = page.locator('button').filter({ hasText: /Balanced/i })
+    const thoroughButton = page.locator('button').filter({ hasText: /Thorough/i })
 
     // At least some presets should be visible
     const hasFast = (await fastButton.count()) > 0

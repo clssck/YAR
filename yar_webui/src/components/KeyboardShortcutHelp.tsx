@@ -1,24 +1,21 @@
 import { KeyboardIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  ONBOARDING_KEY,
-  ONBOARDING_RESET_EVENT,
-} from '@/components/graph/OnboardingHints'
+import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/OnboardingHints'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogTrigger
 } from '@/components/ui/Dialog'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import {
   formatShortcutDisplay,
   type RegisteredShortcut,
   type ShortcutCategory,
-  useShortcutStore,
+  useShortcutStore
 } from '@/stores/shortcuts'
 
 const CATEGORY_ORDER: ShortcutCategory[] = [
@@ -26,7 +23,7 @@ const CATEGORY_ORDER: ShortcutCategory[] = [
   'navigation',
   'documents',
   'graph',
-  'retrieval',
+  'retrieval'
 ]
 
 const CATEGORY_LABELS: Record<ShortcutCategory, string> = {
@@ -34,17 +31,15 @@ const CATEGORY_LABELS: Record<ShortcutCategory, string> = {
   navigation: 'shortcutHelp.category.navigation',
   documents: 'shortcutHelp.category.documents',
   graph: 'shortcutHelp.category.graph',
-  retrieval: 'shortcutHelp.category.retrieval',
+  retrieval: 'shortcutHelp.category.retrieval'
 }
 
 function ShortcutRow({ shortcut }: { shortcut: RegisteredShortcut }) {
   const { t } = useTranslation()
   return (
     <div className="flex items-center justify-between py-1.5">
-      <span className="text-sm text-muted-foreground">
-        {t(shortcut.description)}
-      </span>
-      <kbd className="ml-4 inline-flex h-6 min-w-[24px] items-center justify-center rounded border border-border bg-muted px-1.5 font-mono text-xs font-medium text-foreground">
+      <span className="text-muted-foreground text-sm">{t(shortcut.description)}</span>
+      <kbd className="border-border bg-muted text-foreground ml-4 inline-flex h-6 min-w-[24px] items-center justify-center rounded border px-1.5 font-mono text-xs font-medium">
         {formatShortcutDisplay(shortcut.key, shortcut.modifiers)}
       </kbd>
     </div>
@@ -53,7 +48,7 @@ function ShortcutRow({ shortcut }: { shortcut: RegisteredShortcut }) {
 
 function ShortcutSection({
   category,
-  shortcuts,
+  shortcuts
 }: {
   category: ShortcutCategory
   shortcuts: RegisteredShortcut[]
@@ -64,9 +59,7 @@ function ShortcutSection({
 
   return (
     <div className="mb-4">
-      <h3 className="mb-2 text-sm font-semibold text-foreground">
-        {t(CATEGORY_LABELS[category])}
-      </h3>
+      <h3 className="text-foreground mb-2 text-sm font-semibold">{t(CATEGORY_LABELS[category])}</h3>
       <div className="space-y-0.5">
         {shortcuts.map((shortcut) => (
           <ShortcutRow key={shortcut.id} shortcut={shortcut} />
@@ -87,29 +80,22 @@ export function KeyboardShortcutHelp() {
     modifiers: { shift: true },
     callback: useCallback(() => setOpen(true), []),
     description: 'shortcutHelp.openHelp',
-    ignoreInputs: true,
+    ignoreInputs: true
   })
 
   // Group shortcuts by category
   const shortcutsByCategory = CATEGORY_ORDER.reduce(
     (acc, category) => {
-      acc[category] = Array.from(shortcuts.values()).filter(
-        (s) => s.category === category,
-      )
+      acc[category] = Array.from(shortcuts.values()).filter((s) => s.category === category)
       return acc
     },
-    {} as Record<ShortcutCategory, RegisteredShortcut[]>,
+    {} as Record<ShortcutCategory, RegisteredShortcut[]>
   )
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0"
-          title={t('shortcutHelp.title')}
-        >
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title={t('shortcutHelp.title')}>
           <KeyboardIcon className="h-4 w-4" />
           <span className="sr-only">{t('shortcutHelp.title')}</span>
         </Button>
@@ -130,15 +116,13 @@ export function KeyboardShortcutHelp() {
             />
           ))}
           {shortcuts.size === 0 && (
-            <p className="text-center text-sm text-muted-foreground py-8">
+            <p className="text-muted-foreground py-8 text-center text-sm">
               {t('shortcutHelp.noShortcuts')}
             </p>
           )}
         </div>
         <div className="mt-4 border-t pt-4">
-          <p className="text-xs text-muted-foreground text-center">
-            {t('shortcutHelp.hint')}
-          </p>
+          <p className="text-muted-foreground text-center text-xs">{t('shortcutHelp.hint')}</p>
           <button
             type="button"
             onClick={() => {
@@ -150,7 +134,7 @@ export function KeyboardShortcutHelp() {
               setOpen(false)
               window.dispatchEvent(new Event(ONBOARDING_RESET_EVENT))
             }}
-            className="mt-3 w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="text-muted-foreground hover:text-foreground mt-3 w-full text-xs transition-colors"
           >
             {t('shortcutHelp.replayOnboarding', 'Replay onboarding tour')}
           </button>

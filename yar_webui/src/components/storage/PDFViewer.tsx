@@ -14,7 +14,7 @@ import {
   MinusIcon,
   PlusIcon,
   SearchIcon,
-  XIcon,
+  XIcon
 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -114,10 +114,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
         entries.forEach((entry) => {
           if (entry.intersectionRatio > maxVisibility) {
             maxVisibility = entry.intersectionRatio
-            const pageNum = parseInt(
-              entry.target.getAttribute('data-page') || '1',
-              10,
-            )
+            const pageNum = parseInt(entry.target.getAttribute('data-page') || '1', 10)
             mostVisiblePage = pageNum
           }
         })
@@ -129,8 +126,8 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       },
       {
         root: containerRef.current,
-        threshold: [0, 0.25, 0.5, 0.75, 1],
-      },
+        threshold: [0, 0.25, 0.5, 0.75, 1]
+      }
     )
 
     pageRefs.current.forEach((ref) => {
@@ -158,7 +155,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       setCurrentPage(targetPage)
       setInputValue(String(targetPage))
     },
-    [numPages],
+    [numPages]
   )
 
   const zoomIn = useCallback(() => {
@@ -281,8 +278,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       }
 
       // Only handle if viewer is focused or in fullscreen
-      if (!viewerRef.current?.contains(document.activeElement) && !isFullscreen)
-        return
+      if (!viewerRef.current?.contains(document.activeElement) && !isFullscreen) return
 
       switch (e.key) {
         case 'ArrowLeft':
@@ -338,7 +334,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
     prevMatch,
     toggleFullscreen,
     zoomIn,
-    zoomOut,
+    zoomOut
   ])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -365,9 +361,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       try {
         const page = await pdf.getPage(i)
         const content = await page.getTextContent()
-        const text = content.items
-          .map((item) => ('str' in item ? item.str : ''))
-          .join(' ')
+        const text = content.items.map((item) => ('str' in item ? item.str : '')).join(' ')
         textMap.set(i, text)
       } catch {
         // Skip pages that fail to extract
@@ -414,24 +408,21 @@ export default function PDFViewer({ url }: PDFViewerProps) {
         })
         .join('')
     },
-    [searchQuery],
+    [searchQuery]
   )
 
   return (
-    <div
-      ref={viewerRef}
-      className={cn('flex flex-col h-full', isFullscreen && 'bg-background')}
-    >
+    <div ref={viewerRef} className={cn('flex flex-col h-full', isFullscreen && 'bg-background')}>
       {/* Search bar */}
       {showSearch && (
-        <div className="flex items-center gap-2 p-2 border-b bg-background flex-shrink-0">
-          <SearchIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+        <div className="bg-background flex flex-shrink-0 items-center gap-2 border-b p-2">
+          <SearchIcon className="text-muted-foreground h-4 w-4 flex-shrink-0" />
           <Input
             ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search in document..."
-            className="flex-1 h-8"
+            className="h-8 flex-1"
             autoFocus
           />
           {matches.length > 0 ? (
@@ -445,7 +436,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
               >
                 <ChevronUpIcon className="h-4 w-4" />
               </Button>
-              <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[4rem] text-center">
+              <span className="text-muted-foreground min-w-[4rem] text-center text-sm whitespace-nowrap">
                 {currentMatchIndex + 1} of {matches.length}
               </span>
               <Button
@@ -459,9 +450,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
               </Button>
             </>
           ) : searchQuery.trim() ? (
-            <span className="text-sm text-muted-foreground whitespace-nowrap">
-              No matches
-            </span>
+            <span className="text-muted-foreground text-sm whitespace-nowrap">No matches</span>
           ) : null}
           <Button
             size="icon"
@@ -481,17 +470,17 @@ export default function PDFViewer({ url }: PDFViewerProps) {
         className={cn(
           'flex-1 overflow-auto bg-muted/30',
           'scrollbar-thin scrollbar-track-transparent',
-          'scrollbar-thumb-transparent hover:scrollbar-thumb-muted-foreground/40',
+          'scrollbar-thumb-transparent hover:scrollbar-thumb-muted-foreground/40'
         )}
       >
         {loading && (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex h-full items-center justify-center">
             <LoadingState variant="centered" size="lg" />
           </div>
         )}
 
         {error && (
-          <div className="flex items-center justify-center h-full text-destructive">
+          <div className="text-destructive flex h-full items-center justify-center">
             <p>Failed to load PDF: {error}</p>
           </div>
         )}
@@ -503,7 +492,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
           loading={null}
           error={null}
         >
-          <div className="flex flex-col items-center py-4 gap-4 min-w-fit">
+          <div className="flex min-w-fit flex-col items-center gap-4 py-4">
             {Array.from({ length: numPages }, (_, i) => (
               <div
                 key={`pdf-page-${i + 1}`}
@@ -519,9 +508,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
                   renderTextLayer
                   renderAnnotationLayer
                   onLoadSuccess={i === 0 ? handlePageLoadSuccess : undefined}
-                  customTextRenderer={
-                    searchQuery.trim() ? customTextRenderer : undefined
-                  }
+                  customTextRenderer={searchQuery.trim() ? customTextRenderer : undefined}
                   loading={
                     <div className="flex items-center justify-center p-8">
                       <LoadingState variant="centered" size="lg" />
@@ -536,7 +523,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
 
       {/* Bottom toolbar */}
       {numPages > 0 && (
-        <div className="flex items-center justify-center gap-2 p-2 border-t bg-background flex-shrink-0">
+        <div className="bg-background flex flex-shrink-0 items-center justify-center gap-2 border-t p-2">
           {/* Search button */}
           <Button
             size="icon"
@@ -553,7 +540,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
             <SearchIcon className="h-4 w-4" />
           </Button>
 
-          <div className="border-l h-6 mx-1" />
+          <div className="mx-1 h-6 border-l" />
 
           {/* Page navigation */}
           <Button
@@ -568,18 +555,18 @@ export default function PDFViewer({ url }: PDFViewerProps) {
           </Button>
 
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Page</span>
+            <span className="text-muted-foreground text-sm">Page</span>
             <Input
               type="number"
               value={inputValue}
               onChange={handleInputChange}
               onBlur={handleInputBlur}
               onKeyDown={handleInputKeyDown}
-              className="w-14 h-8 text-center"
+              className="h-8 w-14 text-center"
               min={1}
               max={numPages}
             />
-            <span className="text-sm text-muted-foreground">of {numPages}</span>
+            <span className="text-muted-foreground text-sm">of {numPages}</span>
           </div>
 
           <Button
@@ -593,7 +580,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
             <ChevronRightIcon className="h-4 w-4" />
           </Button>
 
-          <div className="border-l h-6 mx-2" />
+          <div className="mx-2 h-6 border-l" />
 
           {/* Zoom controls */}
           <Button
@@ -606,9 +593,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
           >
             <MinusIcon className="h-4 w-4" />
           </Button>
-          <span className="text-sm w-12 text-center">
-            {Math.round(scale * 100)}%
-          </span>
+          <span className="w-12 text-center text-sm">{Math.round(scale * 100)}%</span>
           <Button
             size="icon"
             variant="ghost"
@@ -631,7 +616,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
             <Maximize2Icon className="h-4 w-4" />
           </Button>
 
-          <div className="border-l h-6 mx-2" />
+          <div className="mx-2 h-6 border-l" />
 
           {/* Fullscreen toggle */}
           <Button

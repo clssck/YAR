@@ -23,7 +23,7 @@ export const remarkFootnotes: Plugin<[], Root> = () => {
         if (startIndex > lastIndex) {
           const textNode: Text = {
             type: 'text',
-            value: text.slice(lastIndex, startIndex),
+            value: text.slice(lastIndex, startIndex)
           }
           replacements.push(textNode)
         }
@@ -39,13 +39,11 @@ export const remarkFootnotes: Plugin<[], Root> = () => {
         const footnoteHtml = `<sup><a href="#footnote-${safeId}" class="footnote-ref">${safeId}</a></sup>`
 
         // Add spacing if there's a consecutive footnote
-        const htmlWithSpacing = hasConsecutiveFootnote
-          ? `${footnoteHtml}&nbsp;`
-          : footnoteHtml
+        const htmlWithSpacing = hasConsecutiveFootnote ? `${footnoteHtml}&nbsp;` : footnoteHtml
 
         const htmlNode: Html = {
           type: 'html',
-          value: htmlWithSpacing,
+          value: htmlWithSpacing
         }
         replacements.push(htmlNode)
 
@@ -57,7 +55,7 @@ export const remarkFootnotes: Plugin<[], Root> = () => {
       if (lastIndex < text.length) {
         const textNode: Text = {
           type: 'text',
-          value: text.slice(lastIndex),
+          value: text.slice(lastIndex)
         }
         replacements.push(textNode)
       }

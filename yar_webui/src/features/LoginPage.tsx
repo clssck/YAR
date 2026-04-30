@@ -53,7 +53,7 @@ const LoginPage = () => {
             status.core_version,
             status.api_version,
             status.webui_title || null,
-            status.webui_description || null,
+            status.webui_description || null
           )
           if (status.message) {
             toast.info(status.message)
@@ -118,7 +118,7 @@ const LoginPage = () => {
         response.core_version,
         response.api_version,
         response.webui_title || null,
-        response.webui_description || null,
+        response.webui_description || null
       )
 
       // Set session flag for version check
@@ -130,10 +130,7 @@ const LoginPage = () => {
         // Show authentication disabled notification
         toast.info(
           response.message ||
-            t(
-              'login.authDisabled',
-              'Authentication is disabled. Using guest access.',
-            ),
+            t('login.authDisabled', 'Authentication is disabled. Using guest access.')
         )
       } else {
         toast.success(t('login.successMessage'))
@@ -157,30 +154,25 @@ const LoginPage = () => {
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-gradient-to-br from-fuchsia-50 to-purple-100 dark:from-gray-800 dark:to-gray-700">
       <div className="absolute top-4 right-4 flex items-center gap-2">
-        <AppSettings className="bg-white/30 dark:bg-gray-700/30 backdrop-blur-sm rounded-md" />
+        <AppSettings className="rounded-md bg-white/30 backdrop-blur-sm dark:bg-gray-700/30" />
       </div>
-      <Card className="w-full max-w-[480px] shadow-lg mx-4">
-        <CardHeader className="flex items-center justify-center space-y-2 pb-8 pt-6">
+      <Card className="mx-4 w-full max-w-[480px] shadow-lg">
+        <CardHeader className="flex items-center justify-center space-y-2 pt-6 pb-8">
           <div className="flex flex-col items-center space-y-4">
             <div className="flex items-center gap-3">
               <img src="logo.svg" alt="YAR Logo" className="h-12 w-12" />
-              <ZapIcon className="size-10 text-plum" aria-hidden="true" />
+              <ZapIcon className="text-plum size-10" aria-hidden="true" />
             </div>
-            <div className="text-center space-y-2">
+            <div className="space-y-2 text-center">
               <h1 className="text-3xl font-bold tracking-tight">YAR</h1>
-              <p className="text-muted-foreground text-sm">
-                {t('login.description')}
-              </p>
+              <p className="text-muted-foreground text-sm">{t('login.description')}</p>
             </div>
           </div>
         </CardHeader>
         <CardContent className="px-8 pb-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="flex items-center gap-4">
-              <label
-                htmlFor="username-input"
-                className="text-sm font-medium w-16 shrink-0"
-              >
+              <label htmlFor="username-input" className="w-16 shrink-0 text-sm font-medium">
                 {t('login.username')}
               </label>
               <Input
@@ -193,10 +185,7 @@ const LoginPage = () => {
               />
             </div>
             <div className="flex items-center gap-4">
-              <label
-                htmlFor="password-input"
-                className="text-sm font-medium w-16 shrink-0"
-              >
+              <label htmlFor="password-input" className="w-16 shrink-0 text-sm font-medium">
                 {t('login.password')}
               </label>
               <Input
@@ -211,7 +200,7 @@ const LoginPage = () => {
             </div>
             <Button
               type="submit"
-              className="w-full h-11 text-base font-medium mt-2"
+              className="mt-2 h-11 w-full text-base font-medium"
               disabled={loading}
             >
               {loading ? t('login.loggingIn') : t('login.loginButton')}

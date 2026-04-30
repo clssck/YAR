@@ -11,14 +11,13 @@ import {
   type NonStreamReference,
   parseCOTContent,
   renumberReferencesSequential,
-  stripReferencesSection,
+  stripReferencesSection
 } from '@/utils/textProcessing'
 import {
   ALLOWED_RETRIEVAL_QUERY_MODES,
   MIN_RETRIEVAL_QUERY_LENGTH,
-  validateRetrievalInput,
+  validateRetrievalInput
 } from '@/utils/retrievalInput'
-
 
 // =============================================================================
 // Tests
@@ -53,27 +52,19 @@ describe('RetrievalTesting Utility Functions', () => {
     })
 
     test('returns true for complete inline LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $E = mc^2$ is famous')).toBe(
-        true,
-      )
+      expect(detectLatexCompleteness('Formula: $E = mc^2$ is famous')).toBe(true)
     })
 
     test('returns true for complete block LaTeX', () => {
-      expect(
-        detectLatexCompleteness('Formula: $$E = mc^2$$ is displayed'),
-      ).toBe(true)
+      expect(detectLatexCompleteness('Formula: $$E = mc^2$$ is displayed')).toBe(true)
     })
 
     test('returns false for unclosed inline LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $E = mc^2 is incomplete')).toBe(
-        false,
-      )
+      expect(detectLatexCompleteness('Formula: $E = mc^2 is incomplete')).toBe(false)
     })
 
     test('returns false for unclosed block LaTeX', () => {
-      expect(detectLatexCompleteness('Formula: $$E = mc^2 is incomplete')).toBe(
-        false,
-      )
+      expect(detectLatexCompleteness('Formula: $$E = mc^2 is incomplete')).toBe(false)
     })
 
     test('returns true for multiple complete inline formulas', () => {
@@ -123,7 +114,7 @@ describe('RetrievalTesting Utility Functions', () => {
 
     test('handles multiple think blocks', () => {
       const result = parseCOTContent(
-        '<think>First thought</think>Middle<think>Second thought</think>Final',
+        '<think>First thought</think>Middle<think>Second thought</think>Final'
       )
       expect(result.hasValidThinkBlock).toBe(true)
       expect(result.thinkingContent).toBe('Second thought')
@@ -299,19 +290,21 @@ Paragraph 2.
   })
 })
 
-
 describe('Non-stream reference propagation', () => {
   test('attaches references to assistant message and state', () => {
-    const assistantMessage: { id: string; references?: NonStreamReference[] } = { id: 'assistant-1' }
-    const messages: { id: string; references?: NonStreamReference[] }[] = [{ id: 'assistant-1' }, { id: 'assistant-2' }]
-    const references: NonStreamReference[] = [
-      { reference_id: '1', file_path: '/docs/source.pdf' },
+    const assistantMessage: { id: string; references?: NonStreamReference[] } = {
+      id: 'assistant-1'
+    }
+    const messages: { id: string; references?: NonStreamReference[] }[] = [
+      { id: 'assistant-1' },
+      { id: 'assistant-2' }
     ]
+    const references: NonStreamReference[] = [{ reference_id: '1', file_path: '/docs/source.pdf' }]
 
     const updatedMessages = applyNonStreamResponse(
       assistantMessage,
       { response: 'Answer', references },
-      messages,
+      messages
     )
 
     expect(assistantMessage.references).toEqual(references)
@@ -322,19 +315,19 @@ describe('Non-stream reference propagation', () => {
   test('clears references when response references are null', () => {
     const assistantMessage = {
       id: 'assistant-1',
-      references: [{ reference_id: 'existing', file_path: '/docs/old.pdf' }],
+      references: [{ reference_id: 'existing', file_path: '/docs/old.pdf' }]
     }
     const messages = [
       {
         id: 'assistant-1',
-        references: [{ reference_id: 'existing', file_path: '/docs/old.pdf' }],
-      },
+        references: [{ reference_id: 'existing', file_path: '/docs/old.pdf' }]
+      }
     ]
 
     const updatedMessages = applyNonStreamResponse(
       assistantMessage,
       { response: 'Answer', references: null },
-      messages,
+      messages
     )
 
     expect(assistantMessage.references).toBeUndefined()
@@ -346,28 +339,28 @@ describe('validateRetrievalInput', () => {
   test('rejects inputs shorter than the backend minimum length', () => {
     expect(validateRetrievalInput('hi', null)).toEqual({
       ok: false,
-      error: 'too_short',
+      error: 'too_short'
     })
   })
 
   test('rejects too-short prefixed queries after stripping the mode prefix', () => {
     expect(validateRetrievalInput('/mix hi', null)).toEqual({
       ok: false,
-      error: 'too_short',
+      error: 'too_short'
     })
   })
 
   test('rejects malformed slash prefixes without a query body', () => {
     expect(validateRetrievalInput('/mix', null)).toEqual({
       ok: false,
-      error: 'invalid_prefix',
+      error: 'invalid_prefix'
     })
   })
 
   test('rejects unknown prefixed modes', () => {
     expect(validateRetrievalInput('/unknown hello', null)).toEqual({
       ok: false,
-      error: 'invalid_mode',
+      error: 'invalid_mode'
     })
     expect(ALLOWED_RETRIEVAL_QUERY_MODES).toContain('mix')
   })
@@ -376,13 +369,13 @@ describe('validateRetrievalInput', () => {
     expect(validateRetrievalInput('   hello   ', 'global')).toEqual({
       ok: true,
       effectiveMode: 'global',
-      trimmedQuery: 'hello',
+      trimmedQuery: 'hello'
     })
 
     expect(validateRetrievalInput('/mix   hello   ', null)).toEqual({
       ok: true,
       effectiveMode: 'mix',
-      trimmedQuery: 'hello',
+      trimmedQuery: 'hello'
     })
   })
 

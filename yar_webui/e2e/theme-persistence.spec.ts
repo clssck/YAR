@@ -33,16 +33,11 @@ test.describe('Theme Persistence', () => {
     expect(storage.state.theme).toBe(isDark ? 'dark' : 'light')
   })
 
-  test('theme loads from localStorage on page load', async ({
-    page,
-    context,
-  }) => {
+  test('theme loads from localStorage on page load', async ({ page, context }) => {
     // First, set theme to dark via localStorage before visiting the page
     await context.addInitScript(() => {
       const existingStorage = localStorage.getItem('settings-storage')
-      const data = existingStorage
-        ? JSON.parse(existingStorage)
-        : { state: {}, version: 26 }
+      const data = existingStorage ? JSON.parse(existingStorage) : { state: {}, version: 26 }
       data.state.theme = 'dark'
       localStorage.setItem('settings-storage', JSON.stringify(data))
     })

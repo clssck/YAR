@@ -11,13 +11,7 @@ import { render } from '@testing-library/react'
 
 // Mock Sigma and related packages - these are WebGL-based and can't run in jsdom
 mock.module('@react-sigma/core', () => ({
-  SigmaContainer: ({
-    children,
-    className,
-  }: {
-    children: React.ReactNode
-    className?: string
-  }) => (
+  SigmaContainer: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div data-testid="sigma-container" className={className}>
       {children}
     </div>
@@ -26,34 +20,34 @@ mock.module('@react-sigma/core', () => ({
   useSigma: () => ({
     getGraph: () => ({
       setNodeAttribute: mock(),
-      removeNodeAttribute: mock(),
+      removeNodeAttribute: mock()
     }),
     viewportToGraph: () => ({ x: 0, y: 0 }),
     getCustomBBox: () => null,
     setCustomBBox: mock(),
-    getBBox: () => ({}),
-  }),
+    getBBox: () => ({})
+  })
 }))
 
 mock.module('@sigma/edge-curve', () => ({
   createEdgeCurveProgram: () => ({}),
-  EdgeCurvedArrowProgram: {},
+  EdgeCurvedArrowProgram: {}
 }))
 
 mock.module('@sigma/node-border', () => ({
   createNodeBorderProgram: () => ({}),
-  NodeBorderProgram: {},
+  NodeBorderProgram: {}
 }))
 
 mock.module('sigma/rendering', () => ({
   EdgeArrowProgram: {},
   NodeCircleProgram: {},
-  NodePointProgram: {},
+  NodePointProgram: {}
 }))
 
 // Mock graph sub-components (these are tested separately or don't need deep testing)
 mock.module('@/components/graph/FocusOnNode', () => ({
-  default: () => <div data-testid="focus-on-node" />,
+  default: () => <div data-testid="focus-on-node" />
 }))
 
 mock.module('@/components/graph/FullScreenControl', () => ({
@@ -61,15 +55,15 @@ mock.module('@/components/graph/FullScreenControl', () => ({
     <button type="button" data-testid="fullscreen-control">
       Fullscreen
     </button>
-  ),
+  )
 }))
 
 mock.module('@/components/graph/GraphControl', () => ({
-  default: () => <div data-testid="graph-control" />,
+  default: () => <div data-testid="graph-control" />
 }))
 
 mock.module('@/components/graph/GraphLabels', () => ({
-  default: () => <div data-testid="graph-labels">Labels</div>,
+  default: () => <div data-testid="graph-labels">Labels</div>
 }))
 
 mock.module('@/components/graph/LayoutsControl', () => ({
@@ -77,7 +71,7 @@ mock.module('@/components/graph/LayoutsControl', () => ({
     <button type="button" data-testid="layouts-control">
       Layouts
     </button>
-  ),
+  )
 }))
 
 mock.module('@/components/graph/Legend', () => ({
@@ -85,7 +79,7 @@ mock.module('@/components/graph/Legend', () => ({
     <div data-testid="legend" className={className}>
       Legend
     </div>
-  ),
+  )
 }))
 
 mock.module('@/components/graph/LegendButton', () => ({
@@ -93,13 +87,13 @@ mock.module('@/components/graph/LegendButton', () => ({
     <button type="button" data-testid="legend-button">
       Toggle Legend
     </button>
-  ),
+  )
 }))
 
 mock.module('@/components/graph/OnboardingHints', () => ({
   default: () => <div data-testid="onboarding-hints">Hints</div>,
   ONBOARDING_KEY: 'yar-graph-onboarding-complete',
-  ONBOARDING_RESET_EVENT: 'yar-onboarding-reset',
+  ONBOARDING_RESET_EVENT: 'yar-onboarding-reset'
 }))
 
 mock.module('@/components/graph/OrphanConnectionControl', () => ({
@@ -107,11 +101,11 @@ mock.module('@/components/graph/OrphanConnectionControl', () => ({
     <button type="button" data-testid="orphan-control">
       Orphan
     </button>
-  ),
+  )
 }))
 
 mock.module('@/components/graph/PropertiesView', () => ({
-  default: () => <div data-testid="properties-view">Properties</div>,
+  default: () => <div data-testid="properties-view">Properties</div>
 }))
 
 mock.module('@/components/graph/Settings', () => ({
@@ -119,11 +113,11 @@ mock.module('@/components/graph/Settings', () => ({
     <button type="button" data-testid="settings">
       Settings
     </button>
-  ),
+  )
 }))
 
 mock.module('@/components/graph/SettingsDisplay', () => ({
-  default: () => <div data-testid="settings-display" />,
+  default: () => <div data-testid="settings-display" />
 }))
 
 mock.module('@/components/graph/ZoomControl', () => ({
@@ -131,7 +125,7 @@ mock.module('@/components/graph/ZoomControl', () => ({
     <button type="button" data-testid="zoom-control">
       Zoom
     </button>
-  ),
+  )
 }))
 
 // Mock stores with configurable state
@@ -141,7 +135,7 @@ let mockGraphState = {
   sigmaGraph: { order: 100, size: 250 },
   selectedNode: null as string | null,
   focusedNode: null as string | null,
-  moveToSelectedNode: false,
+  moveToSelectedNode: false
 }
 
 let mockSettingsState = {
@@ -151,7 +145,7 @@ let mockSettingsState = {
   theme: 'light' as 'light' | 'dark',
   currentTab: 'knowledge-graph',
   showFileName: false,
-  documentsPageSize: 10,
+  documentsPageSize: 10
 }
 
 mock.module('@/stores/graph', () => ({
@@ -162,13 +156,13 @@ mock.module('@/stores/graph', () => ({
       sigmaGraph: () => mockGraphState.sigmaGraph,
       selectedNode: () => mockGraphState.selectedNode,
       focusedNode: () => mockGraphState.focusedNode,
-      moveToSelectedNode: () => mockGraphState.moveToSelectedNode,
+      moveToSelectedNode: () => mockGraphState.moveToSelectedNode
     },
     getState: () => ({
       sigmaInstance: null,
-      setSigmaInstance: mock(),
-    }),
-  },
+      setSigmaInstance: mock()
+    })
+  }
 }))
 
 mock.module('@/stores/settings', () => ({
@@ -182,10 +176,10 @@ mock.module('@/stores/settings', () => ({
       showFileName: () => mockSettingsState.showFileName,
       setShowFileName: () => mock(),
       documentsPageSize: () => mockSettingsState.documentsPageSize,
-      setDocumentsPageSize: () => mock(),
+      setDocumentsPageSize: () => mock()
     },
-    getState: () => ({ apiKey: null }),
-  },
+    getState: () => ({ apiKey: null })
+  }
 }))
 
 // Import component after mocks
@@ -223,21 +217,18 @@ const createSigmaSettings = (isDarkTheme: boolean): SigmaSettings => ({
   enableEdgeEvents: true,
   labelColor: {
     color: isDarkTheme ? labelColorDarkTheme : labelColorLightTheme,
-    attribute: 'labelColor',
+    attribute: 'labelColor'
   },
   edgeLabelColor: {
     color: isDarkTheme ? labelColorDarkTheme : labelColorLightTheme,
-    attribute: 'labelColor',
+    attribute: 'labelColor'
   },
   edgeLabelSize: 8,
-  labelSize: 12,
+  labelSize: 12
 })
 
 // Compact mode calculation
-const calculateCompactMode = (
-  isMobile: boolean,
-  isTablet: boolean,
-): boolean => {
+const calculateCompactMode = (isMobile: boolean, isTablet: boolean): boolean => {
   return isMobile || isTablet
 }
 
@@ -553,7 +544,7 @@ describe('OrphanNodeProgram Configuration', () => {
 
   const orphanBorders: BorderConfig[] = [
     { color: { attribute: 'color' }, size: { value: 0.4, mode: 'relative' } },
-    { color: { value: '#374151' }, size: { value: 0.15, mode: 'relative' } },
+    { color: { value: '#374151' }, size: { value: 0.15, mode: 'relative' } }
   ]
 
   test('has two border layers', () => {
@@ -592,7 +583,7 @@ describe('GraphViewer Component Rendering', () => {
       sigmaGraph: { order: 100, size: 250 },
       selectedNode: null,
       focusedNode: null,
-      moveToSelectedNode: false,
+      moveToSelectedNode: false
     }
     mockSettingsState = {
       showPropertyPanel: true,
@@ -601,7 +592,7 @@ describe('GraphViewer Component Rendering', () => {
       theme: 'light',
       currentTab: 'knowledge-graph',
       showFileName: false,
-      documentsPageSize: 10,
+      documentsPageSize: 10
     }
   }
 
@@ -710,9 +701,7 @@ describe('GraphViewer Component Rendering', () => {
       mockGraphState.isFetching = false
       const { container } = render(<GraphViewer />)
       // Check that there's no overlay covering the sigma container
-      const sigmaContainer = container.querySelector(
-        '[data-testid="sigma-container"]',
-      )
+      const sigmaContainer = container.querySelector('[data-testid="sigma-container"]')
       expect(sigmaContainer).toBeDefined()
     })
   })

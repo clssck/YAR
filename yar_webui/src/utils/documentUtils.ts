@@ -3,10 +3,7 @@
  */
 
 // Utility functions defined outside component for better performance and to avoid dependency issues
-export const getCountValue = (
-  counts: Record<string, number>,
-  ...keys: string[]
-): number => {
+export const getCountValue = (counts: Record<string, number>, ...keys: string[]): number => {
   for (const key of keys) {
     const value = counts[key]
     if (typeof value === 'number') {

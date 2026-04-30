@@ -16,12 +16,10 @@ if (document.doctype == null) {
 
 const IGNORED_TEST_MESSAGES = [
   "KaTeX doesn't work in quirks mode.",
-  'i18next is maintained with support from Locize',
+  'i18next is maintained with support from Locize'
 ]
 
-const silenceKnownTestNoise = (
-  method: 'log' | 'info' | 'warn' | 'error',
-) => {
+const silenceKnownTestNoise = (method: 'log' | 'info' | 'warn' | 'error') => {
   const original = console[method].bind(console)
   console[method] = ((...args: unknown[]) => {
     const first = args[0]
@@ -32,7 +30,7 @@ const silenceKnownTestNoise = (
       return
     }
     original(...args)
-  }) as typeof console[typeof method]
+  }) as (typeof console)[typeof method]
 }
 
 silenceKnownTestNoise('log')
@@ -58,8 +56,8 @@ Object.defineProperty(window, 'matchMedia', {
     removeListener: () => {},
     addEventListener: () => {},
     removeEventListener: () => {},
-    dispatchEvent: () => false,
-  }),
+    dispatchEvent: () => false
+  })
 })
 
 // Mock ResizeObserver
@@ -76,5 +74,4 @@ class IntersectionObserverMock {
   unobserve() {}
   disconnect() {}
 }
-window.IntersectionObserver =
-  IntersectionObserverMock as unknown as typeof IntersectionObserver
+window.IntersectionObserver = IntersectionObserverMock as unknown as typeof IntersectionObserver

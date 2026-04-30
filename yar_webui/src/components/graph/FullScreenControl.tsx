@@ -16,7 +16,7 @@ const FullScreenControl = () => {
       tooltip={t(
         isFullScreen
           ? 'graphPanel.sideBar.fullScreenControl.windowed'
-          : 'graphPanel.sideBar.fullScreenControl.fullScreen',
+          : 'graphPanel.sideBar.fullScreenControl.fullScreen'
       )}
     >
       {isFullScreen ? <MinimizeIcon /> : <MaximizeIcon />}

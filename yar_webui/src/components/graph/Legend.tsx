@@ -17,41 +17,29 @@ const Legend: React.FC<LegendProps> = ({ className }) => {
   }
 
   return (
-    <Card className={`p-2 max-w-xs ${className}`}>
+    <Card className={`max-w-xs p-2 ${className}`}>
       {/* Shapes section */}
-      <h3 className="text-sm font-medium mb-2">
-        {t('graphPanel.legend.shapes')}
-      </h3>
-      <div className="flex flex-col gap-1 mb-3">
+      <h3 className="mb-2 text-sm font-medium">{t('graphPanel.legend.shapes')}</h3>
+      <div className="mb-3 flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border border-slate-400 bg-sky-400" />
-          <span className="text-xs">
-            {t('graphPanel.legend.connectedNode')}
-          </span>
+          <div className="h-4 w-4 rounded-full border border-slate-400 bg-sky-400" />
+          <span className="text-xs">{t('graphPanel.legend.connectedNode')}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-[3px] border-gray-700 bg-sky-400" />
+          <div className="h-4 w-4 rounded-full border-[3px] border-gray-700 bg-sky-400" />
           <span className="text-xs">{t('graphPanel.legend.orphanNode')}</span>
         </div>
       </div>
 
       {/* Colors section */}
-      <h3 className="text-sm font-medium mb-2">
-        {t('graphPanel.legend.colors')}
-      </h3>
+      <h3 className="mb-2 text-sm font-medium">{t('graphPanel.legend.colors')}</h3>
       <ScrollArea className="max-h-64">
         <div className="flex flex-col gap-1">
           {Array.from(typeColorMap.entries()).map(([type, color]) => (
             <div key={type} className="flex items-center gap-2">
-              <div
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: color }}
-              />
-              <span className="text-xs truncate" title={type}>
-                {t(
-                  `graphPanel.nodeTypes.${type.toLowerCase().replace(/\s+/g, '')}`,
-                  type,
-                )}
+              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: color }} />
+              <span className="truncate text-xs" title={type}>
+                {t(`graphPanel.nodeTypes.${type.toLowerCase().replace(/\s+/g, '')}`, type)}
               </span>
             </div>
           ))}

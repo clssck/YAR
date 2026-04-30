@@ -1,12 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import {
-  CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  RefreshCwIcon,
-} from 'lucide-react'
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { getTableData, getTableList, getTableSchema } from '@/api/yar'
@@ -18,14 +12,14 @@ import {
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle,
+  DialogTitle
 } from '@/components/ui/Dialog'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
+  SelectValue
 } from '@/components/ui/Select'
 import { copyToClipboard } from '@/utils/clipboard'
 
@@ -82,7 +76,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
     () => () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     },
-    [],
+    []
   )
 
   const handleCopy = async () => {
@@ -99,17 +93,8 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-6 w-6 p-0"
-      onClick={handleCopy}
-    >
-      {copied ? (
-        <CheckIcon className="h-3 w-3 text-green-500" />
-      ) : (
-        <CopyIcon className="h-3 w-3" />
-      )}
+    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCopy}>
+      {copied ? <CheckIcon className="h-3 w-3 text-green-500" /> : <CopyIcon className="h-3 w-3" />}
     </Button>
   )
 }
@@ -118,7 +103,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 function RowDetailModal({
   row,
   open,
-  onOpenChange,
+  onOpenChange
 }: {
   row: TableRowData | null
   open: boolean
@@ -137,7 +122,7 @@ function RowDetailModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent className="flex max-h-[80vh] max-w-3xl flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Row Details
@@ -148,26 +133,20 @@ function RowDetailModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-auto space-y-3 pr-2">
+        <div className="flex-1 space-y-3 overflow-auto pr-2">
           {entries.map(([key, value]) => (
-            <div key={key} className="border rounded-lg p-3 bg-muted/30">
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-sm text-muted-foreground">
-                  {key}
-                </span>
+            <div key={key} className="bg-muted/30 rounded-lg border p-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-muted-foreground text-sm font-medium">{key}</span>
                 <CopyButton text={formatValue(value)} label={key} />
               </div>
-              <div
-                className={`text-sm ${isJsonLike(value) ? 'font-mono' : ''}`}
-              >
+              <div className={`text-sm ${isJsonLike(value) ? 'font-mono' : ''}`}>
                 {isJsonLike(value) ? (
-                  <pre className="whitespace-pre-wrap break-all bg-muted p-2 rounded text-xs overflow-auto max-h-[200px]">
+                  <pre className="bg-muted max-h-[200px] overflow-auto rounded p-2 text-xs break-all whitespace-pre-wrap">
                     {formatValue(value)}
                   </pre>
                 ) : (
-                  <div className="whitespace-pre-wrap break-all">
-                    {formatValue(value)}
-                  </div>
+                  <div className="break-all whitespace-pre-wrap">{formatValue(value)}</div>
                 )}
               </div>
             </div>
@@ -188,7 +167,7 @@ export default function TableExplorer() {
   // Fetch table list
   const { data: tableList } = useQuery({
     queryKey: ['tables', 'list'],
-    queryFn: getTableList,
+    queryFn: getTableList
   })
 
   // Derive effective selection: use state if set, otherwise default to first table
@@ -204,7 +183,7 @@ export default function TableExplorer() {
   const { data: schema } = useQuery({
     queryKey: ['tables', effectiveSelectedTable, 'schema'],
     queryFn: () => getTableSchema(effectiveSelectedTable),
-    enabled: !!effectiveSelectedTable,
+    enabled: !!effectiveSelectedTable
   })
 
   // Fetch data
@@ -213,11 +192,11 @@ export default function TableExplorer() {
     isLoading,
     isError,
     error,
-    refetch,
+    refetch
   } = useQuery({
     queryKey: ['tables', effectiveSelectedTable, 'data', page],
     queryFn: () => getTableData(effectiveSelectedTable, page, pageSize),
-    enabled: !!effectiveSelectedTable,
+    enabled: !!effectiveSelectedTable
   })
 
   // Handle row click
@@ -244,10 +223,7 @@ export default function TableExplorer() {
           cols.push({
             accessorKey: key,
             header: () => (
-              <div
-                className="font-semibold text-xs truncate max-w-[150px]"
-                title={key}
-              >
+              <div className="max-w-[150px] truncate text-xs font-semibold" title={key}>
                 {key}
               </div>
             ),
@@ -255,18 +231,17 @@ export default function TableExplorer() {
               const value = row.getValue(key) as CellValue
               const displayValue = truncateValue(value, 50)
               const isLong =
-                typeof value === 'object' ||
-                (typeof value === 'string' && value.length > 50)
+                typeof value === 'object' || (typeof value === 'string' && value.length > 50)
 
               return (
                 <div
-                  className={`text-xs max-w-[200px] truncate ${isLong ? 'cursor-pointer hover:text-primary' : ''}`}
+                  className={`max-w-[200px] truncate text-xs ${isLong ? 'hover:text-primary cursor-pointer' : ''}`}
                   title={isLong ? 'Click row to see full value' : displayValue}
                 >
                   {displayValue}
                 </div>
               )
-            },
+            }
           })
         })
     }
@@ -276,24 +251,17 @@ export default function TableExplorer() {
   const totalPages = tableData?.total_pages || 0
 
   return (
-    <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+    <div className="flex h-full flex-col gap-4 overflow-hidden p-4">
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-medium">
-              Table Explorer
-            </CardTitle>
+            <CardTitle className="text-lg font-medium">Table Explorer</CardTitle>
             <div className="flex items-center gap-2">
-              <Select
-                value={effectiveSelectedTable}
-                onValueChange={handleTableChange}
-              >
+              <Select value={effectiveSelectedTable} onValueChange={handleTableChange}>
                 <SelectTrigger className="w-[250px]">
                   <SelectValue
                     placeholder={
-                      tableList && tableList.length > 0
-                        ? 'Select a table'
-                        : 'No tables available'
+                      tableList && tableList.length > 0 ? 'Select a table' : 'No tables available'
                     }
                   />
                 </SelectTrigger>
@@ -319,9 +287,9 @@ export default function TableExplorer() {
         </CardHeader>
         {schema && (
           <CardContent className="pb-2">
-            <details className="text-xs text-muted-foreground cursor-pointer">
+            <details className="text-muted-foreground cursor-pointer text-xs">
               <summary>Show Schema (DDL)</summary>
-              <pre className="mt-2 p-2 bg-muted rounded overflow-auto max-h-[200px] font-mono text-xs">
+              <pre className="bg-muted mt-2 max-h-[200px] overflow-auto rounded p-2 font-mono text-xs">
                 {schema.ddl}
               </pre>
             </details>
@@ -329,24 +297,19 @@ export default function TableExplorer() {
         )}
       </Card>
 
-      <Card className="flex-1 overflow-hidden flex flex-col">
-        <CardContent className="flex-1 p-0 overflow-auto">
+      <Card className="flex flex-1 flex-col overflow-hidden">
+        <CardContent className="flex-1 overflow-auto p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <RefreshCwIcon className="h-8 w-8 animate-spin text-muted-foreground" />
+            <div className="flex h-full items-center justify-center">
+              <RefreshCwIcon className="text-muted-foreground h-8 w-8 animate-spin" />
             </div>
           ) : isError ? (
-            <div className="flex flex-col items-center justify-center h-full text-destructive gap-2">
+            <div className="text-destructive flex h-full flex-col items-center justify-center gap-2">
               <p className="font-medium">Failed to load table data</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-muted-foreground text-sm">
                 {error instanceof Error ? error.message : 'Unknown error'}
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetch()}
-                className="mt-2"
-              >
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-2">
                 Retry
               </Button>
             </div>
@@ -361,13 +324,12 @@ export default function TableExplorer() {
           )}
         </CardContent>
 
-        <div className="border-t p-2 flex items-center justify-between bg-muted/20">
-          <div className="text-sm text-muted-foreground">
+        <div className="bg-muted/20 flex items-center justify-between border-t p-2">
+          <div className="text-muted-foreground text-sm">
             {tableData?.total ? (
               <>
-                Showing {(page - 1) * pageSize + 1} to{' '}
-                {Math.min(page * pageSize, tableData.total)} of{' '}
-                {tableData.total} rows
+                Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, tableData.total)}{' '}
+                of {tableData.total} rows
               </>
             ) : (
               'No results'
@@ -380,10 +342,10 @@ export default function TableExplorer() {
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1 || isLoading}
             >
-              <ChevronLeftIcon className="h-4 w-4 mr-1" />
+              <ChevronLeftIcon className="mr-1 h-4 w-4" />
               Previous
             </Button>
-            <span className="text-sm font-medium min-w-[3rem] text-center">
+            <span className="min-w-[3rem] text-center text-sm font-medium">
               {page} / {totalPages || 1}
             </span>
             <Button
@@ -393,17 +355,13 @@ export default function TableExplorer() {
               disabled={page >= totalPages || isLoading}
             >
               Next
-              <ChevronRightIcon className="h-4 w-4 ml-1" />
+              <ChevronRightIcon className="ml-1 h-4 w-4" />
             </Button>
           </div>
         </div>
       </Card>
 
-      <RowDetailModal
-        row={selectedRow}
-        open={modalOpen}
-        onOpenChange={setModalOpen}
-      />
+      <RowDetailModal row={selectedRow} open={modalOpen} onOpenChange={setModalOpen} />
     </div>
   )
 }

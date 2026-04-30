@@ -2,12 +2,7 @@ import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import Button from './Button'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from './Tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './Tooltip'
 
 /**
  * Format a timestamp as relative time (e.g., "2 min ago", "just now")
@@ -63,7 +58,7 @@ export default function LastUpdated({
   label = 'Updated',
   className,
   refreshInterval = 10000,
-  showRefreshButton = true,
+  showRefreshButton = true
 }: LastUpdatedProps) {
   const [, setTick] = useState(0)
 
@@ -86,12 +81,7 @@ export default function LastUpdated({
 
   if (!timestamp) {
     return (
-      <div
-        className={cn(
-          'flex items-center gap-1.5 text-xs text-muted-foreground',
-          className,
-        )}
-      >
+      <div className={cn('flex items-center gap-1.5 text-xs text-muted-foreground', className)}>
         <span>Never updated</span>
         {showRefreshButton && onRefresh && (
           <Button
@@ -101,9 +91,7 @@ export default function LastUpdated({
             disabled={isRefreshing}
             className="h-6 w-6 p-0"
           >
-            <RefreshCw
-              className={cn('h-3 w-3', isRefreshing && 'animate-spin')}
-            />
+            <RefreshCw className={cn('h-3 w-3', isRefreshing && 'animate-spin')} />
             <span className="sr-only">Refresh</span>
           </Button>
         )}
@@ -115,12 +103,7 @@ export default function LastUpdated({
   const fullTime = formatFullTime(timestamp)
 
   return (
-    <div
-      className={cn(
-        'flex items-center gap-1.5 text-xs text-muted-foreground',
-        className,
-      )}
-    >
+    <div className={cn('flex items-center gap-1.5 text-xs text-muted-foreground', className)}>
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -145,9 +128,7 @@ export default function LastUpdated({
                 disabled={isRefreshing}
                 className="h-6 w-6 p-0"
               >
-                <RefreshCw
-                  className={cn('h-3 w-3', isRefreshing && 'animate-spin')}
-                />
+                <RefreshCw className={cn('h-3 w-3', isRefreshing && 'animate-spin')} />
                 <span className="sr-only">Refresh now</span>
               </Button>
             </TooltipTrigger>

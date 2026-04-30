@@ -4,16 +4,13 @@ import {
   FileIcon,
   FileTextIcon,
   GripVerticalIcon,
-  ImageIcon,
+  ImageIcon
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import {
-  oneDark,
-  oneLight,
-} from 'react-syntax-highlighter/dist/cjs/styles/prism'
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import remarkGfm from 'remark-gfm'
 import { s3GetContentBlob, s3GetContentText } from '@/api/yar'
 import Button from '@/components/ui/Button'
@@ -24,7 +21,7 @@ import {
   SheetContent,
   SheetDescription,
   SheetHeader,
-  SheetTitle,
+  SheetTitle
 } from '@/components/ui/Sheet'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
@@ -38,14 +35,7 @@ interface FileViewerProps {
   fileSize: number
 }
 
-type FileType =
-  | 'text'
-  | 'markdown'
-  | 'json'
-  | 'code'
-  | 'image'
-  | 'pdf'
-  | 'unknown'
+type FileType = 'text' | 'markdown' | 'json' | 'code' | 'image' | 'pdf' | 'unknown'
 
 // Storage key for persisted width
 const VIEWER_WIDTH_KEY = 'yar-viewer-width'
@@ -64,8 +54,7 @@ function getFileType(fileName: string): FileType {
   if (['md', 'markdown', 'mdx'].includes(ext)) return 'markdown'
 
   // JSON/YAML/Config
-  if (['json', 'yaml', 'yml', 'toml', 'ini', 'conf', 'config'].includes(ext))
-    return 'json'
+  if (['json', 'yaml', 'yml', 'toml', 'ini', 'conf', 'config'].includes(ext)) return 'json'
 
   // Code files
   if (
@@ -96,14 +85,13 @@ function getFileType(fileName: string): FileType {
       'less',
       'html',
       'htm',
-      'xml',
+      'xml'
     ].includes(ext)
   )
     return 'code'
 
   // Images
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext))
-    return 'image'
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext)) return 'image'
 
   // PDF
   if (ext === 'pdf') return 'pdf'
@@ -148,19 +136,13 @@ function getLanguage(fileName: string): string {
     toml: 'toml',
     ini: 'ini',
     md: 'markdown',
-    markdown: 'markdown',
+    markdown: 'markdown'
   }
   return langMap[ext] || 'text'
 }
 
 // Get icon for file type
-function FileTypeIcon({
-  fileType,
-  className,
-}: {
-  fileType: FileType
-  className?: string
-}) {
+function FileTypeIcon({ fileType, className }: { fileType: FileType; className?: string }) {
   switch (fileType) {
     case 'text':
       return <FileTextIcon className={className} />
@@ -190,7 +172,7 @@ export default function FileViewer({
   onOpenChange,
   fileKey,
   fileName,
-  fileSize,
+  fileSize
 }: FileViewerProps) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
@@ -214,10 +196,7 @@ export default function FileViewer({
   }, [releaseObjectUrl])
   // Resizable width state
   const [width, setWidth] = useState(() => {
-    const saved =
-      typeof window !== 'undefined'
-        ? localStorage.getItem(VIEWER_WIDTH_KEY)
-        : null
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(VIEWER_WIDTH_KEY) : null
     const parsed = saved ? parseInt(saved, 10) : NaN
     return Number.isFinite(parsed) && parsed >= MIN_WIDTH && parsed <= MAX_WIDTH
       ? parsed
@@ -240,7 +219,7 @@ export default function FileViewer({
       setIsResizing(true)
       resizeRef.current = { startX: e.clientX, startWidth: width }
     },
-    [width],
+    [width]
   )
 
   // Handle resize move
@@ -252,7 +231,7 @@ export default function FileViewer({
       const delta = resizeRef.current.startX - e.clientX
       const newWidth = Math.min(
         MAX_WIDTH,
-        Math.max(MIN_WIDTH, resizeRef.current.startWidth + delta),
+        Math.max(MIN_WIDTH, resizeRef.current.startWidth + delta)
       )
       setWidth(newWidth)
     }
@@ -300,7 +279,7 @@ export default function FileViewer({
 
         if (fileType === 'image' || fileType === 'pdf') {
           const blob = await s3GetContentBlob(fileKey, {
-            signal: controller.signal,
+            signal: controller.signal
           })
           if (controller.signal.aborted) return
 
@@ -312,7 +291,7 @@ export default function FileViewer({
         }
 
         const text = await s3GetContentText(fileKey, {
-          signal: controller.signal,
+          signal: controller.signal
         })
         if (controller.signal.aborted) return
         setContent(text)
@@ -366,22 +345,19 @@ export default function FileViewer({
           aria-hidden="true"
           className={cn(
             'absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors z-50 group',
-            isResizing && 'bg-primary/50',
+            isResizing && 'bg-primary/50'
           )}
           onMouseDown={handleResizeStart}
         >
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVerticalIcon className="h-6 w-6 text-muted-foreground" />
+          <div className="absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
+            <GripVerticalIcon className="text-muted-foreground h-6 w-6" />
           </div>
         </div>
 
-        <div className="p-6 pb-0 flex-shrink-0">
+        <div className="flex-shrink-0 p-6 pb-0">
           <SheetHeader>
             <div className="flex items-center gap-2 pr-8">
-              <FileTypeIcon
-                fileType={fileType}
-                className="h-5 w-5 text-muted-foreground"
-              />
+              <FileTypeIcon fileType={fileType} className="text-muted-foreground h-5 w-5" />
               <SheetTitle className="truncate">{fileName}</SheetTitle>
             </div>
             <SheetDescription className="flex items-center justify-between">
@@ -389,47 +365,41 @@ export default function FileViewer({
                 {formatBytes(fileSize)} • {fileType.toUpperCase()}
               </span>
               <Button variant="outline" size="sm" onClick={handleDownload}>
-                <DownloadIcon className="h-4 w-4 mr-1" />
+                <DownloadIcon className="mr-1 h-4 w-4" />
                 {t('storagePanel.actions.download')}
               </Button>
             </SheetDescription>
           </SheetHeader>
         </div>
 
-        <div className="flex-1 mt-4 min-h-0 overflow-hidden px-6 pb-6">
+        <div className="mt-4 min-h-0 flex-1 overflow-hidden px-6 pb-6">
           {loading ? (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex h-full items-center justify-center">
               <LoadingState variant="centered" size="lg" />
             </div>
           ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full text-destructive gap-2">
+            <div className="text-destructive flex h-full flex-col items-center justify-center gap-2">
               <p>{error}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onOpenChange(false)}
-              >
+              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                 {t('common.close')}
               </Button>
             </div>
           ) : fileType === 'image' && imageUrl ? (
-            <div className="flex items-center justify-center h-full bg-muted/30 rounded-lg p-4">
+            <div className="bg-muted/30 flex h-full items-center justify-center rounded-lg p-4">
               <img
                 src={imageUrl}
                 alt={fileName}
-                className="max-w-full max-h-full object-contain rounded"
+                className="max-h-full max-w-full rounded object-contain"
               />
             </div>
           ) : fileType === 'pdf' && imageUrl ? (
             <PDFViewer url={imageUrl} />
           ) : fileType === 'unknown' ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              <FileIcon className="h-16 w-16 text-muted-foreground" />
-              <p className="text-muted-foreground">
-                {t('storagePanel.viewer.noPreview')}
-              </p>
+            <div className="flex h-full flex-col items-center justify-center gap-4">
+              <FileIcon className="text-muted-foreground h-16 w-16" />
+              <p className="text-muted-foreground">{t('storagePanel.viewer.noPreview')}</p>
               <Button variant="default" onClick={handleDownload}>
-                <DownloadIcon className="h-4 w-4 mr-1" />
+                <DownloadIcon className="mr-1 h-4 w-4" />
                 {t('storagePanel.actions.download')}
               </Button>
             </div>
@@ -451,19 +421,13 @@ export default function FileViewer({
                           customStyle={{
                             margin: 0,
                             borderRadius: '0.375rem',
-                            fontSize: '0.875rem',
+                            fontSize: '0.875rem'
                           }}
                         >
                           {String(children).replace(/\n$/, '')}
                         </SyntaxHighlighter>
                       ) : (
-                        <code
-                          className={cn(
-                            'bg-muted px-1 py-0.5 rounded',
-                            className,
-                          )}
-                          {...props}
-                        >
+                        <code className={cn('bg-muted px-1 py-0.5 rounded', className)} {...props}>
                           {children}
                         </code>
                       )
@@ -474,12 +438,12 @@ export default function FileViewer({
                         <img
                           src={src}
                           alt={alt}
-                          className="max-w-full h-auto rounded"
+                          className="h-auto max-w-full rounded"
                           loading="lazy"
                           {...props}
                         />
                       )
-                    },
+                    }
                   }}
                 >
                   {content}
@@ -496,7 +460,7 @@ export default function FileViewer({
                   margin: 0,
                   borderRadius: '0.375rem',
                   fontSize: '0.8125rem',
-                  minHeight: '100%',
+                  minHeight: '100%'
                 }}
               >
                 {content}
@@ -504,7 +468,7 @@ export default function FileViewer({
             </ScrollArea>
           ) : content ? (
             <ScrollArea className="h-full">
-              <pre className="p-4 text-sm whitespace-pre-wrap break-words font-mono bg-muted/30 rounded-lg min-h-full">
+              <pre className="bg-muted/30 min-h-full rounded-lg p-4 font-mono text-sm break-words whitespace-pre-wrap">
                 {content}
               </pre>
             </ScrollArea>

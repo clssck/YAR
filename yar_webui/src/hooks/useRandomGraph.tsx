@@ -48,14 +48,14 @@ const useRandomGraph = () => {
       // Simulate db_degree being higher than visual degree (some nodes have hidden connections)
       const db_degree = faker.number.int({
         min: visualDegree,
-        max: visualDegree + 8,
+        max: visualDegree + 8
       })
 
       graph.mergeNodeAttributes(node, {
         label: faker.person.fullName(),
         size: faker.number.int({
           min: Constants.minNodeSize,
-          max: Constants.maxNodeSize,
+          max: Constants.maxNodeSize
         }),
         color: randomColor(),
         x: Math.random(),
@@ -67,7 +67,7 @@ const useRandomGraph = () => {
         borderSize: faker.number.float({ min: 0, max: 1, multipleOf: 0.1 }),
         // for node-image
         pictoColor: randomColor(),
-        image: faker.image.urlLoremFlickr(),
+        image: faker.image.urlLoremFlickr()
       })
     })
 
@@ -76,7 +76,7 @@ const useRandomGraph = () => {
       graph.mergeEdgeAttributes(edge, {
         label: faker.lorem.words(faker.number.int({ min: 1, max: 3 })),
         size: faker.number.float({ min: 1, max: 5 }),
-        color: randomColor(),
+        color: randomColor()
       })
     })
 

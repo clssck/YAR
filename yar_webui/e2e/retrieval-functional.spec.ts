@@ -55,9 +55,7 @@ test.describe('Query Settings - Functional Tests', () => {
 
   test('enable rerank checkbox can be toggled', async ({ page }) => {
     // Expand the "Advanced" section first
-    const advancedSection = page
-      .locator('button')
-      .filter({ hasText: /Advanced/i })
+    const advancedSection = page.locator('button').filter({ hasText: /Advanced/i })
     await advancedSection.click()
 
     const rerankCheckbox = page.locator('#enable_rerank')
@@ -274,7 +272,7 @@ test.describe('Settings Persistence - Functional Tests', () => {
     await page.getByRole('tab', { name: /Documents/i }).click()
     await expect(page.getByRole('tab', { name: /Documents/i })).toHaveAttribute(
       'data-state',
-      'active',
+      'active'
     )
 
     // Switch to Knowledge Graph tab

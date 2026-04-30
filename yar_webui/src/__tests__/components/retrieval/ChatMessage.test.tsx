@@ -9,76 +9,72 @@ import type { MessageWithError } from '@/components/retrieval/ChatMessageImpl'
 // Mock react-i18next
 mock.module('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
-  }),
+    t: (key: string) => key
+  })
 }))
 
 // Mock useTheme hook
 mock.module('@/hooks/useTheme', () => ({
   default: () => ({
-    theme: 'light',
-  }),
+    theme: 'light'
+  })
 }))
 
 // Mock mermaid
 mock.module('mermaid', () => ({
   default: {
     initialize: mock(),
-    run: mock(),
-  },
+    run: mock()
+  }
 }))
 
 // Mock react-syntax-highlighter
 mock.module('react-syntax-highlighter', () => ({
-  Prism: ({ children }: { children: string }) => <pre>{children}</pre>,
+  Prism: ({ children }: { children: string }) => <pre>{children}</pre>
 }))
 
 mock.module('react-syntax-highlighter/dist/cjs/styles/prism', () => ({
   oneDark: {},
-  oneLight: {},
+  oneLight: {}
 }))
 
 // Mock rehype plugins
 mock.module('rehype-raw', () => ({
-  default: () => {},
+  default: () => {}
 }))
 
 mock.module('rehype-react', () => ({
-  default: () => {},
+  default: () => {}
 }))
 
 mock.module('remark-gfm', () => ({
-  default: () => {},
+  default: () => {}
 }))
 
 mock.module('remark-math', () => ({
-  default: () => {},
+  default: () => {}
 }))
 
 mock.module('@/utils/remarkFootnotes', () => ({
-  remarkFootnotes: () => {},
+  remarkFootnotes: () => {}
 }))
 
 // Mock CitationMarker
 mock.module('@/components/retrieval/CitationMarker', () => ({
-  CitationMarker: ({ marker }: { marker: string }) => (
-    <span data-testid="citation">{marker}</span>
-  ),
+  CitationMarker: ({ marker }: { marker: string }) => <span data-testid="citation">{marker}</span>
 }))
 
 // Import after mocks are set up
 const { ChatMessage } = await import('@/components/retrieval/ChatMessageImpl')
 
 // Helper to create test messages
-function createMessage(
-  overrides: Partial<MessageWithError> = {},
-): MessageWithError {
+function createMessage(overrides: Partial<MessageWithError> = {}): MessageWithError {
   return {
     id: 'test-message-1',
     role: 'assistant',
     content: 'Test message content',
     timestamp: Date.now(),
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -87,7 +83,7 @@ describe('ChatMessage Component', () => {
     test('renders assistant message', () => {
       const message = createMessage({
         role: 'assistant',
-        content: 'Hello, I am an assistant.',
+        content: 'Hello, I am an assistant.'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -99,7 +95,7 @@ describe('ChatMessage Component', () => {
     test('renders user message', () => {
       const message = createMessage({
         role: 'user',
-        content: 'Hello, I am a user.',
+        content: 'Hello, I am a user.'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -111,7 +107,7 @@ describe('ChatMessage Component', () => {
       const message = createMessage({
         role: 'assistant',
         content: 'Full content here',
-        displayContent: 'Display content shown to user',
+        displayContent: 'Display content shown to user'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -126,7 +122,7 @@ describe('ChatMessage Component', () => {
         role: 'assistant',
         content: 'Error occurred',
         isError: true,
-        errorType: 'server',
+        errorType: 'server'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -140,7 +136,7 @@ describe('ChatMessage Component', () => {
         role: 'assistant',
         content: 'Request timed out',
         isError: true,
-        errorType: 'timeout',
+        errorType: 'timeout'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -153,7 +149,7 @@ describe('ChatMessage Component', () => {
         role: 'assistant',
         content: 'Authentication failed',
         isError: true,
-        errorType: 'auth',
+        errorType: 'auth'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -166,7 +162,7 @@ describe('ChatMessage Component', () => {
         role: 'assistant',
         content: 'Network error',
         isError: true,
-        errorType: 'network',
+        errorType: 'network'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -179,12 +175,10 @@ describe('ChatMessage Component', () => {
       const message = createMessage({
         role: 'assistant',
         content: 'Error occurred',
-        isError: true,
+        isError: true
       })
 
-      const { container } = render(
-        <ChatMessage message={message} onRetry={onRetry} />,
-      )
+      const { container } = render(<ChatMessage message={message} onRetry={onRetry} />)
 
       expect(container).toBeDefined()
     })
@@ -196,7 +190,7 @@ describe('ChatMessage Component', () => {
         role: 'assistant',
         content: '',
         isThinking: true,
-        thinkingContent: 'Analyzing your question...',
+        thinkingContent: 'Analyzing your question...'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -210,7 +204,7 @@ describe('ChatMessage Component', () => {
         content: 'Final response',
         isThinking: false,
         thinkingContent: 'I analyzed the data...',
-        thinkingTime: 2500, // 2.5 seconds
+        thinkingTime: 2500 // 2.5 seconds
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -223,7 +217,7 @@ describe('ChatMessage Component', () => {
         role: 'assistant',
         content: 'Simple response without thinking',
         isThinking: false,
-        thinkingContent: undefined,
+        thinkingContent: undefined
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -236,9 +230,7 @@ describe('ChatMessage Component', () => {
     test('renders with isTabActive true', () => {
       const message = createMessage()
 
-      const { container } = render(
-        <ChatMessage message={message} isTabActive={true} />,
-      )
+      const { container } = render(<ChatMessage message={message} isTabActive={true} />)
 
       expect(container).toBeDefined()
     })
@@ -246,9 +238,7 @@ describe('ChatMessage Component', () => {
     test('renders with isTabActive false', () => {
       const message = createMessage()
 
-      const { container } = render(
-        <ChatMessage message={message} isTabActive={false} />,
-      )
+      const { container } = render(<ChatMessage message={message} isTabActive={false} />)
 
       expect(container).toBeDefined()
     })
@@ -257,7 +247,7 @@ describe('ChatMessage Component', () => {
   describe('Message Content Types', () => {
     test('renders empty content', () => {
       const message = createMessage({
-        content: '',
+        content: ''
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -267,7 +257,7 @@ describe('ChatMessage Component', () => {
 
     test('renders long content', () => {
       const message = createMessage({
-        content: 'Lorem ipsum '.repeat(100),
+        content: 'Lorem ipsum '.repeat(100)
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -277,7 +267,7 @@ describe('ChatMessage Component', () => {
 
     test('renders content with special characters', () => {
       const message = createMessage({
-        content: 'Special chars: <>&"\'`~!@#$%^&*()',
+        content: 'Special chars: <>&"\'`~!@#$%^&*()'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -287,7 +277,7 @@ describe('ChatMessage Component', () => {
 
     test('renders content with newlines', () => {
       const message = createMessage({
-        content: 'Line 1\nLine 2\nLine 3',
+        content: 'Line 1\nLine 2\nLine 3'
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -308,8 +298,8 @@ describe('ChatMessage Component', () => {
           '  "title": "Alpha",',
           '  "score": 0.98',
           '}',
-          '```',
-        ].join('\n'),
+          '```'
+        ].join('\n')
       })
 
       const { container, getByText } = render(<ChatMessage message={message} />)
@@ -329,14 +319,13 @@ describe('ChatMessage Component', () => {
       expect(codeBlock).not.toBeNull()
       expect(codeBlock?.textContent).toContain('"score": 0.98')
     })
-
   })
 
   describe('Mermaid Rendering State', () => {
     test('renders with mermaidRendered false', () => {
       const message = createMessage({
         content: '```mermaid\ngraph TD\nA-->B\n```',
-        mermaidRendered: false,
+        mermaidRendered: false
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -347,7 +336,7 @@ describe('ChatMessage Component', () => {
     test('renders with mermaidRendered true', () => {
       const message = createMessage({
         content: '```mermaid\ngraph TD\nA-->B\n```',
-        mermaidRendered: true,
+        mermaidRendered: true
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -360,7 +349,7 @@ describe('ChatMessage Component', () => {
     test('renders with latexRendered false', () => {
       const message = createMessage({
         content: 'Formula: $E = mc^2$',
-        latexRendered: false,
+        latexRendered: false
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -371,7 +360,7 @@ describe('ChatMessage Component', () => {
     test('renders with latexRendered true', () => {
       const message = createMessage({
         content: 'Formula: $E = mc^2$',
-        latexRendered: true,
+        latexRendered: true
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -383,7 +372,7 @@ describe('ChatMessage Component', () => {
   describe('Timestamp Display', () => {
     test('renders message with timestamp', () => {
       const message = createMessage({
-        timestamp: Date.now(),
+        timestamp: Date.now()
       })
 
       const { container } = render(<ChatMessage message={message} />)
@@ -393,7 +382,7 @@ describe('ChatMessage Component', () => {
 
     test('renders message without timestamp', () => {
       const message = createMessage({
-        timestamp: undefined,
+        timestamp: undefined
       })
 
       const { container } = render(<ChatMessage message={message} />)

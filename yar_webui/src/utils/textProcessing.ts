@@ -1,10 +1,7 @@
 // Helper function to generate unique IDs with browser compatibility
 export const generateUniqueId = () => {
   // Use crypto.randomUUID() if available
-  if (
-    typeof crypto !== 'undefined' &&
-    typeof crypto.randomUUID === 'function'
-  ) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
   // Fallback to timestamp + random string for browsers without crypto.randomUUID
@@ -20,8 +17,7 @@ export const detectLatexCompleteness = (content: string): boolean => {
   // Check for unclosed inline LaTeX formulas ($...$, but not $$)
   // Remove all block formulas first to avoid interference
   const contentWithoutBlocks = content.replace(/\$\$[\s\S]*?\$\$/g, '')
-  const inlineLatexMatches =
-    contentWithoutBlocks.match(/(?<!\$)\$(?!\$)/g) || []
+  const inlineLatexMatches = contentWithoutBlocks.match(/(?<!\$)\$(?!\$)/g) || []
   const hasUnclosedInline = inlineLatexMatches.length % 2 !== 0
 
   // LaTeX is complete if there are no unclosed formulas
@@ -40,10 +36,7 @@ export const parseCOTContent = (content: string) => {
   let startIndex = content.indexOf(thinkStartTag)
   while (startIndex !== -1) {
     startMatches.push(startIndex)
-    startIndex = content.indexOf(
-      thinkStartTag,
-      startIndex + thinkStartTag.length,
-    )
+    startIndex = content.indexOf(thinkStartTag, startIndex + thinkStartTag.length)
   }
 
   let endIndex = content.indexOf(thinkEndTag)
@@ -72,9 +65,7 @@ export const parseCOTContent = (content: string) => {
           .trim()
 
         // Remove all thinking blocks, keep only the final display content
-        displayContent = content
-          .substring(lastEndIndex + thinkEndTag.length)
-          .trim()
+        displayContent = content.substring(lastEndIndex + thinkEndTag.length).trim()
       }
     } else if (isThinking) {
       // Currently thinking: extract current thinking content
@@ -88,8 +79,7 @@ export const parseCOTContent = (content: string) => {
     isThinking,
     thinkingContent,
     displayContent,
-    hasValidThinkBlock:
-      hasThinkStart && hasThinkEnd && startMatches.length === endMatches.length,
+    hasValidThinkBlock: hasThinkStart && hasThinkEnd && startMatches.length === endMatches.length
   }
 }
 
@@ -104,8 +94,7 @@ export const deduplicateReferencesSection = (text: string): string => {
   if (!text) return text
 
   // Match References section (### References or ## References)
-  const refsPattern =
-    /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  const refsPattern = /(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
 
   return text.replace(refsPattern, (_match, header, refsBlock) => {
     const refLinePattern = /[-*]\s*\[(\d+)\]\s*([^\n]+)/
@@ -138,8 +127,7 @@ export const deduplicateReferencesSection = (text: string): string => {
 export const stripReferencesSection = (text: string): string => {
   if (!text) return text
   // Match References section and everything after it
-  const refsPattern =
-    /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
+  const refsPattern = /\n*(#{2,3}\s*References|References:?)\s*\n((?:[-*]\s*\[\d+\][^\n]*\n?)+)/gi
   return text.replace(refsPattern, '').trim()
 }
 
@@ -187,18 +175,12 @@ export const renumberReferencesSequential = (text: string): string => {
 
   // First pass: replace all [n] with placeholder tokens
   for (const oldNum of refMapping.keys()) {
-    result = result.replace(
-      new RegExp(`\\[${oldNum}\\]`, 'g'),
-      `${placeholder}${oldNum}\x00`,
-    )
+    result = result.replace(new RegExp(`\\[${oldNum}\\]`, 'g'), `${placeholder}${oldNum}\x00`)
   }
 
   // Second pass: replace placeholder tokens with new sequential numbers
   for (const [oldNum, newNum] of refMapping.entries()) {
-    result = result.replace(
-      new RegExp(`${placeholder}${oldNum}\x00`, 'g'),
-      `[${newNum}]`,
-    )
+    result = result.replace(new RegExp(`${placeholder}${oldNum}\x00`, 'g'), `[${newNum}]`)
   }
 
   return result
@@ -217,7 +199,7 @@ export type NonStreamQueryResponse = {
 export const applyNonStreamResponse = (
   assistantMessage: { id: string; references?: NonStreamReference[] },
   response: NonStreamQueryResponse,
-  messages: Array<{ id: string; references?: NonStreamReference[] }>,
+  messages: Array<{ id: string; references?: NonStreamReference[] }>
 ) => {
   const references = response.references ?? undefined
   assistantMessage.references = references
@@ -225,8 +207,8 @@ export const applyNonStreamResponse = (
     msg.id === assistantMessage.id
       ? {
           ...msg,
-          references,
+          references
         }
-      : msg,
+      : msg
   )
 }

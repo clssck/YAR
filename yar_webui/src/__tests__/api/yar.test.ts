@@ -7,14 +7,14 @@ const navigateToLogin = mock(() => {})
 
 mock.module('@/services/navigation', () => ({
   navigationService: {
-    navigateToLogin,
-  },
+    navigateToLogin
+  }
 }))
 
 mock.module('@/lib/constants', () => ({
   backendBaseUrl: TEST_BACKEND_ORIGIN,
   popularLabelsDefaultLimit: 10,
-  searchLabelsDefaultLimit: 10,
+  searchLabelsDefaultLimit: 10
 }))
 
 import type { QueryRequest, StreamReference } from '@/api/yarImpl'
@@ -25,9 +25,9 @@ const makeSuccessResponseBody = (body: string) => ({
   statusCode: 200,
   headers: {
     'Content-Type': 'application/x-ndjson',
-    'Content-Length': String(Buffer.byteLength(body)),
+    'Content-Length': String(Buffer.byteLength(body))
   },
-  body,
+  body
 })
 
 const startStreamServer = async (body: string) => {
@@ -59,12 +59,13 @@ const startStreamServer = async (body: string) => {
   })
 
   return {
-    stop: () => new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) reject(error)
-        else resolve()
+    stop: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error)
+          else resolve()
+        })
       })
-    }),
   }
 }
 
@@ -86,8 +87,8 @@ describe('queryTextStream NDJSON parsing', () => {
         document_title: 'Doc A',
         s3_key: null,
         excerpt: null,
-        presigned_url: 'https://example.test/a.pdf',
-      },
+        presigned_url: 'https://example.test/a.pdf'
+      }
     ]
 
     const ndjson = `${JSON.stringify({ response: 'Answer chunk', references })}\n`
@@ -103,7 +104,7 @@ describe('queryTextStream NDJSON parsing', () => {
         (chunk) => chunks.push(chunk),
         onError,
         undefined,
-        (refs) => receivedReferences.push(refs),
+        (refs) => receivedReferences.push(refs)
       )
     } finally {
       await server.stop()
@@ -122,8 +123,8 @@ describe('queryTextStream NDJSON parsing', () => {
         document_title: 'Doc B',
         s3_key: null,
         excerpt: null,
-        presigned_url: null,
-      },
+        presigned_url: null
+      }
     ]
 
     const finalChunk = JSON.stringify({ response: 'Buffered answer', references })
@@ -138,7 +139,7 @@ describe('queryTextStream NDJSON parsing', () => {
         (chunk) => chunks.push(chunk),
         undefined,
         undefined,
-        (refs) => receivedReferences.push(refs),
+        (refs) => receivedReferences.push(refs)
       )
     } finally {
       await server.stop()
@@ -162,7 +163,7 @@ describe('queryTextStream NDJSON parsing', () => {
         (chunk) => chunks.push(chunk),
         onError,
         undefined,
-        (refs) => receivedReferences.push(refs),
+        (refs) => receivedReferences.push(refs)
       )
     } finally {
       await server.stop()
@@ -170,9 +171,7 @@ describe('queryTextStream NDJSON parsing', () => {
 
     expect(chunks).toEqual(['Chunk before bad refs'])
     expect(receivedReferences).toEqual([])
-    expect(onError).toHaveBeenCalledWith(
-      'Protocol error: expected "references" to be an array',
-    )
+    expect(onError).toHaveBeenCalledWith('Protocol error: expected "references" to be an array')
   })
 
   test('routes citation_error event from final buffered object to onError', async () => {
@@ -185,15 +184,13 @@ describe('queryTextStream NDJSON parsing', () => {
       await queryTextStream(
         { query: 'Need citations', mode: 'mix', stream: true } as QueryRequest,
         () => {},
-        onError,
+        onError
       )
     } finally {
       await server.stop()
     }
 
-    expect(onError).toHaveBeenCalledWith(
-      'Citation error: citation service unavailable',
-    )
+    expect(onError).toHaveBeenCalledWith('Citation error: citation service unavailable')
   })
 })
 
@@ -202,8 +199,8 @@ describe('getDocumentUrl', () => {
     expect(
       getDocumentUrl({
         s3_key: 'folder/report #1?.pdf',
-        presigned_url: 'https://example.test/fallback.pdf?download=1',
-      }),
+        presigned_url: 'https://example.test/fallback.pdf?download=1'
+      })
     ).toBe('https://example.test/fallback.pdf?download=1')
   })
 
@@ -211,8 +208,8 @@ describe('getDocumentUrl', () => {
     expect(
       getDocumentUrl({
         s3_key: 'folder/report #1?.pdf',
-        presigned_url: null,
-      }),
+        presigned_url: null
+      })
     ).toBe(`${TEST_BACKEND_ORIGIN}/s3/content/folder%2Freport%20%231%3F.pdf`)
   })
 
@@ -220,8 +217,8 @@ describe('getDocumentUrl', () => {
     expect(
       getDocumentUrl({
         s3_key: null,
-        presigned_url: null,
-      }),
+        presigned_url: null
+      })
     ).toBeNull()
   })
 })

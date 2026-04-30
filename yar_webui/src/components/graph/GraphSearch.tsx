@@ -1,16 +1,13 @@
 import {
   EdgeById,
   type GraphSearchContextProviderProps,
-  type GraphSearchInputProps,
+  type GraphSearchInputProps
 } from '@react-sigma/graph-search'
 import MiniSearch from 'minisearch'
 import { type FC, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AsyncSearch } from '@/components/ui/AsyncSearch'
-import {
-  formatShortcut,
-  useKeyboardShortcut,
-} from '@/hooks/useKeyboardShortcut'
+import { formatShortcut, useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
 import { searchResultLimit } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
 
@@ -41,11 +38,11 @@ const NodeOption = ({ id }: { id: string }) => {
   return (
     <div className="flex items-center gap-2 p-2 text-sm">
       <div
-        className="rounded-full flex-shrink-0"
+        className="flex-shrink-0 rounded-full"
         style={{
           width: Math.max(8, Math.min(size * 2, 16)),
           height: Math.max(8, Math.min(size * 2, 16)),
-          backgroundColor: color,
+          backgroundColor: color
         }}
       />
       <span className="truncate">{label}</span>
@@ -69,7 +66,7 @@ function OptionComponent(item: OptionItem) {
 export const GraphSearchInput = ({
   onChange,
   onFocus,
-  value,
+  value
 }: {
   onChange: GraphSearchInputProps['onChange']
   onFocus?: GraphSearchInputProps['onFocus']
@@ -91,7 +88,7 @@ export const GraphSearchInput = ({
     key: 'k',
     modifiers: { ctrl: true },
     callback: focusSearch,
-    description: t('graphPanel.search.focusShortcut', 'Focus node search'),
+    description: t('graphPanel.search.focusShortcut', 'Focus node search')
   })
 
   // Also support Cmd+K on Mac
@@ -99,7 +96,7 @@ export const GraphSearchInput = ({
     key: 'k',
     modifiers: { meta: true },
     callback: focusSearch,
-    description: t('graphPanel.search.focusShortcut', 'Focus node search'),
+    description: t('graphPanel.search.focusShortcut', 'Focus node search')
   })
 
   // Reset search engine when graph changes
@@ -124,9 +121,9 @@ export const GraphSearchInput = ({
         prefix: true,
         fuzzy: 0.2,
         boost: {
-          label: 2,
-        },
-      },
+          label: 2
+        }
+      }
     })
 
     // Add nodes to search engine with safety checks
@@ -135,7 +132,7 @@ export const GraphSearchInput = ({
       .filter((id) => graph.hasNode(id)) // Ensure node exists before accessing attributes
       .map((id: string) => ({
         id: id,
-        label: graph.getNodeAttribute(id, 'label'),
+        label: graph.getNodeAttribute(id, 'label')
       }))
 
     if (documents.length > 0) {
@@ -171,7 +168,7 @@ export const GraphSearchInput = ({
           .slice(0, searchResultLimit)
         return nodeIds.map((id) => ({
           id,
-          type: 'nodes',
+          type: 'nodes'
         }))
       }
 
@@ -181,7 +178,7 @@ export const GraphSearchInput = ({
         .filter((r: { id: string }) => graph.hasNode(r.id))
         .map((r: { id: string }) => ({
           id: r.id,
-          type: 'nodes',
+          type: 'nodes'
         }))
 
       // Add middle-content matching if results are few
@@ -212,7 +209,7 @@ export const GraphSearchInput = ({
           })
           .map((id) => ({
             id,
-            type: 'nodes' as const,
+            type: 'nodes' as const
           }))
 
         // Merge results
@@ -233,7 +230,7 @@ export const GraphSearchInput = ({
             },
           ]
     },
-    [graph, searchEngine, onFocus, t],
+    [graph, searchEngine, onFocus, t]
   )
 
   // Build placeholder with keyboard shortcut hint
@@ -255,8 +252,7 @@ export const GraphSearchInput = ({
           if (id !== messageId) onChange(id ? { id, type: 'nodes' } : null)
         }}
         onFocus={(id) => {
-          if (id !== messageId && onFocus)
-            onFocus(id ? { id, type: 'nodes' } : null)
+          if (id !== messageId && onFocus) onFocus(id ? { id, type: 'nodes' } : null)
         }}
         ariaLabel={t('graphPanel.search.placeholder')}
         placeholder={placeholderWithShortcut}
@@ -273,9 +269,7 @@ export const GraphSearchInput = ({
 /**
  * Component that display the search.
  */
-const GraphSearch: FC<
-  GraphSearchInputProps & GraphSearchContextProviderProps
-> = ({ ...props }) => {
+const GraphSearch: FC<GraphSearchInputProps & GraphSearchContextProviderProps> = ({ ...props }) => {
   return <GraphSearchInput {...props} />
 }
 

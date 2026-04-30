@@ -5,11 +5,7 @@ import Button, { ControlButton } from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
 import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import Input from '@/components/ui/Input'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/Popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import useRandomGraph from '@/hooks/useRandomGraph'
 import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
@@ -20,7 +16,7 @@ import { useSettingsStore } from '@/stores/settings'
 const LabeledCheckBox = ({
   checked,
   onCheckedChange,
-  label,
+  label
 }: {
   checked: boolean
   onCheckedChange: () => void
@@ -51,7 +47,7 @@ const LabeledNumberInput = ({
   label,
   min,
   max,
-  defaultValue,
+  defaultValue
 }: {
   value: number
   onEditFinished: (value: number) => void
@@ -87,7 +83,7 @@ const LabeledNumberInput = ({
         setCurrentValue(newValue)
       }
     },
-    [currentValue, min, max],
+    [currentValue, min, max]
   )
 
   const onBlur = useCallback(() => {
@@ -131,7 +127,7 @@ const LabeledNumberInput = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
+            className="hover:bg-muted text-muted-foreground hover:text-foreground h-6 w-6 flex-shrink-0"
             onClick={handleReset}
             type="button"
             title={t('graphPanel.sideBar.settings.resetToDefault')}
@@ -155,16 +151,14 @@ export default function Settings() {
   const showNodeLabel = useSettingsStore.use.showNodeLabel()
   const enableEdgeEvents = useSettingsStore.use.enableEdgeEvents()
   const enableNodeDrag = useSettingsStore.use.enableNodeDrag()
-  const enableHideUnselectedEdges =
-    useSettingsStore.use.enableHideUnselectedEdges()
+  const enableHideUnselectedEdges = useSettingsStore.use.enableHideUnselectedEdges()
   const showEdgeLabel = useSettingsStore.use.showEdgeLabel()
   const minEdgeSize = useSettingsStore.use.minEdgeSize()
   const maxEdgeSize = useSettingsStore.use.maxEdgeSize()
   const graphQueryMaxDepth = useSettingsStore.use.graphQueryMaxDepth()
   const graphMaxNodes = useSettingsStore.use.graphMaxNodes()
   const backendMaxGraphNodes = useSettingsStore.use.backendMaxGraphNodes()
-  const graphLayoutMaxIterations =
-    useSettingsStore.use.graphLayoutMaxIterations()
+  const graphLayoutMaxIterations = useSettingsStore.use.graphLayoutMaxIterations()
   const graphMinDegree = useSettingsStore.use.graphMinDegree()
   const graphIncludeOrphans = useSettingsStore.use.graphIncludeOrphans()
   const graphExpandDepth = useSettingsStore.use.graphExpandDepth()
@@ -177,63 +171,63 @@ export default function Settings() {
   const setEnableNodeDrag = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        enableNodeDrag: !pre.enableNodeDrag,
+        enableNodeDrag: !pre.enableNodeDrag
       })),
-    [],
+    []
   )
   const setEnableEdgeEvents = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        enableEdgeEvents: !pre.enableEdgeEvents,
+        enableEdgeEvents: !pre.enableEdgeEvents
       })),
-    [],
+    []
   )
   const setEnableHideUnselectedEdges = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        enableHideUnselectedEdges: !pre.enableHideUnselectedEdges,
+        enableHideUnselectedEdges: !pre.enableHideUnselectedEdges
       })),
-    [],
+    []
   )
   const setShowEdgeLabel = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        showEdgeLabel: !pre.showEdgeLabel,
+        showEdgeLabel: !pre.showEdgeLabel
       })),
-    [],
+    []
   )
 
   //
   const setShowPropertyPanel = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        showPropertyPanel: !pre.showPropertyPanel,
+        showPropertyPanel: !pre.showPropertyPanel
       })),
-    [],
+    []
   )
 
   const setShowNodeSearchBar = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        showNodeSearchBar: !pre.showNodeSearchBar,
+        showNodeSearchBar: !pre.showNodeSearchBar
       })),
-    [],
+    []
   )
 
   const setShowNodeLabel = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        showNodeLabel: !pre.showNodeLabel,
+        showNodeLabel: !pre.showNodeLabel
       })),
-    [],
+    []
   )
 
   const setEnableHealthCheck = useCallback(
     () =>
       useSettingsStore.setState((pre) => ({
-        enableHealthCheck: !pre.enableHealthCheck,
+        enableHealthCheck: !pre.enableHealthCheck
       })),
-    [],
+    []
   )
 
   const setGraphQueryMaxDepth = useCallback((depth: number) => {
@@ -252,7 +246,7 @@ export default function Settings() {
       if (nodes < 1 || nodes > maxLimit) return
       useSettingsStore.getState().setGraphMaxNodes(nodes, true)
     },
-    [backendMaxGraphNodes],
+    [backendMaxGraphNodes]
   )
 
   const setGraphLayoutMaxIterations = useCallback((iterations: number) => {
@@ -266,9 +260,7 @@ export default function Settings() {
   }, [])
 
   const setGraphIncludeOrphans = useCallback(() => {
-    useSettingsStore
-      .getState()
-      .setGraphIncludeOrphans(!graphIncludeOrphans, true)
+    useSettingsStore.getState().setGraphIncludeOrphans(!graphIncludeOrphans, true)
   }, [graphIncludeOrphans])
 
   const setGraphExpandDepth = useCallback((depth: number) => {
@@ -297,7 +289,7 @@ export default function Settings() {
         align="end"
         sideOffset={8}
         collisionPadding={5}
-        className="p-2 max-w-[220px] max-h-[80vh] overflow-y-auto"
+        className="max-h-[80vh] max-w-[220px] overflow-y-auto p-2"
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex flex-col">
@@ -332,10 +324,7 @@ export default function Settings() {
 
           {/* Interaction Section */}
           <CollapsibleSection
-            title={t(
-              'graphPanel.sideBar.settings.sections.interaction',
-              'Interaction',
-            )}
+            title={t('graphPanel.sideBar.settings.sections.interaction', 'Interaction')}
             defaultOpen={false}
             className="border-b-0"
             contentClassName="space-y-2"
@@ -359,10 +348,7 @@ export default function Settings() {
 
           {/* Edge Sizing Section */}
           <CollapsibleSection
-            title={t(
-              'graphPanel.sideBar.settings.sections.edges',
-              'Edge Sizing',
-            )}
+            title={t('graphPanel.sideBar.settings.sections.edges', 'Edge Sizing')}
             defaultOpen={false}
             className="border-b-0"
             contentClassName="space-y-2"
@@ -370,7 +356,7 @@ export default function Settings() {
             <div className="flex flex-col gap-2">
               <label
                 htmlFor="edge-size-min"
-                className="text-xs leading-none font-medium text-muted-foreground"
+                className="text-muted-foreground text-xs leading-none font-medium"
               >
                 {t('graphPanel.sideBar.settings.edgeSizeRange')}
               </label>
@@ -381,11 +367,7 @@ export default function Settings() {
                   value={minEdgeSize}
                   onChange={(e) => {
                     const newValue = Number(e.target.value)
-                    if (
-                      !Number.isNaN(newValue) &&
-                      newValue >= 1 &&
-                      newValue <= maxEdgeSize
-                    ) {
+                    if (!Number.isNaN(newValue) && newValue >= 1 && newValue <= maxEdgeSize) {
                       useSettingsStore.setState({ minEdgeSize: newValue })
                     }
                   }}
@@ -417,11 +399,11 @@ export default function Settings() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
+                    className="hover:bg-muted text-muted-foreground hover:text-foreground h-6 w-6 flex-shrink-0"
                     onClick={() =>
                       useSettingsStore.setState({
                         minEdgeSize: 1,
-                        maxEdgeSize: 5,
+                        maxEdgeSize: 5
                       })
                     }
                     type="button"
@@ -468,10 +450,7 @@ export default function Settings() {
 
           {/* Filtering Section */}
           <CollapsibleSection
-            title={t(
-              'graphPanel.sideBar.settings.sections.filtering',
-              'Filtering',
-            )}
+            title={t('graphPanel.sideBar.settings.sections.filtering', 'Filtering')}
             defaultOpen={false}
             className="border-b-0"
             contentClassName="space-y-3"
@@ -514,8 +493,8 @@ export default function Settings() {
 
             {/* Development/Testing Section - Only visible in development mode */}
             {import.meta.env.DEV && (
-              <div className="flex flex-col gap-2 pt-2 border-t border-border/30">
-                <span className="text-xs leading-none font-medium text-muted-foreground">
+              <div className="border-border/30 flex flex-col gap-2 border-t pt-2">
+                <span className="text-muted-foreground text-xs leading-none font-medium">
                   Dev Options
                 </span>
                 <Button
@@ -532,13 +511,8 @@ export default function Settings() {
           </CollapsibleSection>
 
           {/* Close button */}
-          <div className="pt-2 border-t border-border/50">
-            <Button
-              onClick={saveSettings}
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
+          <div className="border-border/50 border-t pt-2">
+            <Button onClick={saveSettings} variant="outline" size="sm" className="w-full">
               {t('graphPanel.sideBar.settings.save')}
             </Button>
           </div>

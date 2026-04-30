@@ -7,7 +7,7 @@ export const ALLOWED_RETRIEVAL_QUERY_MODES: QueryMode[] = [
   'global',
   'hybrid',
   'mix',
-  'bypass',
+  'bypass'
 ]
 
 export type RetrievalInputValidationResult =
@@ -24,7 +24,7 @@ export type RetrievalInputValidationResult =
 export const validateRetrievalInput = (
   inputValue: string,
   modeOverride: QueryMode | null,
-  minLength: number = MIN_RETRIEVAL_QUERY_LENGTH,
+  minLength: number = MIN_RETRIEVAL_QUERY_LENGTH
 ): RetrievalInputValidationResult => {
   const prefixMatch = inputValue.match(/^\/(\w+)\s+([\s\S]+)/)
 
@@ -55,6 +55,6 @@ export const validateRetrievalInput = (
   return {
     ok: true,
     effectiveMode,
-    trimmedQuery,
+    trimmedQuery
   }
 }

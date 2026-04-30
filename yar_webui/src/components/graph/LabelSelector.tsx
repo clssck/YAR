@@ -9,13 +9,9 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
-  CommandList,
+  CommandList
 } from '@/components/ui/Command'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/Popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import { useDebounce } from '@/hooks/useDebounce'
 import { controlButtonVariant, searchLabelsDefaultLimit } from '@/lib/constants'
 import { cn } from '@/lib/utils'
@@ -39,11 +35,7 @@ const RECENT_LABELS_LIMIT = 5
  * 3. No dependency cascades - selection doesn't trigger refetch
  * 4. Limited rendered items per section
  */
-const LabelSelector = ({
-  value,
-  onChange,
-  disabled = false,
-}: LabelSelectorProps) => {
+const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps) => {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -93,10 +85,7 @@ const LabelSelector = ({
     const performSearch = async () => {
       setIsSearching(true)
       try {
-        const results = await searchLabels(
-          debouncedSearchTerm.trim(),
-          searchLabelsDefaultLimit,
-        )
+        const results = await searchLabels(debouncedSearchTerm.trim(), searchLabelsDefaultLimit)
         if (!cancelled) {
           setSearchResults(results.filter((l) => l !== '*'))
         }
@@ -132,7 +121,7 @@ const LabelSelector = ({
       setOpen(false)
       setSearchTerm('')
     },
-    [onChange],
+    [onChange]
   )
 
   // Clear search when dropdown closes
@@ -154,7 +143,7 @@ const LabelSelector = ({
     const result = {
       recent: [] as string[],
       popular: [] as string[],
-      search: [] as string[],
+      search: [] as string[]
     }
 
     if (showSearchResults) {
@@ -191,7 +180,7 @@ const LabelSelector = ({
           variant={controlButtonVariant}
           role="combobox"
           aria-expanded={open}
-          className="justify-between min-w-[80px] max-w-[200px] px-2 h-8"
+          className="h-8 max-w-[200px] min-w-[80px] justify-between px-2"
           disabled={disabled}
           tooltip={t('graphPanel.graphLabels.selectLabelTooltip')}
         >
@@ -214,28 +203,21 @@ const LabelSelector = ({
               onValueChange={setSearchTerm}
             />
             {isSearching && (
-              <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <div className="absolute top-1/2 right-2 -translate-y-1/2">
+                <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
               </div>
             )}
           </div>
           <CommandList>
             {/* Always show wildcard at top */}
             <CommandGroup>
-              <CommandItem
-                value=""
-                onSelect={() => handleSelect('*')}
-                className="cursor-pointer"
-              >
+              <CommandItem value="" onSelect={() => handleSelect('*')} className="cursor-pointer">
                 <span className="font-mono">*</span>
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="text-muted-foreground ml-2 text-xs">
                   {t('graphPanel.graphLabels.allLabels')}
                 </span>
                 <Check
-                  className={cn(
-                    'ml-auto h-4 w-4',
-                    value === '*' ? 'opacity-100' : 'opacity-0',
-                  )}
+                  className={cn('ml-auto h-4 w-4', value === '*' ? 'opacity-100' : 'opacity-0')}
                 />
               </CommandItem>
             </CommandGroup>
@@ -243,9 +225,7 @@ const LabelSelector = ({
             {/* Search results */}
             {showSearchResults &&
               (displayedLabels.search.length > 0 ? (
-                <CommandGroup
-                  heading={t('graphPanel.graphLabels.searchResults')}
-                >
+                <CommandGroup heading={t('graphPanel.graphLabels.searchResults')}>
                   {displayedLabels.search.map((label) => (
                     <CommandItem
                       key={label}
@@ -257,18 +237,14 @@ const LabelSelector = ({
                       <Check
                         className={cn(
                           'ml-auto h-4 w-4 shrink-0',
-                          value === label ? 'opacity-100' : 'opacity-0',
+                          value === label ? 'opacity-100' : 'opacity-0'
                         )}
                       />
                     </CommandItem>
                   ))}
                 </CommandGroup>
               ) : (
-                !isSearching && (
-                  <CommandEmpty>
-                    {t('graphPanel.graphLabels.noResults')}
-                  </CommandEmpty>
-                )
+                !isSearching && <CommandEmpty>{t('graphPanel.graphLabels.noResults')}</CommandEmpty>
               ))}
 
             {/* Recent + Popular when not searching */}
@@ -287,7 +263,7 @@ const LabelSelector = ({
                         <Check
                           className={cn(
                             'ml-auto h-4 w-4 shrink-0',
-                            value === label ? 'opacity-100' : 'opacity-0',
+                            value === label ? 'opacity-100' : 'opacity-0'
                           )}
                         />
                       </CommandItem>
@@ -315,7 +291,7 @@ const LabelSelector = ({
                           <Check
                             className={cn(
                               'ml-auto h-4 w-4 shrink-0',
-                              value === label ? 'opacity-100' : 'opacity-0',
+                              value === label ? 'opacity-100' : 'opacity-0'
                             )}
                           />
                         </CommandItem>

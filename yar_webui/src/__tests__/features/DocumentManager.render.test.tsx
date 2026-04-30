@@ -15,8 +15,8 @@ const mockGetDocumentsPaginated = mock(async (request?: unknown) => {
         created_at: '2024-01-01T00:00:00.000Z',
         updated_at: '2024-01-02T00:00:00.000Z',
         chunks_count: 1,
-        metadata: {},
-      },
+        metadata: {}
+      }
     ],
     pagination: {
       page: 1,
@@ -24,32 +24,32 @@ const mockGetDocumentsPaginated = mock(async (request?: unknown) => {
       total_count: 1,
       total_pages: 1,
       has_next: false,
-      has_prev: false,
+      has_prev: false
     },
-    status_counts: { all: 1, processed: 1 },
+    status_counts: { all: 1, processed: 1 }
   }
 })
 
 const mockScanNewDocuments = mock(async () => ({
   status: 'success',
   message: 'ok',
-  track_id: 'track-1',
+  track_id: 'track-1'
 }))
 
 const mockReprocessFailedDocuments = mock(async () => ({
   status: 'success',
-  message: 'ok',
+  message: 'ok'
 }))
 
 const mockBackendState = {
   resetHealthCheckTimerDelayed: mock(() => {}),
-  check: mock(async () => true),
+  check: mock(async () => true)
 }
 
 const mockSettingsState = {
   currentTab: 'documents',
   showFileName: false,
-  documentsPageSize: 10,
+  documentsPageSize: 10
 }
 
 // Bun mock note: spreading a real module namespace causes the mock to leak
@@ -60,7 +60,7 @@ mock.module('@/api/yar', () => ({
   scanNewDocuments: mockScanNewDocuments,
   reprocessFailedDocuments: mockReprocessFailedDocuments,
   checkHealth: () => Promise.resolve({ status: 'healthy' }),
-  getDocumentUrl: () => null,
+  getDocumentUrl: () => null
 }))
 
 mock.module('@/stores/settings', () => ({
@@ -70,10 +70,10 @@ mock.module('@/stores/settings', () => ({
       showFileName: () => mockSettingsState.showFileName,
       setShowFileName: () => mock(() => {}),
       documentsPageSize: () => mockSettingsState.documentsPageSize,
-      setDocumentsPageSize: () => mock(() => {}),
+      setDocumentsPageSize: () => mock(() => {})
     },
-    getState: () => ({ apiKey: null }),
-  },
+    getState: () => ({ apiKey: null })
+  }
 }))
 
 mock.module('@/stores/state', () => ({
@@ -81,10 +81,10 @@ mock.module('@/stores/state', () => ({
     use: {
       health: () => true,
       pipelineBusy: () => false,
-      documentListVersion: () => 0,
+      documentListVersion: () => 0
     },
-    getState: () => mockBackendState,
-  },
+    getState: () => mockBackendState
+  }
 }))
 
 mock.module('@/components/documents/ClearDocumentsDialog', () => ({ default: () => null }))
@@ -125,8 +125,8 @@ describe('DocumentManager Rendering', () => {
         page: 1,
         page_size: 10,
         sort_field: 'updated_at',
-        sort_direction: 'desc',
-      }),
+        sort_direction: 'desc'
+      })
     )
     expect(rendered!.getByText('doc-1')).toBeTruthy()
   })
@@ -152,8 +152,8 @@ describe('DocumentManager Rendering', () => {
         page: 1,
         page_size: 10,
         sort_field: 'updated_at',
-        sort_direction: 'asc',
-      }),
+        sort_direction: 'asc'
+      })
     )
   })
 })

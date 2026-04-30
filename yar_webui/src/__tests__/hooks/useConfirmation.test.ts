@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { act, renderHook } from '@testing-library/react'
-import type {
-  ConfirmationConfig,
-  UndoableActionConfig,
-} from '../../hooks/useConfirmation'
+import type { ConfirmationConfig, UndoableActionConfig } from '../../hooks/useConfirmation'
 
 const toastMainMock = mock(() => 'mock-toast-id')
 const toastErrorMock = mock(() => 'error-toast-id')
@@ -15,11 +12,11 @@ const toastMock = Object.assign(toastMainMock, {
   error: toastErrorMock,
   success: toastSuccessMock,
   loading: toastLoadingMock,
-  dismiss: toastDismissMock,
+  dismiss: toastDismissMock
 })
 
 mock.module('sonner', () => ({
-  toast: toastMock,
+  toast: toastMock
 }))
 
 const {
@@ -27,7 +24,7 @@ const {
   useInlineConfirmation,
   createDelayedAction,
   createProgressToast,
-  useProgressToast,
+  useProgressToast
 } = await import('../../hooks/useConfirmation')
 
 describe('useUndoableAction', () => {
@@ -52,16 +49,13 @@ describe('useUndoableAction', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'Action completed',
-        action: actionMock,
+        action: actionMock
       })
     })
 
     expect(actionMock).toHaveBeenCalled()
     expect(actionMock).toHaveBeenCalledTimes(1)
-    expect(toastMainMock).toHaveBeenCalledWith(
-      'Action completed',
-      expect.any(Object),
-    )
+    expect(toastMainMock).toHaveBeenCalledWith('Action completed', expect.any(Object))
   })
 
   test('handles async action execution', async () => {
@@ -77,7 +71,7 @@ describe('useUndoableAction', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'Async action',
-        action: asyncAction,
+        action: asyncAction
       })
     })
 
@@ -92,7 +86,7 @@ describe('useUndoableAction', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'Action with cleanup',
-        action: () => cleanupMock,
+        action: () => cleanupMock
       })
     })
 
@@ -108,12 +102,12 @@ describe('useUndoableAction', () => {
         message: 'Failing action',
         action: () => {
           throw new Error(errorMessage)
-        },
+        }
       })
     })
 
     expect(toastErrorMock).toHaveBeenCalledWith('Action failed', {
-      description: errorMessage,
+      description: errorMessage
     })
   })
 
@@ -125,12 +119,12 @@ describe('useUndoableAction', () => {
         message: 'Failing action',
         action: () => {
           throw 'string error'
-        },
+        }
       })
     })
 
     expect(toastErrorMock).toHaveBeenCalledWith('Action failed', {
-      description: 'An error occurred',
+      description: 'An error occurred'
     })
   })
 
@@ -142,14 +136,14 @@ describe('useUndoableAction', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'First action',
-        action: () => cleanup1Mock,
+        action: () => cleanup1Mock
       })
     })
 
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'Second action',
-        action: () => cleanup2Mock,
+        action: () => cleanup2Mock
       })
     })
 
@@ -163,15 +157,15 @@ describe('useUndoableAction', () => {
       await result.current.executeWithUndo({
         message: 'Custom toast',
         description: 'Custom description',
-        action: () => {},
+        action: () => {}
       })
     })
 
     expect(toastMainMock).toHaveBeenCalledWith(
       'Custom toast',
       expect.objectContaining({
-        description: 'Custom description',
-      }),
+        description: 'Custom description'
+      })
     )
   })
 
@@ -182,15 +176,15 @@ describe('useUndoableAction', () => {
       await result.current.executeWithUndo({
         message: 'Long duration',
         duration: 10000,
-        action: () => {},
+        action: () => {}
       })
     })
 
     expect(toastMainMock).toHaveBeenCalledWith(
       'Long duration',
       expect.objectContaining({
-        duration: 10000,
-      }),
+        duration: 10000
+      })
     )
   })
 
@@ -200,15 +194,15 @@ describe('useUndoableAction', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'Default duration',
-        action: () => {},
+        action: () => {}
       })
     })
 
     expect(toastMainMock).toHaveBeenCalledWith(
       'Default duration',
       expect.objectContaining({
-        duration: 5000,
-      }),
+        duration: 5000
+      })
     )
   })
 
@@ -220,7 +214,7 @@ describe('useUndoableAction', () => {
       await result.current.executeWithUndo({
         message: 'With undo',
         action: () => {},
-        onUndo: onUndoMock,
+        onUndo: onUndoMock
       })
     })
 
@@ -228,9 +222,9 @@ describe('useUndoableAction', () => {
       'With undo',
       expect.objectContaining({
         action: expect.objectContaining({
-          label: 'Undo',
-        }),
-      }),
+          label: 'Undo'
+        })
+      })
     )
   })
 
@@ -240,14 +234,11 @@ describe('useUndoableAction', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'No undo',
-        action: () => {},
+        action: () => {}
       })
     })
 
-    const call = toastMainMock.mock.calls[0] as unknown as [
-      string,
-      Record<string, unknown>,
-    ]
+    const call = toastMainMock.mock.calls[0] as unknown as [string, Record<string, unknown>]
     expect(call[1].action).toBeUndefined()
   })
 
@@ -259,13 +250,13 @@ describe('useUndoableAction', () => {
       await result.current.executeWithUndo({
         message: 'With undo',
         action: () => {},
-        onUndo: onUndoMock,
+        onUndo: onUndoMock
       })
     })
 
     const call = toastMainMock.mock.calls[0] as unknown as [
       string,
-      { action: { onClick: () => Promise<void> } },
+      { action: { onClick: () => Promise<void> } }
     ]
     const undoAction = call[1].action
     await act(async () => {
@@ -287,13 +278,13 @@ describe('useUndoableAction', () => {
       await result.current.executeWithUndo({
         message: 'With undo',
         action: () => {},
-        onUndo: onUndoMock,
+        onUndo: onUndoMock
       })
     })
 
     const call = toastMainMock.mock.calls[0] as unknown as [
       string,
-      { action: { onClick: () => Promise<void> } },
+      { action: { onClick: () => Promise<void> } }
     ]
     const undoAction = call[1].action
     await act(async () => {
@@ -301,7 +292,7 @@ describe('useUndoableAction', () => {
     })
 
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to undo', {
-      description: 'Undo failed',
+      description: 'Undo failed'
     })
   })
 
@@ -314,7 +305,7 @@ describe('useUndoableAction', () => {
         message: 'Track execution',
         action: () => {
           isExecuted = true
-        },
+        }
       })
     })
 
@@ -331,7 +322,7 @@ describe('useUndoableAction', () => {
         action: async () => {
           await new Promise((resolve) => setTimeout(resolve, 10))
           return cleanupMock
-        },
+        }
       })
     })
 
@@ -345,15 +336,15 @@ describe('useUndoableAction', () => {
       await result.current.executeWithUndo({
         message: 'With icon',
         icon: 'test-icon',
-        action: () => {},
+        action: () => {}
       })
     })
 
     expect(toastMainMock).toHaveBeenCalledWith(
       'With icon',
       expect.objectContaining({
-        icon: 'test-icon',
-      }),
+        icon: 'test-icon'
+      })
     )
   })
 })
@@ -372,7 +363,7 @@ describe('useInlineConfirmation', () => {
   test('confirm function returns a promise', () => {
     const { result } = renderHook(() => useInlineConfirmation())
     const confirmPromise = result.current.confirm({
-      title: 'Test confirmation',
+      title: 'Test confirmation'
     })
     expect(confirmPromise).toBeInstanceOf(Promise)
   })
@@ -382,7 +373,7 @@ describe('useInlineConfirmation', () => {
 
     act(() => {
       result.current.confirm({
-        title: 'Test confirmation',
+        title: 'Test confirmation'
       })
     })
 
@@ -390,12 +381,12 @@ describe('useInlineConfirmation', () => {
       'Test confirmation',
       expect.objectContaining({
         action: expect.objectContaining({
-          label: 'Confirm',
+          label: 'Confirm'
         }),
         cancel: expect.objectContaining({
-          label: 'Cancel',
-        }),
-      }),
+          label: 'Cancel'
+        })
+      })
     )
   })
 
@@ -406,7 +397,7 @@ describe('useInlineConfirmation', () => {
       result.current.confirm({
         title: 'Delete item?',
         confirmText: 'Delete',
-        cancelText: 'Keep',
+        cancelText: 'Keep'
       })
     })
 
@@ -414,12 +405,12 @@ describe('useInlineConfirmation', () => {
       'Delete item?',
       expect.objectContaining({
         action: expect.objectContaining({
-          label: 'Delete',
+          label: 'Delete'
         }),
         cancel: expect.objectContaining({
-          label: 'Keep',
-        }),
-      }),
+          label: 'Keep'
+        })
+      })
     )
   })
 
@@ -429,15 +420,15 @@ describe('useInlineConfirmation', () => {
     act(() => {
       result.current.confirm({
         title: 'Confirm action',
-        description: 'This action cannot be undone',
+        description: 'This action cannot be undone'
       })
     })
 
     expect(toastMainMock).toHaveBeenCalledWith(
       'Confirm action',
       expect.objectContaining({
-        description: 'This action cannot be undone',
-      }),
+        description: 'This action cannot be undone'
+      })
     )
   })
 
@@ -445,12 +436,12 @@ describe('useInlineConfirmation', () => {
     const { result } = renderHook(() => useInlineConfirmation())
 
     const confirmPromise = result.current.confirm({
-      title: 'Confirm?',
+      title: 'Confirm?'
     })
 
     const call = toastMainMock.mock.calls[0] as unknown as [
       string,
-      { action: { onClick: () => void } },
+      { action: { onClick: () => void } }
     ]
     const confirmAction = call[1].action
     act(() => {
@@ -464,12 +455,12 @@ describe('useInlineConfirmation', () => {
     const { result } = renderHook(() => useInlineConfirmation())
 
     const confirmPromise = result.current.confirm({
-      title: 'Confirm?',
+      title: 'Confirm?'
     })
 
     const call = toastMainMock.mock.calls[0] as unknown as [
       string,
-      { cancel: { onClick: () => void } },
+      { cancel: { onClick: () => void } }
     ]
     const cancelAction = call[1].cancel
     act(() => {
@@ -483,13 +474,10 @@ describe('useInlineConfirmation', () => {
     const { result } = renderHook(() => useInlineConfirmation())
 
     const confirmPromise = result.current.confirm({
-      title: 'Confirm?',
+      title: 'Confirm?'
     })
 
-    const call = toastMainMock.mock.calls[0] as unknown as [
-      string,
-      { onDismiss: () => void },
-    ]
+    const call = toastMainMock.mock.calls[0] as unknown as [string, { onDismiss: () => void }]
     const onDismiss = call[1].onDismiss
     act(() => {
       onDismiss()
@@ -507,7 +495,7 @@ describe('useInlineConfirmation', () => {
         description: 'Irreversible',
         confirmText: 'Delete All',
         cancelText: 'Cancel',
-        variant: 'destructive',
+        variant: 'destructive'
       })
     })
 
@@ -515,8 +503,8 @@ describe('useInlineConfirmation', () => {
       'Delete all?',
       expect.objectContaining({
         description: 'Irreversible',
-        duration: 10000,
-      }),
+        duration: 10000
+      })
     )
   })
 
@@ -525,15 +513,15 @@ describe('useInlineConfirmation', () => {
 
     act(() => {
       result.current.confirm({
-        title: 'Confirm',
+        title: 'Confirm'
       })
     })
 
     expect(toastMainMock).toHaveBeenCalledWith(
       'Confirm',
       expect.objectContaining({
-        duration: 10000,
-      }),
+        duration: 10000
+      })
     )
   })
 
@@ -541,11 +529,11 @@ describe('useInlineConfirmation', () => {
     const { result } = renderHook(() => useInlineConfirmation())
 
     const promise1 = result.current.confirm({
-      title: 'First confirmation',
+      title: 'First confirmation'
     })
 
     const promise2 = result.current.confirm({
-      title: 'Second confirmation',
+      title: 'Second confirmation'
     })
 
     expect(promise1).toBeInstanceOf(Promise)
@@ -676,7 +664,7 @@ describe('createProgressToast', () => {
 
   test('creates a progress toast object', () => {
     const progress = createProgressToast({
-      message: 'Loading...',
+      message: 'Loading...'
     })
 
     expect(progress).toBeDefined()
@@ -689,26 +677,23 @@ describe('createProgressToast', () => {
 
   test('calls toast.loading with message', () => {
     createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
-    expect(toastLoadingMock).toHaveBeenCalledWith(
-      'Processing...',
-      expect.any(Object),
-    )
+    expect(toastLoadingMock).toHaveBeenCalledWith('Processing...', expect.any(Object))
   })
 
   test('includes optional description', () => {
     createProgressToast({
       message: 'Uploading files...',
-      description: '0 of 10 files',
+      description: '0 of 10 files'
     })
 
     expect(toastLoadingMock).toHaveBeenCalledWith(
       'Uploading files...',
       expect.objectContaining({
-        description: '0 of 10 files',
-      }),
+        description: '0 of 10 files'
+      })
     )
   })
 
@@ -716,21 +701,21 @@ describe('createProgressToast', () => {
     createProgressToast({
       message: 'Processing...',
       options: {
-        duration: 10000,
-      },
+        duration: 10000
+      }
     })
 
     expect(toastLoadingMock).toHaveBeenCalledWith(
       'Processing...',
       expect.objectContaining({
-        duration: 10000,
-      }),
+        duration: 10000
+      })
     )
   })
 
   test('update method calls toast.loading with id', () => {
     const progress = createProgressToast({
-      message: 'Initial message',
+      message: 'Initial message'
     })
 
     progress.update({ message: 'Updated message' })
@@ -738,14 +723,14 @@ describe('createProgressToast', () => {
     expect(toastLoadingMock).toHaveBeenCalledWith(
       'Updated message',
       expect.objectContaining({
-        id: 'loading-toast-id',
-      }),
+        id: 'loading-toast-id'
+      })
     )
   })
 
   test('update method works with description', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     progress.update({ description: '50 of 100' })
@@ -754,14 +739,14 @@ describe('createProgressToast', () => {
       undefined,
       expect.objectContaining({
         id: 'loading-toast-id',
-        description: '50 of 100',
-      }),
+        description: '50 of 100'
+      })
     )
   })
 
   test('update method works with both message and description', () => {
     const progress = createProgressToast({
-      message: 'Starting...',
+      message: 'Starting...'
     })
 
     progress.update({ message: 'In progress...', description: '1 of 10' })
@@ -770,66 +755,66 @@ describe('createProgressToast', () => {
       'In progress...',
       expect.objectContaining({
         id: 'loading-toast-id',
-        description: '1 of 10',
-      }),
+        description: '1 of 10'
+      })
     )
   })
 
   test('success method calls toast.success', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     progress.success('Completed!')
 
     expect(toastSuccessMock).toHaveBeenCalledWith('Completed!', {
       id: 'loading-toast-id',
-      description: undefined,
+      description: undefined
     })
   })
 
   test('success method with description', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     progress.success('All done', 'All 10 items processed')
 
     expect(toastSuccessMock).toHaveBeenCalledWith('All done', {
       id: 'loading-toast-id',
-      description: 'All 10 items processed',
+      description: 'All 10 items processed'
     })
   })
 
   test('error method shows error state', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     progress.error('Failed!')
 
     expect(toastErrorMock).toHaveBeenCalledWith('Failed!', {
       id: 'loading-toast-id',
-      description: undefined,
+      description: undefined
     })
   })
 
   test('error method with description', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     progress.error('Operation failed', 'Network timeout')
 
     expect(toastErrorMock).toHaveBeenCalledWith('Operation failed', {
       id: 'loading-toast-id',
-      description: 'Network timeout',
+      description: 'Network timeout'
     })
   })
 
   test('dismiss method calls toast.dismiss', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     progress.dismiss()
@@ -839,23 +824,21 @@ describe('createProgressToast', () => {
 
   test('toast id is accessible', () => {
     const progress = createProgressToast({
-      message: 'Processing...',
+      message: 'Processing...'
     })
 
     expect(progress.id).toBe('loading-toast-id')
   })
 
   test('multiple progress toasts have different ids', () => {
-    toastLoadingMock
-      .mockReturnValueOnce('toast-1')
-      .mockReturnValueOnce('toast-2')
+    toastLoadingMock.mockReturnValueOnce('toast-1').mockReturnValueOnce('toast-2')
 
     const progress1 = createProgressToast({
-      message: 'Process 1...',
+      message: 'Process 1...'
     })
 
     const progress2 = createProgressToast({
-      message: 'Process 2...',
+      message: 'Process 2...'
     })
 
     expect(progress1.id).toBe('toast-1')
@@ -879,7 +862,7 @@ describe('useProgressToast', () => {
     const { result } = renderHook(() => useProgressToast())
 
     const progress = result.current.startProgress({
-      message: 'Loading...',
+      message: 'Loading...'
     })
 
     expect(progress).toBeDefined()
@@ -892,15 +875,15 @@ describe('useProgressToast', () => {
 
     const progress = result.current.startProgress({
       message: 'Uploading...',
-      description: '0 of 10',
+      description: '0 of 10'
     })
 
     expect(progress.id).toBe('loading-toast-id')
     expect(toastLoadingMock).toHaveBeenCalledWith(
       'Uploading...',
       expect.objectContaining({
-        description: '0 of 10',
-      }),
+        description: '0 of 10'
+      })
     )
   })
 
@@ -910,32 +893,30 @@ describe('useProgressToast', () => {
     const progress = result.current.startProgress({
       message: 'Processing...',
       options: {
-        duration: 5000,
-      },
+        duration: 5000
+      }
     })
 
     expect(progress).toBeDefined()
     expect(toastLoadingMock).toHaveBeenCalledWith(
       'Processing...',
       expect.objectContaining({
-        duration: 5000,
-      }),
+        duration: 5000
+      })
     )
   })
 
   test('multiple startProgress calls are independent', () => {
     const { result } = renderHook(() => useProgressToast())
 
-    toastLoadingMock
-      .mockReturnValueOnce('toast-1')
-      .mockReturnValueOnce('toast-2')
+    toastLoadingMock.mockReturnValueOnce('toast-1').mockReturnValueOnce('toast-2')
 
     const progress1 = result.current.startProgress({
-      message: 'Task 1...',
+      message: 'Task 1...'
     })
 
     const progress2 = result.current.startProgress({
-      message: 'Task 2...',
+      message: 'Task 2...'
     })
 
     expect(progress1.id).toBe('toast-1')
@@ -967,25 +948,22 @@ describe('Integration scenarios', () => {
 
     const progress = result.current.startProgress({
       message: 'Deleting items...',
-      description: '0 of 5 items',
+      description: '0 of 5 items'
     })
 
     for (let i = 1; i <= 5; i++) {
       progress.update({
-        description: `${i} of 5 items deleted`,
+        description: `${i} of 5 items deleted`
       })
     }
 
     progress.success('All items deleted successfully')
 
     expect(toastLoadingMock).toHaveBeenCalled()
-    expect(toastSuccessMock).toHaveBeenCalledWith(
-      'All items deleted successfully',
-      {
-        id: 'loading-toast-id',
-        description: undefined,
-      },
-    )
+    expect(toastSuccessMock).toHaveBeenCalledWith('All items deleted successfully', {
+      id: 'loading-toast-id',
+      description: undefined
+    })
   })
 
   test('delayed action for soft delete', async () => {
@@ -1021,7 +999,7 @@ describe('Integration scenarios', () => {
     await act(async () => {
       await result.current.executeWithUndo({
         message: 'Item deleted',
-        action: () => cleanupMock,
+        action: () => cleanupMock
       })
     })
 
@@ -1036,7 +1014,7 @@ describe('Type safety', () => {
       description: 'Test description',
       action: async () => undefined,
       onUndo: async () => {},
-      duration: 5000,
+      duration: 5000
     }
 
     expect(config.message).toBe('Test')
@@ -1048,7 +1026,7 @@ describe('Type safety', () => {
       description: 'Are you sure?',
       confirmText: 'Yes',
       cancelText: 'No',
-      variant: 'destructive',
+      variant: 'destructive'
     }
 
     expect(config.title).toBe('Confirm')

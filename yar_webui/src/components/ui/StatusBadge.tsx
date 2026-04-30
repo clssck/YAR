@@ -6,7 +6,7 @@ import {
   Info,
   Loader2,
   type LucideIcon,
-  XCircle,
+  XCircle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -15,28 +15,24 @@ const statusBadgeVariants = cva(
   {
     variants: {
       status: {
-        success:
-          'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-        warning:
-          'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+        success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
+        warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
         error: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
         info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-        pending:
-          'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-        processing:
-          'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+        pending: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+        processing: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
       },
       size: {
         sm: 'text-[10px] px-2 py-0.5',
         default: 'text-xs px-2.5 py-0.5',
-        lg: 'text-sm px-3 py-1',
-      },
+        lg: 'text-sm px-3 py-1'
+      }
     },
     defaultVariants: {
       status: 'info',
-      size: 'default',
-    },
-  },
+      size: 'default'
+    }
+  }
 )
 
 const statusIcons: Record<string, LucideIcon> = {
@@ -45,12 +41,11 @@ const statusIcons: Record<string, LucideIcon> = {
   error: XCircle,
   info: Info,
   pending: Clock,
-  processing: Loader2,
+  processing: Loader2
 }
 
 export interface StatusBadgeProps
-  extends React.HTMLAttributes<HTMLOutputElement>,
-    VariantProps<typeof statusBadgeVariants> {
+  extends React.HTMLAttributes<HTMLOutputElement>, VariantProps<typeof statusBadgeVariants> {
   /** Text label displayed in the badge */
   label: string
   /** Whether to show the status icon */
@@ -85,10 +80,7 @@ export default function StatusBadge({
       {...props}
     >
       {showIcon && Icon && (
-        <Icon
-          className={cn('h-3 w-3 shrink-0', isAnimated && 'animate-spin')}
-          aria-hidden="true"
-        />
+        <Icon className={cn('h-3 w-3 shrink-0', isAnimated && 'animate-spin')} aria-hidden="true" />
       )}
       <span>{label}</span>
     </output>
@@ -103,5 +95,5 @@ export const DocumentStatusBadge = {
   Processing: () => <StatusBadge status="processing" label="Processing" />,
   Pending: () => <StatusBadge status="pending" label="Pending" />,
   Failed: () => <StatusBadge status="error" label="Failed" />,
-  Preprocessed: () => <StatusBadge status="info" label="Preprocessed" />,
+  Preprocessed: () => <StatusBadge status="info" label="Preprocessed" />
 }

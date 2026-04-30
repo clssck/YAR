@@ -1,11 +1,5 @@
 import { useCamera, useSigma } from '@react-sigma/core'
-import {
-  FullscreenIcon,
-  RotateCcwIcon,
-  RotateCwIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
-} from 'lucide-react'
+import { FullscreenIcon, RotateCcwIcon, RotateCwIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ControlButton } from '@/components/ui/Button'
@@ -38,9 +32,7 @@ const ZoomControl = () => {
         return
       }
 
-      sigma
-        .getCamera()
-        .animate({ x: 0.5, y: 0.5, ratio: 1.1 }, { duration: 1000 })
+      sigma.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1.1 }, { duration: 1000 })
     } catch (error) {
       console.error('Error resetting zoom:', error)
       // Use reset() as fallback on error
@@ -78,9 +70,7 @@ const ZoomControl = () => {
       </ControlButton>
       <ControlButton
         onClick={handleRotateCounterClockwise}
-        tooltip={t(
-          'graphPanel.sideBar.zoomControl.rotateCameraCounterClockwise',
-        )}
+        tooltip={t('graphPanel.sideBar.zoomControl.rotateCameraCounterClockwise')}
       >
         <RotateCcwIcon />
       </ControlButton>
@@ -90,16 +80,10 @@ const ZoomControl = () => {
       >
         <FullscreenIcon />
       </ControlButton>
-      <ControlButton
-        onClick={handleZoomIn}
-        tooltip={t('graphPanel.sideBar.zoomControl.zoomIn')}
-      >
+      <ControlButton onClick={handleZoomIn} tooltip={t('graphPanel.sideBar.zoomControl.zoomIn')}>
         <ZoomInIcon />
       </ControlButton>
-      <ControlButton
-        onClick={handleZoomOut}
-        tooltip={t('graphPanel.sideBar.zoomControl.zoomOut')}
-      >
+      <ControlButton onClick={handleZoomOut} tooltip={t('graphPanel.sideBar.zoomControl.zoomOut')}>
         <ZoomOutIcon />
       </ControlButton>
     </>

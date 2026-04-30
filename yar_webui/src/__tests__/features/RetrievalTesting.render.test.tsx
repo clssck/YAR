@@ -6,7 +6,7 @@ import {
   type FormEventHandler,
   type InputHTMLAttributes,
   type ReactNode,
-  type TextareaHTMLAttributes,
+  type TextareaHTMLAttributes
 } from 'react'
 import type { CitationsMetadata } from '@/api/yar'
 
@@ -16,7 +16,7 @@ const mockQueryTextStream = mock(
     _request: unknown,
     onChunk: (chunk: string) => void,
     onError?: (error: string) => void,
-    onCitations?: (metadata: CitationsMetadata) => void,
+    onCitations?: (metadata: CitationsMetadata) => void
   ) => {
     onChunk('Partial answer')
     onError?.('Stream failed')
@@ -24,17 +24,17 @@ const mockQueryTextStream = mock(
       markers: [],
       sources: [],
       footnotes: [],
-      uncited_count: 0,
+      uncited_count: 0
     })
-  },
+  }
 )
 const chatMessageRenderCounts = new Map<string, number>()
 
 mock.module('sonner', () => ({
   toast: {
     success: mock(() => {}),
-    error: mock(() => {}),
-  },
+    error: mock(() => {})
+  }
 }))
 
 // Bun mock note: spreading the realYar namespace into the factory causes
@@ -50,45 +50,35 @@ mock.module('@/api/yar', () => ({
   getDocumentUrl: () => null,
   getDocumentsPaginated: () => Promise.resolve({ documents: [], pagination: {} }),
   scanNewDocuments: () => Promise.resolve({ status: 'success' }),
-  reprocessFailedDocuments: () => Promise.resolve({ status: 'success' }),
+  reprocessFailedDocuments: () => Promise.resolve({ status: 'success' })
 }))
 
-
 mock.module('@/components/ui/Input', () => ({
-  default: ({
-    onChange,
-    ...props
-  }: InputHTMLAttributes<HTMLInputElement>) => (
+  default: ({ onChange, ...props }: InputHTMLAttributes<HTMLInputElement>) => (
     <input {...props} onInput={onChange as unknown as FormEventHandler<HTMLInputElement>} />
-  ),
+  )
 }))
 
 mock.module('@/components/ui/Textarea', () => ({
-  default: ({
-    onChange,
-    ...props
-  }: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
-    <textarea
-      {...props}
-      onInput={onChange as unknown as FormEventHandler<HTMLTextAreaElement>}
-    />
-  ),
+  default: ({ onChange, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
+    <textarea {...props} onInput={onChange as unknown as FormEventHandler<HTMLTextAreaElement>} />
+  )
 }))
 
 mock.module('@/components/ui/Popover', () => ({
   Popover: ({ children }: { children?: ReactNode }) => <>{children}</>,
   PopoverTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  PopoverContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  PopoverContent: ({ children }: { children?: ReactNode }) => <>{children}</>
 }))
 
 mock.module('@/components/retrieval/QuerySettings', () => ({
-  default: () => null,
+  default: () => null
 }))
 
 mock.module('@/components/retrieval/ChatMessage', () => ({
   ChatMessage: memo(
     ({
-      message,
+      message
     }: {
       message: {
         id: string
@@ -98,10 +88,7 @@ mock.module('@/components/retrieval/ChatMessage', () => ({
         isError?: boolean
       }
     }) => {
-      chatMessageRenderCounts.set(
-        message.id,
-        (chatMessageRenderCounts.get(message.id) ?? 0) + 1,
-      )
+      chatMessageRenderCounts.set(message.id, (chatMessageRenderCounts.get(message.id) ?? 0) + 1)
 
       return (
         <div
@@ -112,14 +99,11 @@ mock.module('@/components/retrieval/ChatMessage', () => ({
           {message.displayContent ?? message.content}
         </div>
       )
-    },
-  ),
+    }
+  )
 }))
 
-const setElementValue = (
-  element: HTMLInputElement | HTMLTextAreaElement,
-  value: string,
-) => {
+const setElementValue = (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
   const prototype =
     element instanceof HTMLTextAreaElement
       ? window.HTMLTextAreaElement.prototype
@@ -129,10 +113,7 @@ const setElementValue = (
   fireEvent.input(element, { target: { value } })
 }
 
-const submitQuery = async (
-  rendered: ReturnType<typeof render>,
-  query: string,
-): Promise<void> => {
+const submitQuery = async (rendered: ReturnType<typeof render>, query: string): Promise<void> => {
   const input = rendered.container.querySelector('#query-input') as
     | HTMLInputElement
     | HTMLTextAreaElement
@@ -173,19 +154,19 @@ describe('RetrievalTesting streaming errors', () => {
       async (
         _request: unknown,
         onChunk: (chunk: string) => void,
-        onError?: (error: string) => void,
+        onError?: (error: string) => void
       ) => {
         onChunk('Partial answer')
         onError?.('Stream failed')
-      },
+      }
     )
     useSettingsStore.setState({
       currentTab: 'retrieval',
       retrievalHistory: [],
       querySettings: {
         ...defaultQuerySettings,
-        stream: true,
-      },
+        stream: true
+      }
     })
   })
 
@@ -193,8 +174,8 @@ describe('RetrievalTesting streaming errors', () => {
     useSettingsStore.setState({
       retrievalHistory: [],
       querySettings: {
-        ...defaultQuerySettings,
-      },
+        ...defaultQuerySettings
+      }
     })
   })
 
@@ -205,22 +186,18 @@ describe('RetrievalTesting streaming errors', () => {
         onChunk('nk>Planning')
         onChunk(' across chunks</th')
         onChunk('ink>Final answer')
-      },
+      }
     )
 
     const rendered = render(<RetrievalTesting />)
     await submitQuery(rendered, 'What is AI?')
 
     await waitFor(() => {
-      const assistantMessage = rendered.container.querySelector(
-        '[data-testid="message-assistant"]',
-      )
+      const assistantMessage = rendered.container.querySelector('[data-testid="message-assistant"]')
       expect(assistantMessage?.textContent).toBe('Final answer')
     })
 
-    const userMessage = rendered.container.querySelector(
-      '[data-testid="message-user"]',
-    )
+    const userMessage = rendered.container.querySelector('[data-testid="message-user"]')
     expect(userMessage).toBeTruthy()
     const userMessageId = userMessage?.getAttribute('data-message-id')
     expect(userMessageId).toBeTruthy()
@@ -233,7 +210,7 @@ describe('RetrievalTesting streaming errors', () => {
         _request: unknown,
         onChunk: (chunk: string) => void,
         _onError?: (error: string) => void,
-        onCitations?: (metadata: CitationsMetadata) => void,
+        onCitations?: (metadata: CitationsMetadata) => void
       ) => {
         onChunk('Answer')
         onChunk(' with support')
@@ -244,25 +221,23 @@ describe('RetrievalTesting streaming errors', () => {
               insert_position: 6,
               reference_ids: ['ref-1'],
               confidence: 0.91,
-              text_preview: 'Answer',
-            },
+              text_preview: 'Answer'
+            }
           ],
           sources: [],
           footnotes: ['[1] Source.pdf'],
-          uncited_count: 0,
+          uncited_count: 0
         })
-      },
+      }
     )
 
     const rendered = render(<RetrievalTesting />)
     await submitQuery(rendered, 'Need sources')
 
     await waitFor(() => {
-      const assistantMessage = rendered.container.querySelector(
-        '[data-testid="message-assistant"]',
-      )
+      const assistantMessage = rendered.container.querySelector('[data-testid="message-assistant"]')
       expect(assistantMessage?.textContent).toBe(
-        'Answer[1] with support\n\n---\n\n**References:**\n[1] Source.pdf',
+        'Answer[1] with support\n\n---\n\n**References:**\n[1] Source.pdf'
       )
     })
   })
@@ -272,9 +247,7 @@ describe('RetrievalTesting streaming errors', () => {
     await submitQuery(rendered, 'What is AI?')
 
     await waitFor(() => {
-      const assistantMessage = rendered.container.querySelector(
-        '[data-testid="message-assistant"]',
-      )
+      const assistantMessage = rendered.container.querySelector('[data-testid="message-assistant"]')
       expect(assistantMessage).toBeTruthy()
       expect(assistantMessage?.textContent).toContain('Partial answer')
       expect(assistantMessage?.textContent).toContain('Stream failed')

@@ -7,14 +7,10 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
-  CommandList,
+  CommandList
 } from '@/components/ui/Command'
 import DefaultLoadingSkeleton from '@/components/ui/DefaultLoadingSkeleton'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/Popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 
@@ -97,7 +93,7 @@ export function AsyncSelect<T>({
   noResultsMessage,
   triggerTooltip,
   clearable = true,
-  debounceTime = 150,
+  debounceTime = 150
 }: AsyncSelectProps<T>) {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
@@ -107,13 +103,9 @@ export function AsyncSelect<T>({
   const [selectedValue, setSelectedValue] = useState(value)
   const [selectedOption, setSelectedOption] = useState<T | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const debouncedSearchTerm = useDebounce(
-    searchTerm,
-    preload ? 0 : debounceTime,
-  )
+  const debouncedSearchTerm = useDebounce(searchTerm, preload ? 0 : debounceTime)
   const [originalOptions, setOriginalOptions] = useState<T[]>([])
-  const [initialValueDisplay, setInitialValueDisplay] =
-    useState<React.ReactNode | null>(null)
+  const [initialValueDisplay, setInitialValueDisplay] = useState<React.ReactNode | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -186,35 +178,25 @@ export function AsyncSelect<T>({
       if (debouncedSearchTerm) {
         setOptions(
           originalOptions.filter((option) =>
-            filterFn ? filterFn(option, debouncedSearchTerm) : true,
-          ),
+            filterFn ? filterFn(option, debouncedSearchTerm) : true
+          )
         )
       } else {
         setOptions(originalOptions)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    fetcher,
-    debouncedSearchTerm,
-    mounted,
-    preload,
-    filterFn,
-    originalOptions,
-  ])
+  }, [fetcher, debouncedSearchTerm, mounted, preload, filterFn, originalOptions])
 
   const handleSelect = useCallback(
     (currentValue: string) => {
-      const newValue =
-        clearable && currentValue === selectedValue ? '' : currentValue
+      const newValue = clearable && currentValue === selectedValue ? '' : currentValue
       setSelectedValue(newValue)
-      setSelectedOption(
-        options.find((option) => getOptionValue(option) === newValue) || null,
-      )
+      setSelectedOption(options.find((option) => getOptionValue(option) === newValue) || null)
       onChange(newValue)
       setOpen(false)
     },
-    [selectedValue, onChange, clearable, options, getOptionValue],
+    [selectedValue, onChange, clearable, options, getOptionValue]
   )
 
   const handleOpenChange = useCallback(
@@ -224,7 +206,7 @@ export function AsyncSelect<T>({
       }
       setOpen(newOpen)
     },
-    [onBeforeOpen],
+    [onBeforeOpen]
   )
 
   return (
@@ -238,7 +220,7 @@ export function AsyncSelect<T>({
           className={cn(
             'justify-between',
             disabled && 'cursor-not-allowed opacity-50',
-            triggerClassName,
+            triggerClassName
           )}
           disabled={disabled}
           tooltip={triggerTooltip}
@@ -278,20 +260,12 @@ export function AsyncSelect<T>({
             )}
           </div>
           <CommandList>
-            {error && (
-              <div className="text-destructive p-4 text-center">{error}</div>
-            )}
-            {loading &&
-              options.length === 0 &&
-              (loadingSkeleton || <DefaultLoadingSkeleton />)}
+            {error && <div className="text-destructive p-4 text-center">{error}</div>}
+            {loading && options.length === 0 && (loadingSkeleton || <DefaultLoadingSkeleton />)}
             {!loading &&
               !error &&
               options.length === 0 &&
-              (notFound || (
-                <CommandEmpty>
-                  {noResultsMessage || 'No results found.'}
-                </CommandEmpty>
-              ))}
+              (notFound || <CommandEmpty>{noResultsMessage || 'No results found.'}</CommandEmpty>)}
             <CommandGroup>
               {options.map((option) => {
                 const optionValue = getOptionValue(option)
@@ -312,9 +286,7 @@ export function AsyncSelect<T>({
                     <Check
                       className={cn(
                         'ml-auto h-3 w-3',
-                        selectedValue === optionValue
-                          ? 'opacity-100'
-                          : 'opacity-0',
+                        selectedValue === optionValue ? 'opacity-100' : 'opacity-0'
                       )}
                     />
                   </CommandItem>

@@ -46,7 +46,7 @@ const EditablePropertyRow = ({
   targetId,
   onValueChange,
   isEditable = false,
-  tooltip,
+  tooltip
 }: EditablePropertyRowProps) => {
   const { t } = useTranslation()
   const [isEditing, setIsEditing] = useState(false)
@@ -75,10 +75,7 @@ const EditablePropertyRow = ({
     setErrorMessage(null)
   }
 
-  const handleSave = async (
-    value: string,
-    options?: { allowMerge?: boolean },
-  ) => {
+  const handleSave = async (value: string, options?: { allowMerge?: boolean }) => {
     if (isSubmitting || value === String(currentValue)) {
       setIsEditing(false)
       setErrorMessage(null)
@@ -97,9 +94,7 @@ const EditablePropertyRow = ({
           if (!allowMerge) {
             const exists = await checkEntityNameExists(value)
             if (exists) {
-              const errorMsg = t(
-                'graphPanel.propertiesView.errors.duplicateName',
-              )
+              const errorMsg = t('graphPanel.propertiesView.errors.duplicateName')
               setErrorMessage(errorMsg)
               toast.error(errorMsg)
               return
@@ -108,15 +103,9 @@ const EditablePropertyRow = ({
           updatedData = { entity_name: value }
         }
 
-        const response = await updateEntity(
-          entityId,
-          updatedData,
-          true,
-          allowMerge,
-        )
+        const response = await updateEntity(entityId, updatedData, true, allowMerge)
         const operationSummary = response.operation_summary
-        const operationStatus =
-          operationSummary?.operation_status || 'complete_success'
+        const operationStatus = operationSummary?.operation_status || 'complete_success'
         const finalValue = operationSummary?.final_entity ?? value
 
         // Handle different operation statuses
@@ -125,7 +114,7 @@ const EditablePropertyRow = ({
             // Node was successfully merged into an existing entity
             setMergeDialogInfo({
               targetEntity: finalValue,
-              sourceEntity: entityId,
+              sourceEntity: entityId
             })
             setMergeDialogOpen(true)
 
@@ -139,9 +128,7 @@ const EditablePropertyRow = ({
             // Node was updated/renamed normally
             try {
               const graphValue = name === 'entity_id' ? finalValue : value
-              await useGraphStore
-                .getState()
-                .updateNodeAndSelect(nodeId, entityId, name, graphValue)
+              await useGraphStore.getState().updateNodeAndSelect(nodeId, entityId, name, graphValue)
             } catch (error) {
               console.error('Error updating node in graph:', error)
               throw new Error('Failed to update node in graph')
@@ -177,12 +164,9 @@ const EditablePropertyRow = ({
           // Do NOT update graph data to keep frontend in sync with backend
           const mergeError = operationSummary?.merge_error || 'Unknown error'
 
-          const errorMsg = t(
-            'graphPanel.propertiesView.errors.updateSuccessButMergeFailed',
-            {
-              error: mergeError,
-            },
-          )
+          const errorMsg = t('graphPanel.propertiesView.errors.updateSuccessButMergeFailed', {
+            error: mergeError
+          })
           setErrorMessage(errorMsg)
           toast.error(errorMsg)
           // Do not update currentValue or call onValueChange
@@ -194,7 +178,7 @@ const EditablePropertyRow = ({
             // Merge operation was attempted but failed
             const mergeError = operationSummary?.merge_error || 'Unknown error'
             const errorMsg = t('graphPanel.propertiesView.errors.mergeFailed', {
-              error: mergeError,
+              error: mergeError
             })
             setErrorMessage(errorMsg)
             toast.error(errorMsg)
@@ -207,31 +191,15 @@ const EditablePropertyRow = ({
           // Do not update currentValue or call onValueChange
           return
         }
-      } else if (
-        entityType === 'edge' &&
-        sourceId &&
-        targetId &&
-        edgeId &&
-        dynamicId
-      ) {
+      } else if (entityType === 'edge' && sourceId && targetId && edgeId && dynamicId) {
         const updatedData = { [name]: value }
         await updateRelation(sourceId, targetId, updatedData)
         try {
           await useGraphStore
             .getState()
-            .updateEdgeAndSelect(
-              edgeId,
-              dynamicId,
-              sourceId,
-              targetId,
-              name,
-              value,
-            )
+            .updateEdgeAndSelect(edgeId, dynamicId, sourceId, targetId, name, value)
         } catch (error) {
-          console.error(
-            `Error updating edge ${sourceId}->${targetId} in graph:`,
-            error,
-          )
+          console.error(`Error updating edge ${sourceId}->${targetId} in graph:`, error)
           throw new Error('Failed to update edge in graph')
         }
         toast.success(t('graphPanel.propertiesView.success.relationUpdated'))
@@ -243,9 +211,7 @@ const EditablePropertyRow = ({
     } catch (error) {
       console.error('Error updating property:', error)
       const errorMsg =
-        error instanceof Error
-          ? error.message
-          : t('graphPanel.propertiesView.errors.updateFailed')
+        error instanceof Error ? error.message : t('graphPanel.propertiesView.errors.updateFailed')
       setErrorMessage(errorMsg)
       toast.error(errorMsg)
       return
@@ -294,9 +260,7 @@ const EditablePropertyRow = ({
         onClick={onClick}
         tooltip={
           tooltip ||
-          (typeof currentValue === 'string'
-            ? currentValue
-            : JSON.stringify(currentValue, null, 2))
+          (typeof currentValue === 'string' ? currentValue : JSON.stringify(currentValue, null, 2))
         }
       />
       <PropertyEditDialog
