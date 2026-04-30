@@ -29,6 +29,7 @@ from yar.operate import (
     _enrich_local_keywords,
     _find_most_related_edges_from_entities,
     _generate_multi_facet_hyde,
+    _get_edge_data,
     _get_node_data,
     _get_vector_context,
     _matches_entity_filter,
@@ -2083,6 +2084,102 @@ class TestEntityQueryEmbeddingReuse:
         knowledge_graph_inst.get_nodes_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
         knowledge_graph_inst.node_degrees_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
         assert all(node['entity_name'] != 'AlphaTwo' for node in node_datas)
+
+    @pytest.mark.asyncio
+    async def test_get_node_data_queries_terms_concurrently(self):
+        entities_vdb = MagicMock()
+        entities_vdb.cosine_better_than_threshold = 0.2
+
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'AlphaOne': {'entity_type': 'COMPANY', 'description': 'Alpha one'},
+                'BetaOne': {'entity_type': 'COMPANY', 'description': 'Beta one'},
+            }
+        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(return_value={'AlphaOne': 5, 'BetaOne': 3})
+
+        started_terms: list[str] = []
+        all_started = asyncio.Event()
+
+        async def query_entity_candidates(term, *_args, **_kwargs):
+            started_terms.append(term)
+            if len(started_terms) == 2:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=0.1)
+            return [{'entity_name': f'{term.title()}One', 'score': 0.9}]
+
+        with (
+            patch('yar.operate._query_entity_candidates', new=query_entity_candidates),
+            patch('yar.operate._find_most_related_edges_from_entities', new=AsyncMock(return_value=[])),
+        ):
+            node_datas, _relations = await _get_node_data(
+                'alpha, beta',
+                knowledge_graph_inst,
+                entities_vdb,
+                QueryParam(mode='local', top_k=2),
+            )
+
+        assert started_terms == ['alpha', 'beta']
+        assert [node['entity_name'] for node in node_datas] == ['AlphaOne', 'BetaOne']
+
+    @pytest.mark.asyncio
+    async def test_get_edge_data_queries_terms_concurrently(self):
+        relationships_vdb = MagicMock()
+        relationships_vdb.cosine_better_than_threshold = 0.2
+
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_edges_batch = AsyncMock(
+            return_value={
+                ('Alpha Source', 'Alpha Target'): {'description': 'Alpha relation', 'weight': 1.0},
+                ('Beta Source', 'Beta Target'): {'description': 'Beta relation', 'weight': 1.0},
+            }
+        )
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'Alpha Source': {'entity_type': 'EVENT', 'description': 'Alpha source'},
+                'Alpha Target': {'entity_type': 'PERSON', 'description': 'Alpha target'},
+                'Beta Source': {'entity_type': 'EVENT', 'description': 'Beta source'},
+                'Beta Target': {'entity_type': 'PERSON', 'description': 'Beta target'},
+            }
+        )
+
+        started_terms: list[str] = []
+        all_started = asyncio.Event()
+
+        async def query_relationship(term, *, top_k):
+            started_terms.append(term)
+            if len(started_terms) == 2:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=0.1)
+            return [
+                {
+                    'src_id': f'{term.title()} Source',
+                    'tgt_id': f'{term.title()} Target',
+                    'score': 0.9,
+                }
+            ][:top_k]
+
+        relationships_vdb.query = AsyncMock(side_effect=query_relationship)
+
+        edge_datas, entity_datas = await _get_edge_data(
+            'alpha, beta',
+            knowledge_graph_inst,
+            relationships_vdb,
+            QueryParam(mode='global', top_k=2),
+        )
+
+        assert started_terms == ['alpha', 'beta']
+        assert [(edge['src_id'], edge['tgt_id']) for edge in edge_datas] == [
+            ('Alpha Source', 'Alpha Target'),
+            ('Beta Source', 'Beta Target'),
+        ]
+        assert [entity['entity_name'] for entity in entity_datas] == [
+            'Alpha Source',
+            'Alpha Target',
+            'Beta Source',
+            'Beta Target',
+        ]
 
 
 @pytest.mark.offline

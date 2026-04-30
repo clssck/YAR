@@ -6407,18 +6407,23 @@ async def _get_node_data(
     seen_entities: set[str] = set()
     per_term_results: list[list[dict[str, Any]]] = []
 
-    # Query each term independently to preserve specific entity matches
-    # when keywords are comma-joined (e.g., "IBM, Google, Microsoft, IonQ").
-    for term in search_terms:
-        per_term_results.append(
-            await _query_entity_candidates(
-                term,
-                entities_vdb,
-                query_param,
-                query_embedding=query_embedding,
-                original_query_embedding=original_query_embedding,
-            )
+    # Query each term independently and concurrently to preserve specific entity
+    # matches when keywords are comma-joined (e.g., "IBM, Google, Microsoft, IonQ")
+    # without serializing independent vector lookups.
+    per_term_results = list(
+        await asyncio.gather(
+            *[
+                _query_entity_candidates(
+                    term,
+                    entities_vdb,
+                    query_param,
+                    query_embedding=query_embedding,
+                    original_query_embedding=original_query_embedding,
+                )
+                for term in search_terms
+            ]
         )
+    )
 
     term_offsets = [0] * len(per_term_results)
     while len(results) < query_param.top_k:
@@ -6755,13 +6760,14 @@ async def _get_edge_data(
     if not search_terms:
         return [], []
 
-    per_term_results: list[list[dict[str, Any]]] = []
-    for term in search_terms:
+    async def _query_relationship_candidates(term: str) -> list[dict[str, Any]]:
         try:
-            per_term_results.append(await relationships_vdb.query(term, top_k=query_param.top_k) or [])
+            return await relationships_vdb.query(term, top_k=query_param.top_k) or []
         except Exception as e:
             logger.error(f'Relationship vector search failed for term "{term[:50]}...": {e}')
-            per_term_results.append([])
+            return []
+
+    per_term_results = list(await asyncio.gather(*[_query_relationship_candidates(term) for term in search_terms]))
 
     results: list[dict[str, Any]] = []
     seen_pairs: set[tuple[str, str]] = set()
