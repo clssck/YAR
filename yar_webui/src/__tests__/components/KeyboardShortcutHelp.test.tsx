@@ -15,7 +15,7 @@ mock.module('react-i18next', () => ({
 }))
 
 import { fireEvent, render, waitFor } from '@testing-library/react'
-import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/OnboardingHints'
+import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/onboardingConstants'
 import KeyboardShortcutHelp from '@/components/KeyboardShortcutHelp'
 
 const openHelpDialog = (root: HTMLElement) => {

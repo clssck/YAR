@@ -361,7 +361,7 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
       }
     } catch (error) {
       console.error('Error updating node in graph:', error)
-      throw new Error('Failed to update node in graph')
+      throw new Error('Failed to update node in graph', { cause: error })
     }
   },
 
@@ -398,7 +398,7 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
       set({ selectedEdge: dynamicId })
     } catch (error) {
       console.error(`Error updating edge ${sourceId}->${targetId} in graph:`, error)
-      throw new Error('Failed to update edge in graph')
+      throw new Error('Failed to update edge in graph', { cause: error })
     }
   }
 }))

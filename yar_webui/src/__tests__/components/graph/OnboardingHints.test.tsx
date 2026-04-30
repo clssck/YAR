@@ -21,10 +21,8 @@ mock.module('react-i18next', () => ({
 }))
 
 import { fireEvent, render, waitFor } from '@testing-library/react'
-import OnboardingHints, {
-  ONBOARDING_KEY,
-  ONBOARDING_RESET_EVENT
-} from '@/components/graph/OnboardingHintsImpl'
+import OnboardingHints from '@/components/graph/OnboardingHintsImpl'
+import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/onboardingConstants'
 
 beforeEach(() => {
   localStorage.clear()

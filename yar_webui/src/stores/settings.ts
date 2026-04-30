@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type { Message, QueryRequest, YarConfiguration } from '@/api/yar'
 import { defaultQueryLabel } from '@/lib/constants'
-import { createSelectors } from '@/lib/utils'
+import { createSelectors, omit } from '@/lib/utils'
 
 const DEV_STORAGE_CONFIG = import.meta.env.DEV
   ? {
@@ -318,17 +318,14 @@ const useSettingsStoreBase = create<SettingsState>()(
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
       version: 26,
-      partialize: (state) => {
-        // Exclude large ephemeral data and runtime-only fields from localStorage
-        const {
-          retrievalHistory,
-          userPromptHistory,
-          searchLabelDropdownRefreshTrigger,
-          apiKey,
-          ...persisted
-        } = state
-        return persisted
-      },
+      partialize: (state) =>
+        // Exclude large ephemeral data and runtime-only fields from localStorage.
+        omit(state, [
+          'retrievalHistory',
+          'userPromptHistory',
+          'searchLabelDropdownRefreshTrigger',
+          'apiKey'
+        ]),
       migrate: (persistedState: unknown, version: number) => {
         // Cast to the expected state type for migration operations
         const state = persistedState as Partial<SettingsState> & Record<string, unknown>

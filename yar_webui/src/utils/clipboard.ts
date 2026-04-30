@@ -115,61 +115,52 @@ async function copyWithExecCommand(text: string): Promise<CopyResult> {
  * Copy using manual text selection method
  */
 async function copyWithManualSelection(text: string): Promise<CopyResult> {
-  return new Promise((resolve) => {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.style.position = 'absolute'
-    textarea.style.left = '-9999px'
-    textarea.style.top = '-9999px'
-    textarea.style.opacity = '0'
-    textarea.style.pointerEvents = 'none'
-    textarea.setAttribute('readonly', '')
-    textarea.setAttribute('tabindex', '-1')
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'absolute'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '-9999px'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  textarea.setAttribute('readonly', '')
+  textarea.setAttribute('tabindex', '-1')
 
-    document.body.appendChild(textarea)
+  document.body.appendChild(textarea)
 
-    try {
-      // Focus and select the text
-      textarea.focus()
-      textarea.select()
-      textarea.setSelectionRange(0, text.length)
+  try {
+    textarea.focus()
+    textarea.select()
+    textarea.setSelectionRange(0, text.length)
 
-      // Try to trigger copy event
-      const copyEvent = new ClipboardEvent('copy', {
-        clipboardData: new DataTransfer()
-      })
+    const copyEvent = new ClipboardEvent('copy', {
+      clipboardData: new DataTransfer()
+    })
 
-      if (copyEvent.clipboardData) {
-        copyEvent.clipboardData.setData('text/plain', text)
-        document.dispatchEvent(copyEvent)
-
-        resolve({
-          success: true,
-          method: 'manual-select'
-        })
-      } else {
-        // Fallback: keep text selected for manual copy
-        resolve({
-          success: false,
-          method: 'manual-select',
-          error: 'Manual selection prepared, but automatic copy failed'
-        })
-      }
-    } catch (error) {
-      resolve({
+    if (!copyEvent.clipboardData) {
+      return {
         success: false,
         method: 'manual-select',
-        error: error instanceof Error ? error.message : 'Manual selection failed'
-      })
-    } finally {
-      // Clean up after a short delay to allow copy operation
-      setTimeout(() => {
-        if (document.body.contains(textarea)) {
-          document.body.removeChild(textarea)
-        }
-      }, 100)
+        error: 'Manual selection prepared, but automatic copy failed'
+      }
     }
-  })
+
+    copyEvent.clipboardData.setData('text/plain', text)
+    document.dispatchEvent(copyEvent)
+    return { success: true, method: 'manual-select' }
+  } catch (error) {
+    return {
+      success: false,
+      method: 'manual-select',
+      error: error instanceof Error ? error.message : 'Manual selection failed'
+    }
+  } finally {
+    // Clean up after a short delay to allow copy operation
+    setTimeout(() => {
+      if (document.body.contains(textarea)) {
+        document.body.removeChild(textarea)
+      }
+    }, 100)
+  }
 }
 
 /**

@@ -6,4 +6,4 @@
  * without preventing the OnboardingHints test suite from importing
  * the real implementation directly.
  */
-export { default, ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from './OnboardingHintsImpl'
+export { default } from './OnboardingHintsImpl'

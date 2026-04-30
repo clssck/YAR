@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from 'class-variance-authority'
 import { Loader2 } from 'lucide-react'
+import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import Progress from './Progress'
 
@@ -121,13 +122,12 @@ export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivEl
  * Skeleton loader for text content
  */
 export function SkeletonText({ lines = 3, className }: { lines?: number; className?: string }) {
+  // Stable IDs so React doesn't reuse skeleton DOM across re-renders with different `lines`.
+  const ids = useMemo(() => Array.from({ length: lines }, () => crypto.randomUUID()), [lines])
   return (
     <div className={cn('space-y-2', className)} aria-hidden="true">
-      {Array.from({ length: lines }).map((_, i, arr) => (
-        <Skeleton
-          key={`line-${i}-${arr.length}`}
-          className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
-        />
+      {ids.map((id, i) => (
+        <Skeleton key={id} className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')} />
       ))}
     </div>
   )

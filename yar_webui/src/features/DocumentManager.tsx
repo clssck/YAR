@@ -37,7 +37,7 @@ import { EmptyDocuments } from '@/components/ui/EmptyState'
 import Input from '@/components/ui/Input'
 import LastUpdated from '@/components/ui/LastUpdated'
 import PaginationControls from '@/components/ui/PaginationControls'
-import { DocumentStatusBadge } from '@/components/ui/StatusBadge'
+import DocumentStatusBadge from '@/components/ui/DocumentStatusBadge'
 import {
   Table,
   TableBody,
@@ -59,6 +59,12 @@ type StatusFilter = DocStatus | 'all'
 
 // Timeline stages for document processing
 const TIMELINE_STAGES = ['pending', 'preprocessed', 'processing', 'processed'] as const
+
+// Stable empty fallbacks for the query-derived state. Hoisted so the
+// `?? EMPTY_X` expressions return the same reference every render and don't
+// invalidate downstream useMemo/useEffect deps.
+const EMPTY_DOCS: DocStatusResponse[] = []
+const EMPTY_STATUS_COUNTS: Record<string, number> = { all: 0 }
 
 interface StatusTimelineProps {
   currentStatus: DocStatus
@@ -259,7 +265,7 @@ export default function DocumentManager() {
   const { scan: scanMutation, retry: retryMutation } = usePipelineMutations({ setBoostUntil })
 
   // Derive everything previously held in local state from the query.
-  const currentPageDocs = documentsQuery.data?.documents ?? []
+  const currentPageDocs = documentsQuery.data?.documents ?? EMPTY_DOCS
   const pagination: PaginationInfo = documentsQuery.data?.pagination ?? {
     page,
     page_size: documentsPageSize,
@@ -268,7 +274,8 @@ export default function DocumentManager() {
     has_next: false,
     has_prev: false
   }
-  const statusCounts: Record<string, number> = documentsQuery.data?.status_counts ?? { all: 0 }
+  const statusCounts: Record<string, number> =
+    documentsQuery.data?.status_counts ?? EMPTY_STATUS_COUNTS
   const lastFetchTime = documentsQuery.dataUpdatedAt > 0 ? documentsQuery.dataUpdatedAt : null
   const isRefreshing = documentsQuery.isFetching
   const isRetrying = retryMutation.isPending

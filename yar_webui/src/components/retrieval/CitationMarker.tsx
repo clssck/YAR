@@ -169,67 +169,6 @@ export function CitationMarker({ marker, referenceIds, confidence, sources }: Ci
 }
 
 /**
- * Parses text containing citation markers and returns React elements
- * with interactive CitationMarker components.
- *
- * @param text - Text that may contain [n] or [n,m] patterns
- * @param sources - Array of citation sources for hover card metadata
- * @param markers - Array of citation markers with position and confidence data
- * @returns Array of React elements (strings and CitationMarker components)
- */
-export function renderTextWithCitations(
-  text: string,
-  sources: CitationSource[],
-  markers: Array<{
-    marker: string
-    reference_ids: string[]
-    confidence: number
-  }>
-): React.ReactNode[] {
-  // Match citation patterns like [1], [2], [1,2], etc.
-  const citationPattern = /\[(\d+(?:,\d+)*)\]/g
-  const parts: React.ReactNode[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null = citationPattern.exec(text)
-
-  while (match !== null) {
-    // Add text before the citation
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index))
-    }
-
-    // Parse reference IDs from the marker
-    const markerText = match[0]
-    const refIds = match[1].split(',').map((id) => id.trim())
-
-    // Find matching marker data for confidence
-    const markerData = markers.find((m) => m.marker === markerText)
-    const confidence = markerData?.confidence ?? 0.5
-
-    // Add the citation marker component
-    parts.push(
-      <CitationMarker
-        key={`citation-${match.index}`}
-        marker={markerText}
-        referenceIds={refIds}
-        confidence={confidence}
-        sources={sources}
-      />
-    )
-
-    lastIndex = match.index + match[0].length
-    match = citationPattern.exec(text)
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
-  }
-
-  return parts
-}
-
-/**
  * Citation summary component shown at the end of messages with citations
  */
 interface CitationSummaryProps {

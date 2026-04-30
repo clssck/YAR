@@ -1,5 +1,5 @@
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import Button from '@/components/ui/Button'
 import {
   Command,
@@ -106,6 +106,7 @@ export function AsyncSelect<T>({
   const debouncedSearchTerm = useDebounce(searchTerm, preload ? 0 : debounceTime)
   const [originalOptions, setOriginalOptions] = useState<T[]>([])
   const [initialValueDisplay, setInitialValueDisplay] = useState<React.ReactNode | null>(null)
+  const listboxId = useId()
 
   useEffect(() => {
     setMounted(true)
@@ -216,6 +217,7 @@ export function AsyncSelect<T>({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-controls={listboxId}
           aria-label={ariaLabel}
           className={cn(
             'justify-between',
@@ -243,7 +245,7 @@ export function AsyncSelect<T>({
         sideOffset={8}
         collisionPadding={5}
       >
-        <Command shouldFilter={false}>
+        <Command shouldFilter={false} id={listboxId}>
           <div className="relative w-full border-b">
             <CommandInput
               placeholder={searchPlaceholder || 'Search...'}

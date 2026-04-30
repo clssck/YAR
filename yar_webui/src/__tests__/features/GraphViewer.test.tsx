@@ -91,9 +91,7 @@ mock.module('@/components/graph/LegendButton', () => ({
 }))
 
 mock.module('@/components/graph/OnboardingHints', () => ({
-  default: () => <div data-testid="onboarding-hints">Hints</div>,
-  ONBOARDING_KEY: 'yar-graph-onboarding-complete',
-  ONBOARDING_RESET_EVENT: 'yar-onboarding-reset'
+  default: () => <div data-testid="onboarding-hints">Hints</div>
 }))
 
 mock.module('@/components/graph/OrphanConnectionControl', () => ({

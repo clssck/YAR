@@ -1,5 +1,5 @@
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getPopularLabels, searchLabels } from '@/api/yar'
 import Button from '@/components/ui/Button'
@@ -38,6 +38,7 @@ const RECENT_LABELS_LIMIT = 5
 const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps) => {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const listboxId = useId()
   const [searchTerm, setSearchTerm] = useState('')
   const [popularLabels, setPopularLabels] = useState<string[]>([])
   const [searchResults, setSearchResults] = useState<string[]>([])
@@ -180,6 +181,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
           variant={controlButtonVariant}
           role="combobox"
           aria-expanded={open}
+          aria-controls={listboxId}
           className="h-8 max-w-[200px] min-w-[80px] justify-between px-2"
           disabled={disabled}
           tooltip={t('graphPanel.graphLabels.selectLabelTooltip')}
@@ -195,7 +197,7 @@ const LabelSelector = ({ value, onChange, disabled = false }: LabelSelectorProps
         collisionPadding={5}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <Command shouldFilter={false}>
+        <Command shouldFilter={false} id={listboxId}>
           <div className="relative">
             <CommandInput
               placeholder={t('graphPanel.graphLabels.searchPlaceholder')}

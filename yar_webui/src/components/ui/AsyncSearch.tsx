@@ -202,7 +202,7 @@ export function AsyncSearch<T>({
             (notFound || <CommandEmpty>{noResultsMessage || 'No results found.'}</CommandEmpty>)}
           <CommandGroup>
             {options.map((option, idx) => (
-              <React.Fragment key={`${getOptionValue(option)}-fragment-${idx}`}>
+              <React.Fragment key={`${getOptionValue(option)}-fragment`}>
                 <CommandItem
                   value={getOptionValue(option)}
                   onSelect={handleSelect}

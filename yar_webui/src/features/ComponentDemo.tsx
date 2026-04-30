@@ -14,7 +14,8 @@ import EmptyState, {
 } from '@/components/ui/EmptyState'
 import LastUpdated from '@/components/ui/LastUpdated'
 import LoadingState, { PulsingDot, Skeleton, SkeletonText } from '@/components/ui/LoadingState'
-import StatusBadge, { DocumentStatusBadge } from '@/components/ui/StatusBadge'
+import StatusBadge from '@/components/ui/StatusBadge'
+import DocumentStatusBadge from '@/components/ui/DocumentStatusBadge'
 import { useResponsive } from '@/hooks/useBreakpoint'
 import { formatShortcut, useKeyboardShortcuts } from '@/hooks/useKeyboardShortcut'
 

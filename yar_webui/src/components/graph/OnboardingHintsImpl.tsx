@@ -3,9 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-
-export const ONBOARDING_KEY = 'yar-graph-onboarding-complete'
-export const ONBOARDING_RESET_EVENT = 'yar-onboarding-reset'
+import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from './onboardingConstants'
 
 interface OnboardingStep {
   id: string

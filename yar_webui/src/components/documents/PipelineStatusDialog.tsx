@@ -22,7 +22,7 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/Dialog'
-import { cn, errorMessage } from '@/lib/utils'
+import { cn, errorMessage, withStableKeys } from '@/lib/utils'
 
 type DialogPosition = 'left' | 'center' | 'right'
 
@@ -263,12 +263,9 @@ export default function PipelineStatusDialog({ open, onOpenChange }: PipelineSta
               className="max-h-[40vh] min-h-[7.5em] overflow-x-hidden overflow-y-auto rounded-md bg-zinc-800 p-3 font-mono text-xs text-zinc-100"
             >
               {status?.history_messages?.length
-                ? status.history_messages.map((msg, idx) => (
-                    <div
-                      key={`msg-${idx}-${msg.slice(0, 32)}`}
-                      className="break-all whitespace-pre-wrap"
-                    >
-                      {msg}
+                ? withStableKeys(status.history_messages).map(({ key, value }) => (
+                    <div key={key} className="break-all whitespace-pre-wrap">
+                      {value}
                     </div>
                   ))
                 : '-'}

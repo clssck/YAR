@@ -26,7 +26,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 // Generic row type for database table data
 type TableRowData = Record<string, string | number | boolean | null | object>
 
-const HIDDEN_COLUMNS = ['meta']
+const HIDDEN_COLUMNS = new Set(['meta'])
 
 // Cell value type
 type CellValue = string | number | boolean | null | object
@@ -219,7 +219,7 @@ export default function TableExplorer() {
       Array.from(allKeys)
         .sort()
         .forEach((key) => {
-          if (HIDDEN_COLUMNS.includes(key)) return // Skip hidden columns
+          if (HIDDEN_COLUMNS.has(key)) return // Skip hidden columns
           cols.push({
             accessorKey: key,
             header: () => (

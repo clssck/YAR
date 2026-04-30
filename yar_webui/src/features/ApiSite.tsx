@@ -25,6 +25,7 @@ export default function ApiSite() {
           title="YAR API Documentation"
           className="size-full h-full w-full"
           style={{ width: '100%', height: '100%', border: 'none' }}
+          sandbox="allow-scripts allow-forms allow-popups"
           // Use key to ensure iframe doesn't reload
           key="api-docs-iframe"
         />

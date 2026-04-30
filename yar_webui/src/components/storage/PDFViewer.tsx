@@ -423,7 +423,6 @@ export default function PDFViewer({ url }: PDFViewerProps) {
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search in document..."
             className="h-8 flex-1"
-            autoFocus
           />
           {matches.length > 0 ? (
             <>

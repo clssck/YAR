@@ -1,7 +1,7 @@
 import { ChevronDown, X } from 'lucide-react'
 import type React from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { cn } from '@/lib/utils'
+import { cn, withStableKeys } from '@/lib/utils'
 import Input from './Input'
 
 interface UserPromptInputWithHistoryProps {
@@ -177,9 +177,9 @@ export default function UserPromptInputWithHistory({
       {/* Dropdown */}
       {isOpen && history.length > 0 && (
         <div className="absolute top-full right-0 left-0 z-50 mt-0.5 max-h-96 min-w-0 overflow-auto rounded-md border border-gray-300 bg-gray-100 shadow-lg dark:border-gray-600 dark:bg-gray-800">
-          {history.map((prompt, index) => (
+          {withStableKeys(history).map(({ key, value: prompt }, index) => (
             <div
-              key={`prompt-${prompt.slice(0, 32)}-${index}`}
+              key={key}
               className={cn(
                 'flex items-center justify-between pl-3 pr-1 py-2 text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors',
                 'border-b border-gray-100 dark:border-gray-600 last:border-b-0',

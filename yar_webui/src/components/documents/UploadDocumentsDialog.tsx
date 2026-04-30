@@ -46,7 +46,16 @@ export default function UploadDocumentsDialog({
   // Support both controlled and uncontrolled modes
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : internalOpen
-  const setOpen = isControlled ? (onOpenChange ?? (() => {})) : setInternalOpen
+  const setOpen = useCallback(
+    (value: boolean) => {
+      if (isControlled) {
+        onOpenChange?.(value)
+      } else {
+        setInternalOpen(value)
+      }
+    },
+    [isControlled, onOpenChange]
+  )
   const [isUploading, setIsUploading] = useState(false)
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
   const [progresses, setProgresses] = useState<Record<string, number>>({})
@@ -156,12 +165,6 @@ export default function UploadDocumentsDialog({
             const result = await uploadDocument(
               file,
               (percentCompleted: number) => {
-                console.debug(
-                  t('documentPanel.uploadDocuments.single.uploading', {
-                    name: file.name,
-                    percent: percentCompleted
-                  })
-                )
                 setProgresses((pre) => ({
                   ...pre,
                   [file.name]: percentCompleted

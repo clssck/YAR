@@ -86,14 +86,3 @@ export default function StatusBadge({
     </output>
   )
 }
-
-/**
- * Pre-configured status badges for common document states
- */
-export const DocumentStatusBadge = {
-  Processed: () => <StatusBadge status="success" label="Processed" />,
-  Processing: () => <StatusBadge status="processing" label="Processing" />,
-  Pending: () => <StatusBadge status="pending" label="Pending" />,
-  Failed: () => <StatusBadge status="error" label="Failed" />,
-  Preprocessed: () => <StatusBadge status="info" label="Preprocessed" />
-}

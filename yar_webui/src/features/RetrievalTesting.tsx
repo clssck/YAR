@@ -3,8 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { CitationsMetadata, QueryMode, StreamReference } from '@/api/yar'
-import { queryText, queryTextStream } from '@/api/yar'
-import { ChatMessage, type MessageWithError } from '@/components/retrieval/ChatMessage'
+import { type Message, queryText, queryTextStream } from '@/api/yar'
+import { ChatMessage } from '@/components/retrieval/ChatMessage'
+import type { MessageWithError } from '@/components/retrieval/chatMessageTypes'
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -12,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover
 import Textarea from '@/components/ui/Textarea'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut'
-import { cn, errorMessage, throttle } from '@/lib/utils'
+import { cn, errorMessage, omit, throttle } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { copyToClipboard } from '@/utils/clipboard'
 import {
@@ -64,6 +65,24 @@ const QUERY_MODES: { value: QueryMode; labelKey: string; descKey: string }[] = [
 ]
 
 const STREAM_CHUNK_FLUSH_DELAY_MS = 16
+
+const normalizeHistoryMessage = (msg: Message, index: number): MessageWithError => {
+  const msgWithError = msg as MessageWithError
+  return {
+    ...msg,
+    id: msgWithError.id || `hist-${Date.now()}-${index}`,
+    mermaidRendered: msgWithError.mermaidRendered ?? true,
+    latexRendered: msgWithError.latexRendered ?? true
+  }
+}
+
+const placeholderHistoryMessage = (index: number): MessageWithError => ({
+  role: 'system',
+  content: 'Error loading message',
+  id: `error-${Date.now()}-${index}`,
+  isError: true,
+  mermaidRendered: true
+})
 export default function RetrievalTesting() {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
@@ -77,31 +96,17 @@ export default function RetrievalTesting() {
   const [messages, setMessages] = useState<MessageWithError[]>(() => {
     try {
       const history = useSettingsStore.getState().retrievalHistory || []
-      // Ensure each message from history has a unique ID and mermaidRendered status
       return history.map((msg, index) => {
         try {
-          const msgWithError = msg as MessageWithError // Cast to access potential properties
-          return {
-            ...msg,
-            id: msgWithError.id || `hist-${Date.now()}-${index}`, // Add ID if missing
-            mermaidRendered: msgWithError.mermaidRendered ?? true, // Assume historical mermaid is rendered
-            latexRendered: msgWithError.latexRendered ?? true // Assume historical LaTeX is rendered
-          }
+          return normalizeHistoryMessage(msg, index)
         } catch (error) {
           console.error('Error processing message:', error)
-          // Return a default message if there's an error
-          return {
-            role: 'system',
-            content: 'Error loading message',
-            id: `error-${Date.now()}-${index}`,
-            isError: true,
-            mermaidRendered: true
-          }
+          return placeholderHistoryMessage(index)
         }
       })
     } catch (error) {
       console.error('Error loading history:', error)
-      return [] // Return an empty array if there's an error
+      return []
     }
   })
   const [inputValue, setInputValue] = useState('')
@@ -349,7 +354,7 @@ export default function RetrievalTesting() {
         state.addUserPromptToHistory(state.querySettings.user_prompt.trim())
       }
 
-      const { show_references_section, ...sendableSettings } = state.querySettings
+      const sendableSettings = omit(state.querySettings, ['show_references_section'])
       const queryParams = {
         ...sendableSettings,
         query: trimmedQuery,

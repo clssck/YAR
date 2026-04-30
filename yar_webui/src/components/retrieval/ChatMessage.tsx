@@ -6,4 +6,4 @@
  * with a render-counting stub without preventing the dedicated ChatMessage
  * test suite from importing the real implementation directly.
  */
-export * from './ChatMessageImpl'
+export { ChatMessage } from './ChatMessageImpl'

@@ -55,11 +55,14 @@ export default function ThemeProvider({ children, ...props }: ThemeProviderProps
     }
   }, [theme])
 
-  const value = {
-    theme,
-    resolvedTheme,
-    setTheme
-  }
+  const value = useMemo(
+    () => ({
+      theme,
+      resolvedTheme,
+      setTheme
+    }),
+    [theme, resolvedTheme, setTheme]
+  )
 
   return (
     <ThemeProviderContext.Provider {...props} value={value}>

@@ -20,6 +20,33 @@ export function errorMessage(error: unknown) {
 }
 
 /**
+ * Returns a shallow copy of `obj` with the listed keys removed. Use instead of
+ * destructure-and-rest patterns when the only purpose of the destructure is to
+ * exclude keys from the rest spread.
+ */
+export function omit<T extends object, K extends keyof T>(obj: T, keys: readonly K[]): Omit<T, K> {
+  const next = { ...obj }
+  for (const key of keys) {
+    delete next[key]
+  }
+  return next
+}
+
+/**
+ * Pairs each item in an append-only string list with a stable React key derived
+ * from content + per-content occurrence index. Lets duplicate strings coexist
+ * without falling back to the array index as a key.
+ */
+export function withStableKeys(items: string[]): Array<{ key: string; value: string }> {
+  const seen = new Map<string, number>()
+  return items.map((value) => {
+    const occurrence = (seen.get(value) ?? 0) + 1
+    seen.set(value, occurrence)
+    return { key: `${value}\u0000${occurrence}`, value }
+  })
+}
+
+/**
  * Creates a throttled function that limits how often the original function can be called
  * @param fn The function to throttle
  * @param delay The delay in milliseconds

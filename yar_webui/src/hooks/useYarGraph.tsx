@@ -39,54 +39,34 @@ const getNodeColorByType = (nodeType: string | undefined): string => {
   return color || DEFAULT_NODE_COLOR
 }
 
-const validateGraph = (graph: RawGraph) => {
-  const debug = import.meta.env.DEV && localStorage.getItem('DEBUG_GRAPH')
-
-  // Check if graph exists
-  if (!graph) {
-    if (debug) console.log('Graph validation failed: graph is null')
-    return false
-  }
-
-  // Check if nodes and edges are arrays
+const validateGraph = (graph: RawGraph): string | null => {
+  if (!graph) return 'graph is null'
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    if (debug) console.log('Graph validation failed: nodes or edges is not an array')
-    return false
+    return 'nodes or edges is not an array'
   }
+  if (graph.nodes.length === 0) return 'nodes array is empty'
 
-  // Check if nodes array is empty
-  if (graph.nodes.length === 0) {
-    if (debug) console.log('Graph validation failed: nodes array is empty')
-    return false
-  }
-
-  // Validate each node
   for (const node of graph.nodes) {
     if (!node.id || !node.labels || !node.properties) {
-      if (debug) console.log('Graph validation failed: invalid node structure')
-      return false
+      return 'invalid node structure'
     }
   }
 
-  // Validate each edge
   for (const edge of graph.edges) {
     if (!edge.id || !edge.source || !edge.target) {
-      if (debug) console.log('Graph validation failed: invalid edge structure')
-      return false
+      return 'invalid edge structure'
     }
   }
 
-  // Validate edge connections
   for (const edge of graph.edges) {
     const source = graph.getNode(edge.source)
     const target = graph.getNode(edge.target)
     if (source === undefined || target === undefined) {
-      if (debug) console.log('Graph validation failed: edge references non-existent node')
-      return false
+      return 'edge references non-existent node'
     }
   }
 
-  return true
+  return null
 }
 
 export type NodeType = {
@@ -124,7 +104,6 @@ const fetchGraph = async (
   let rawData: YarGraphType | null = null
 
   // Trigger GraphLabels component to check if the label is valid
-  // console.log('Setting labelsFetchAttempted to true');
   useGraphStore.getState().setLabelsFetchAttempted(true)
 
   // If label is empty, use default label '*'
@@ -132,11 +111,6 @@ const fetchGraph = async (
 
   try {
     // Debug logging - only in development
-    if (import.meta.env.DEV && localStorage.getItem('DEBUG_GRAPH')) {
-      console.log(
-        `Fetching graph label: ${queryLabel}, depth: ${maxDepth}, nodes: ${maxNodes}, minDegree: ${minDegree}, includeOrphans: ${includeOrphans}`
-      )
-    }
     rawData = await queryGraphs(queryLabel, maxDepth, maxNodes, minDegree, includeOrphans, signal)
   } catch (e) {
     if (isGraphRequestCanceled(e, signal)) {
@@ -221,15 +195,15 @@ const fetchGraph = async (
     rawGraph.nodeIdMap = nodeIdMap
     rawGraph.edgeIdMap = edgeIdMap
 
-    if (!validateGraph(rawGraph)) {
+    const invalidReason = validateGraph(rawGraph)
+    if (invalidReason !== null) {
       rawGraph = null
       if (import.meta.env.DEV && localStorage.getItem('DEBUG_GRAPH')) {
-        console.warn('Invalid graph data')
+        console.warn(`Invalid graph data: ${invalidReason}`)
       }
     }
   }
 
-  // console.debug({ data: JSON.parse(JSON.stringify(rawData)) })
   return { rawGraph, is_truncated: rawData.is_truncated }
 }
 
@@ -533,6 +507,8 @@ const useLightrangeGraph = () => {
           if ((!data || !data.nodes || data.nodes.length === 0) && !currentQueryLabel) {
             emptyDataHandledRef.current = true
           }
+
+          return undefined
         })
         .catch((error) => {
           if (cancelled || isGraphRequestCanceled(error, fetchController.signal)) {
@@ -549,6 +525,7 @@ const useLightrangeGraph = () => {
           state.setIsFetching(false)
           dataLoadedRef.current = false
           fetchInProgressRef.current = false
+          return undefined
         })
     }
 

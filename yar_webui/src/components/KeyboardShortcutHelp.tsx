@@ -1,7 +1,7 @@
 import { KeyboardIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/OnboardingHints'
+import { ONBOARDING_KEY, ONBOARDING_RESET_EVENT } from '@/components/graph/onboardingConstants'
 import Button from '@/components/ui/Button'
 import {
   Dialog,

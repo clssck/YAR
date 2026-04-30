@@ -131,7 +131,7 @@ const EditablePropertyRow = ({
               await useGraphStore.getState().updateNodeAndSelect(nodeId, entityId, name, graphValue)
             } catch (error) {
               console.error('Error updating node in graph:', error)
-              throw new Error('Failed to update node in graph')
+              throw new Error('Failed to update node in graph', { cause: error })
             }
 
             // Update search history: remove old name, add new name
@@ -200,7 +200,7 @@ const EditablePropertyRow = ({
             .updateEdgeAndSelect(edgeId, dynamicId, sourceId, targetId, name, value)
         } catch (error) {
           console.error(`Error updating edge ${sourceId}->${targetId} in graph:`, error)
-          throw new Error('Failed to update edge in graph')
+          throw new Error('Failed to update edge in graph', { cause: error })
         }
         toast.success(t('graphPanel.propertiesView.success.relationUpdated'))
         setCurrentValue(value)
@@ -214,7 +214,6 @@ const EditablePropertyRow = ({
         error instanceof Error ? error.message : t('graphPanel.propertiesView.errors.updateFailed')
       setErrorMessage(errorMsg)
       toast.error(errorMsg)
-      return
     } finally {
       setIsSubmitting(false)
     }

@@ -35,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/Select'
-import { cn, errorMessage } from '@/lib/utils'
+import { cn, errorMessage, withStableKeys } from '@/lib/utils'
 
 type DialogPosition = 'left' | 'center' | 'right'
 
@@ -315,18 +315,18 @@ export default function OrphanConnectionDialog({
                     ref={messagesContainerRef}
                     className="h-40 overflow-y-auto rounded-md border bg-zinc-50 p-2 font-mono text-xs dark:bg-zinc-900"
                   >
-                    {status.history_messages.map((msg, idx) => (
+                    {withStableKeys(status.history_messages).map(({ key, value }) => (
                       <div
-                        key={`msg-${idx}-${msg.slice(0, 32)}`}
+                        key={key}
                         className={cn(
                           'py-0.5',
-                          msg.includes('Error') && 'text-red-600 dark:text-red-400',
-                          msg.includes('Connected:') && 'text-green-600 dark:text-green-400',
-                          msg.includes('Completed') &&
+                          value.includes('Error') && 'text-red-600 dark:text-red-400',
+                          value.includes('Connected:') && 'text-green-600 dark:text-green-400',
+                          value.includes('Completed') &&
                             'text-blue-600 dark:text-blue-400 font-semibold'
                         )}
                       >
-                        {msg}
+                        {value}
                       </div>
                     ))}
                     <div ref={messagesEndRef} />

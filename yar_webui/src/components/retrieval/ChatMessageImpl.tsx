@@ -14,8 +14,9 @@ import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/pris
 import rehypeReact from 'rehype-react'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import type { CitationsMetadata, Message } from '@/api/yar'
+import type { CitationsMetadata } from '@/api/yar'
 import { getDocumentUrl } from '@/api/yar'
+import type { MessageWithError } from './chatMessageTypes'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import { remarkFootnotes } from '@/utils/remarkFootnotes'
@@ -103,24 +104,6 @@ interface CodeComponentProps {
   className?: string
   children?: ReactNode
   node?: unknown
-}
-
-export type MessageWithError = Message & {
-  id: string // Unique identifier for stable React keys
-  isError?: boolean
-  errorType?: 'timeout' | 'auth' | 'server' | 'network' | 'unknown' // Error categorization
-  isThinking?: boolean // Flag to indicate if the message is in a "thinking" state
-  timestamp?: number // Unix timestamp when message was created
-  /**
-   * Indicates if the mermaid diagram in this message has been rendered.
-   * Used to persist the rendering state across updates and prevent flickering.
-   */
-  mermaidRendered?: boolean
-  /**
-   * Indicates if the LaTeX formulas in this message are complete and ready for rendering.
-   * Used to prevent red error text during streaming of incomplete LaTeX formulas.
-   */
-  latexRendered?: boolean
 }
 
 /**
@@ -780,6 +763,7 @@ const CodeHighlight = memo(
                 } else if (mermaidRef.current !== container) {
                   // Container changed before rendering completed - skip applying result
                 }
+                return undefined
               })
               .catch((error) => {
                 console.error('Mermaid rendering promise error (debounced):', error)
@@ -791,6 +775,7 @@ const CodeHighlight = memo(
                   errorPre.textContent = `Mermaid diagram error: ${errorMessage}\n\nContent:\n${processedContent}`
                   container.replaceChildren(errorPre)
                 }
+                return undefined
               })
           } catch (error) {
             console.error('Mermaid synchronous error (debounced):', error)
