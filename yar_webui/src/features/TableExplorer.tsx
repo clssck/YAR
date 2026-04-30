@@ -7,7 +7,7 @@ import {
   CopyIcon,
   RefreshCwIcon,
 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { getTableData, getTableList, getTableSchema } from '@/api/yar'
 import Button from '@/components/ui/Button'
@@ -73,10 +73,17 @@ function isJsonLike(value: CellValue): boolean {
   return typeof value === 'object' && value !== null
 }
 
-
 // Copy button component with feedback
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    [],
+  )
 
   const handleCopy = async () => {
     const result = await copyToClipboard(text)
@@ -84,7 +91,8 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
     if (success) {
       setCopied(true)
       toast.success(label ? `${label} copied` : 'Copied to clipboard')
-      setTimeout(() => setCopied(false), 2000)
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => setCopied(false), 2000)
     } else {
       toast.error('Failed to copy')
     }

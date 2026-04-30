@@ -437,7 +437,9 @@ export default function DocumentManager() {
   const recoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fetchDocumentsRef = useRef<() => Promise<void>>(null!)
   const isCircuitBreakerOpenRef = useRef<() => boolean>(null!)
-  const handleIntelligentRefreshRef = useRef<(page?: number) => Promise<void>>(null!)
+  const handleIntelligentRefreshRef = useRef<(page?: number) => Promise<void>>(
+    null!,
+  )
 
   // Add retry mechanism state
   const [retryState, setRetryState] = useState({
@@ -952,7 +954,8 @@ export default function DocumentManager() {
   }, [])
 
   // Circuit breaker utility functions
-  const { isOpen: cbIsOpen, nextRetryTime: cbNextRetryTime } = circuitBreakerState
+  const { isOpen: cbIsOpen, nextRetryTime: cbNextRetryTime } =
+    circuitBreakerState
   const isCircuitBreakerOpen = useCallback(() => {
     if (!cbIsOpen) return false
 
@@ -969,7 +972,9 @@ export default function DocumentManager() {
 
     return true
   }, [cbIsOpen, cbNextRetryTime])
-  useEffect(() => { isCircuitBreakerOpenRef.current = isCircuitBreakerOpen }, [isCircuitBreakerOpen])
+  useEffect(() => {
+    isCircuitBreakerOpenRef.current = isCircuitBreakerOpen
+  }, [isCircuitBreakerOpen])
 
   const recordFailure = useCallback((error: Error) => {
     const now = Date.now()
@@ -1108,7 +1113,9 @@ export default function DocumentManager() {
       recordFailure,
     ],
   )
-  useEffect(() => { handleIntelligentRefreshRef.current = handleIntelligentRefresh }, [handleIntelligentRefresh])
+  useEffect(() => {
+    handleIntelligentRefreshRef.current = handleIntelligentRefresh
+  }, [handleIntelligentRefresh])
 
   // New paginated data fetching function
   const fetchPaginatedDocuments = useCallback(
@@ -1136,7 +1143,9 @@ export default function DocumentManager() {
     pagination.page_size,
     statusFilter,
   ])
-  useEffect(() => { fetchDocumentsRef.current = fetchDocuments }, [fetchDocuments])
+  useEffect(() => {
+    fetchDocumentsRef.current = fetchDocuments
+  }, [fetchDocuments])
 
   // Function to clear current polling interval
   const clearPollingInterval = useCallback(() => {
@@ -1310,7 +1319,14 @@ export default function DocumentManager() {
         setIsRetrying(false)
       }
     }
-  }, [t, isRetrying, startPollingInterval, currentTab, health, hasActiveProcessing])
+  }, [
+    t,
+    isRetrying,
+    startPollingInterval,
+    currentTab,
+    health,
+    hasActiveProcessing,
+  ])
 
   // Handle page size change - update state and save to store
   const handlePageSizeChange = useCallback(
@@ -1361,7 +1377,6 @@ export default function DocumentManager() {
     hasActiveProcessing,
     startPollingInterval,
   ])
-
 
   // Set up intelligent polling with dynamic interval based on document status
   useEffect(() => {
@@ -1560,6 +1575,27 @@ export default function DocumentManager() {
             </button>
           )}
         </div>
+        {/* Search is client-side and only filters the current page.
+            Warn when there are additional pages so users don't assume
+            a no-match means the corpus has nothing. */}
+        {searchQuery && pagination.total_pages > 1 && (
+          <div
+            role="note"
+            className="-mt-2 mb-4 flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            <span aria-hidden="true">⚠</span>
+            <span>
+              {t(
+                'documentPanel.documentManager.searchScopedToPage',
+                'Search only matches documents on the current page ({{page}} of {{pages}}). Increase the page size or paginate to see matches across the full list.',
+                {
+                  page: pagination.page,
+                  pages: pagination.total_pages,
+                },
+              )}
+            </span>
+          </div>
+        )}
 
         {/* Status Filter Chips */}
         <div className="flex flex-wrap gap-2 mb-4">
@@ -1859,7 +1895,7 @@ export default function DocumentManager() {
                           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                             {doc.content_length != null && (
                               <span>
-																{doc.content_length.toLocaleString()} tokens
+                                {doc.content_length.toLocaleString()} tokens
                               </span>
                             )}
                             {doc.chunks_count != null && (

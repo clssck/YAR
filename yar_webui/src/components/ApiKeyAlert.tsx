@@ -72,6 +72,7 @@ const ApiKeyAlert = ({
               placeholder={t('apiKeyAlert.placeholder')}
               className="max-h-full w-full min-w-0"
               autoComplete="off"
+              aria-label={t('apiKeyAlert.title')}
             />
 
             <Button onClick={setApiKey} variant="outline" size="sm">

@@ -8,6 +8,16 @@ import {
   getPipelineStatus,
   type PipelineStatusResponse,
 } from '@/api/yar'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/AlertDialog'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
@@ -282,29 +292,27 @@ export default function PipelineStatusDialog({
       </DialogContent>
 
       {/* Cancel Confirmation Dialog */}
-      <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>
+      <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <AlertDialogContent className="sm:max-w-[425px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
               {t('documentPanel.pipelineStatus.cancelConfirmTitle')}
-            </DialogTitle>
-            <DialogDescription>
+            </AlertDialogTitle>
+            <AlertDialogDescription>
               {t('documentPanel.pipelineStatus.cancelConfirmDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-3 mt-4">
-            <Button
-              variant="outline"
-              onClick={() => setShowCancelConfirm(false)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmCancel}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {t('common.cancel')}
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmCancel}>
               {t('documentPanel.pipelineStatus.cancelConfirmButton')}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

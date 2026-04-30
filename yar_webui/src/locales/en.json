@@ -149,6 +149,7 @@
       "uploadedDescription": "List of uploaded documents and their statuses.",
       "emptyTitle": "No Documents",
       "emptyDescription": "There are no uploaded documents yet.",
+      "searchScopedToPage": "Search only matches documents on the current page ({{page}} of {{pages}}). Increase the page size or paginate to see matches across the full list.",
       "columns": {
         "id": "ID",
         "fileName": "File Name",

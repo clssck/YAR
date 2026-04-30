@@ -19,7 +19,7 @@ const StatusIndicator = ({ className }: { className?: string }) => {
     setAnimate(true)
     const timer = setTimeout(() => setAnimate(false), 300)
     return () => clearTimeout(timer)
-  }, [])
+  }, [health])
 
   return (
     <div
