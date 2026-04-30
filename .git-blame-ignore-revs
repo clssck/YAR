@@ -1,0 +1,7 @@
+# Mechanical reformat-only commits to skip in `git blame`.
+#
+# Configure once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style(webui): apply oxfmt sweep
+fc4d109f2a59ce821fd37d1d333ffce2d02e9b0d
