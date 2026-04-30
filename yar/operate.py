@@ -1799,13 +1799,13 @@ async def _rebuild_single_relationship(
 
     await knowledge_graph_inst.upsert_edge(src, tgt, updated_relationship_data)
 
-    # Update relationship in vector database
-    # Sort src and tgt to ensure consistent ordering (smaller string first)
-    if src > tgt:
-        src, tgt = tgt, src
+    # Update relationship in vector database. Use a canonical record id for
+    # pair-level deduplication, but preserve the extracted source/target direction
+    # in the vector payload and searchable content.
+    canonical_src, canonical_tgt = sorted((src, tgt))
     try:
-        rel_vdb_id = compute_mdhash_id(src + tgt, prefix='rel-')
-        rel_vdb_id_reverse = compute_mdhash_id(tgt + src, prefix='rel-')
+        rel_vdb_id = compute_mdhash_id(canonical_src + canonical_tgt, prefix='rel-')
+        rel_vdb_id_reverse = compute_mdhash_id(canonical_tgt + canonical_src, prefix='rel-')
 
         # Delete old vector records first (both directions to be safe)
         try:
@@ -2483,12 +2483,12 @@ async def _merge_edges_then_upsert(
         'weight': weight,
     }
 
-    # Sort src_id and tgt_id to ensure consistent ordering (smaller string first)
-    if src_id > tgt_id:
-        src_id, tgt_id = tgt_id, src_id
+    # Use a canonical record id for pair-level deduplication, but preserve the
+    # extracted source/target direction in the vector payload and searchable content.
+    canonical_src, canonical_tgt = sorted((src_id, tgt_id))
 
-    rel_vdb_id = compute_mdhash_id(src_id + tgt_id, prefix='rel-')
-    rel_vdb_id_reverse = compute_mdhash_id(tgt_id + src_id, prefix='rel-')
+    rel_vdb_id = compute_mdhash_id(canonical_src + canonical_tgt, prefix='rel-')
+    rel_vdb_id_reverse = compute_mdhash_id(canonical_tgt + canonical_src, prefix='rel-')
     rel_delete_ids = [rel_vdb_id, rel_vdb_id_reverse]
     rel_content = f'{keywords}\t{src_id}\n{tgt_id}\n{description}'
     rel_vdb_payload = {
@@ -2667,9 +2667,9 @@ async def _resolve_entity_aliases_for_batch(
         if new_src == new_tgt:
             logger.debug(f'[{workspace}] Skipping self-loop: {src}-{tgt} → {new_src}')
             continue
-        # Filter out None values before sorting to satisfy type checker
-        nodes_to_sort = [n for n in [new_src, new_tgt] if n is not None]
-        new_key = tuple(sorted(nodes_to_sort))
+        if new_src is None or new_tgt is None:
+            continue
+        new_key = (new_src, new_tgt)
         new_all_edges[new_key].extend(edges)
 
     return dict(new_all_nodes), dict(new_all_edges)
@@ -2732,10 +2732,10 @@ async def merge_nodes_and_edges(
         for entity_name, entities in maybe_nodes.items():
             all_nodes[entity_name].extend(entities)
 
-        # Collect edges with sorted keys for undirected graph
+        # Collect edges by extracted direction; storage-specific lock/chunk keys
+        # are canonicalized later without changing relationship semantics.
         for edge_key, edges in maybe_edges.items():
-            sorted_edge_key = tuple(sorted(edge_key))
-            all_edges[sorted_edge_key].extend(edges)
+            all_edges[edge_key].extend(edges)
 
     # ===== Alias Resolution Phase =====
     # Resolve entity aliases before merging (within-batch deduplication)
@@ -4481,9 +4481,6 @@ async def _get_vector_context(
     except Exception as e:
         logger.error(f'Error in _get_vector_context: {e}')
         return []
-
-
-
 
 
 async def _generate_hyde_answer(

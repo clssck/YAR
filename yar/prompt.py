@@ -23,7 +23,7 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
     *   **What NOT to Extract as Entities:**
         *   Do NOT extract numeric values, percentages, or metrics (e.g., "3.4% decline", "$10 billion", "40% reduction").
         *   Do NOT extract generic event descriptors (e.g., "market selloff", "price increase", "stock decline").
-        *   Do NOT extract time periods or dates as entities (e.g., "Q3 2024", "this year", "midday trading").
+        *   Do NOT extract time periods or bare dates as entities (e.g., "Q3 2024", "this year", "midday trading"). In dated event bullets like "14th Nov => Delay of 2 mo communicated", extract the action/event phrase as the entity and keep the date in its description. Bare dates are never valid relation sources.
         *   Do NOT extract adjectives or qualities (e.g., "significant", "lower-than-expected").
         *   Do NOT extract GENERIC terms in these categories (with or without organization prefix):
             - Documents/Reports: "annual report", "quarterly earnings", "press release", "safety report", "earnings report", "shareholder letter", "10-K filing", "Form 8-K", "proxy statement", "SEC filings"
@@ -63,6 +63,8 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
     *   **What NOT to Extract:**
         *   No "featured", "included", "part of" relationships -- too vague.
         *   No relationships between mere co-list items (e.g. "skateboarding and surfing" co-mentioned: NOT a relationship).
+        *   EXCEPTION: labeled-role lists where the label is an action verb or role that applies to every listed item ARE relationships (e.g. "Communication to: Alice, Bob" means each person received that communication). Extract one relation per listed item using the nearest named action/event/document as source, or the literal label phrase as the source if no named source exists; extract that source as an event/document entity when needed. The listed items fill the label's role: in "Communication to:" or "sent to:" lists, each listed item is the target/recipient, never the source. Do NOT apply this exception to category headers like "Topics: AI, ML".
+        *   For dated bullets like "14th Nov => Delay of 2 mo communicated" with a recipient list below, use the action/event phrase as the source entity (e.g. "Primary Stability Batch Delay Communication"), never the bare date. This also applies when the date is a section header on its own line followed by an action bullet. Keep the date as temporal context in descriptions.
         *   Events: PRIMARY action (won, hosted, occurred in), not every association.
         *   Sports: achievements (won, broke record), not participation alone.
         *   No duplicate relationships with different wording.
@@ -242,6 +244,50 @@ relation{tuple_delimiter}Maya Chen{tuple_delimiter}200m Sprint{tuple_delimiter}w
 {completion_delimiter}
 
 """,
+    """<Entity_types>
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
+
+<Input Text>
+```
+# Sequence of events
+* 14th Nov => Delay of 2 mo of primary stability batch communicated
+    * Communication to: Miller, Torres, Kim, Patel
+```
+
+<Output>
+entity{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}event{tuple_delimiter}Primary Stability Batch Delay Communication is the 14th Nov event where a two-month primary stability batch delay was communicated to listed recipients.
+entity{tuple_delimiter}Miller{tuple_delimiter}person{tuple_delimiter}Miller is a recipient of the Primary Stability Batch Delay Communication.
+entity{tuple_delimiter}Torres{tuple_delimiter}person{tuple_delimiter}Torres is a recipient of the Primary Stability Batch Delay Communication.
+entity{tuple_delimiter}Kim{tuple_delimiter}person{tuple_delimiter}Kim is a recipient of the Primary Stability Batch Delay Communication.
+entity{tuple_delimiter}Patel{tuple_delimiter}person{tuple_delimiter}Patel is a recipient of the Primary Stability Batch Delay Communication.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Miller{tuple_delimiter}sent to{tuple_delimiter}The Primary Stability Batch Delay Communication was sent to Miller on 14th Nov.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Torres{tuple_delimiter}sent to{tuple_delimiter}The Primary Stability Batch Delay Communication was sent to Torres on 14th Nov.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Kim{tuple_delimiter}sent to{tuple_delimiter}The Primary Stability Batch Delay Communication was sent to Kim on 14th Nov.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Patel{tuple_delimiter}sent to{tuple_delimiter}The Primary Stability Batch Delay Communication was sent to Patel on 14th Nov.
+{completion_delimiter}
+
+""",
+    """<Entity_types>
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
+
+<Input Text>
+```
+14th November 2018
+Delay of primary stability batch by 2 months communicated to project team.
+Communication to: Chen, Novak, Okafor
+```
+
+<Output>
+entity{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}event{tuple_delimiter}Primary Stability Batch Delay Communication is the 14th November 2018 communication of a two-month delay in the primary stability batch.
+entity{tuple_delimiter}Chen{tuple_delimiter}person{tuple_delimiter}Chen is a recipient of the Primary Stability Batch Delay Communication.
+entity{tuple_delimiter}Novak{tuple_delimiter}person{tuple_delimiter}Novak is a recipient of the Primary Stability Batch Delay Communication.
+entity{tuple_delimiter}Okafor{tuple_delimiter}person{tuple_delimiter}Okafor is a recipient of the Primary Stability Batch Delay Communication.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Chen{tuple_delimiter}communicated to{tuple_delimiter}The Primary Stability Batch Delay Communication was communicated to Chen on 14th November 2018.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Novak{tuple_delimiter}communicated to{tuple_delimiter}The Primary Stability Batch Delay Communication was communicated to Novak on 14th November 2018.
+relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Okafor{tuple_delimiter}communicated to{tuple_delimiter}The Primary Stability Batch Delay Communication was communicated to Okafor on 14th November 2018.
+{completion_delimiter}
+
+""",
 ]
 
 PROMPTS['summarize_entity_descriptions'] = """---Role---
@@ -283,11 +329,6 @@ Description List:
 
 ---Output---
 """
-
-
-
-
-
 
 
 PROMPTS['fail_response'] = """I couldn't find relevant information in the knowledge base to answer your question.
@@ -362,11 +403,6 @@ Direct, well-structured answer; integrate Knowledge Graph + Document Chunks from
 """
 
 
-
-
-
-
-
 PROMPTS['naive_rag_response'] = """---Role---
 
 Expert RAG assistant. Answer using ONLY the **Context**.
@@ -421,15 +457,6 @@ Direct, well-structured answer; synthesize Document Chunks from **Context**.
 
 {content_data}
 """
-
-
-
-
-
-
-
-
-
 
 
 PROMPTS['kg_query_context'] = """
@@ -502,12 +529,6 @@ User Query: {query}
 
 ---Output---
 Output:"""
-
-
-
-
-
-
 
 
 PROMPTS['keywords_extraction_examples'] = [
@@ -645,11 +666,6 @@ Example (not connected):
 """
 
 
-
-
-
-
-
 # HyDE (Hypothetical Document Embedding) prompt
 # Generates a hypothetical answer to improve retrieval through semantic similarity
 PROMPTS[
@@ -728,7 +744,6 @@ Per pair, return JSON object with:
 - reasoning: brief decision rationale
 
 Return JSON array of all results."""
-
 
 
 PROMPTS['entity_review_user_prompt'] = """---Task---

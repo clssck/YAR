@@ -14,6 +14,7 @@ This module tests:
 from __future__ import annotations
 
 import asyncio
+import inspect
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -32,9 +33,11 @@ from yar.operate import (
     _get_vector_context,
     _matches_entity_filter,
     _merge_all_chunks,
+    _merge_edges_then_upsert,
     _normalize_query_shaped_response,
     _perform_kg_search,
     _prepare_visible_reference_payload,
+    _resolve_entity_aliases_for_batch,
     _resolve_max_file_paths,
     _should_validate_inline_citations,
     _split_keyword_terms,
@@ -45,9 +48,92 @@ from yar.operate import (
     extract_keywords_only,
     get_keywords_from_query,
     kg_query,
+    merge_nodes_and_edges,
 )
 from yar.prompt import PROMPTS
 from yar.utils import process_chunks_unified
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_preserves_directed_relation_vector_payload():
+    """Relation VDB content should keep extraction direction even when ids are canonicalized."""
+
+    source = 'Primary Stability Batch Delay Communication'
+    target = 'Kripa Ram'
+    chunk_id = 'chunk-1'
+    file_path = '20190227_iCMCNPP_LLcross_Sharing_SARA_lessons learned.pptx'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+            self.upserted_nodes = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': chunk_id,
+                'description': f'{node_id} description',
+                'entity_type': 'event' if node_id == source else 'person',
+                'file_path': file_path,
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            self.upserted_nodes.append((node_id, node_data))
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    graph = FakeGraphStorage()
+    edge_data, _ent_vdb, rel_vdb, rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [
+            {
+                'src_id': source,
+                'tgt_id': target,
+                'weight': 1.0,
+                'description': 'The delay communication was sent to Kripa Ram.',
+                'keywords': 'sent to',
+                'source_id': chunk_id,
+                'file_path': file_path,
+                'timestamp': 1,
+            }
+        ],
+        graph,
+        {
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    rel_payload = next(iter(rel_vdb.values()))
+
+    assert edge_data['src_id'] == source
+    assert edge_data['tgt_id'] == target
+    assert graph.upserted_edges[0][0] == source
+    assert graph.upserted_edges[0][1] == target
+    assert rel_payload['src_id'] == source
+    assert rel_payload['tgt_id'] == target
+    assert rel_payload['content'].splitlines()[:2] == [f'sent to\t{source}', target]
+    assert len(rel_delete_ids) == 2
+
+
+def test_edge_grouping_preserves_extracted_relation_direction():
+    """Directional relationships must not be normalized to lexical endpoint order."""
+
+    merge_source = inspect.getsource(merge_nodes_and_edges)
+    alias_source = inspect.getsource(_resolve_entity_aliases_for_batch)
+
+    assert 'all_edges[edge_key].extend(edges)' in merge_source
+    assert 'tuple(sorted(edge_key))' not in merge_source
+    assert 'new_key = (new_src, new_tgt)' in alias_source
+    assert 'tuple(sorted(nodes_to_sort))' not in alias_source
 
 
 @pytest.mark.offline
@@ -668,8 +754,6 @@ class TestExtractKeywordsOnly:
         mock_llm.assert_called_once()
         assert isinstance(hl, list)
         assert isinstance(ll, list)
-
-
 
     @pytest.mark.asyncio
     async def test_invalid_json_response(self):
@@ -3160,9 +3244,6 @@ class TestResponseQualityControls:
         )
 
         assert normalized == 'In type C meeting [1].'
-
-
-
 
 
 @pytest.mark.offline

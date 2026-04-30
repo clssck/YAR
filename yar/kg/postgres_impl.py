@@ -3794,12 +3794,8 @@ class PGVectorStorage(BaseVectorStorage):
             query=query,
             language=language,
             phrase_terms=phrase_terms,
-            heading_weight_enabled=os.getenv('YAR_BM25_HEADING_WEIGHT_BOOST', 'false').lower()
-            in ('1', 'true', 'yes'),
+            heading_weight_enabled=os.getenv('YAR_BM25_HEADING_WEIGHT_BOOST', 'false').lower() in ('1', 'true', 'yes'),
         )
-
-
-
 
         # Run vector searches and BM25 search in parallel for better performance
         db = self._db_required()
@@ -6584,7 +6580,7 @@ class PGGraphStorage(BaseGraphStorage):
             else:
                 degree_filter = ''
 
-            nodes_cypher = 'MATCH (n:base) OPTIONAL MATCH (n)-[r]->() RETURN id(n) as node_id, count(r) as degree'
+            nodes_cypher = 'MATCH (n:base) OPTIONAL MATCH (n)-[r]-() RETURN id(n) as node_id, count(r) as degree'
             query_nodes = f"""SELECT * FROM (
                 SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(nodes_cypher)}) AS (node_id BIGINT, degree BIGINT)
             ) AS subq

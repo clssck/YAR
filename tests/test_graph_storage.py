@@ -12,6 +12,7 @@ Supported graph storage types include:
 import asyncio
 import hashlib
 import importlib
+import inspect
 import os
 import sys
 import uuid
@@ -84,6 +85,15 @@ def test_dollar_quote_function():
     assert result.startswith('$AGE1$'), f'Should use $AGE1$: {result}'
 
     print('All _dollar_quote unit tests passed!')
+
+
+def test_wildcard_knowledge_graph_counts_incoming_and_outgoing_degree():
+    """Wildcard graph views should not mark target-only nodes as orphans."""
+    from yar.kg.postgres_impl import PGGraphStorage
+
+    source = inspect.getsource(PGGraphStorage.get_knowledge_graph)
+    assert 'OPTIONAL MATCH (n)-[r]-() RETURN id(n) as node_id, count(r) as degree' in source
+    assert 'OPTIONAL MATCH (n)-[r]->() RETURN id(n) as node_id, count(r) as degree' not in source
 
 
 def check_env_file():
@@ -316,7 +326,9 @@ async def test_graph_basic(storage):
             )
         else:
             print(f'Failed to read reverse edge properties: {node2_id} -> {node1_id}')
-            pytest.fail(f'Failed to read reverse edge properties: {node2_id} -> {node1_id}, undirected graph property verification failed')
+            pytest.fail(
+                f'Failed to read reverse edge properties: {node2_id} -> {node1_id}, undirected graph property verification failed'
+            )
 
         print('Basic tests completed, data is preserved in the database.')
         return True

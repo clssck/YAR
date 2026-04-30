@@ -80,6 +80,34 @@ class TestEntityExtractionPrompts:
         assert '{language}' in prompt
         assert '{examples}' in prompt
 
+    def test_entity_extraction_handles_labeled_role_lists(self):
+        """Labeled recipient lists should produce per-recipient relationships, not orphan people."""
+        prompt = PROMPTS['entity_extraction_system_prompt']
+        examples = '\n'.join(PROMPTS['entity_extraction_examples'])
+
+        assert 'labeled-role lists' in prompt
+        assert 'Communication to: Alice, Bob' in prompt
+        assert 'category headers like "Topics: AI, ML"' in prompt
+        assert 'extract that source as an event/document entity when needed' in prompt
+        assert 'nearest named action/event/document' in prompt
+        assert 'never the bare date' in prompt
+        assert 'Bare dates are never valid relation sources' in prompt
+        assert 'date is a section header on its own line' in prompt
+        assert 'target/recipient, never the source' in prompt
+        assert '14th Nov => Delay of 2 mo of primary stability batch communicated' in examples
+        assert '14th November 2018\nDelay of primary stability batch by 2 months' in examples
+        assert 'entity{tuple_delimiter}Primary Stability Batch Delay Communication' in examples
+        assert 'relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Miller' in examples
+        assert 'relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Chen' in examples
+
+        bare_date_record = re.compile(
+            r'(entity|relation)\{tuple_delimiter\}\d{1,2}(st|nd|rd|th)?\s+'
+            r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|'
+            r'January|February|March|April|May|June|July|August|September|'
+            r'October|November|December)'
+        )
+        assert bare_date_record.search(examples) is None
+
     def test_entity_extraction_user_prompt_exists(self):
         """Test entity extraction user prompt exists."""
         assert 'entity_extraction_user_prompt' in PROMPTS
