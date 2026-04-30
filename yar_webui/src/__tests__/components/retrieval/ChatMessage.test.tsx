@@ -4,7 +4,7 @@
 import '../../setup'
 import { describe, expect, mock, test } from 'bun:test'
 import { render } from '@testing-library/react'
-import type { MessageWithError } from '@/components/retrieval/ChatMessage'
+import type { MessageWithError } from '@/components/retrieval/ChatMessageImpl'
 
 // Mock react-i18next
 mock.module('react-i18next', () => ({
@@ -67,7 +67,7 @@ mock.module('@/components/retrieval/CitationMarker', () => ({
 }))
 
 // Import after mocks are set up
-const { ChatMessage } = await import('@/components/retrieval/ChatMessage')
+const { ChatMessage } = await import('@/components/retrieval/ChatMessageImpl')
 
 // Helper to create test messages
 function createMessage(

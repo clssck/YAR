@@ -17,9 +17,9 @@ mock.module('@/lib/constants', () => ({
   searchLabelsDefaultLimit: 10,
 }))
 
-import type { QueryRequest, StreamReference } from '@/api/yar'
+import type { QueryRequest, StreamReference } from '@/api/yarImpl'
 
-const { getDocumentUrl, queryTextStream } = await import('@/api/yar')
+const { getDocumentUrl, queryTextStream } = await import('@/api/yarImpl')
 
 const makeSuccessResponseBody = (body: string) => ({
   statusCode: 200,

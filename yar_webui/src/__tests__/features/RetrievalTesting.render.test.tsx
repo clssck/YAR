@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import {
   memo,
-  type ButtonHTMLAttributes,
   type FormEventHandler,
   type InputHTMLAttributes,
   type ReactNode,
@@ -31,12 +30,6 @@ const mockQueryTextStream = mock(
 )
 const chatMessageRenderCounts = new Map<string, number>()
 
-mock.module('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
-  }),
-}))
-
 mock.module('sonner', () => ({
   toast: {
     success: mock(() => {}),
@@ -44,19 +37,22 @@ mock.module('sonner', () => ({
   },
 }))
 
+// Bun mock note: spreading the realYar namespace into the factory causes
+// the mock to leak through `export *` and override the underlying yarImpl
+// module too. So enumerate the specific exports downstream consumers
+// (ChatMessageImpl getDocumentUrl, KeyboardShortcutHelp checkHealth via
+// store side-effects) actually pull. The test never exercises these paths,
+// so cheap stubs are sufficient.
 mock.module('@/api/yar', () => ({
   queryText: mockQueryText,
   queryTextStream: mockQueryTextStream,
+  checkHealth: () => Promise.resolve({ status: 'healthy' }),
+  getDocumentUrl: () => null,
+  getDocumentsPaginated: () => Promise.resolve({ documents: [], pagination: {} }),
+  scanNewDocuments: () => Promise.resolve({ status: 'success' }),
+  reprocessFailedDocuments: () => Promise.resolve({ status: 'success' }),
 }))
 
-mock.module('@/components/ui/Button', () => ({
-  default: ({
-    children,
-    ...props
-  }: ButtonHTMLAttributes<HTMLButtonElement> & { children?: ReactNode }) => (
-    <button {...props}>{children}</button>
-  ),
-}))
 
 mock.module('@/components/ui/Input', () => ({
   default: ({

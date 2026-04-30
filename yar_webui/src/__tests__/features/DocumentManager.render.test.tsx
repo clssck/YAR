@@ -52,14 +52,15 @@ const mockSettingsState = {
   documentsPageSize: 10,
 }
 
+// Bun mock note: spreading a real module namespace causes the mock to leak
+// through `export *` and override the underlying yarImpl too. Enumerate the
+// specific exports needed by transitive consumers as cheap stubs.
 mock.module('@/api/yar', () => ({
   getDocumentsPaginated: mockGetDocumentsPaginated,
   scanNewDocuments: mockScanNewDocuments,
   reprocessFailedDocuments: mockReprocessFailedDocuments,
-}))
-
-mock.module('@/hooks/useBreakpoint', () => ({
-  useResponsive: () => ({ isMobile: false, isTablet: false, isDesktop: true }),
+  checkHealth: () => Promise.resolve({ status: 'healthy' }),
+  getDocumentUrl: () => null,
 }))
 
 mock.module('@/stores/settings', () => ({
@@ -80,6 +81,7 @@ mock.module('@/stores/state', () => ({
     use: {
       health: () => true,
       pipelineBusy: () => false,
+      documentListVersion: () => 0,
     },
     getState: () => mockBackendState,
   },
