@@ -1,6 +1,8 @@
 import '../setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 
 const mockGetDocumentsPaginated = mock(async (request?: unknown) => {
   void request
@@ -94,6 +96,14 @@ mock.module('@/components/documents/UploadDocumentsDialog', () => ({ default: ()
 
 const DocumentManager = (await import('@/features/DocumentManager')).default
 
+const renderWithQueryClient = (ui: ReactNode) => {
+  // Disable retries and refetchInterval so tests run deterministically.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchInterval: false } }
+  })
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
+
 describe('DocumentManager Rendering', () => {
   beforeEach(() => {
     mockGetDocumentsPaginated.mockClear()
@@ -113,7 +123,7 @@ describe('DocumentManager Rendering', () => {
   test('mounts and fetches paginated documents once on load', async () => {
     let rendered: ReturnType<typeof render>
     await act(async () => {
-      rendered = render(<DocumentManager />)
+      rendered = renderWithQueryClient(<DocumentManager />)
     })
 
     await waitFor(() => {
@@ -126,7 +136,8 @@ describe('DocumentManager Rendering', () => {
         page_size: 10,
         sort_field: 'updated_at',
         sort_direction: 'desc'
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     expect(rendered!.getByText('doc-1')).toBeTruthy()
   })
@@ -134,7 +145,7 @@ describe('DocumentManager Rendering', () => {
   test('refetches page 1 when the active sort direction changes', async () => {
     let rendered: ReturnType<typeof render>
     await act(async () => {
-      rendered = render(<DocumentManager />)
+      rendered = renderWithQueryClient(<DocumentManager />)
     })
 
     await waitFor(() => {
@@ -153,7 +164,8 @@ describe('DocumentManager Rendering', () => {
         page_size: 10,
         sort_field: 'updated_at',
         sort_direction: 'asc'
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
   })
 })

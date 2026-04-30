@@ -19,17 +19,12 @@ import {
 } from 'lucide-react'
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   type DocStatus,
   type DocStatusResponse,
-  type DocumentsRequest,
-  getDocumentsPaginated,
-  type PaginatedDocsResponse,
   type PaginationInfo,
-  type PropertyValue,
-  reprocessFailedDocuments,
-  scanNewDocuments
+  type PropertyValue
 } from '@/api/yar'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
@@ -53,10 +48,12 @@ import {
 } from '@/components/ui/Table'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useResponsive } from '@/hooks/useBreakpoint'
-import { cn, errorMessage } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
-import { getCountValue, hasActiveDocumentsStatus } from '@/utils/documentUtils'
+import { getCountValue } from '@/utils/documentUtils'
+import { useDocumentListQuery } from '@/features/documents/useDocumentListQuery'
+import { usePipelineMutations } from '@/features/documents/usePipelineMutations'
 
 type StatusFilter = DocStatus | 'all'
 
@@ -208,32 +205,12 @@ type SortField = 'created_at' | 'updated_at' | 'id' | 'file_path'
 type SortDirection = 'asc' | 'desc'
 
 export default function DocumentManager() {
-  // Track component mount status
-  const isMountedRef = useRef(true)
-
-  // Set up mount/unmount status tracking
-  useEffect(() => {
-    isMountedRef.current = true
-
-    // Handle page reload/unload
-    const handleBeforeUnload = () => {
-      isMountedRef.current = false
-    }
-
-    window.addEventListener('beforeunload', handleBeforeUnload)
-
-    return () => {
-      isMountedRef.current = false
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-      if (recoveryTimeoutRef.current) clearTimeout(recoveryTimeoutRef.current)
-    }
-  }, [])
-
-  const [showPipelineStatus, setShowPipelineStatus] = useState(false)
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+
+  // Server state from stores. health/pipelineBusy still drive the global UI shell.
   const health = useBackendState.use.health()
   const pipelineBusy = useBackendState.use.pipelineBusy()
-  const documentListVersion = useBackendState.use.documentListVersion()
 
   const currentTab = useSettingsStore.use.currentTab()
   const showFileName = useSettingsStore.use.showFileName()
@@ -241,34 +218,17 @@ export default function DocumentManager() {
   const documentsPageSize = useSettingsStore.use.documentsPageSize()
   const setDocumentsPageSize = useSettingsStore.use.setDocumentsPageSize()
 
-  // New pagination state
-  const [currentPageDocs, setCurrentPageDocs] = useState<DocStatusResponse[]>([])
-  const [pagination, setPagination] = useState<PaginationInfo>({
-    page: 1,
-    page_size: documentsPageSize,
-    total_count: 0,
-    total_pages: 0,
-    has_next: false,
-    has_prev: false
-  })
-  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({
-    all: 0
-  })
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [lastFetchTime, setLastFetchTime] = useState<number | null>(null)
+  // Local UI state. Page/filter/sort drive the queryKey; everything else is presentation.
+  const [showPipelineStatus, setShowPipelineStatus] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const { isMobile, isTablet, isDesktop } = useResponsive()
 
-  // Sort state
+  const [page, setPage] = useState(1)
   const [sortField, setSortField] = useState<SortField>('updated_at')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
-
-  // State for document status filter
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-
-  // State to store page number for each status filter
   const [pageByStatus, setPageByStatus] = useState<Record<StatusFilter, number>>({
     all: 1,
     processed: 1,
@@ -278,38 +238,40 @@ export default function DocumentManager() {
     failed: 1
   })
 
-  // State for document selection
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const isSelectionMode = selectedDocIds.length > 0
-
-  // State for expanded error details (track which document IDs are expanded)
   const [expandedErrorIds, setExpandedErrorIds] = useState<Set<string>>(new Set())
 
-  // State for retry operation
-  const [isRetrying, setIsRetrying] = useState(false)
+  // Mutation boost: when set to a future timestamp, useDocumentListQuery polls every 2s
+  // until that time. Set by usePipelineMutations on success.
+  const [boostUntil, setBoostUntil] = useState<number | null>(null)
 
-  // Add refs to track previous pipelineBusy state and current interval
-  const prevPipelineBusyRef = useRef<boolean | undefined>(undefined)
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const recoveryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fetchDocumentsRef = useRef<() => Promise<void>>(null!)
-  const isCircuitBreakerOpenRef = useRef<() => boolean>(null!)
-  const handleIntelligentRefreshRef = useRef<(page?: number) => Promise<void>>(null!)
-
-  // Add retry mechanism state
-  const [retryState, setRetryState] = useState({
-    count: 0,
-    lastError: null as Error | null,
-    isBackingOff: false
+  const documentsQuery = useDocumentListQuery({
+    page,
+    pageSize: documentsPageSize,
+    statusFilter,
+    sortField,
+    sortDirection,
+    boostUntil,
+    enabled: currentTab === 'documents' && health
   })
 
-  // Add circuit breaker state
-  const [circuitBreakerState, setCircuitBreakerState] = useState({
-    isOpen: false,
-    failureCount: 0,
-    lastFailureTime: null as number | null,
-    nextRetryTime: null as number | null
-  })
+  const { scan: scanMutation, retry: retryMutation } = usePipelineMutations({ setBoostUntil })
+
+  // Derive everything previously held in local state from the query.
+  const currentPageDocs = documentsQuery.data?.documents ?? []
+  const pagination: PaginationInfo = documentsQuery.data?.pagination ?? {
+    page,
+    page_size: documentsPageSize,
+    total_count: 0,
+    total_pages: 0,
+    has_next: false,
+    has_prev: false
+  }
+  const statusCounts: Record<string, number> = documentsQuery.data?.status_counts ?? { all: 0 }
+  const lastFetchTime = documentsQuery.dataUpdatedAt > 0 ? documentsQuery.dataUpdatedAt : null
+  const isRefreshing = documentsQuery.isFetching
+  const isRetrying = retryMutation.isPending
 
   // Handle checkbox change for individual documents
   const handleDocumentSelect = useCallback((docId: string, checked: boolean) => {
@@ -355,7 +317,7 @@ export default function DocumentManager() {
     setSortDirection(newDirection)
 
     // Reset page to 1 when sorting changes
-    setPagination((prev) => ({ ...prev, page: 1 }))
+    setPage(1)
 
     // Reset all status filters' page memory since sorting affects all
     setPageByStatus({
@@ -526,453 +488,13 @@ export default function DocumentManager() {
   // Reference to the card content element
   const cardContentRef = useRef<HTMLDivElement>(null)
 
-  // Utility function to update component state
-  const updateComponentState = useCallback((response: PaginatedDocsResponse) => {
-    setPagination(response.pagination)
-    setCurrentPageDocs(response.documents)
-    setStatusCounts(response.status_counts)
-    setLastFetchTime(Date.now())
-  }, [])
-
-  // Utility function to create timeout wrapper for API calls
-  const withTimeout = useCallback(
-    <T,>(promise: Promise<T>, timeoutMs = 30000, errorMsg = 'Request timeout'): Promise<T> => {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
-      })
-      return Promise.race([promise, timeoutPromise])
-    },
-    []
-  )
-
-  // Enhanced error classification
-  const classifyError = useCallback((error: unknown) => {
-    const err = error as {
-      name?: string
-      message?: string
-      code?: string
-      status?: number
-    }
-
-    if (err.name === 'AbortError') {
-      return { type: 'cancelled', shouldRetry: false, shouldShowToast: false }
-    }
-
-    if (err.message === 'Request timeout') {
-      return { type: 'timeout', shouldRetry: true, shouldShowToast: true }
-    }
-
-    if (err.message?.includes('Network Error') || err.code === 'NETWORK_ERROR') {
-      return { type: 'network', shouldRetry: true, shouldShowToast: true }
-    }
-
-    if (err.status !== undefined && err.status >= 500) {
-      return { type: 'server', shouldRetry: true, shouldShowToast: true }
-    }
-
-    if (err.status !== undefined && err.status >= 400 && err.status < 500) {
-      return { type: 'client', shouldRetry: false, shouldShowToast: true }
-    }
-
-    return { type: 'unknown', shouldRetry: true, shouldShowToast: true }
-  }, [])
-
-  // Circuit breaker utility functions
-  const { isOpen: cbIsOpen, nextRetryTime: cbNextRetryTime } = circuitBreakerState
-  const isCircuitBreakerOpen = useCallback(() => {
-    if (!cbIsOpen) return false
-
-    const now = Date.now()
-    if (cbNextRetryTime && now >= cbNextRetryTime) {
-      // Reset circuit breaker to half-open state
-      setCircuitBreakerState((prev) => ({
-        ...prev,
-        isOpen: false,
-        failureCount: Math.max(0, prev.failureCount - 1)
-      }))
-      return false
-    }
-
-    return true
-  }, [cbIsOpen, cbNextRetryTime])
+  // Reset polling cadence whenever the pipeline busy flag flips: we want the next
+  // refetch to happen immediately rather than waiting out the current interval.
   useEffect(() => {
-    isCircuitBreakerOpenRef.current = isCircuitBreakerOpen
-  }, [isCircuitBreakerOpen])
-
-  const recordFailure = useCallback((error: Error) => {
-    const now = Date.now()
-    setCircuitBreakerState((prev) => {
-      const newFailureCount = prev.failureCount + 1
-      const shouldOpen = newFailureCount >= 3 // Open after 3 failures
-
-      return {
-        isOpen: shouldOpen,
-        failureCount: newFailureCount,
-        lastFailureTime: now,
-        nextRetryTime: shouldOpen ? now + 2 ** newFailureCount * 1000 : null
-      }
-    })
-
-    setRetryState((prev) => ({
-      count: prev.count + 1,
-      lastError: error,
-      isBackingOff: true
-    }))
-  }, [])
-
-  const recordSuccess = useCallback(() => {
-    setCircuitBreakerState({
-      isOpen: false,
-      failureCount: 0,
-      lastFailureTime: null,
-      nextRetryTime: null
-    })
-
-    setRetryState({
-      count: 0,
-      lastError: null,
-      isBackingOff: false
-    })
-  }, [])
-
-  // Intelligent refresh function: handles all boundary cases
-  const handleIntelligentRefresh = useCallback(
-    async (
-      targetPage?: number, // Optional target page, defaults to current page
-      resetToFirst?: boolean // Whether to force reset to first page
-    ) => {
-      try {
-        if (!isMountedRef.current) return
-
-        setIsRefreshing(true)
-
-        // Determine target page
-        const pageToFetch = resetToFirst ? 1 : targetPage || pagination.page
-
-        const request: DocumentsRequest = {
-          status_filter: statusFilter === 'all' ? null : statusFilter,
-          page: pageToFetch,
-          page_size: pagination.page_size,
-          sort_field: sortField,
-          sort_direction: sortDirection
-        }
-
-        // Use timeout wrapper for the API call
-        const response = await withTimeout(
-          getDocumentsPaginated(request),
-          30000, // 30 second timeout
-          'Document fetch timeout'
-        )
-
-        if (!isMountedRef.current) return
-
-        // Boundary case handling: if target page has no data but total count > 0
-        if (response.documents.length === 0 && response.pagination.total_count > 0) {
-          // Calculate last page
-          const lastPage = Math.max(1, response.pagination.total_pages)
-
-          if (pageToFetch !== lastPage) {
-            // Re-request last page
-            const lastPageRequest: DocumentsRequest = {
-              ...request,
-              page: lastPage
-            }
-
-            const lastPageResponse = await withTimeout(
-              getDocumentsPaginated(lastPageRequest),
-              30000,
-              'Document fetch timeout'
-            )
-
-            if (!isMountedRef.current) return
-
-            // Update page state to last page
-            setPageByStatus((prev) => ({ ...prev, [statusFilter]: lastPage }))
-            updateComponentState(lastPageResponse)
-            return
-          }
-        }
-
-        // Normal case: update state
-        if (pageToFetch !== pagination.page) {
-          setPageByStatus((prev) => ({ ...prev, [statusFilter]: pageToFetch }))
-        }
-        updateComponentState(response)
-      } catch (err) {
-        if (isMountedRef.current) {
-          const errorClassification = classifyError(err)
-
-          if (errorClassification.shouldShowToast) {
-            toast.error(
-              t('documentPanel.documentManager.errors.loadFailed', {
-                error: errorMessage(err)
-              })
-            )
-          }
-
-          if (errorClassification.shouldRetry) {
-            recordFailure(err as Error)
-          }
-        }
-      } finally {
-        if (isMountedRef.current) {
-          setIsRefreshing(false)
-        }
-      }
-    },
-    [
-      statusFilter,
-      pagination.page,
-      pagination.page_size,
-      sortField,
-      sortDirection,
-      t,
-      updateComponentState,
-      withTimeout,
-      classifyError,
-      recordFailure
-    ]
-  )
-  useEffect(() => {
-    handleIntelligentRefreshRef.current = handleIntelligentRefresh
-  }, [handleIntelligentRefresh])
-
-  // New paginated data fetching function
-  const fetchPaginatedDocuments = useCallback(
-    async (
-      page: number,
-      _pageSize: number,
-      _statusFilter: StatusFilter // eslint-disable-line @typescript-eslint/no-unused-vars
-    ) => {
-      // Use intelligent refresh via ref to break dep cycle
-      await handleIntelligentRefreshRef.current(page)
-    },
-    []
-  )
-
-  // Legacy fetchDocuments function for backward compatibility
-  const fetchDocuments = useCallback(async () => {
-    await fetchPaginatedDocuments(pagination.page, pagination.page_size, statusFilter)
-  }, [fetchPaginatedDocuments, pagination.page, pagination.page_size, statusFilter])
-  useEffect(() => {
-    fetchDocumentsRef.current = fetchDocuments
-  }, [fetchDocuments])
-
-  // Function to clear current polling interval
-  const clearPollingInterval = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-      pollingIntervalRef.current = null
+    if (currentTab === 'documents' && health) {
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
     }
-  }, [])
-
-  // Function to start polling with given interval
-  const startPollingInterval = useCallback(
-    (intervalMs: number) => {
-      clearPollingInterval()
-
-      pollingIntervalRef.current = setInterval(async () => {
-        try {
-          // Check circuit breaker before making request
-          if (isCircuitBreakerOpenRef.current()) {
-            return // Skip this polling cycle
-          }
-
-          // Only perform fetch if component is still mounted
-          if (isMountedRef.current) {
-            await fetchDocumentsRef.current()
-            recordSuccess() // Record successful operation
-          }
-        } catch (err) {
-          // Only handle error if component is still mounted
-          if (isMountedRef.current) {
-            const errorClassification = classifyError(err)
-
-            // Always reset isRefreshing state on error
-            setIsRefreshing(false)
-
-            if (errorClassification.shouldShowToast) {
-              toast.error(
-                t('documentPanel.documentManager.errors.scanProgressFailed', {
-                  error: errorMessage(err)
-                })
-              )
-            }
-
-            if (errorClassification.shouldRetry) {
-              recordFailure(err as Error)
-
-              // Implement exponential backoff for retries
-              const backoffDelay = Math.min(2 ** retryState.count * 1000, 30000) // Max 30s
-
-              if (retryState.count < 3) {
-                // Max 3 retries
-                setTimeout(() => {
-                  if (isMountedRef.current) {
-                    setRetryState((prev) => ({ ...prev, isBackingOff: false }))
-                  }
-                }, backoffDelay)
-              }
-            } else {
-              // For non-retryable errors, stop polling
-              clearPollingInterval()
-            }
-          }
-        }
-      }, intervalMs)
-    },
-    [t, clearPollingInterval, recordSuccess, recordFailure, classifyError, retryState.count]
-  )
-
-  const hasActiveProcessing = useMemo(() => hasActiveDocumentsStatus(statusCounts), [statusCounts])
-
-  const scanDocuments = useCallback(async () => {
-    try {
-      // Check if component is still mounted before starting the request
-      if (!isMountedRef.current) return
-
-      const { status, message, track_id: _track_id } = await scanNewDocuments() // eslint-disable-line @typescript-eslint/no-unused-vars
-
-      // Check again if component is still mounted after the request completes
-      if (!isMountedRef.current) return
-
-      // Note: _track_id is available for future use (e.g., progress tracking)
-      toast.message(message || status)
-
-      // Reset health check timer with 1 second delay to avoid race condition
-      useBackendState.getState().resetHealthCheckTimerDelayed(1000)
-
-      // Start fast refresh with 2-second interval immediately after scan
-      startPollingInterval(2000)
-
-      // Set recovery timer to restore normal polling interval after 15 seconds
-      if (recoveryTimeoutRef.current) clearTimeout(recoveryTimeoutRef.current)
-      recoveryTimeoutRef.current = setTimeout(() => {
-        recoveryTimeoutRef.current = null
-        if (isMountedRef.current && currentTab === 'documents' && health) {
-          // Restore intelligent polling interval based on document status
-          const normalInterval = hasActiveProcessing ? 5000 : 30000
-          startPollingInterval(normalInterval)
-        }
-      }, 15000) // Restore after 15 seconds
-    } catch (err) {
-      // Only show error if component is still mounted
-      if (isMountedRef.current) {
-        toast.error(
-          t('documentPanel.documentManager.errors.scanFailed', {
-            error: errorMessage(err)
-          })
-        )
-      }
-    }
-  }, [t, startPollingInterval, currentTab, health, hasActiveProcessing])
-
-  // Retry failed documents
-  const retryFailedDocuments = useCallback(async () => {
-    try {
-      if (!isMountedRef.current || isRetrying) return
-
-      setIsRetrying(true)
-      const { status, message } = await reprocessFailedDocuments()
-
-      if (!isMountedRef.current) return
-
-      if (status === 'reprocessing_started') {
-        toast.success(
-          t('documentPanel.documentManager.retrySuccess', 'Retrying failed documents...')
-        )
-
-        // Reset health check timer and start fast polling
-        useBackendState.getState().resetHealthCheckTimerDelayed(1000)
-        startPollingInterval(2000)
-
-        // Restore normal polling after 15 seconds
-        if (recoveryTimeoutRef.current) clearTimeout(recoveryTimeoutRef.current)
-        recoveryTimeoutRef.current = setTimeout(() => {
-          recoveryTimeoutRef.current = null
-          if (isMountedRef.current && currentTab === 'documents' && health) {
-            const normalInterval = hasActiveProcessing ? 5000 : 30000
-            startPollingInterval(normalInterval)
-          }
-        }, 15000)
-      } else {
-        toast.error(
-          message || t('documentPanel.documentManager.retryFailed', 'Failed to retry documents')
-        )
-      }
-    } catch (err) {
-      if (isMountedRef.current) {
-        toast.error(
-          t('documentPanel.documentManager.errors.retryFailed', {
-            error: errorMessage(err)
-          })
-        )
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsRetrying(false)
-      }
-    }
-  }, [t, isRetrying, startPollingInterval, currentTab, health, hasActiveProcessing])
-
-  // Handle page size change - update state and save to store
-  const handlePageSizeChange = useCallback(
-    (newPageSize: number) => {
-      if (newPageSize === pagination.page_size) return
-
-      // Save the new page size to the store
-      setDocumentsPageSize(newPageSize)
-
-      // Reset all status filters to page 1 when page size changes
-      setPageByStatus({
-        all: 1,
-        processed: 1,
-        preprocessed: 1,
-        processing: 1,
-        pending: 1,
-        failed: 1
-      })
-
-      setPagination((prev) => ({ ...prev, page: 1, page_size: newPageSize }))
-    },
-    [pagination.page_size, setDocumentsPageSize]
-  )
-
-  // Monitor pipelineBusy changes and trigger immediate refresh with timer reset
-  useEffect(() => {
-    // Skip the first render when prevPipelineBusyRef is undefined
-    if (prevPipelineBusyRef.current !== undefined && prevPipelineBusyRef.current !== pipelineBusy) {
-      // pipelineBusy state has changed, trigger immediate refresh
-      if (currentTab === 'documents' && health && isMountedRef.current) {
-        // Use intelligent refresh to preserve current page
-        handleIntelligentRefreshRef.current()
-
-        // Reset polling timer after intelligent refresh
-        const pollingInterval = hasActiveProcessing ? 5000 : 30000
-        startPollingInterval(pollingInterval)
-      }
-    }
-    // Update the previous state
-    prevPipelineBusyRef.current = pipelineBusy
-  }, [pipelineBusy, currentTab, health, hasActiveProcessing, startPollingInterval])
-
-  // Set up intelligent polling with dynamic interval based on document status
-  useEffect(() => {
-    if (currentTab !== 'documents' || !health) {
-      clearPollingInterval()
-      return
-    }
-
-    // Determine polling interval based on document status
-    const hasActiveDocuments = hasActiveProcessing
-    const pollingInterval = hasActiveDocuments ? 5000 : 30000 // 5s if active, 30s if idle
-
-    startPollingInterval(pollingInterval)
-
-    return () => {
-      clearPollingInterval()
-    }
-  }, [health, currentTab, hasActiveProcessing, startPollingInterval, clearPollingInterval])
+  }, [pipelineBusy, currentTab, health, queryClient])
 
   // Trigger a backend health check whenever the status counts shift, so the
   // global pipeline indicator stays in sync with the actively-changing documents.
@@ -989,7 +511,7 @@ export default function DocumentManager() {
       Object.keys(newStatusCounts) as Array<keyof typeof newStatusCounts>
     ).some((status) => newStatusCounts[status] !== prevStatusCounts.current[status])
 
-    if (hasStatusCountChange && isMountedRef.current) {
+    if (hasStatusCountChange) {
       useBackendState.getState().check()
     }
 
@@ -999,73 +521,64 @@ export default function DocumentManager() {
   // Handle page change - only update state
   const handlePageChange = useCallback(
     (newPage: number) => {
-      if (newPage === pagination.page) return
+      if (newPage === page) return
 
-      // Save the new page for current status filter
       setPageByStatus((prev) => ({ ...prev, [statusFilter]: newPage }))
-      setPagination((prev) => ({ ...prev, page: newPage }))
+      setPage(newPage)
     },
-    [pagination.page, statusFilter]
+    [page, statusFilter]
   )
 
-  // Handle status filter change - only update state
+  // Handle page size change - update store + reset all filters back to page 1.
+  const handlePageSizeChange = useCallback(
+    (newPageSize: number) => {
+      if (newPageSize === documentsPageSize) return
+      setDocumentsPageSize(newPageSize)
+      setPageByStatus({
+        all: 1,
+        processed: 1,
+        preprocessed: 1,
+        processing: 1,
+        pending: 1,
+        failed: 1
+      })
+      setPage(1)
+    },
+    [documentsPageSize, setDocumentsPageSize]
+  )
+
+  // Handle status filter change - update local page intent.
   const handleStatusFilterChange = useCallback(
     (newStatusFilter: StatusFilter) => {
       if (newStatusFilter === statusFilter) return
-
-      // Save current page for the current status filter
-      setPageByStatus((prev) => ({ ...prev, [statusFilter]: pagination.page }))
-
-      // Get the saved page for the new status filter
-      const newPage = pageByStatus[newStatusFilter]
-
-      // Update status filter and restore the saved page
+      setPageByStatus((prev) => ({ ...prev, [statusFilter]: page }))
       setStatusFilter(newStatusFilter)
-      setPagination((prev) => ({ ...prev, page: newPage }))
+      setPage(pageByStatus[newStatusFilter])
     },
-    [statusFilter, pagination.page, pageByStatus]
+    [statusFilter, page, pageByStatus]
   )
 
-  // Handle documents deleted callback
+  // Handle documents deleted callback. Drop selection and let the query refresh.
   const handleDocumentsDeleted = useCallback(async () => {
     setSelectedDocIds([])
-
-    // Reset health check timer with 1 second delay to avoid race condition
     useBackendState.getState().resetHealthCheckTimerDelayed(1000)
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+  }, [queryClient])
 
-    // Schedule a health check 2 seconds after successful clear
-    startPollingInterval(2000)
-  }, [startPollingInterval])
-
-  // Handle documents cleared callback with proper interval reset
+  // Handle documents cleared callback. Reset to page 1 and force a refetch.
   const handleDocumentsCleared = useCallback(async () => {
-    // Clear current polling interval
-    clearPollingInterval()
-
-    // Reset status counts to ensure proper state
-    setStatusCounts({
-      all: 0,
-      processed: 0,
-      processing: 0,
-      pending: 0,
-      failed: 0
+    setSelectedDocIds([])
+    setPage(1)
+    setPageByStatus({
+      all: 1,
+      processed: 1,
+      preprocessed: 1,
+      processing: 1,
+      pending: 1,
+      failed: 1
     })
-
-    // Perform one immediate refresh to confirm clear operation
-    if (isMountedRef.current) {
-      try {
-        await fetchDocuments()
-      } catch (err) {
-        console.error('Error fetching documents after clear:', err)
-      }
-    }
-
-    // Set appropriate polling interval based on current state
-    // Since documents are cleared, use idle interval (30 seconds)
-    if (currentTab === 'documents' && health && isMountedRef.current) {
-      startPollingInterval(30000) // 30 seconds for idle state
-    }
-  }, [clearPollingInterval, fetchDocuments, currentTab, health, startPollingInterval])
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+  }, [queryClient])
 
   // Handle showFileName change - switch sort field if currently sorting by first column
   useEffect(() => {
@@ -1078,26 +591,11 @@ export default function DocumentManager() {
     }
   }, [showFileName, sortField])
 
-  // Reset selection state when page, status filter, or sort changes
+  // Reset selection state when page, status filter, or sort changes.
+  // The actual data fetch lives in useDocumentListQuery which keys off the same params.
   useEffect(() => {
     setSelectedDocIds([])
-  }, [pagination.page, statusFilter, sortField, sortDirection])
-
-  // Central effect to handle all data fetching
-  useEffect(() => {
-    if (currentTab === 'documents') {
-      fetchPaginatedDocuments(pagination.page, pagination.page_size, statusFilter)
-    }
-  }, [
-    currentTab,
-    pagination.page,
-    pagination.page_size,
-    statusFilter,
-    sortField,
-    sortDirection,
-    fetchPaginatedDocuments,
-    documentListVersion
-  ])
+  }, [page, statusFilter, sortField, sortDirection])
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -1214,7 +712,7 @@ export default function DocumentManager() {
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={scanDocuments}
+                onClick={() => scanMutation.mutate()}
                 side="bottom"
                 tooltip={t('documentPanel.documentManager.scanTooltip')}
                 size="sm"
@@ -1235,7 +733,7 @@ export default function DocumentManager() {
               {failedCount > 0 && (
                 <Button
                   variant="outline"
-                  onClick={retryFailedDocuments}
+                  onClick={() => retryMutation.mutate()}
                   side="bottom"
                   tooltip={t(
                     'documentPanel.documentManager.retryFailedTooltip',
@@ -1325,7 +823,9 @@ export default function DocumentManager() {
                 <ClearDocumentsDialog onDocumentsCleared={handleDocumentsCleared} />
               ) : null}
               <UploadDocumentsDialog
-                onDocumentsUploaded={fetchDocuments}
+                onDocumentsUploaded={() =>
+                  queryClient.invalidateQueries({ queryKey: ['documents'] })
+                }
                 open={uploadDialogOpen}
                 onOpenChange={setUploadDialogOpen}
               />
@@ -1342,7 +842,7 @@ export default function DocumentManager() {
                 <CardTitle>{t('documentPanel.documentManager.uploadedTitle')}</CardTitle>
                 <LastUpdated
                   timestamp={lastFetchTime}
-                  onRefresh={fetchDocuments}
+                  onRefresh={() => documentsQuery.refetch()}
                   isRefreshing={isRefreshing}
                 />
               </div>

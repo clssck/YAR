@@ -1064,9 +1064,12 @@ export const getTrackStatus = async (trackId: string): Promise<TrackStatusRespon
  * @returns Promise with paginated documents response
  */
 export const getDocumentsPaginated = async (
-  request: DocumentsRequest
+  request: DocumentsRequest,
+  options?: { signal?: AbortSignal }
 ): Promise<PaginatedDocsResponse> => {
-  const response = await axiosInstance.post('/documents/paginated', request)
+  const response = await axiosInstance.post('/documents/paginated', request, {
+    signal: options?.signal
+  })
   return response.data
 }
 
