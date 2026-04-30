@@ -4,12 +4,12 @@ import {
   FolderIcon,
   GripVerticalIcon,
   HardDriveIcon,
-  Loader2Icon,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { S3ObjectInfo } from '@/api/yar'
 import { s3FolderStats } from '@/api/yar'
+import LoadingState from '@/components/ui/LoadingState'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import {
   Sheet,
@@ -173,7 +173,7 @@ export default function FolderDetails({
         <div className="flex-1 mt-4 min-h-0 overflow-hidden px-6 pb-6">
           {isLoading ? (
             <div className="flex items-center justify-center h-full">
-              <Loader2Icon className="h-8 w-8 animate-spin text-muted-foreground" />
+              <LoadingState variant="centered" size="lg" />
             </div>
           ) : isError ? (
             <div className="flex flex-col items-center justify-center h-full text-destructive gap-2">

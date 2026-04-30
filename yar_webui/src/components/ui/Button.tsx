@@ -95,6 +95,21 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 )
 Button.displayName = 'Button'
 
+/**
+ * ControlButton: ghost-variant icon button for graph/sidebar toolbars.
+ *
+ * Bundles the `variant="ghost" size="icon"` repetition that several graph
+ * toolbar buttons (ZoomControl, LegendButton, OrphanConnectionControl,
+ * LayoutsControl, GraphLabels, FullScreenControl) all share.
+ */
+const ControlButton = React.forwardRef<
+  HTMLButtonElement,
+  Omit<ButtonProps, 'variant' | 'size'>
+>((props, ref) => <Button ref={ref} variant="ghost" size="icon" {...props} />)
+ControlButton.displayName = 'ControlButton'
+
+export { ControlButton }
+
 export type ButtonVariantType = Exclude<
   NonNullable<Parameters<typeof buttonVariants>[0]>['variant'],
   undefined

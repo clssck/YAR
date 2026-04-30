@@ -2,8 +2,7 @@ import { Link } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import Button from '@/components/ui/Button'
-import { controlButtonVariant } from '@/lib/constants'
+import { ControlButton } from '@/components/ui/Button'
 import { useBackendState } from '@/stores/state'
 import OrphanConnectionDialog from './OrphanConnectionDialog'
 
@@ -23,14 +22,12 @@ export default function OrphanConnectionControl() {
 
   return (
     <>
-      <Button
-        variant={controlButtonVariant}
+      <ControlButton
         tooltip={t('graphPanel.orphanConnection.tooltip')}
-        size="icon"
         onClick={() => setShowDialog(true)}
       >
         <Link />
-      </Button>
+      </ControlButton>
       <OrphanConnectionDialog open={showDialog} onOpenChange={setShowDialog} />
     </>
   )

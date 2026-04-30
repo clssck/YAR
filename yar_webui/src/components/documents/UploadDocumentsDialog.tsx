@@ -10,7 +10,6 @@ import type { FileRejection } from 'react-dropzone'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { type ChunkingPreset, uploadDocument } from '@/api/yar'
-import { useBackendState } from '@/stores/state'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
@@ -30,6 +29,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select'
 import { cn, errorMessage } from '@/lib/utils'
+import { useBackendState } from '@/stores/state'
 
 interface UploadDocumentsDialogProps {
   onDocumentsUploaded?: () => Promise<void>
@@ -204,7 +204,6 @@ export default function UploadDocumentsDialog({
               }))
               failedCount++
             } else {
-
               // Refresh document list immediately so the doc appears as processing
               onDocumentsUploaded?.().catch((err) => {
                 console.error('Error refreshing documents:', err)

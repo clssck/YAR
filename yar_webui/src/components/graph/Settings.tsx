@@ -1,7 +1,7 @@
 import { SettingsIcon, Shuffle, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Button from '@/components/ui/Button'
+import Button, { ControlButton } from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
 import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import Input from '@/components/ui/Input'
@@ -11,7 +11,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/Popover'
 import useRandomGraph from '@/hooks/useRandomGraph'
-import { controlButtonVariant } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -289,13 +288,9 @@ export default function Settings() {
   return (
     <Popover open={opened} onOpenChange={setOpened}>
       <PopoverTrigger asChild>
-        <Button
-          variant={controlButtonVariant}
-          tooltip={t('graphPanel.sideBar.settings.settings')}
-          size="icon"
-        >
+        <ControlButton tooltip={t('graphPanel.sideBar.settings.settings')}>
           <SettingsIcon />
-        </Button>
+        </ControlButton>
       </PopoverTrigger>
       <PopoverContent
         side="right"

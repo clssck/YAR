@@ -5,7 +5,6 @@ import {
   FileTextIcon,
   GripVerticalIcon,
   ImageIcon,
-  Loader2Icon,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -18,6 +17,7 @@ import {
 import remarkGfm from 'remark-gfm'
 import { s3GetContentBlob, s3GetContentText } from '@/api/yar'
 import Button from '@/components/ui/Button'
+import LoadingState from '@/components/ui/LoadingState'
 import { ScrollArea } from '@/components/ui/ScrollArea'
 import {
   Sheet,
@@ -399,7 +399,7 @@ export default function FileViewer({
         <div className="flex-1 mt-4 min-h-0 overflow-hidden px-6 pb-6">
           {loading ? (
             <div className="flex items-center justify-center h-full">
-              <Loader2Icon className="h-8 w-8 animate-spin text-muted-foreground" />
+              <LoadingState variant="centered" size="lg" />
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-full text-destructive gap-2">

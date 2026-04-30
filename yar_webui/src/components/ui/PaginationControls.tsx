@@ -72,8 +72,8 @@ export default function PaginationControls({
     }
   }, [inputPage, totalPages, onPageChange, currentPage])
 
-  // Handle page input key press
-  const handlePageInputKeyPress = useCallback(
+  // Handle page input key down
+  const handlePageInputKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') {
         handlePageInputSubmit()
@@ -142,11 +142,14 @@ export default function PaginationControls({
               value={inputPage}
               onChange={(e) => handlePageInputChange(e.target.value)}
               onBlur={handlePageInputSubmit}
-              onKeyPress={handlePageInputKeyPress}
+              onKeyDown={handlePageInputKeyDown}
+              aria-label={t('pagination.pageInputLabel')}
               disabled={isLoading}
               className="h-8 w-12 text-center text-sm"
             />
-            <span className="text-sm text-gray-500">/ {totalPages}</span>
+            <span className="text-sm text-muted-foreground">
+              / {totalPages}
+            </span>
           </div>
 
           <Button
@@ -182,7 +185,7 @@ export default function PaginationControls({
 
   return (
     <div className={cn('flex items-center justify-between gap-4', className)}>
-      <div className="text-sm text-gray-500">
+      <div className="text-sm text-muted-foreground">
         {t('pagination.showing', {
           start: Math.min((currentPage - 1) * pageSize + 1, totalCount),
           end: Math.min(currentPage * pageSize, totalCount),
@@ -221,7 +224,8 @@ export default function PaginationControls({
               value={inputPage}
               onChange={(e) => handlePageInputChange(e.target.value)}
               onBlur={handlePageInputSubmit}
-              onKeyPress={handlePageInputKeyPress}
+              onKeyDown={handlePageInputKeyDown}
+              aria-label={t('pagination.pageInputLabel')}
               disabled={isLoading}
               className="h-8 w-16 text-center text-sm"
             />

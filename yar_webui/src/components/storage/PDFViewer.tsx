@@ -8,7 +8,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpIcon,
-  Loader2Icon,
   Maximize2Icon,
   MaximizeIcon,
   MinimizeIcon,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import LoadingState from '@/components/ui/LoadingState'
 import { cn } from '@/lib/utils'
 
 // Configure pdf.js worker
@@ -486,7 +486,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
       >
         {loading && (
           <div className="flex items-center justify-center h-full">
-            <Loader2Icon className="h-8 w-8 animate-spin text-muted-foreground" />
+            <LoadingState variant="centered" size="lg" />
           </div>
         )}
 
@@ -524,7 +524,7 @@ export default function PDFViewer({ url }: PDFViewerProps) {
                   }
                   loading={
                     <div className="flex items-center justify-center p-8">
-                      <Loader2Icon className="h-6 w-6 animate-spin text-muted-foreground" />
+                      <LoadingState variant="centered" size="lg" />
                     </div>
                   }
                 />

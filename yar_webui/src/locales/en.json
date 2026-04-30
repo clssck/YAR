@@ -130,7 +130,9 @@
         "removeFile": "Remove file",
         "uploadDescription": "You can upload {{isMultiple ? 'multiple' : count}} files (up to {{maxSize}} each)",
         "duplicateFile": "File name already exists in server cache"
-      }
+      },
+      "uploadMore": "Upload More",
+      "done": "Done"
     },
     "documentManager": {
       "title": "Document Management",
@@ -385,9 +387,18 @@
       "rerankerBindingHost": "Reranker Endpoint",
       "rerankerModel": "Reranker Model",
       "lockStatus": "Lock Status",
-      "threshold": "Threshold"
+      "threshold": "Threshold",
+      "sections": {
+        "display": "Display",
+        "interaction": "Interaction",
+        "edges": "Edge Sizing",
+        "query": "Query",
+        "filtering": "Filtering",
+        "system": "System"
+      }
     },
     "propertiesView": {
+      "closePanel": "Close properties panel",
       "editProperty": "Edit {{property}}",
       "editPropertyDescription": "Edit the property value in the text area below.",
       "errors": {
@@ -426,6 +437,8 @@
         "noNewNodes": "No expandable nodes found",
         "inDatabase": "in database",
         "loadConnections": "Load {{count}} connection(s)",
+        "hidden": "hidden",
+        "hiddenConnectionsTooltip": "This node has {{count}} additional connections in the database that are not currently visible. Click \"Load connections\" below to expand.",
         "propertyNames": {
           "description": "Description",
           "entity_id": "Name",
@@ -448,7 +461,16 @@
     },
     "search": {
       "placeholder": "Search nodes in page...",
-      "message": "And {{count}} others"
+      "message": "And {{count}} others",
+      "focusShortcut": "Focus node search"
+    },
+    "stats": {
+      "nodes": "nodes",
+      "edges": "edges"
+    },
+    "loading": {
+      "switchingTheme": "Switching theme...",
+      "fetchingData": "Loading graph data..."
     },
     "graphLabels": {
       "selectTooltip": "Get subgraph of a node (label)",
@@ -511,6 +533,14 @@
     },
     "querySettings": {
       "parametersTitle": "Parameters",
+      "presets": {
+        "fast": "Fast",
+        "fastTooltip": "Quick responses with fewer results",
+        "balanced": "Balanced",
+        "balancedTooltip": "Balanced speed and quality",
+        "thorough": "Thorough",
+        "thoroughTooltip": "Comprehensive search with more context"
+      },
       "parametersDescription": "Configure your query parameters",
       "queryMode": "Query Mode",
       "queryModeTooltip": "Select the retrieval strategy:\n• Naive: Traditional text chunk vector retrieval\n• Local: Focus on entity retrieval\n• Global: Focus on relationship retrieval\n• Hybrid: Local+Global\n• Mix: Local+Global+Naive\n• Bypass: Skip retrieval, send conversation history and current question to LLM",
@@ -658,7 +688,8 @@
     "firstPage": "First Page",
     "prevPage": "Previous Page",
     "nextPage": "Next Page",
-    "lastPage": "Last Page"
+    "lastPage": "Last Page",
+    "pageInputLabel": "Page number"
   },
   "shortcutHelp": {
     "title": "Keyboard Shortcuts",

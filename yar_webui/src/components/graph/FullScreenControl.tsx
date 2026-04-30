@@ -1,8 +1,7 @@
 import { useFullScreen } from '@react-sigma/core'
 import { MaximizeIcon, MinimizeIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import Button from '@/components/ui/Button'
-import { controlButtonVariant } from '@/lib/constants'
+import { ControlButton } from '@/components/ui/Button'
 
 /**
  * Component that toggles full screen mode.
@@ -12,27 +11,16 @@ const FullScreenControl = () => {
   const { t } = useTranslation()
 
   return (
-    <>
-      {isFullScreen ? (
-        <Button
-          variant={controlButtonVariant}
-          onClick={toggle}
-          tooltip={t('graphPanel.sideBar.fullScreenControl.windowed')}
-          size="icon"
-        >
-          <MinimizeIcon />
-        </Button>
-      ) : (
-        <Button
-          variant={controlButtonVariant}
-          onClick={toggle}
-          tooltip={t('graphPanel.sideBar.fullScreenControl.fullScreen')}
-          size="icon"
-        >
-          <MaximizeIcon />
-        </Button>
+    <ControlButton
+      onClick={toggle}
+      tooltip={t(
+        isFullScreen
+          ? 'graphPanel.sideBar.fullScreenControl.windowed'
+          : 'graphPanel.sideBar.fullScreenControl.fullScreen',
       )}
-    </>
+    >
+      {isFullScreen ? <MinimizeIcon /> : <MaximizeIcon />}
+    </ControlButton>
   )
 }
 

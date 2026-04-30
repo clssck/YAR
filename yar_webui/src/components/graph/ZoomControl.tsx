@@ -8,8 +8,7 @@ import {
 } from 'lucide-react'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import Button from '@/components/ui/Button'
-import { controlButtonVariant } from '@/lib/constants'
+import { ControlButton } from '@/components/ui/Button'
 
 /**
  * Component that provides zoom controls for the graph viewer.
@@ -71,48 +70,38 @@ const ZoomControl = () => {
 
   return (
     <>
-      <Button
-        variant={controlButtonVariant}
+      <ControlButton
         onClick={handleRotate}
         tooltip={t('graphPanel.sideBar.zoomControl.rotateCamera')}
-        size="icon"
       >
         <RotateCwIcon />
-      </Button>
-      <Button
-        variant={controlButtonVariant}
+      </ControlButton>
+      <ControlButton
         onClick={handleRotateCounterClockwise}
         tooltip={t(
           'graphPanel.sideBar.zoomControl.rotateCameraCounterClockwise',
         )}
-        size="icon"
       >
         <RotateCcwIcon />
-      </Button>
-      <Button
-        variant={controlButtonVariant}
+      </ControlButton>
+      <ControlButton
         onClick={handleResetZoom}
         tooltip={t('graphPanel.sideBar.zoomControl.resetZoom')}
-        size="icon"
       >
         <FullscreenIcon />
-      </Button>
-      <Button
-        variant={controlButtonVariant}
+      </ControlButton>
+      <ControlButton
         onClick={handleZoomIn}
         tooltip={t('graphPanel.sideBar.zoomControl.zoomIn')}
-        size="icon"
       >
         <ZoomInIcon />
-      </Button>
-      <Button
-        variant={controlButtonVariant}
+      </ControlButton>
+      <ControlButton
         onClick={handleZoomOut}
         tooltip={t('graphPanel.sideBar.zoomControl.zoomOut')}
-        size="icon"
       >
         <ZoomOutIcon />
-      </Button>
+      </ControlButton>
     </>
   )
 }

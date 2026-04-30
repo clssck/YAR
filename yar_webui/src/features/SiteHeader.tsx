@@ -106,9 +106,7 @@ export default function SiteHeader() {
         </a>
         {webuiTitle && (
           <div className="flex items-center">
-            <span className="mx-1 text-xs text-gray-500 dark:text-gray-400">
-              |
-            </span>
+            <span className="mx-1 text-xs text-muted-foreground">|</span>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>

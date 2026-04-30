@@ -175,7 +175,7 @@ export default function UserPromptInputWithHistory({
           >
             <ChevronDown
               className={cn(
-                'h-3 w-3 transition-transform duration-200 text-gray-500',
+                'h-3 w-3 transition-transform duration-200 text-muted-foreground',
                 isOpen && 'rotate-180',
               )}
             />
@@ -211,7 +211,7 @@ export default function UserPromptInputWithHistory({
                   className="flex-shrink-0 p-0 rounded hover:bg-red-100 dark:hover:bg-red-800 transition-colors focus:outline-none ml-auto"
                   title="Delete this history item"
                 >
-                  <X className="h-3 w-3 text-gray-400 hover:text-red-500" />
+                  <X className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                 </button>
               )}
             </div>

@@ -8,6 +8,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/Command'
+import DefaultLoadingSkeleton from '@/components/ui/DefaultLoadingSkeleton'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 
@@ -236,21 +237,5 @@ export function AsyncSearch<T>({
         </CommandList>
       </Command>
     </div>
-  )
-}
-
-function DefaultLoadingSkeleton() {
-  return (
-    <CommandGroup>
-      <CommandItem disabled>
-        <div className="flex w-full items-center gap-2">
-          <div className="bg-muted h-6 w-6 animate-pulse rounded-full" />
-          <div className="flex flex-1 flex-col gap-1">
-            <div className="bg-muted h-4 w-24 animate-pulse rounded" />
-            <div className="bg-muted h-3 w-16 animate-pulse rounded" />
-          </div>
-        </div>
-      </CommandItem>
-    </CommandGroup>
   )
 }

@@ -2,6 +2,7 @@ import { GitBranchPlus, Link, Scissors, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PropertyValue } from '@/api/yar'
+import { useTranslatedPropertyName } from '@/components/graph/propertyName'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Text from '@/components/ui/Text'
@@ -41,6 +42,7 @@ const asNumber = (value: PropertyValue | undefined): number => {
  * Component that view properties of elements in graph.
  */
 const PropertiesView = () => {
+  const { t } = useTranslation()
   const { getNode, getEdge } = useYarGraph()
   const selectedNode = useGraphStore.use.selectedNode()
   const focusedNode = useGraphStore.use.focusedNode()
@@ -117,7 +119,10 @@ const PropertiesView = () => {
         type="button"
         onClick={handleClose}
         className="absolute top-2 right-2 z-10 p-1 rounded-full hover:bg-primary/10 transition-colors"
-        aria-label="Close properties panel"
+        aria-label={t(
+          'graphPanel.propertiesView.closePanel',
+          'Close properties panel',
+        )}
       >
         <X className="h-4 w-4 text-muted-foreground" />
       </button>
@@ -265,13 +270,7 @@ const PropertyRow = ({
   isEditable?: boolean
   truncate?: string
 }) => {
-  const { t } = useTranslation()
-
-  const getPropertyNameTranslation = (name: string) => {
-    const translationKey = `graphPanel.propertiesView.node.propertyNames.${name}`
-    const translation = t(translationKey)
-    return translation === translationKey ? name : translation
-  }
+  const translatePropertyName = useTranslatedPropertyName()
 
   // Utility function to convert <SEP> to newlines
   const formatValueWithSeparators = (val: PropertyValue): string => {
@@ -323,7 +322,7 @@ const PropertyRow = ({
   return (
     <div className="flex items-center gap-2">
       <span className="text-primary/60 tracking-wide whitespace-nowrap">
-        {getPropertyNameTranslation(name)}
+        {translatePropertyName(name)}
         {name === 'source_id' && truncate && (
           <sup className="text-red-500">†</sup>
         )}

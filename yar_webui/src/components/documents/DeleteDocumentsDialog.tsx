@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { deleteDocuments } from '@/api/yar'
 import Button from '@/components/ui/Button'
+import Checkbox from '@/components/ui/Checkbox'
 import {
   Dialog,
   DialogContent,
@@ -214,13 +215,11 @@ export default function DeleteDocumentsDialog({
             {/* Options */}
             <div className="space-y-3 pt-2">
               <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="delete-file"
                   checked={deleteFile}
-                  onChange={(e) => setDeleteFile(e.target.checked)}
+                  onCheckedChange={(checked) => setDeleteFile(checked === true)}
                   disabled={isDeleting}
-                  className="h-4 w-4 rounded border-input focus:ring-2 focus:ring-ring"
                 />
                 <Label htmlFor="delete-file" className="text-sm cursor-pointer">
                   {t('documentPanel.deleteDocuments.deleteFileOption')}
@@ -228,13 +227,13 @@ export default function DeleteDocumentsDialog({
               </div>
 
               <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="delete-llm-cache"
                   checked={deleteLLMCache}
-                  onChange={(e) => setDeleteLLMCache(e.target.checked)}
+                  onCheckedChange={(checked) =>
+                    setDeleteLLMCache(checked === true)
+                  }
                   disabled={isDeleting}
-                  className="h-4 w-4 rounded border-input focus:ring-2 focus:ring-ring"
                 />
                 <Label
                   htmlFor="delete-llm-cache"

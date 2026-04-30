@@ -1,6 +1,6 @@
 import { PencilIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
 import type { PropertyValue as PropertyValueType } from '@/api/yar'
+import { useTranslatedPropertyName } from '@/components/graph/propertyName'
 import Text from '@/components/ui/Text'
 
 interface PropertyNameProps {
@@ -8,17 +8,11 @@ interface PropertyNameProps {
 }
 
 export const PropertyName = ({ name }: PropertyNameProps) => {
-  const { t } = useTranslation()
-
-  const getPropertyNameTranslation = (propName: string) => {
-    const translationKey = `graphPanel.propertiesView.node.propertyNames.${propName}`
-    const translation = t(translationKey)
-    return translation === translationKey ? propName : translation
-  }
+  const translatePropertyName = useTranslatedPropertyName()
 
   return (
     <span className="text-primary/60 tracking-wide whitespace-nowrap">
-      {getPropertyNameTranslation(name)}
+      {translatePropertyName(name)}
     </span>
   )
 }
@@ -30,7 +24,7 @@ interface EditIconProps {
 export const EditIcon = ({ onClick }: EditIconProps) => (
   <div>
     <PencilIcon
-      className="h-3 w-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+      className="h-3 w-3 text-muted-foreground hover:text-foreground cursor-pointer"
       onClick={onClick}
     />
   </div>

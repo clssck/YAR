@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { animateNodes } from 'sigma/utils'
 import { toast } from 'sonner'
 import Badge from '@/components/ui/Badge'
-import Button from '@/components/ui/Button'
+import { ControlButton } from '@/components/ui/Button'
 import {
   Command,
   CommandGroup,
@@ -34,7 +34,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/Popover'
-import { controlButtonVariant } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -248,15 +247,13 @@ const WorkerLayoutControl = ({
 
   return (
     <div className="relative">
-      <Button
-        size="icon"
+      <ControlButton
         onClick={handleClick}
         tooltip={
           isRunning
             ? `${t('graphPanel.sideBar.layoutsControl.stopAnimation')} (${iterationCount})`
             : t('graphPanel.sideBar.layoutsControl.startAnimation')
         }
-        variant={controlButtonVariant}
         className={cn(
           isRunning &&
             'ring-2 ring-primary ring-offset-1 ring-offset-background',
@@ -267,7 +264,7 @@ const WorkerLayoutControl = ({
         ) : (
           <PlayIcon />
         )}
-      </Button>
+      </ControlButton>
       {/* Running indicator badge */}
       {isRunning && (
         <Badge
@@ -411,14 +408,12 @@ const LayoutsControl = () => {
       <div>
         <Popover open={opened} onOpenChange={setOpened}>
           <PopoverTrigger asChild>
-            <Button
-              size="icon"
-              variant={controlButtonVariant}
+            <ControlButton
               onClick={() => setOpened((e: boolean) => !e)}
               tooltip={`${t('graphPanel.sideBar.layoutsControl.layoutGraph')}: ${t(`graphPanel.sideBar.layoutsControl.layouts.${layout}`)}`}
             >
               <GripIcon />
-            </Button>
+            </ControlButton>
           </PopoverTrigger>
           <PopoverContent
             side="right"

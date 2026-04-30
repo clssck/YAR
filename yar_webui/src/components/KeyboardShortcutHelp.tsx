@@ -1,5 +1,5 @@
 import { KeyboardIcon } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ONBOARDING_KEY,
@@ -89,17 +89,6 @@ export function KeyboardShortcutHelp() {
     description: 'shortcutHelp.openHelp',
     ignoreInputs: true,
   })
-
-  // Register Escape to close
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) {
-        setOpen(false)
-      }
-    }
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [open])
 
   // Group shortcuts by category
   const shortcutsByCategory = CATEGORY_ORDER.reduce(

@@ -1,8 +1,7 @@
 import { BookOpenIcon } from 'lucide-react'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import Button from '@/components/ui/Button'
-import { controlButtonVariant } from '@/lib/constants'
+import { ControlButton } from '@/components/ui/Button'
 import { useSettingsStore } from '@/stores/settings'
 
 /**
@@ -18,14 +17,12 @@ const LegendButton = () => {
   }, [showLegend, setShowLegend])
 
   return (
-    <Button
-      variant={controlButtonVariant}
+    <ControlButton
       onClick={toggleLegend}
       tooltip={t('graphPanel.sideBar.legendControl.toggleLegend')}
-      size="icon"
     >
       <BookOpenIcon />
-    </Button>
+    </ControlButton>
   )
 }
 

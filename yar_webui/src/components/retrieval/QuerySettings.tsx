@@ -146,7 +146,7 @@ export default function QuerySettings() {
             className="mr-1 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             title={title}
           >
-            <RotateCcw className="h-3 w-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+            <RotateCcw className="h-3 w-3 text-muted-foreground hover:text-foreground" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="left">

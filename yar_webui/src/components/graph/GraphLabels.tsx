@@ -3,11 +3,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getPopularLabels } from '@/api/yar'
 import LabelSelector from '@/components/graph/LabelSelector'
-import Button from '@/components/ui/Button'
-import {
-  controlButtonVariant,
-  popularLabelsDefaultLimit,
-} from '@/lib/constants'
+import { ControlButton } from '@/components/ui/Button'
+import { popularLabelsDefaultLimit } from '@/lib/constants'
 import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import { useBackendState } from '@/stores/state'
@@ -71,9 +68,7 @@ const GraphLabels = () => {
 
   return (
     <div className="flex items-center">
-      <Button
-        size="icon"
-        variant={controlButtonVariant}
+      <ControlButton
         onClick={handleRefresh}
         tooltip={t('graphPanel.graphLabels.refreshGlobalTooltip')}
         className="mr-2"
@@ -82,7 +77,7 @@ const GraphLabels = () => {
         <RefreshCw
           className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
         />
-      </Button>
+      </ControlButton>
       <LabelSelector
         value={label}
         onChange={handleLabelChange}
