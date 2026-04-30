@@ -96,6 +96,18 @@ def test_wildcard_knowledge_graph_counts_incoming_and_outgoing_degree():
     assert 'OPTIONAL MATCH (n)-[r]->() RETURN id(n) as node_id, count(r) as degree' not in source
 
 
+def test_batch_node_edges_uses_single_undirected_traversal():
+    """Batch edge lookup should avoid separate incoming/outgoing AGE round trips."""
+    from yar.kg.postgres_impl import PGGraphStorage
+
+    source = inspect.getsource(PGGraphStorage.get_nodes_edges_batch)
+    assert 'MATCH (n)-[r]-(connected:base)' in source
+    assert 'startNode(r).entity_id AS source_id' in source
+    assert 'endNode(r).entity_id AS target_id' in source
+    assert 'outgoing_cypher' not in source
+    assert 'incoming_cypher' not in source
+
+
 def check_env_file():
     """
     Check if the .env file exists and issue a warning if it does not.

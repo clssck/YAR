@@ -6277,29 +6277,19 @@ class PGGraphStorage(BaseGraphStorage):
             batch = unique_ids[i : i + batch_size]
             cy_params = {'params': json.dumps({'node_ids': batch}, ensure_ascii=False)}
 
-            outgoing_cypher = """UNWIND $node_ids AS node_id
+            cypher = """UNWIND $node_ids AS node_id
                          MATCH (n:base {entity_id: node_id})
-                         OPTIONAL MATCH (n:base)-[]->(connected:base)
-                         RETURN node_id, connected.entity_id AS connected_id"""
-            outgoing_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(outgoing_cypher)}, $1::agtype) AS (node_id text, connected_id text)'
+                         MATCH (n)-[r]-(connected:base)
+                         RETURN node_id,
+                                startNode(r).entity_id AS source_id,
+                                endNode(r).entity_id AS target_id"""
+            query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (node_id text, source_id text, target_id text)'
 
-            incoming_cypher = """UNWIND $node_ids AS node_id
-                         MATCH (n:base {entity_id: node_id})
-                         OPTIONAL MATCH (n:base)<-[]-(connected:base)
-                         RETURN node_id, connected.entity_id AS connected_id"""
-            incoming_query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(incoming_cypher)}, $1::agtype) AS (node_id text, connected_id text)'
+            results = await self._query(query, params=cy_params)
 
-            outgoing_results, incoming_results = await asyncio.gather(
-                self._query(outgoing_query, params=cy_params), self._query(incoming_query, params=cy_params)
-            )
-
-            for result in outgoing_results:
-                if result['node_id'] and result['connected_id']:
-                    edges_norm[result['node_id']].append((result['node_id'], result['connected_id']))
-
-            for result in incoming_results:
-                if result['node_id'] and result['connected_id']:
-                    edges_norm[result['node_id']].append((result['connected_id'], result['node_id']))
+            for result in results:
+                if result['node_id'] and result['source_id'] and result['target_id']:
+                    edges_norm[result['node_id']].append((result['source_id'], result['target_id']))
 
         out: dict[str, list[tuple[str, str]]] = {}
         for orig in node_ids:
