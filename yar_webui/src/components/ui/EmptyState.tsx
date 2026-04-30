@@ -2,7 +2,6 @@ import {
   FileUp,
   FolderOpen,
   type LucideIcon,
-  MessageSquare,
   Network,
   Search,
 } from 'lucide-react'
@@ -191,28 +190,6 @@ export function EmptySearchResults({
       description={`No matches for "${query}". Try a different search term.`}
       action={{ label: 'Clear Search', onClick: onClear, variant: 'outline' }}
       size="sm"
-      className={className}
-    />
-  )
-}
-
-export function EmptyChat({
-  onStartQuery,
-  className,
-}: {
-  onStartQuery?: () => void
-  className?: string
-}) {
-  return (
-    <EmptyState
-      icon={MessageSquare}
-      title="Start a conversation"
-      description="Ask questions about your knowledge base"
-      action={
-        onStartQuery
-          ? { label: 'Ask a Question', onClick: onStartQuery }
-          : undefined
-      }
       className={className}
     />
   )
