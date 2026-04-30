@@ -182,6 +182,7 @@ const GraphViewer = () => {
       return () => clearTimeout(timer)
     }
     prevTheme.current = theme
+    return undefined
   }, [theme])
 
   // Clean up sigma instance when component unmounts

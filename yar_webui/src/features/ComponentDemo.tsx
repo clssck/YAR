@@ -40,7 +40,9 @@ export default function ComponentDemo() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
-    await new Promise((r) => setTimeout(r, 1000))
+    await new Promise((r) => {
+      setTimeout(r, 1000)
+    })
     setLastUpdate(Date.now())
     setIsRefreshing(false)
     toast.success('Refreshed!')

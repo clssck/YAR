@@ -12,6 +12,7 @@ import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import remarkGfm from 'remark-gfm'
+import { toast } from 'sonner'
 import { s3GetContentBlob, s3GetContentText } from '@/api/yar'
 import Button from '@/components/ui/Button'
 import LoadingState from '@/components/ui/LoadingState'
@@ -329,7 +330,7 @@ export default function FileViewer({
       URL.revokeObjectURL(objectUrl)
     } catch (err) {
       console.error('Download failed', err)
-      alert(t('storagePanel.actions.downloadFailed') ?? 'Download failed')
+      toast.error(t('storagePanel.actions.downloadFailed') ?? 'Download failed')
     }
   }, [fileKey, fileName, t])
 

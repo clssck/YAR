@@ -98,6 +98,7 @@ export function useKeyboardShortcut(config: ShortcutConfig) {
       })
       return () => useShortcutStore.getState().unregister(id)
     }
+    return undefined
   }, [id, config])
 
   useEffect(() => {

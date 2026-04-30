@@ -5,26 +5,68 @@
     "unicorn",
     "oxc",
     "react",
-    "jsx-a11y"
+    "jsx-a11y",
+    "promise"
   ],
   "categories": {
     "correctness": "error",
-    "suspicious": "warn"
+    "suspicious": "warn",
+    "perf": "warn"
   },
   "rules": {
-    "no-unused-vars": "warn",
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "no-empty-pattern": "warn",
+    "no-shadow": "off",
+    "no-await-in-loop": "off",
+    "no-underscore-dangle": "off",
+    "no-unused-expressions": "warn",
+    "no-useless-catch": "warn",
+    "no-useless-rename": "warn",
+    "no-useless-return": "warn",
+    "no-unneeded-ternary": "warn",
+    "no-unreachable": "error",
+    "no-fallthrough": "error",
+    "no-promise-executor-return": "error",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "prefer-const": "warn",
+    "no-var": "error",
+    "prefer-spread": "warn",
+    "prefer-rest-params": "warn",
+    "prefer-template": "warn",
+    "no-console": ["warn", { "allow": ["error", "warn"] }],
+    "no-debugger": "error",
+    "no-alert": "error",
+    "no-eval": "error",
+    "no-new-func": "error",
     "react/jsx-key": "error",
+    "react/no-array-index-key": "warn",
+    "react/no-danger": "warn",
     "react/no-unescaped-entities": "off",
     "react/react-in-jsx-scope": "off",
-    "typescript/no-explicit-any": "off",
-    "typescript/no-unused-vars": "warn",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }],
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-non-null-assertion": "warn",
+    "typescript/ban-ts-comment": [
+      "warn",
+      { "ts-ignore": true, "ts-expect-error": "allow-with-description" }
+    ],
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/no-wrapper-object-types": "error",
+    "typescript/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "unicorn/no-array-for-each": "off",
     "unicorn/no-array-sort": "off",
     "unicorn/no-array-reverse": "off",
     "unicorn/prefer-node-protocol": "off",
     "unicorn/consistent-function-scoping": "off",
-    "unicorn/require-module-specifiers": "off"
+    "unicorn/require-module-specifiers": "off",
+    "unicorn/no-null": "off",
+    "unicorn/no-array-callback-reference": "off",
+    "unicorn/prefer-array-some": "warn",
+    "unicorn/prefer-string-starts-ends-with": "warn",
+    "unicorn/prefer-set-has": "warn",
+    "unicorn/prefer-modern-math-apis": "warn"
   },
   "settings": {
     "react": {
@@ -41,5 +83,21 @@
     "../yar/api/webui",
     "playwright-report",
     "test-results"
+  ],
+  "overrides": [
+    {
+      "files": ["src/__tests__/**/*", "e2e/**/*", "**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
+      "rules": {
+        "typescript/no-explicit-any": "off",
+        "typescript/no-non-null-assertion": "off",
+        "react/no-array-index-key": "off",
+        "no-console": "off",
+        "react/only-export-components": "off",
+        "no-promise-executor-return": "off",
+        "no-shadow": "off",
+        "react/jsx-no-constructed-context-values": "off",
+        "jsx-a11y/prefer-tag-over-role": "off"
+      }
+    }
   ]
 }

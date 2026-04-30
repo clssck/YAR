@@ -52,6 +52,7 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
       mediaQuery.addEventListener('change', handler)
       return () => mediaQuery.removeEventListener('change', handler)
     }
+    return undefined
   }, [theme])
 
   // ==================== PERFORMANCE OPTIMIZATION ====================

@@ -51,6 +51,7 @@ export default function ThemeProvider({ children, ...props }: ThemeProviderProps
       return () => mediaQuery.removeEventListener('change', handleChange)
     } else {
       root.classList.add(theme)
+      return undefined
     }
   }, [theme])
 
