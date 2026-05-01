@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from dotenv import load_dotenv
 from openai import APIConnectionError, APITimeoutError, OpenAI
 
 from yar.constants import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
-from yar.operate import _process_extraction_result
+from yar.operate import _classify_malformed_relation_record, _process_extraction_result
 from yar.prompt import PROMPTS
 
 BARE_DATE_RE = re.compile(
@@ -257,9 +258,39 @@ async def _fetch_stored_extraction(
         workspace,
         chunk_ids,
     )
+    entity_degrees = await conn.fetch(
+        """
+        WITH selected_entities AS (
+            SELECT DISTINCT entity_name
+            FROM YAR_VDB_ENTITY
+            WHERE workspace=$1 AND chunk_ids::text[] && $2::text[]
+        ),
+        relation_endpoints AS (
+            SELECT source_id AS entity_name
+            FROM YAR_VDB_RELATION
+            WHERE workspace=$1 AND chunk_ids::text[] && $2::text[]
+            UNION ALL
+            SELECT target_id AS entity_name
+            FROM YAR_VDB_RELATION
+            WHERE workspace=$1 AND chunk_ids::text[] && $2::text[]
+        ),
+        degree_counts AS (
+            SELECT entity_name, COUNT(*) AS degree
+            FROM relation_endpoints
+            GROUP BY entity_name
+        )
+        SELECT selected_entities.entity_name, COALESCE(degree_counts.degree, 0) AS degree
+        FROM selected_entities
+        LEFT JOIN degree_counts USING (entity_name)
+        ORDER BY degree, selected_entities.entity_name
+        """,
+        workspace,
+        chunk_ids,
+    )
     return {
         'entities': [dict(row) for row in entities],
         'relations': [dict(row) for row in relations],
+        'entity_degrees': [dict(row) for row in entity_degrees],
     }
 
 
@@ -343,7 +374,11 @@ def _snapshot(
     }
 
 
-def _malformed_relation_records(raw_output: str) -> list[dict[str, Any]]:
+def _malformed_relation_records(
+    raw_output: str,
+    chunk_id: str = 'live-output',
+    file_path: str = 'unknown_source',
+) -> list[dict[str, Any]]:
     malformed = []
     tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
     for line in raw_output.splitlines():
@@ -351,9 +386,38 @@ def _malformed_relation_records(raw_output: str) -> list[dict[str, Any]]:
         if not record.startswith('relation'):
             continue
         fields = record.split(tuple_delimiter)
-        if len(fields) != 5:
-            malformed.append({'field_count': len(fields), 'record': record})
+        diagnostic = _classify_malformed_relation_record(fields, chunk_id, file_path)
+        if diagnostic is not None:
+            malformed.append({'record': record, **diagnostic.to_dict()})
     return malformed
+
+
+def _orphan_entity_names(
+    entity_names: set[str],
+    relation_pairs: set[tuple[str, str]],
+) -> list[str]:
+    relation_endpoints = {endpoint for pair in relation_pairs for endpoint in pair}
+    return sorted(entity_names - relation_endpoints)
+
+
+@pytest.mark.offline
+def test_malformed_relation_records_classifies_action_verb_target_slot():
+    tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
+    raw_output = (
+        f'relation{tuple_delimiter}Obeya{tuple_delimiter}supports launch preparation'
+        f'{tuple_delimiter}Obeya supports launch preparation.'
+    )
+
+    records = _malformed_relation_records(raw_output, 'chunk-obeya', 'source.pptx')
+
+    assert len(records) == 1
+    assert records[0]['field_count'] == 4
+    assert {'wrong_field_count', 'action_verb_in_target_slot', 'missing_target'} <= set(records[0]['reasons'])
+
+
+@pytest.mark.offline
+def test_orphan_entity_names_reports_uncovered_entities():
+    assert _orphan_entity_names({'A', 'B', 'C'}, {('A', 'B'), ('external', 'A')}) == ['C']
 
 
 def _content_preview(content: str, limit: int = 320) -> str:
@@ -391,6 +455,7 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
         YAR_LIVE_EXTRACTION_FAIL_ON_MALFORMED=true
         YAR_LIVE_EXTRACTION_FAIL_ON_DANGLING_ENDPOINTS=true
         YAR_LIVE_EXTRACTION_FAIL_ON_BARE_DATE_RECORDS=true
+        YAR_LIVE_EXTRACTION_FAIL_ON_ORPHAN_ENTITIES=true
         YAR_LIVE_EXTRACTION_REQUIRE_RELATIONS=false
     """
     conn = await _connect_postgres()
@@ -422,8 +487,12 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
             completion_delimiter=PROMPTS['DEFAULT_COMPLETION_DELIMITER'],
         )
 
-        chunk_malformed = _malformed_relation_records(raw_output)
-        malformed_records.extend({'chunk_id': chunk['id'], **record} for record in chunk_malformed)
+        chunk_malformed = _malformed_relation_records(
+            raw_output,
+            str(chunk['id']),
+            str(chunk.get('file_path') or 'unknown_source'),
+        )
+        malformed_records.extend(chunk_malformed)
 
         for name, records in nodes.items():
             aggregate_nodes.setdefault(name, []).extend(records)
@@ -447,6 +516,9 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
     live_relation_pairs = set(aggregate_edges)
     stored_entity_names = {row['entity_name'] for row in stored['entities']}
     stored_relation_pairs = {(row['source_id'], row['target_id']) for row in stored['relations']}
+    stored_entity_degrees = {row['entity_name']: int(row['degree']) for row in stored['entity_degrees']}
+    live_orphan_entities = _orphan_entity_names(live_entity_names, live_relation_pairs)
+    stored_orphan_entities = sorted(name for name, degree in stored_entity_degrees.items() if degree == 0)
     dangling_relation_endpoints = [
         {'source': source, 'target': target}
         for source, target in sorted(live_relation_pairs)
@@ -459,6 +531,8 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
         if BARE_DATE_RE.match(source) or BARE_DATE_RE.match(target)
     ]
 
+    malformed_reason_counts = Counter(reason for record in malformed_records for reason in record.get('reasons', []))
+
     report = {
         'config': {
             'model': model,
@@ -468,6 +542,7 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
                 'fail_on_malformed': _bool_env('YAR_LIVE_EXTRACTION_FAIL_ON_MALFORMED', False),
                 'fail_on_dangling_endpoints': _bool_env('YAR_LIVE_EXTRACTION_FAIL_ON_DANGLING_ENDPOINTS', False),
                 'fail_on_bare_date_records': _bool_env('YAR_LIVE_EXTRACTION_FAIL_ON_BARE_DATE_RECORDS', False),
+                'fail_on_orphan_entities': _bool_env('YAR_LIVE_EXTRACTION_FAIL_ON_ORPHAN_ENTITIES', False),
                 'require_relations': _bool_env('YAR_LIVE_EXTRACTION_REQUIRE_RELATIONS', True),
             },
         },
@@ -490,11 +565,18 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
             'live_only_relations': [list(pair) for pair in sorted(live_relation_pairs - stored_relation_pairs)],
             'stored_only_relations': [list(pair) for pair in sorted(stored_relation_pairs - live_relation_pairs)],
         },
+        'graph_coverage': {
+            'live_orphan_entities': live_orphan_entities,
+            'stored_orphan_entities': stored_orphan_entities,
+            'stored_entity_degrees': stored_entity_degrees,
+        },
         'invariants': {
             'malformed_relation_records': malformed_records,
+            'malformed_relation_reason_counts': dict(malformed_reason_counts),
             'dangling_relation_endpoints': dangling_relation_endpoints,
             'bare_date_entities': bare_date_entities,
             'bare_date_relations': bare_date_relations,
+            'live_orphan_entities': live_orphan_entities,
         },
         'chunks': chunk_reports,
     }
@@ -524,3 +606,6 @@ async def test_live_tuna_extracts_entities_and_relations_from_processed_document
     if _bool_env('YAR_LIVE_EXTRACTION_FAIL_ON_BARE_DATE_RECORDS', False):
         assert bare_date_entities == [], report_json
         assert bare_date_relations == [], report_json
+    if _bool_env('YAR_LIVE_EXTRACTION_FAIL_ON_ORPHAN_ENTITIES', False):
+        assert live_orphan_entities == [], report_json
+        assert stored_orphan_entities == [], report_json

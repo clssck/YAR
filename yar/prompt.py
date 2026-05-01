@@ -16,10 +16,13 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
     *   **Identification:** identify clearly defined, meaningful entities.
     *   **Entity Details:** for each entity, extract:
         *   `entity_name`: entity name. Title-case if case-insensitive. Use **consistent naming** across the extraction.
-        *   `entity_type`: one of `{entity_types}`. If none apply, use `Other`. Do NOT invent new types.
+        *   `entity_type`: one of `{entity_types}`. Choose the closest configured high-level type; do NOT output `Other`, `UNKNOWN`, or invent new types.
         *   `entity_description`: concise yet comprehensive description of the entity's attributes and activities, based *solely* on input text.
     *   **Output Format - Entities:** 4 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `entity`.
         *   Format: `entity{tuple_delimiter}entity_name{tuple_delimiter}entity_type{tuple_delimiter}entity_description`
+    *   **Connectivity:** Every extracted entity MUST appear as `source_entity` or `target_entity` in at least one valid relation in the same output. If the text only provides isolated metadata, headings, or labels, omit that entity unless you can also extract its explicit relation.
+    *   **Metadata authors:** Extract title-slide authors/presenters only when the text explicitly links them to a named document, report, presentation, or event; output that authorship/presentation relation. Otherwise omit the person to avoid an orphan metadata node.
+    *   **Branding-only mentions:** Do NOT extract organizations that appear only in logos, headers, footers, copyright notices, or slide branding (e.g., `[SANOFI Logo]`) unless the text states a concrete relationship for that organization.
     *   **What NOT to Extract as Entities:**
         *   Do NOT extract numeric values, percentages, or metrics (e.g., "3.4% decline", "$10 billion", "40% reduction").
         *   Do NOT extract generic event descriptors (e.g., "market selloff", "price increase", "stock decline").
@@ -65,6 +68,11 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
         *   No relationships between mere co-list items (e.g. "skateboarding and surfing" co-mentioned: NOT a relationship).
         *   EXCEPTION: labeled-role lists where the label is an action verb or role that applies to every listed item ARE relationships (e.g. "Communication to: Alice, Bob" means each person received that communication). Extract one relation per listed item using the nearest named action/event/document as source, or the literal label phrase as the source if no named source exists; extract that source as an event/document entity when needed. The listed items fill the label's role: in "Communication to:" or "sent to:" lists, each listed item is the target/recipient, never the source. Do NOT apply this exception to category headers like "Topics: AI, ML".
         *   For dated bullets like "14th Nov => Delay of 2 mo communicated" with a recipient list below, use the action/event phrase as the source entity (e.g. "Primary Stability Batch Delay Communication"), never the bare date. This also applies when the date is a section header on its own line followed by an action bullet. Keep the date as temporal context in descriptions.
+        *   For issue/problem headings (e.g., "3mL final stopper Issue"), do NOT leave the issue as a standalone event. Prefer the affected artifact/product as the entity and connect it to the responsible supplier, organization, rejection, or use-impact stated in the text.
+        *   For event bullets with action verbs but implicit objects (e.g., "assessed", "agreed", "aligned", "sent out"), extract a relation only if both endpoints are explicit named entities. If the object is missing, omit the relation rather than placing the action verb in `target_entity`.
+        *   For "X on Y" event names, keep the event and object separate when the text treats Y as the reviewed/read/sent document or topic. Example: `IA Management TC` reviewed `IDC Pre-reads`, not one fused entity named `IA Management TC on IDC Pre-reads`.
+        *   For meeting agreement/postponement bullets, extract the agreed action or decision as the target entity when it is explicit. Example: `GPT F2F Team Meeting` agreed on `EU Submission Postponement`.
+        *   For wording-alignment bullets tied to a prior named meeting, connect the alignment event to that meeting (e.g., `IDC Slides Wording Alignment` followed `GPT F2F Team Meeting`) unless the slide deck itself is emitted as an entity.
         *   Events: PRIMARY action (won, hosted, occurred in), not every association.
         *   Sports: achievements (won, broke record), not participation alone.
         *   No duplicate relationships with different wording.
@@ -82,6 +90,8 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
         *   `source_entity`: ACTOR/SUBJECT performing the action (consistent naming with entities).
         *   `target_entity`: OBJECT/RECIPIENT (consistent naming with entities).
         *   `relationship_keywords`: action-oriented keywords ("manufactures", "treats", "leads", "approved"). Comma-separated. **NEVER use `{tuple_delimiter}` here.**
+        *   `source_entity` and `target_entity` MUST exactly match `entity_name` values emitted in this same output. Relationship keywords are not endpoints. A relation with only 4 fields is invalid and MUST NOT be output.
+        *   **Malformed 4-field pattern to avoid:** `relation{tuple_delimiter}Source{tuple_delimiter}action_verb{tuple_delimiter}description` means the action verb was incorrectly placed in `target_entity` and the true target is missing. Do NOT output that line. Output a corrected 5-field relation only when the input explicitly names the real target entity.
         *   `relationship_description`: concise explanation.
     *   **Relationship Direction (CRITICAL):**
         *   source_entity PERFORMS action ON target_entity.
@@ -94,6 +104,7 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
 
 3.  **Delimiter Usage Protocol:**
     *   `{tuple_delimiter}` is atomic marker, **never filled with content**. Strictly a field separator.
+    *   The first separator after `entity` or `relation` MUST also be exactly `{tuple_delimiter}`. Do NOT output similar-looking variants such as `<|##|>`, `<|#|` or `|#|>`; one character wrong makes the whole record invalid.
     *   **Incorrect Example:** `entity{tuple_delimiter}Tokyo<|location|>Tokyo is the capital of Japan.`
     *   **Correct Example:** `entity{tuple_delimiter}Tokyo{tuple_delimiter}location{tuple_delimiter}Tokyo is the capital of Japan.`
 
@@ -104,6 +115,7 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
 5.  **Output Order & Prioritization:**
     *   Output all entities first, then all relationships.
     *   Among relationships, output the **most significant** (core meaning of input) first.
+    *   **Final self-check before `{completion_delimiter}`:** every relation has exactly 5 fields; every `source_entity` and `target_entity` has a matching entity line; every entity appears as a relation source or target. Fix or omit any record that fails this check.
 
 6.  **Context & Objectivity:**
     *   Ensure all entity names and descriptions are written in the **third person**.
@@ -168,6 +180,8 @@ Identify any **missed or incorrectly formatted** entities and relationships from
     *   Do NOT re-output entities/relationships that were already extracted **correctly and fully**.
     *   Missed entity/relationship: extract and output now in system format.
     *   **Truncated, missing fields, or malformed**: re-output the *corrected and complete* version.
+    *   **Known 4-field relation pattern:** if the prior extraction emitted `relation{tuple_delimiter}Source{tuple_delimiter}verb{tuple_delimiter}description` (action verb in target slot, no true target_entity), that record is malformed. Re-output the corrected 5-field record if a real target entity can be inferred from context; otherwise omit the relation entirely.
+    *   Audit prior relation lines one by one. Any 4-field line with an action verb in the `target_entity` slot is missing a real target; correct it only if the target is explicitly named in the input text, otherwise omit it.
 3.  **Output Format - Entities:** 4 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `entity`.
 4.  **Output Format - Relationships:** 5 `{tuple_delimiter}`-delimited fields, single line. First field MUST be literal `relation`.
 5.  **Output Only Lists:** *only* the entities and relationships. No preamble, explanations, postamble.
@@ -198,6 +212,8 @@ relation{tuple_delimiter}Merck{tuple_delimiter}Keytruda{tuple_delimiter}manufact
 relation{tuple_delimiter}FDA{tuple_delimiter}Keytruda{tuple_delimiter}approved{tuple_delimiter}The FDA approved Keytruda for the treatment of non-small cell lung cancer.
 relation{tuple_delimiter}Keytruda{tuple_delimiter}Non-Small Cell Lung Cancer{tuple_delimiter}treats{tuple_delimiter}Keytruda is approved as a treatment for non-small cell lung cancer.
 relation{tuple_delimiter}Roger Perlmutter{tuple_delimiter}Merck{tuple_delimiter}leads{tuple_delimiter}Dr. Roger Perlmutter is the President of Merck Research Laboratories.
+relation{tuple_delimiter}KEYNOTE-024{tuple_delimiter}Keytruda{tuple_delimiter}evaluated{tuple_delimiter}KEYNOTE-024 evaluated Keytruda and demonstrated reduced disease progression.
+relation{tuple_delimiter}Keytruda{tuple_delimiter}PD-1{tuple_delimiter}blocks{tuple_delimiter}Keytruda blocks PD-1 to help the immune system fight cancer cells.
 {completion_delimiter}
 
 """,
@@ -221,6 +237,7 @@ relation{tuple_delimiter}OpenAI{tuple_delimiter}Microsoft{tuple_delimiter}partne
 relation{tuple_delimiter}Microsoft{tuple_delimiter}OpenAI{tuple_delimiter}invested in{tuple_delimiter}Microsoft is investing $10 billion in OpenAI over multiple years.
 relation{tuple_delimiter}Sam Altman{tuple_delimiter}OpenAI{tuple_delimiter}leads{tuple_delimiter}Sam Altman is the CEO of OpenAI.
 relation{tuple_delimiter}OpenAI{tuple_delimiter}GPT-4{tuple_delimiter}developed{tuple_delimiter}OpenAI developed the GPT-4 large language model.
+relation{tuple_delimiter}OpenAI{tuple_delimiter}Artificial General Intelligence{tuple_delimiter}researches{tuple_delimiter}OpenAI's collaboration with Microsoft focuses on building safe and beneficial artificial general intelligence.
 relation{tuple_delimiter}GPT-4{tuple_delimiter}ChatGPT{tuple_delimiter}powers{tuple_delimiter}GPT-4 is the underlying model that powers ChatGPT.
 relation{tuple_delimiter}GPT-4{tuple_delimiter}Microsoft Copilot{tuple_delimiter}powers{tuple_delimiter}GPT-4 powers Microsoft's Copilot assistant.
 {completion_delimiter}
@@ -285,6 +302,88 @@ entity{tuple_delimiter}Okafor{tuple_delimiter}person{tuple_delimiter}Okafor is a
 relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Chen{tuple_delimiter}communicated to{tuple_delimiter}The Primary Stability Batch Delay Communication was communicated to Chen on 14th November 2018.
 relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Novak{tuple_delimiter}communicated to{tuple_delimiter}The Primary Stability Batch Delay Communication was communicated to Novak on 14th November 2018.
 relation{tuple_delimiter}Primary Stability Batch Delay Communication{tuple_delimiter}Okafor{tuple_delimiter}communicated to{tuple_delimiter}The Primary Stability Batch Delay Communication was communicated to Okafor on 14th November 2018.
+{completion_delimiter}
+
+""",
+    """<Entity_types>
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
+
+<Input Text>
+```
+# SARA CS information escalation – lessons learned
+C.Dette, iCMC NPP LL Cross sharing, 27th Feb 2019
+[SANOFI Logo]
+
+# 3mL final stopper Issue
+Delivery of supplier West showed fibers and metal particles.
+Final stopper batches from West could not be released.
+Final stopper could not be used for manufacturing of primary stability batches.
+
+# Sequence of events
+* 23rd Nov => iCMC team meeting
+    * Assessment EU submission intermediate/final stopper
+* 28th/29th Nov => GPT F2F team meeting
+    * Agreement on postponement of submission in EU
+* 29th Nov => wording on IDC slides align after GPT meeting ended
+* 30th Nov => Midday IDC pre-reads sent out
+* 3rd Dec => IA management TC on IDC pre-reads
+    * Participants: Boensel, Charreau
+```
+
+<Output>
+entity{tuple_delimiter}SARA CS Information Escalation{tuple_delimiter}document{tuple_delimiter}SARA CS Information Escalation is the 27th Feb 2019 lessons-learned document for iCMC NPP LL Cross sharing.
+entity{tuple_delimiter}C.Dette{tuple_delimiter}person{tuple_delimiter}C.Dette is the author of the SARA CS Information Escalation document.
+entity{tuple_delimiter}West{tuple_delimiter}organization{tuple_delimiter}West is the supplier whose final stopper batches showed fibers and metal particles.
+entity{tuple_delimiter}3mL Final Stopper{tuple_delimiter}artifact{tuple_delimiter}3mL Final Stopper is the affected stopper artifact whose West batches could not be released or used for primary stability batch manufacturing.
+entity{tuple_delimiter}iCMC Team Meeting{tuple_delimiter}event{tuple_delimiter}iCMC Team Meeting is the 23rd Nov event that assessed the EU submission intermediate/final stopper.
+entity{tuple_delimiter}GPT F2F Team Meeting{tuple_delimiter}event{tuple_delimiter}GPT F2F Team Meeting is the 28th/29th Nov event where postponement of the EU submission was agreed.
+entity{tuple_delimiter}EU Submission Postponement{tuple_delimiter}event{tuple_delimiter}EU Submission Postponement is the agreed postponement of the EU submission.
+entity{tuple_delimiter}IDC Slides Wording Alignment{tuple_delimiter}event{tuple_delimiter}IDC Slides Wording Alignment is the 29th Nov event where wording on IDC slides was aligned after the GPT meeting.
+entity{tuple_delimiter}IDC Pre-reads{tuple_delimiter}document{tuple_delimiter}IDC Pre-reads are the documents sent out on 30th Nov for the IA Management TC.
+entity{tuple_delimiter}IA Management TC{tuple_delimiter}event{tuple_delimiter}IA Management TC is the 3rd Dec management teleconference that reviewed IDC pre-reads.
+entity{tuple_delimiter}Boensel{tuple_delimiter}person{tuple_delimiter}Boensel is a participant in the IA Management TC.
+entity{tuple_delimiter}Charreau{tuple_delimiter}person{tuple_delimiter}Charreau is a participant in the IA Management TC.
+relation{tuple_delimiter}C.Dette{tuple_delimiter}SARA CS Information Escalation{tuple_delimiter}authored{tuple_delimiter}C.Dette authored the SARA CS Information Escalation document dated 27th Feb 2019.
+relation{tuple_delimiter}West{tuple_delimiter}3mL Final Stopper{tuple_delimiter}supplied contaminated batches{tuple_delimiter}West supplied final stopper batches that showed fibers and metal particles.
+relation{tuple_delimiter}iCMC Team Meeting{tuple_delimiter}3mL Final Stopper{tuple_delimiter}assessed{tuple_delimiter}The iCMC Team Meeting assessed the EU submission intermediate/final stopper.
+relation{tuple_delimiter}GPT F2F Team Meeting{tuple_delimiter}EU Submission Postponement{tuple_delimiter}agreed on{tuple_delimiter}The GPT F2F Team Meeting agreed on postponement of the EU submission.
+relation{tuple_delimiter}IDC Slides Wording Alignment{tuple_delimiter}GPT F2F Team Meeting{tuple_delimiter}followed{tuple_delimiter}IDC Slides Wording Alignment followed the GPT F2F Team Meeting.
+relation{tuple_delimiter}IDC Pre-reads{tuple_delimiter}IA Management TC{tuple_delimiter}sent for{tuple_delimiter}IDC Pre-reads were sent out for the IA Management TC on IDC pre-reads.
+relation{tuple_delimiter}IA Management TC{tuple_delimiter}IDC Pre-reads{tuple_delimiter}reviewed{tuple_delimiter}IA Management TC reviewed IDC pre-reads on 3rd Dec.
+relation{tuple_delimiter}IA Management TC{tuple_delimiter}Boensel{tuple_delimiter}included participant{tuple_delimiter}Boensel participated in the IA Management TC.
+relation{tuple_delimiter}IA Management TC{tuple_delimiter}Charreau{tuple_delimiter}included participant{tuple_delimiter}Charreau participated in the IA Management TC.
+{completion_delimiter}
+
+""",
+    """<Entity_types>
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
+
+<Input Text>
+```
+# Drug Device Combination Product (DDCP)
+Performance of 3 Different Stopper Designs
+| Device (supply for) | Stopper Design | DDCP Performance Tests |
+| Clinic: Ph3 | Existing | Passed |
+| Clinic: Interchangeability - Primary Stability | Intermediate | Passed |
+| Primary Stability - Commercial | Final | Ongoing, positive initial results |
+
+To improve compatibility of rubber stoppers with the drug in the 3 mL cartridge, optimized paraffin free material and an adapted design are being performed.
+```
+
+<Output>
+entity{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}product{tuple_delimiter}Drug Device Combination Product is tested with three stopper designs for DDCP performance.
+entity{tuple_delimiter}3 mL Cartridge{tuple_delimiter}artifact{tuple_delimiter}3 mL Cartridge is the cartridge whose drug compatibility is improved by optimized rubber stopper designs.
+entity{tuple_delimiter}Stopper Design{tuple_delimiter}artifact{tuple_delimiter}Stopper Design is the adapted rubber stopper design family tested for compatibility with the drug in the 3 mL cartridge.
+entity{tuple_delimiter}Clinic Ph3 Stopper{tuple_delimiter}artifact{tuple_delimiter}Clinic Ph3 Stopper is the existing stopper design for Clinic Ph3 that passed DDCP performance tests.
+entity{tuple_delimiter}Interchangeability Primary Stability Stopper{tuple_delimiter}artifact{tuple_delimiter}Interchangeability Primary Stability Stopper is the intermediate stopper design that passed DDCP performance tests.
+entity{tuple_delimiter}Primary Stability Commercial Stopper{tuple_delimiter}artifact{tuple_delimiter}Primary Stability Commercial Stopper is the final stopper design with ongoing positive initial DDCP performance results.
+relation{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}Clinic Ph3 Stopper{tuple_delimiter}tested with{tuple_delimiter}Drug Device Combination Product was tested with the Clinic Ph3 Stopper and the test passed.
+relation{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}Interchangeability Primary Stability Stopper{tuple_delimiter}tested with{tuple_delimiter}Drug Device Combination Product was tested with the Interchangeability Primary Stability Stopper and the test passed.
+relation{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}Primary Stability Commercial Stopper{tuple_delimiter}tested with{tuple_delimiter}Drug Device Combination Product testing with the Primary Stability Commercial Stopper is ongoing with positive initial results.
+relation{tuple_delimiter}Stopper Design{tuple_delimiter}3 mL Cartridge{tuple_delimiter}improves compatibility with{tuple_delimiter}Stopper Design improves compatibility with the drug in the 3 mL Cartridge.
+relation{tuple_delimiter}Clinic Ph3 Stopper{tuple_delimiter}Stopper Design{tuple_delimiter}is existing variant of{tuple_delimiter}Clinic Ph3 Stopper is the existing variant of Stopper Design.
+relation{tuple_delimiter}Interchangeability Primary Stability Stopper{tuple_delimiter}Stopper Design{tuple_delimiter}is intermediate variant of{tuple_delimiter}Interchangeability Primary Stability Stopper is the intermediate variant of Stopper Design.
+relation{tuple_delimiter}Primary Stability Commercial Stopper{tuple_delimiter}Stopper Design{tuple_delimiter}is final variant of{tuple_delimiter}Primary Stability Commercial Stopper is the final variant of Stopper Design.
 {completion_delimiter}
 
 """,
@@ -646,6 +745,8 @@ Valid relationship types:
 - competitive: direct competitors or alternatives
 - temporal: versions, successors, historical connections
 - dependency: one relies on / runs on the other
+- authorship: one authored, prepared, or presented the other document/event
+- participation: one participated in, attended, or was a named stakeholder of the other meeting/event
 
 Output valid JSON only, no markdown:
 {{"should_connect": bool, "confidence": float, "relationship_type": str|null, "relationship_keywords": str|null, "relationship_description": str|null, "reasoning": str}}
@@ -723,6 +824,8 @@ PROMPTS[
 - Company suffixes: "Apple" = "Apple Inc." = "Apple Inc" = "Apple Corporation"
 - University variations: "Stanford" = "Stanford University" = "Stanford U"
 - Government agencies: "SEC" = "Securities and Exchange Commission"
+- Measurement unit case variants: "3 mL" = "3 ml", "mL" = "ml" (unit symbol case is not semantically significant)
+- Initial-prefixed names: "P.Charreau" = "Charreau", "C.Dette" = "Dette" when context confirms the same person
 
 **DO NOT merge entities that are:**
 - Similar but distinct: "Method 1" ≠ "Method 2"

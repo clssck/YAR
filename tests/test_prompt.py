@@ -75,6 +75,7 @@ class TestEntityExtractionPrompts:
         prompt = PROMPTS['entity_extraction_system_prompt']
 
         assert '{entity_types}' in prompt
+        assert 'do NOT output `Other`, `UNKNOWN`, or invent new types' in prompt
         assert '{tuple_delimiter}' in prompt
         assert '{completion_delimiter}' in prompt
         assert '{language}' in prompt
@@ -108,6 +109,54 @@ class TestEntityExtractionPrompts:
         )
         assert bare_date_record.search(examples) is None
 
+    def test_entity_extraction_requires_connected_entities(self):
+        """Prompt should steer extraction away from unjustified orphan entities."""
+        prompt = PROMPTS['entity_extraction_system_prompt']
+        examples = '\n'.join(PROMPTS['entity_extraction_examples'])
+
+        assert 'Every extracted entity MUST appear as `source_entity` or `target_entity`' in prompt
+        assert 'Metadata authors' in prompt
+        assert 'Branding-only mentions' in prompt
+        assert 'Relationship keywords are not endpoints' in prompt
+        assert 'similar-looking variants such as `<|##|>`' in prompt
+        assert 'A relation with only 4 fields is invalid' in prompt
+        assert 'Malformed 4-field pattern to avoid' in prompt
+        assert 'do NOT leave the issue as a standalone event' in prompt
+        assert 'IA Management TC` reviewed `IDC Pre-reads`' in prompt
+        assert 'omit the relation rather than placing the action verb' in prompt
+        assert 'Final self-check' in prompt
+        assert 'GPT F2F Team Meeting` agreed on `EU Submission Postponement`' in prompt
+        assert 'IDC Slides Wording Alignment` followed `GPT F2F Team Meeting`' in prompt
+
+        assert 'entity{tuple_delimiter}SARA CS Information Escalation' in examples
+        assert '[SANOFI Logo]' in examples
+        assert 'entity{tuple_delimiter}EU Submission Postponement' in examples
+        assert 'relation{tuple_delimiter}GPT F2F Team Meeting{tuple_delimiter}EU Submission Postponement' in examples
+        assert 'relation{tuple_delimiter}C.Dette{tuple_delimiter}SARA CS Information Escalation' in examples
+        assert 'relation{tuple_delimiter}IA Management TC{tuple_delimiter}IDC Pre-reads' in examples
+        assert 'relation{tuple_delimiter}IDC Slides Wording Alignment{tuple_delimiter}GPT F2F Team Meeting' in examples
+        assert 'relation{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}Clinic Ph3 Stopper' in examples
+        assert 'relation{tuple_delimiter}Stopper Design{tuple_delimiter}3 mL Cartridge' in examples
+
+    def test_entity_extraction_examples_do_not_emit_orphans(self):
+        """Every example entity should be covered by at least one example relation."""
+        tuple_marker = '{tuple_delimiter}'
+
+        for example in PROMPTS['entity_extraction_examples']:
+            output = example.split('<Output>', 1)[1]
+            entity_names: set[str] = set()
+            relation_endpoints: set[str] = set()
+            for line in output.splitlines():
+                fields = line.split(tuple_marker)
+                if line.startswith(f'entity{tuple_marker}'):
+                    assert len(fields) == 4
+                    entity_names.add(fields[1])
+                elif line.startswith(f'relation{tuple_marker}'):
+                    assert len(fields) == 5
+                    relation_endpoints.update((fields[1], fields[2]))
+
+            assert entity_names <= relation_endpoints
+
     def test_entity_extraction_user_prompt_exists(self):
         """Test entity extraction user prompt exists."""
         assert 'entity_extraction_user_prompt' in PROMPTS
@@ -132,6 +181,16 @@ class TestEntityExtractionPrompts:
         assert '{tuple_delimiter}' in prompt
         assert '{completion_delimiter}' in prompt
         assert '{language}' in prompt
+
+    def test_continue_extraction_prompt_names_4field_malform_pattern(self):
+        """Gleaning prompt should name keywords-in-target-slot failures."""
+        prompt = PROMPTS['entity_continue_extraction_user_prompt']
+
+        assert 'malformed' in prompt.lower()
+        assert '4-field relation pattern' in prompt
+        assert 'action verb in target slot' in prompt
+        assert 'Audit prior relation lines one by one' in prompt
+        assert 'target_entity' in prompt
 
 
 class TestEntityExtractionExamples:
@@ -380,6 +439,13 @@ class TestOrphanConnectionPrompt:
         assert '{candidate_description}' in prompt
         assert '{similarity_score}' in prompt
 
+    def test_orphan_connection_covers_authorship_and_participation(self):
+        """Orphan validation should recognise authorship and participation."""
+        prompt = PROMPTS['orphan_connection_validation']
+
+        assert 'authorship' in prompt
+        assert 'participation' in prompt
+
 
 class TestHyDEPrompt:
     """Tests for HyDE (Hypothetical Document Embedding) prompt."""
@@ -409,6 +475,23 @@ class TestEntityReviewPrompts:
         """Test entity review user prompt has pairs placeholder."""
         prompt = PROMPTS['entity_review_user_prompt']
         assert '{pairs}' in prompt
+
+    def test_entity_review_handles_measurement_unit_case(self):
+        """Entity review should merge measurement unit case variants."""
+        prompt = PROMPTS['entity_review_system_prompt']
+
+        assert '3 mL' in prompt
+        assert '3 ml' in prompt
+        assert 'mL' in prompt
+        assert 'ml' in prompt
+
+    def test_entity_review_handles_initial_prefixed_names(self):
+        """Entity review should merge initial-prefixed surname variants."""
+        prompt = PROMPTS['entity_review_system_prompt']
+
+        assert 'Initial-prefixed names' in prompt
+        assert 'P.Charreau' in prompt
+        assert 'Charreau' in prompt
 
     def test_entity_batch_review_prompt_exists(self):
         """Test entity batch review prompt exists."""

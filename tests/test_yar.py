@@ -1296,6 +1296,134 @@ class TestYARPublicMethods:
     @patch('yar.kg.verify_storage_implementation')
     @patch('yar.utils.check_storage_env_vars')
     @pytest.mark.asyncio
+    async def test_apipeline_enqueue_documents_prefers_canonical_duplicate_filename(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Duplicate content should keep the original source filename."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+        )
+
+        rag.doc_status.filter_keys = AsyncMock(side_effect=lambda keys: set(keys))
+        rag.doc_status.upsert = AsyncMock()
+        rag.full_docs.upsert = AsyncMock()
+        rag.full_docs.index_done_callback = AsyncMock()
+
+        await rag.apipeline_enqueue_documents(
+            input=['same extracted content', 'same extracted content', 'same extracted content'],
+            file_paths=[
+                'test_doc.pdf',
+                '2020-05-06 SARP lessons learned at CMC cross-sharing ver06_002.pdf',
+                '2020-05-06 SARP lessons learned at CMC cross-sharing ver06.pdf',
+            ],
+            track_id='enqueue_track_abc',
+        )
+
+        full_docs_payload = rag.full_docs.upsert.call_args[0][0]
+        doc_status_payload = rag.doc_status.upsert.call_args[0][0]
+
+        assert len(full_docs_payload) == 1
+        assert len(doc_status_payload) == 1
+        assert next(iter(full_docs_payload.values()))['file_path'] == (
+            '2020-05-06 SARP lessons learned at CMC cross-sharing ver06.pdf'
+        )
+        assert next(iter(doc_status_payload.values()))['file_path'] == (
+            '2020-05-06 SARP lessons learned at CMC cross-sharing ver06.pdf'
+        )
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_apipeline_enqueue_documents_preserves_first_id_with_canonical_path(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """User IDs remain stable while duplicate file paths are canonicalized."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+        )
+
+        rag.doc_status.filter_keys = AsyncMock(side_effect=lambda keys: set(keys))
+        rag.doc_status.upsert = AsyncMock()
+        rag.full_docs.upsert = AsyncMock()
+        rag.full_docs.index_done_callback = AsyncMock()
+
+        await rag.apipeline_enqueue_documents(
+            input=['same extracted content', 'same extracted content'],
+            ids=['provided-id-1', 'provided-id-2'],
+            file_paths=['test_doc2.pdf', 'Olipudase-comparability for NPP-9JULY2019.pdf'],
+            track_id='enqueue_track_abc',
+        )
+
+        full_docs_payload = rag.full_docs.upsert.call_args[0][0]
+
+        assert set(full_docs_payload) == {'provided-id-1'}
+        assert full_docs_payload['provided-id-1']['file_path'] == 'Olipudase-comparability for NPP-9JULY2019.pdf'
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
+    async def test_apipeline_enqueue_documents_duplicate_record_uses_canonical_file_path(
+        self,
+        mock_check_env,
+        mock_verify_storage,
+        temp_working_dir,
+        mock_embedding_func,
+        mock_llm_func,
+    ):
+        """Duplicate status records should report the canonical source filename."""
+        rag = YAR(
+            working_dir=temp_working_dir,
+            embedding_func=mock_embedding_func,
+            llm_model_func=mock_llm_func,
+        )
+
+        rag.doc_status.filter_keys = AsyncMock(return_value=set())
+        rag.doc_status.get_by_id = AsyncMock(
+            return_value={
+                'status': DocStatus.PROCESSED,
+                'track_id': 'orig_track_123',
+            }
+        )
+        rag.doc_status.upsert = AsyncMock()
+        rag.full_docs.upsert = AsyncMock()
+        rag.full_docs.index_done_callback = AsyncMock()
+
+        await rag.apipeline_enqueue_documents(
+            input=['same extracted content', 'same extracted content'],
+            file_paths=[
+                '2023_06_06_Awareness of product usage within R&D_001.pdf',
+                '2023_06_06_Awareness of product usage within R&D.pdf',
+            ],
+            track_id='enqueue_track_abc',
+        )
+
+        duplicate_payload = rag.doc_status.upsert.call_args[0][0]
+        duplicate_record = next(iter(duplicate_payload.values()))
+
+        assert len(duplicate_payload) == 1
+        assert duplicate_record['status'] == DocStatus.FAILED
+        assert duplicate_record['metadata']['is_duplicate'] is True
+        assert duplicate_record['file_path'] == '2023_06_06_Awareness of product usage within R&D.pdf'
+        rag.full_docs.upsert.assert_not_called()
+        rag.full_docs.index_done_callback.assert_not_called()
+
+    @patch('yar.kg.verify_storage_implementation')
+    @patch('yar.utils.check_storage_env_vars')
+    @pytest.mark.asyncio
     async def test_apipeline_enqueue_documents_creates_duplicate_records(
         self,
         mock_check_env,

@@ -20,13 +20,20 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from yar.base import QueryContextResult, QueryParam, TextChunkSchema
-from yar.constants import DEFAULT_MAX_FILE_PATHS, DEFAULT_SUMMARY_LANGUAGE, GRAPH_FIELD_SEP
+from yar.constants import (
+    DEFAULT_ENTITY_TYPES,
+    DEFAULT_MAX_FILE_PATHS,
+    DEFAULT_SUMMARY_LANGUAGE,
+    GRAPH_FIELD_SEP,
+)
 from yar.operate import (
     _build_context_str,
     _build_prompt_chunk_context,
     _build_query_context,
     _build_query_shaping_instructions,
+    _classify_malformed_relation_record,
     _enrich_local_keywords,
+    _filter_nodes_to_relation_endpoints,
     _find_most_related_edges_from_entities,
     _generate_multi_facet_hyde,
     _get_edge_data,
@@ -36,8 +43,11 @@ from yar.operate import (
     _merge_all_chunks,
     _merge_edges_then_upsert,
     _normalize_query_shaped_response,
+    _normalize_relation_keywords,
     _perform_kg_search,
     _prepare_visible_reference_payload,
+    _process_extraction_result,
+    _rebuild_single_relationship,
     _resolve_entity_aliases_for_batch,
     _resolve_max_file_paths,
     _should_validate_inline_citations,
@@ -125,6 +135,319 @@ async def test_merge_edges_preserves_directed_relation_vector_payload():
     assert len(rel_delete_ids) == 2
 
 
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_assigns_configured_type_to_missing_endpoint_nodes():
+    """Relation-created endpoint nodes should not persist UNKNOWN entity types."""
+    source = 'Relation Only Source'
+    target = 'Relation Only Target'
+    chunk_id = 'chunk-1'
+    file_path = 'source.pdf'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_nodes = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return None
+
+        async def upsert_node(self, node_id, node_data):
+            self.upserted_nodes.append((node_id, node_data))
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            return None
+
+    graph = FakeGraphStorage()
+    _edge_data, ent_vdb, _rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [
+            {
+                'src_id': source,
+                'tgt_id': target,
+                'weight': 1.0,
+                'description': 'The source is related to the target.',
+                'keywords': 'related to',
+                'source_id': chunk_id,
+                'file_path': file_path,
+                'timestamp': 1,
+            }
+        ],
+        graph,
+        {
+            'addon_params': {'entity_types': list(DEFAULT_ENTITY_TYPES)},
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    assert len(graph.upserted_nodes) == 2
+    assert {node_data['entity_type'] for _node_id, node_data in graph.upserted_nodes} == {'concept'}
+    assert {payload['entity_type'] for payload in ent_vdb.values()} == {'concept'}
+
+
+@pytest.mark.offline
+def test_normalize_relation_keywords_splits_and_deduplicates_labels():
+    assert (
+        _normalize_relation_keywords([' Uses, supports ', 'uses,Requires', '', 'SUPPORTS'])
+        == 'uses, supports, requires'
+    )
+
+
+@pytest.mark.offline
+def test_normalize_relation_keywords_canonicalizes_without_inverting_direction():
+    assert (
+        _normalize_relation_keywords(
+            ['manufactured by, manufactured, evaluates, evaluated in'],
+            max_keywords=10,
+        )
+        == 'manufactured by, manufactures, evaluates, evaluated in'
+    )
+
+
+@pytest.mark.offline
+def test_normalize_relation_keywords_bounds_labels_to_first_three():
+    assert _normalize_relation_keywords('supports, requires, evaluates, approves') == 'supports, requires, evaluates'
+
+
+@pytest.mark.offline
+def test_malformed_relation_classifier_identifies_action_verb_target_slot():
+    diagnostic = _classify_malformed_relation_record(
+        ['relation', 'Obeya', 'supports launch preparation', 'Obeya supports launch preparation.'],
+        'chunk-obeya',
+        'source.pptx',
+    )
+
+    assert diagnostic is not None
+    assert diagnostic.field_count == 4
+    assert diagnostic.source == 'Obeya'
+    assert diagnostic.target_slot == 'supports launch preparation'
+    assert {'wrong_field_count', 'action_verb_in_target_slot', 'missing_target'} <= set(diagnostic.reasons)
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_process_extraction_result_skips_4field_action_relation_without_dangling_endpoint():
+    tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
+    completion_delimiter = PROMPTS['DEFAULT_COMPLETION_DELIMITER']
+    raw_result = '\n'.join(
+        [
+            f'entity{tuple_delimiter}Obeya{tuple_delimiter}organization{tuple_delimiter}Obeya is a launch room.',
+            f'relation{tuple_delimiter}Obeya{tuple_delimiter}supports launch preparation'
+            f'{tuple_delimiter}Obeya supports launch preparation.',
+            completion_delimiter,
+        ]
+    )
+
+    nodes, edges = await _process_extraction_result(
+        raw_result,
+        'chunk-obeya',
+        1234567890,
+        'source.pptx',
+        tuple_delimiter=tuple_delimiter,
+        completion_delimiter=completion_delimiter,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    assert set(nodes) == {'Obeya'}
+    assert edges == {}
+    assert _filter_nodes_to_relation_endpoints(nodes, edges, 'chunk-obeya') == {}
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_process_extraction_result_accepts_corrected_5field_relation():
+    tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
+    completion_delimiter = PROMPTS['DEFAULT_COMPLETION_DELIMITER']
+    raw_result = '\n'.join(
+        [
+            f'entity{tuple_delimiter}Obeya{tuple_delimiter}organization{tuple_delimiter}Obeya is a launch room.',
+            f'entity{tuple_delimiter}Launch Preparation{tuple_delimiter}event'
+            f'{tuple_delimiter}Launch preparation is supported by Obeya.',
+            f'relation{tuple_delimiter}Obeya{tuple_delimiter}Launch Preparation'
+            f'{tuple_delimiter}supports{tuple_delimiter}Obeya supports launch preparation.',
+            completion_delimiter,
+        ]
+    )
+
+    nodes, edges = await _process_extraction_result(
+        raw_result,
+        'chunk-obeya',
+        1234567890,
+        'source.pptx',
+        tuple_delimiter=tuple_delimiter,
+        completion_delimiter=completion_delimiter,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    assert set(nodes) == {'Obeya', 'Launch Preparation'}
+    assert set(edges) == {('Obeya', 'Launch Preparation')}
+    assert edges[('Obeya', 'Launch Preparation')][0]['keywords'] == 'supports'
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_bounds_keywords_but_preserves_relation_descriptions():
+    source = 'Source Entity'
+    target = 'Target Entity'
+    descriptions = [
+        'Source supports Target.',
+        'Source requires Target.',
+        'Source evaluates Target.',
+        'Source approves Target.',
+    ]
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+            self.upserted_nodes = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': 'existing-chunk',
+                'description': f'{node_id} description',
+                'entity_type': 'concept',
+                'file_path': 'source.pptx',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            self.upserted_nodes.append((node_id, node_data))
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    graph = FakeGraphStorage()
+    edge_data, _ent_vdb, rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [
+            {
+                'src_id': source,
+                'tgt_id': target,
+                'weight': 1.0,
+                'description': description,
+                'keywords': keyword,
+                'source_id': f'chunk-{index}',
+                'file_path': 'source.pptx',
+                'timestamp': index,
+            }
+            for index, (description, keyword) in enumerate(
+                zip(descriptions, ['supports', 'requires', 'evaluates', 'approves'], strict=True),
+                start=1,
+            )
+        ],
+        graph,
+        {
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+            'tokenizer': Mock(encode=Mock(side_effect=lambda text: text.split())),
+            'summary_context_size': 1000,
+            'summary_max_tokens': 500,
+            'force_llm_summary_on_merge': 10,
+        },
+    )
+
+    assert edge_data['keywords'] == 'supports, requires, evaluates'
+    assert next(iter(rel_vdb.values()))['keywords'] == 'supports, requires, evaluates'
+    for description in descriptions:
+        assert description in edge_data['description']
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_rebuild_relationship_uses_configured_type_for_missing_endpoint_nodes():
+    source = 'Relation Only Source'
+    target = 'Relation Only Target'
+    chunk_id = 'chunk-1'
+    file_path = 'source.pdf'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_nodes = []
+            self.upserted_edges = []
+
+        async def get_edge(self, source_node_id, target_node_id):
+            return {
+                'description': 'Existing relation.',
+                'keywords': 'existing',
+                'weight': 1.0,
+                'source_id': chunk_id,
+                'file_path': file_path,
+            }
+
+        async def has_node(self, node_id):
+            return False
+
+        async def upsert_node(self, node_id, node_data):
+            self.upserted_nodes.append((node_id, node_data))
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeVectorStorage:
+        def __init__(self):
+            self.deleted = []
+            self.payloads = {}
+
+        async def delete(self, ids):
+            self.deleted.extend(ids)
+
+        async def upsert(self, payload):
+            self.payloads.update(payload)
+
+    graph = FakeGraphStorage()
+    ent_vdb = FakeVectorStorage()
+    rel_vdb = FakeVectorStorage()
+
+    await _rebuild_single_relationship(
+        knowledge_graph_inst=graph,
+        relationships_vdb=rel_vdb,
+        entities_vdb=ent_vdb,
+        src=source,
+        tgt=target,
+        chunk_ids=[chunk_id],
+        chunk_relationships={
+            chunk_id: {
+                (source, target): [
+                    {
+                        'src_id': source,
+                        'tgt_id': target,
+                        'weight': 1.0,
+                        'description': 'The source supports the target.',
+                        'keywords': 'Supports, uses, supports',
+                        'source_id': chunk_id,
+                        'file_path': file_path,
+                        'timestamp': 1,
+                    }
+                ]
+            }
+        },
+        llm_response_cache=None,
+        global_config={
+            'addon_params': {'entity_types': list(DEFAULT_ENTITY_TYPES)},
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    assert {node_data['entity_type'] for _node_id, node_data in graph.upserted_nodes} == {'concept'}
+    assert {payload['entity_type'] for payload in ent_vdb.payloads.values()} == {'concept'}
+    assert graph.upserted_edges[0][2]['keywords'] == 'supports, uses'
+    assert next(iter(rel_vdb.payloads.values()))['keywords'] == 'supports, uses'
+
+
 def test_edge_grouping_preserves_extracted_relation_direction():
     """Directional relationships must not be normalized to lexical endpoint order."""
 
@@ -138,6 +461,120 @@ def test_edge_grouping_preserves_extracted_relation_direction():
 
 
 @pytest.mark.offline
+@pytest.mark.asyncio
+async def test_process_extraction_result_normalizes_types_before_chunk_filtering():
+    """Parser should preserve parsed nodes until all chunk extraction passes are merged."""
+    tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
+    completion_delimiter = PROMPTS['DEFAULT_COMPLETION_DELIMITER']
+    raw_result = '\n'.join(
+        [
+            f'entity{tuple_delimiter}Connected Person{tuple_delimiter}role{tuple_delimiter}Person tied to a relation.',
+            f'entity{tuple_delimiter}Unsupported Widget{tuple_delimiter}widget{tuple_delimiter}Unsupported type tied to a relation.',
+            f'entity{tuple_delimiter}Isolated Author{tuple_delimiter}person{tuple_delimiter}Metadata-only author.',
+            f'relation{tuple_delimiter}Connected Person{tuple_delimiter}Unsupported Widget'
+            f'{tuple_delimiter}collaborated with{tuple_delimiter}Connected Person collaborated with Unsupported Widget.',
+            completion_delimiter,
+        ]
+    )
+
+    nodes, edges = await _process_extraction_result(
+        raw_result,
+        'chunk-1',
+        1234567890,
+        'source.pdf',
+        tuple_delimiter=tuple_delimiter,
+        completion_delimiter=completion_delimiter,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    assert set(nodes) == {'Connected Person', 'Unsupported Widget', 'Isolated Author'}
+    assert set(edges) == {('Connected Person', 'Unsupported Widget')}
+    assert nodes['Connected Person'][0]['entity_type'] == 'person'
+    assert nodes['Unsupported Widget'][0]['entity_type'] == 'concept'
+    assert all(
+        record['entity_type'] in {entity_type.lower() for entity_type in DEFAULT_ENTITY_TYPES}
+        for records in nodes.values()
+        for record in records
+    )
+    assert set(_filter_nodes_to_relation_endpoints(nodes, edges, 'chunk-1')) == {
+        'Connected Person',
+        'Unsupported Widget',
+    }
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_chunk_entity_filter_drops_entity_only_outputs():
+    tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
+    completion_delimiter = PROMPTS['DEFAULT_COMPLETION_DELIMITER']
+    raw_result = (
+        f'entity{tuple_delimiter}Standalone Topic{tuple_delimiter}concept'
+        f'{tuple_delimiter}A heading with no explicit relation.\n{completion_delimiter}'
+    )
+
+    nodes, edges = await _process_extraction_result(
+        raw_result,
+        'chunk-1',
+        1234567890,
+        'source.pdf',
+        tuple_delimiter=tuple_delimiter,
+        completion_delimiter=completion_delimiter,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    assert set(nodes) == {'Standalone Topic'}
+    assert _filter_nodes_to_relation_endpoints(nodes, edges, 'chunk-1') == {}
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_chunk_entity_filter_preserves_entities_connected_by_later_pass():
+    tuple_delimiter = PROMPTS['DEFAULT_TUPLE_DELIMITER']
+    completion_delimiter = PROMPTS['DEFAULT_COMPLETION_DELIMITER']
+    initial_result = '\n'.join(
+        [
+            f'entity{tuple_delimiter}Initial Source{tuple_delimiter}person{tuple_delimiter}Detailed source metadata.',
+            f'entity{tuple_delimiter}Initial Target{tuple_delimiter}concept{tuple_delimiter}Detailed target metadata.',
+            completion_delimiter,
+        ]
+    )
+    glean_result = '\n'.join(
+        [
+            f'relation{tuple_delimiter}Initial Source{tuple_delimiter}Initial Target'
+            f'{tuple_delimiter}supports{tuple_delimiter}Initial Source supports Initial Target.',
+            completion_delimiter,
+        ]
+    )
+
+    initial_nodes, initial_edges = await _process_extraction_result(
+        initial_result,
+        'chunk-1',
+        1234567890,
+        'source.pdf',
+        tuple_delimiter=tuple_delimiter,
+        completion_delimiter=completion_delimiter,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+    glean_nodes, glean_edges = await _process_extraction_result(
+        glean_result,
+        'chunk-1',
+        1234567891,
+        'source.pdf',
+        tuple_delimiter=tuple_delimiter,
+        completion_delimiter=completion_delimiter,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    merged_nodes = {**initial_nodes, **glean_nodes}
+    merged_edges = {**initial_edges, **glean_edges}
+
+    filtered_nodes = _filter_nodes_to_relation_endpoints(merged_nodes, merged_edges, 'chunk-1')
+
+    assert set(filtered_nodes) == {'Initial Source', 'Initial Target'}
+    assert filtered_nodes['Initial Source'][0]['description'] == 'Detailed source metadata.'
+    assert set(merged_edges) == {('Initial Source', 'Initial Target')}
+
+
 class TestEntityFilterMatching:
     """Tests for entity filter normalization used during retrieval."""
 

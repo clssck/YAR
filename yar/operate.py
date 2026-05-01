@@ -772,11 +772,292 @@ async def _batch_infer_entity_types(
     return updated_count
 
 
+_ENTITY_TYPE_ALIASES = {
+    'activity': 'event',
+    'animal': 'concept',
+    'batch': 'artifact',
+    'date': 'data',
+    'dose': 'data',
+    'group': 'organization',
+    'other': 'concept',
+    'people': 'person',
+    'process': 'method',
+    'project': 'event',
+    'role': 'person',
+    'stage': 'event',
+    'study': 'document',
+    'task': 'method',
+    'team': 'organization',
+    'time': 'data',
+    'unknown': 'concept',
+    'workstream': 'organization',
+}
+
+
+def _normalized_entity_type_lookup(entity_types: list[str] | None) -> dict[str, str]:
+    configured_types = entity_types or DEFAULT_ENTITY_TYPES
+    lookup: dict[str, str] = {}
+    for entity_type in configured_types:
+        normalized = str(entity_type).replace(' ', '').lower()
+        if normalized:
+            lookup[normalized] = normalized
+    return lookup
+
+
+def _fallback_entity_type(allowed_types: dict[str, str]) -> str:
+    for preferred_type in ('concept', 'data', 'document'):
+        if preferred_type in allowed_types:
+            return allowed_types[preferred_type]
+    return next(iter(allowed_types.values()), 'concept')
+
+
+def _normalize_extracted_entity_type(raw_entity_type: str, entity_types: list[str] | None) -> str:
+    allowed_types = _normalized_entity_type_lookup(entity_types)
+    normalized_type = raw_entity_type.replace(' ', '').lower()
+    if normalized_type in allowed_types:
+        return allowed_types[normalized_type]
+
+    alias_type = _ENTITY_TYPE_ALIASES.get(normalized_type)
+    if alias_type in allowed_types:
+        return allowed_types[alias_type]
+
+    fallback_type = _fallback_entity_type(allowed_types)
+    logger.debug('Normalizing unsupported entity type %r to %r', raw_entity_type, fallback_type)
+    return fallback_type
+
+
+_RELATION_KEYWORD_LIMIT = 3
+_RELATION_KEYWORD_CANONICAL_MAP = {
+    'approve': 'approves',
+    'approved': 'approves',
+    'approves': 'approves',
+    'approving': 'approves',
+    'assess': 'assesses',
+    'assessed': 'assesses',
+    'assesses': 'assesses',
+    'assessing': 'assesses',
+    'collaborate': 'collaborates',
+    'collaborated': 'collaborates',
+    'collaborates': 'collaborates',
+    'collaborating': 'collaborates',
+    'evaluate': 'evaluates',
+    'evaluated': 'evaluates',
+    'evaluates': 'evaluates',
+    'evaluating': 'evaluates',
+    'manufacture': 'manufactures',
+    'manufactured': 'manufactures',
+    'manufactures': 'manufactures',
+    'manufacturing': 'manufactures',
+    'require': 'requires',
+    'required': 'requires',
+    'requires': 'requires',
+    'requiring': 'requires',
+    'review': 'reviews',
+    'reviewed': 'reviews',
+    'reviews': 'reviews',
+    'reviewing': 'reviews',
+    'send': 'sends',
+    'sends': 'sends',
+    'sent': 'sends',
+    'support': 'supports',
+    'supported': 'supports',
+    'supporting': 'supports',
+    'supports': 'supports',
+    'use': 'uses',
+    'used': 'uses',
+    'uses': 'uses',
+    'using': 'uses',
+    'utilize': 'uses',
+    'utilized': 'uses',
+    'utilizes': 'uses',
+    'utilizing': 'uses',
+}
+
+_RELATION_ACTION_TARGET_VERBS = frozenset(
+    {
+        'agreed',
+        'aligned',
+        'approved',
+        'assess',
+        'assessed',
+        'assesses',
+        'communicated',
+        'conducted',
+        'evaluated',
+        'evaluates',
+        'facilitated',
+        'prepared',
+        'reviewed',
+        'reviews',
+        'sent',
+        'support',
+        'supported',
+        'supporting',
+        'supports',
+        'used',
+        'uses',
+    }
+)
+
+
+@dataclass(frozen=True)
+class MalformedRelationDiagnostic:
+    chunk_id: str
+    file_path: str
+    field_count: int
+    reasons: tuple[str, ...]
+    source: str
+    target_slot: str
+    raw_fields: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'chunk_id': self.chunk_id,
+            'file_path': self.file_path,
+            'field_count': self.field_count,
+            'reasons': list(self.reasons),
+            'source': self.source,
+            'target_slot': self.target_slot,
+            'raw_fields': list(self.raw_fields),
+        }
+
+
+def _canonicalize_relation_keyword(keyword: str) -> str:
+    # Exact-phrase mapping only. Do not collapse inverse forms such as
+    # "manufactured by", "used in", or "evaluated in" unless direction is also changed.
+    return _RELATION_KEYWORD_CANONICAL_MAP.get(keyword, keyword)
+
+
+def _normalize_relation_keywords(
+    raw_keywords: str | list[str],
+    *,
+    max_keywords: int = _RELATION_KEYWORD_LIMIT,
+) -> str:
+    raw_values = [raw_keywords] if isinstance(raw_keywords, str) else raw_keywords
+    normalized_keywords: list[str] = []
+    seen_keywords: set[str] = set()
+
+    for raw_value in raw_values:
+        cleaned_value = sanitize_and_normalize_extracted_text(str(raw_value), remove_inner_quotes=True)
+        cleaned_value = cleaned_value.replace('，', ',')
+        for raw_keyword in cleaned_value.split(','):
+            keyword = re.sub(r'\s+', ' ', raw_keyword).strip(' \t\r\n,.;')
+            if not keyword:
+                continue
+            keyword = _canonicalize_relation_keyword(keyword.lower())
+            if keyword in seen_keywords:
+                continue
+            normalized_keywords.append(keyword)
+            seen_keywords.add(keyword)
+            if max_keywords > 0 and len(normalized_keywords) >= max_keywords:
+                return ', '.join(normalized_keywords)
+
+    return ', '.join(normalized_keywords)
+
+
+def _looks_like_action_verb_target_slot(value: str) -> bool:
+    normalized = sanitize_and_normalize_extracted_text(str(value), remove_inner_quotes=True).lower()
+    normalized = re.sub(r'\s+', ' ', normalized).strip(' \t\r\n,.;')
+    if not normalized:
+        return False
+    first_token = normalized.split(' ', 1)[0]
+    return first_token in _RELATION_ACTION_TARGET_VERBS
+
+
+def _classify_malformed_relation_record(
+    record_attributes: list[str],
+    chunk_key: str,
+    file_path: str = 'unknown_source',
+) -> MalformedRelationDiagnostic | None:
+    if not record_attributes or 'relation' not in record_attributes[0]:
+        return None
+
+    field_count = len(record_attributes)
+    source = (
+        sanitize_and_normalize_extracted_text(record_attributes[1], remove_inner_quotes=True) if field_count > 1 else ''
+    )
+    target_slot = (
+        sanitize_and_normalize_extracted_text(record_attributes[2], remove_inner_quotes=True) if field_count > 2 else ''
+    )
+
+    reasons: list[str] = []
+    if field_count != 5:
+        reasons.append('wrong_field_count')
+    if not source:
+        reasons.append('empty_source')
+    if field_count <= 2 or not target_slot:
+        reasons.append('empty_target')
+    if field_count == 4 and _looks_like_action_verb_target_slot(target_slot):
+        reasons.extend(['action_verb_in_target_slot', 'missing_target'])
+    if source and target_slot and source == target_slot:
+        reasons.append('self_loop')
+
+    if not reasons:
+        return None
+
+    return MalformedRelationDiagnostic(
+        chunk_id=chunk_key,
+        file_path=file_path,
+        field_count=field_count,
+        reasons=tuple(dict.fromkeys(reasons)),
+        source=source,
+        target_slot=target_slot,
+        raw_fields=tuple(record_attributes),
+    )
+
+
+def _record_malformed_relation_diagnostic(
+    diagnostic: MalformedRelationDiagnostic,
+    malformed_relation_counter: Counter[str] | None = None,
+) -> None:
+    if malformed_relation_counter is not None:
+        malformed_relation_counter.update(diagnostic.reasons)
+
+    logger.warning(
+        '%s: Skipping malformed RELATION (%s; fields=%d) source=%r target_slot=%r file_path=%s',
+        diagnostic.chunk_id,
+        ','.join(diagnostic.reasons),
+        diagnostic.field_count,
+        diagnostic.source,
+        diagnostic.target_slot,
+        diagnostic.file_path,
+    )
+
+
+def _filter_nodes_to_relation_endpoints(
+    maybe_nodes: dict[str, list[dict[str, Any]]],
+    maybe_edges: dict[tuple[str, str], list[dict[str, Any]]],
+    chunk_key: str,
+) -> dict[str, list[dict[str, Any]]]:
+    if not maybe_edges:
+        if maybe_nodes:
+            logger.debug('Dropping %d entity-only extraction records in %s', len(maybe_nodes), chunk_key)
+        return {}
+
+    relation_endpoints = {endpoint for edge_key in maybe_edges for endpoint in edge_key}
+    filtered_nodes = {
+        entity_name: nodes for entity_name, nodes in maybe_nodes.items() if entity_name in relation_endpoints
+    }
+    dropped_count = len(maybe_nodes) - len(filtered_nodes)
+    if dropped_count:
+        logger.debug('Dropping %d unconnected entity extraction records in %s', dropped_count, chunk_key)
+    return filtered_nodes
+
+
+def _finalize_chunk_extraction_result(
+    maybe_nodes: dict[str, list[dict[str, Any]]],
+    maybe_edges: dict[tuple[str, str], list[dict[str, Any]]],
+    chunk_key: str,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[tuple[str, str], list[dict[str, Any]]]]:
+    return _filter_nodes_to_relation_endpoints(dict(maybe_nodes), dict(maybe_edges), chunk_key), dict(maybe_edges)
+
+
 async def _handle_single_entity_extraction(
     record_attributes: list[str],
     chunk_key: str,
     timestamp: int,
     file_path: str = 'unknown_source',
+    entity_types: list[str] | None = None,
 ):
     if len(record_attributes) != 4 or 'entity' not in record_attributes[0]:
         if len(record_attributes) > 1 and 'entity' in record_attributes[0]:
@@ -803,8 +1084,7 @@ async def _handle_single_entity_extraction(
             logger.warning(f'Entity extraction error: invalid entity type in: {record_attributes}')
             return None
 
-        # Remove spaces and convert to lowercase
-        entity_type = entity_type.replace(' ', '').lower()
+        entity_type = _normalize_extracted_entity_type(entity_type, entity_types)
 
         # Process entity description with same cleaning pipeline
         entity_description = sanitize_and_normalize_extracted_text(record_attributes[3])
@@ -837,16 +1117,14 @@ async def _handle_single_relationship_extraction(
     chunk_key: str,
     timestamp: int,
     file_path: str = 'unknown_source',
+    malformed_relation_counter: Counter[str] | None = None,
 ):
     if (
         len(record_attributes) != 5 or 'relation' not in record_attributes[0]
     ):  # treat "relationship" and "relation" interchangeable
-        if len(record_attributes) > 1 and 'relation' in record_attributes[0]:
-            logger.warning(
-                f'{chunk_key}: LLM output format error; found {len(record_attributes)}/5 '
-                f'fields on RELATION `{record_attributes[1]}`~'
-                f'`{record_attributes[2] if len(record_attributes) > 2 else "N/A"}`'
-            )
+        diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
+        if diagnostic is not None:
+            _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
             logger.debug(record_attributes)
         return None
 
@@ -856,20 +1134,31 @@ async def _handle_single_relationship_extraction(
 
         # Validate entity names after all cleaning steps
         if not source:
-            logger.info(f"Empty source entity found after sanitization. Original: '{record_attributes[1]}'")
+            diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
+            if diagnostic is not None:
+                _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
+            else:
+                logger.info(f"Empty source entity found after sanitization. Original: '{record_attributes[1]}'")
             return None
 
         if not target:
-            logger.info(f"Empty target entity found after sanitization. Original: '{record_attributes[2]}'")
+            diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
+            if diagnostic is not None:
+                _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
+            else:
+                logger.info(f"Empty target entity found after sanitization. Original: '{record_attributes[2]}'")
             return None
 
         if source == target:
-            logger.debug(f'Relationship source and target are the same in: {record_attributes}')
+            diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
+            if diagnostic is not None:
+                _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
+            else:
+                logger.debug(f'Relationship source and target are the same in: {record_attributes}')
             return None
 
         # Process keywords with same cleaning pipeline
-        edge_keywords = sanitize_and_normalize_extracted_text(record_attributes[3], remove_inner_quotes=True)
-        edge_keywords = edge_keywords.replace('，', ',')
+        edge_keywords = _normalize_relation_keywords(record_attributes[3])
 
         # Process relationship description with same cleaning pipeline
         edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
@@ -965,6 +1254,11 @@ async def rebuild_knowledge_from_chunks(
         await update_pipeline_status(pipeline_status, pipeline_status_lock, status_message)
         return
 
+    addon_params = global_config.get('addon_params') or {}
+    configured_entity_types = addon_params.get('entity_types') if isinstance(addon_params, dict) else None
+    if not isinstance(configured_entity_types, list):
+        configured_entity_types = DEFAULT_ENTITY_TYPES
+
     # Process cached results to get entities and relationships for each chunk
     chunk_entities = {}  # chunk_id -> {entity_name: [entity_data]}
     chunk_relationships = {}  # chunk_id -> {(src, tgt): [relationship_data]}
@@ -982,6 +1276,7 @@ async def rebuild_knowledge_from_chunks(
                     chunk_id=chunk_id,
                     extraction_result=result[0],
                     timestamp=int(result[1]),
+                    entity_types=configured_entity_types,
                 )
 
                 # Merge entities and relationships from this extraction result
@@ -1020,6 +1315,12 @@ async def rebuild_knowledge_from_chunks(
                             # Replace with the new relationship that has longer description
                             chunk_relationships[chunk_id][rel_key] = list(rel_list)
                         # Otherwise keep existing version
+
+            chunk_entities[chunk_id] = _filter_nodes_to_relation_endpoints(
+                dict(chunk_entities[chunk_id]),
+                dict(chunk_relationships[chunk_id]),
+                chunk_id,
+            )
 
         except Exception as e:
             status_message = f'Failed to parse cached extraction result for chunk {chunk_id}: {e}'
@@ -1240,20 +1541,19 @@ async def _process_extraction_result(
     file_path: str = 'unknown_source',
     tuple_delimiter: str = '<|#|>',
     completion_delimiter: str = '<|COMPLETE|>',
+    entity_types: list[str] | None = None,
 ) -> tuple[dict, dict]:
-    """Process a single extraction result (either initial or gleaning)
-    Args:
-        result (str): The extraction result to process
-        chunk_key (str): The chunk key for source tracking
-        file_path (str): The file path for citation
-        tuple_delimiter (str): Delimiter for tuple fields
-        record_delimiter (str): Delimiter for records
-        completion_delimiter (str): Delimiter for completion
-    Returns:
-        tuple: (nodes_dict, edges_dict) containing the extracted entities and relationships
+    """Process a single extraction result (either initial or gleaning).
+
+    This parser returns all structurally valid entity and relationship records
+    from one LLM response. Callers that combine initial and gleaned responses
+    must filter unconnected entity records only after all responses for the
+    chunk have been merged, so later relations can preserve earlier entity
+    metadata.
     """
     maybe_nodes = defaultdict(list)
     maybe_edges = defaultdict(list)
+    malformed_relation_counter: Counter[str] = Counter()
 
     if completion_delimiter not in result:
         logger.warning(f'{chunk_key}: Complete delimiter can not be found in extraction result')
@@ -1307,7 +1607,13 @@ async def _process_extraction_result(
         record_attributes = split_string_by_multi_markers(record, [tuple_delimiter])
 
         # Try to parse as entity
-        entity_data = await _handle_single_entity_extraction(record_attributes, chunk_key, timestamp, file_path)
+        entity_data = await _handle_single_entity_extraction(
+            record_attributes,
+            chunk_key,
+            timestamp,
+            file_path,
+            entity_types=entity_types,
+        )
         if entity_data is not None:
             truncated_name = _truncate_entity_identifier(
                 entity_data['entity_name'],
@@ -1321,7 +1627,11 @@ async def _process_extraction_result(
 
         # Try to parse as relationship
         relationship_data = await _handle_single_relationship_extraction(
-            record_attributes, chunk_key, timestamp, file_path
+            record_attributes,
+            chunk_key,
+            timestamp,
+            file_path,
+            malformed_relation_counter=malformed_relation_counter,
         )
         if relationship_data is not None:
             truncated_source = _truncate_entity_identifier(
@@ -1340,6 +1650,9 @@ async def _process_extraction_result(
             relationship_data['tgt_id'] = truncated_target
             maybe_edges[(truncated_source, truncated_target)].append(relationship_data)
 
+    if malformed_relation_counter:
+        logger.info('%s: skipped malformed relation records by reason: %s', chunk_key, dict(malformed_relation_counter))
+
     return dict(maybe_nodes), dict(maybe_edges)
 
 
@@ -1348,6 +1661,7 @@ async def _rebuild_from_extraction_result(
     extraction_result: str,
     chunk_id: str,
     timestamp: int,
+    entity_types: list[str] | None = None,
 ) -> tuple[dict, dict]:
     """Parse cached extraction result using the same logic as extract_entities
 
@@ -1372,6 +1686,7 @@ async def _rebuild_from_extraction_result(
         file_path,
         tuple_delimiter=PROMPTS['DEFAULT_TUPLE_DELIMITER'],
         completion_delimiter=PROMPTS['DEFAULT_COMPLETION_DELIMITER'],
+        entity_types=entity_types,
     )
 
 
@@ -1705,7 +2020,7 @@ async def _rebuild_single_relationship(
     description_list = list(dict.fromkeys(descriptions))
     keywords = list(dict.fromkeys(keywords))
 
-    combined_keywords = ', '.join(set(keywords)) if keywords else current_relationship.get('keywords', '')
+    combined_keywords = _normalize_relation_keywords(keywords) if keywords else current_relationship.get('keywords', '')
 
     weight = sum(weights) if weights else current_relationship.get('weight', 1.0)
 
@@ -1750,6 +2065,11 @@ async def _rebuild_single_relationship(
     )
     node_source_id = updated_relationship_data.get('source_id', '')
     node_file_path = updated_relationship_data.get('file_path', 'unknown_source')
+    addon_params = global_config.get('addon_params') or {}
+    configured_entity_types = addon_params.get('entity_types') if isinstance(addon_params, dict) else None
+    if not isinstance(configured_entity_types, list):
+        configured_entity_types = DEFAULT_ENTITY_TYPES
+    missing_entity_type = _normalize_extracted_entity_type('unknown', configured_entity_types)
 
     for node_id in {src, tgt}:
         if not (await knowledge_graph_inst.has_node(node_id)):
@@ -1758,7 +2078,7 @@ async def _rebuild_single_relationship(
                 'entity_id': node_id,
                 'source_id': node_source_id,
                 'description': node_description,
-                'entity_type': 'UNKNOWN',
+                'entity_type': missing_entity_type,
                 'file_path': node_file_path,
                 'created_at': node_created_at,
                 'truncate': '',
@@ -1785,7 +2105,7 @@ async def _rebuild_single_relationship(
                         'content': entity_content,
                         'entity_name': node_id,
                         'source_id': node_source_id,
-                        'entity_type': 'UNKNOWN',
+                        'entity_type': missing_entity_type,
                         'file_path': node_file_path,
                     }
                 }
@@ -2208,17 +2528,12 @@ async def _merge_edges_then_upsert(
     weight = sum([dp['weight'] for dp in edges_data] + already_weights)
 
     # 6.2 Finalize keywords by merging existing and new keywords
-    all_keywords = set()
-    # Process already_keywords (which are comma-separated)
-    for keyword_str in already_keywords:
-        if keyword_str:  # Skip empty strings
-            all_keywords.update(k.strip() for k in keyword_str.split(',') if k.strip())
-    # Process new keywords from edges_data
-    for edge in edges_data:
-        if edge.get('keywords'):
-            all_keywords.update(k.strip() for k in edge['keywords'].split(',') if k.strip())
-    # Join all unique keywords with commas
-    keywords = ','.join(sorted(all_keywords))
+    keywords = _normalize_relation_keywords(
+        [
+            *already_keywords,
+            *[edge.get('keywords', '') for edge in edges_data if edge.get('keywords')],
+        ]
+    )
 
     # 7. Deduplicate by description, keeping first occurrence in the same document
     unique_edges = {}
@@ -2335,6 +2650,12 @@ async def _merge_edges_then_upsert(
         logger.debug(status_message)
 
     # 11. Update both graph and vector db
+    addon_params = global_config.get('addon_params') or {}
+    configured_entity_types = addon_params.get('entity_types') if isinstance(addon_params, dict) else None
+    if not isinstance(configured_entity_types, list):
+        configured_entity_types = DEFAULT_ENTITY_TYPES
+    missing_entity_type = _normalize_extracted_entity_type('unknown', configured_entity_types)
+
     for need_insert_id in [src_id, tgt_id]:
         # Optimization: Use get_node instead of has_node + get_node
         existing_node = await knowledge_graph_inst.get_node(need_insert_id)
@@ -2346,7 +2667,7 @@ async def _merge_edges_then_upsert(
                 'entity_id': need_insert_id,
                 'source_id': source_id,
                 'description': description,
-                'entity_type': 'UNKNOWN',
+                'entity_type': missing_entity_type,
                 'file_path': file_path,
                 'created_at': node_created_at,
                 'truncate': '',
@@ -2372,7 +2693,7 @@ async def _merge_edges_then_upsert(
                 'content': entity_content,
                 'entity_name': need_insert_id,
                 'source_id': source_id,
-                'entity_type': 'UNKNOWN',
+                'entity_type': missing_entity_type,
                 'file_path': file_path,
             }
 
@@ -2380,7 +2701,7 @@ async def _merge_edges_then_upsert(
             if added_entities is not None:
                 entity_data = {
                     'entity_name': need_insert_id,
-                    'entity_type': 'UNKNOWN',
+                    'entity_type': missing_entity_type,
                     'description': description,
                     'source_id': source_id,
                     'file_path': file_path,
@@ -3308,6 +3629,7 @@ async def extract_entities(
             file_path or 'unknown_source',
             tuple_delimiter=context_base['tuple_delimiter'],
             completion_delimiter=context_base['completion_delimiter'],
+            entity_types=entity_types,
         )
 
         # Gleaning support
@@ -3329,6 +3651,7 @@ async def extract_entities(
                 file_path or 'unknown_source',
                 tuple_delimiter=context_base['tuple_delimiter'],
                 completion_delimiter=context_base['completion_delimiter'],
+                entity_types=entity_types,
             )
             for entity_name, glean_entities in glean_nodes.items():
                 if entity_name in maybe_nodes:
@@ -3347,6 +3670,7 @@ async def extract_entities(
                 else:
                     maybe_edges[edge_key] = list(glean_edge_list)
 
+        maybe_nodes, maybe_edges = _finalize_chunk_extraction_result(maybe_nodes, maybe_edges, chunk_key)
         if cache_keys_collector and text_chunks_storage:
             await update_chunk_cache_list(chunk_key, text_chunks_storage, cache_keys_collector, 'entity_extraction')
 
@@ -3464,7 +3788,9 @@ async def extract_entities(
                         file_path or 'unknown_source',
                         tuple_delimiter=context_base['tuple_delimiter'],
                         completion_delimiter=context_base['completion_delimiter'],
+                        entity_types=entity_types,
                     )
+                    nodes, edges = _finalize_chunk_extraction_result(nodes, edges, chunk_key)
                     results.append((nodes, edges))
                     processed_chunks += 1
                     log_message = (

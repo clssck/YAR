@@ -150,6 +150,49 @@ def _annotate_requested_query_mode(
         metadata['effective_query_mode'] = effective_mode
 
 
+_DUPLICATE_FILENAME_SUFFIX_RE = re.compile(r'(?:_[0-9]{3})+$')
+_GENERIC_DUPLICATE_FILENAME_RE = re.compile(r'test_doc[0-9]*$', re.IGNORECASE)
+
+
+def _file_path_leaf(file_path: str) -> str:
+    parts = [part for part in re.split(r'[\\/]+', file_path) if part]
+    return parts[-1] if parts else file_path
+
+
+def _file_path_stem(leaf_name: str) -> str:
+    stem, separator, _suffix = leaf_name.rpartition('.')
+    return stem if separator else leaf_name
+
+
+def _canonical_file_path_sort_key(file_path: str) -> tuple[int, int, int, int, int, str, str]:
+    raw_path = str(file_path or '').strip()
+    leaf_name = _file_path_leaf(raw_path)
+    stem = _file_path_stem(leaf_name)
+    suffix_matches = _DUPLICATE_FILENAME_SUFFIX_RE.search(stem)
+    duplicate_suffix = suffix_matches.group(0) if suffix_matches else ''
+    canonical_stem = stem[: -len(duplicate_suffix)] if duplicate_suffix else stem
+    duplicate_suffix_count = duplicate_suffix.count('_')
+
+    is_unknown = int(not raw_path or raw_path == 'unknown_source')
+    is_generic_duplicate = int(bool(_GENERIC_DUPLICATE_FILENAME_RE.fullmatch(canonical_stem)))
+    path_depth = len([part for part in re.split(r'[\\/]+', raw_path) if part])
+    return (
+        is_unknown,
+        is_generic_duplicate,
+        duplicate_suffix_count,
+        path_depth,
+        len(leaf_name),
+        leaf_name.casefold(),
+        raw_path.casefold(),
+    )
+
+
+def _select_canonical_file_path(file_paths: list[str]) -> str:
+    if not file_paths:
+        return 'unknown_source'
+    return min((str(path or 'unknown_source') for path in file_paths), key=_canonical_file_path_sort_key)
+
+
 @final
 @dataclass
 class YAR:
@@ -1199,32 +1242,36 @@ class YAR:
                 raise ValueError('IDs must be unique')
 
             # Generate contents dict and remove duplicates in one pass
-            unique_contents = {}
+            unique_contents: dict[str, dict[str, Any]] = {}
             for id_, doc, path in zip(ids, input, file_paths, strict=False):
                 cleaned_content = sanitize_text_for_encoding(doc)
                 if cleaned_content not in unique_contents:
-                    unique_contents[cleaned_content] = (id_, path)
+                    unique_contents[cleaned_content] = {'id': id_, 'file_paths': [path]}
+                else:
+                    unique_contents[cleaned_content]['file_paths'].append(path)
 
             # Reconstruct contents with unique content
             contents = {
-                id_: {'content': content, 'file_path': file_path}
-                for content, (id_, file_path) in unique_contents.items()
+                content_data['id']: {
+                    'content': content,
+                    'file_path': _select_canonical_file_path(content_data['file_paths']),
+                }
+                for content, content_data in unique_contents.items()
             }
         else:
             # Clean input text and remove duplicates in one pass
-            unique_content_with_paths = {}
+            unique_content_with_paths: dict[str, list[str]] = {}
             for doc, path in zip(input, file_paths, strict=False):
                 cleaned_content = sanitize_text_for_encoding(doc)
-                if cleaned_content not in unique_content_with_paths:
-                    unique_content_with_paths[cleaned_content] = path
+                unique_content_with_paths.setdefault(cleaned_content, []).append(path)
 
-            # Generate contents dict of MD5 hash IDs and documents with paths
+            # Generate contents dict of MD5 hash IDs and documents with canonical paths
             contents = {
                 compute_mdhash_id(content, prefix='doc-'): {
                     'content': content,
-                    'file_path': path,
+                    'file_path': _select_canonical_file_path(paths),
                 }
-                for content, path in unique_content_with_paths.items()
+                for content, paths in unique_content_with_paths.items()
             }
 
         # 2. Generate document initial status (without content)
