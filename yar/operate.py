@@ -8,6 +8,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -49,6 +50,18 @@ from yar.constants import (
     SOURCE_IDS_LIMIT_METHOD_KEEP,
 )
 from yar.exceptions import PipelineCancelledException
+from yar.graph_model import (
+    ChunkExtractionResult,
+    EntityFact,
+    RelationFact,
+    RelationKey,
+    RelationPredicate,
+    RelationSemantics,
+    RelationSummary,
+    build_relation_storage_projection,
+    normalize_extracted_entity_type,
+    normalize_relation_keywords,
+)
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
 from yar.retrieval import expand_query_aliases, resolve_entity_filter
@@ -65,7 +78,6 @@ from yar.utils import (
     fix_tuple_delimiter_corruption,
     generate_reference_list_from_chunks,
     handle_cache,
-    is_float_regex,
     logger,
     make_relation_chunk_key,
     merge_source_ids,
@@ -772,107 +784,6 @@ async def _batch_infer_entity_types(
     return updated_count
 
 
-_ENTITY_TYPE_ALIASES = {
-    'activity': 'event',
-    'animal': 'concept',
-    'batch': 'artifact',
-    'date': 'data',
-    'dose': 'data',
-    'group': 'organization',
-    'other': 'concept',
-    'people': 'person',
-    'process': 'method',
-    'project': 'event',
-    'role': 'person',
-    'stage': 'event',
-    'study': 'document',
-    'task': 'method',
-    'team': 'organization',
-    'time': 'data',
-    'unknown': 'concept',
-    'workstream': 'organization',
-}
-
-
-def _normalized_entity_type_lookup(entity_types: list[str] | None) -> dict[str, str]:
-    configured_types = entity_types or DEFAULT_ENTITY_TYPES
-    lookup: dict[str, str] = {}
-    for entity_type in configured_types:
-        normalized = str(entity_type).replace(' ', '').lower()
-        if normalized:
-            lookup[normalized] = normalized
-    return lookup
-
-
-def _fallback_entity_type(allowed_types: dict[str, str]) -> str:
-    for preferred_type in ('concept', 'data', 'document'):
-        if preferred_type in allowed_types:
-            return allowed_types[preferred_type]
-    return next(iter(allowed_types.values()), 'concept')
-
-
-def _normalize_extracted_entity_type(raw_entity_type: str, entity_types: list[str] | None) -> str:
-    allowed_types = _normalized_entity_type_lookup(entity_types)
-    normalized_type = raw_entity_type.replace(' ', '').lower()
-    if normalized_type in allowed_types:
-        return allowed_types[normalized_type]
-
-    alias_type = _ENTITY_TYPE_ALIASES.get(normalized_type)
-    if alias_type in allowed_types:
-        return allowed_types[alias_type]
-
-    fallback_type = _fallback_entity_type(allowed_types)
-    logger.debug('Normalizing unsupported entity type %r to %r', raw_entity_type, fallback_type)
-    return fallback_type
-
-
-_RELATION_KEYWORD_LIMIT = 3
-_RELATION_KEYWORD_CANONICAL_MAP = {
-    'approve': 'approves',
-    'approved': 'approves',
-    'approves': 'approves',
-    'approving': 'approves',
-    'assess': 'assesses',
-    'assessed': 'assesses',
-    'assesses': 'assesses',
-    'assessing': 'assesses',
-    'collaborate': 'collaborates',
-    'collaborated': 'collaborates',
-    'collaborates': 'collaborates',
-    'collaborating': 'collaborates',
-    'evaluate': 'evaluates',
-    'evaluated': 'evaluates',
-    'evaluates': 'evaluates',
-    'evaluating': 'evaluates',
-    'manufacture': 'manufactures',
-    'manufactured': 'manufactures',
-    'manufactures': 'manufactures',
-    'manufacturing': 'manufactures',
-    'require': 'requires',
-    'required': 'requires',
-    'requires': 'requires',
-    'requiring': 'requires',
-    'review': 'reviews',
-    'reviewed': 'reviews',
-    'reviews': 'reviews',
-    'reviewing': 'reviews',
-    'send': 'sends',
-    'sends': 'sends',
-    'sent': 'sends',
-    'support': 'supports',
-    'supported': 'supports',
-    'supporting': 'supports',
-    'supports': 'supports',
-    'use': 'uses',
-    'used': 'uses',
-    'uses': 'uses',
-    'using': 'uses',
-    'utilize': 'uses',
-    'utilized': 'uses',
-    'utilizes': 'uses',
-    'utilizing': 'uses',
-}
-
 _RELATION_ACTION_TARGET_VERBS = frozenset(
     {
         'agreed',
@@ -922,37 +833,32 @@ class MalformedRelationDiagnostic:
         }
 
 
-def _canonicalize_relation_keyword(keyword: str) -> str:
-    # Exact-phrase mapping only. Do not collapse inverse forms such as
-    # "manufactured by", "used in", or "evaluated in" unless direction is also changed.
-    return _RELATION_KEYWORD_CANONICAL_MAP.get(keyword, keyword)
+class AliasDecisionSource(str, Enum):
+    CACHE = 'cache'
+    LLM = 'llm'
 
 
-def _normalize_relation_keywords(
-    raw_keywords: str | list[str],
-    *,
-    max_keywords: int = _RELATION_KEYWORD_LIMIT,
-) -> str:
-    raw_values = [raw_keywords] if isinstance(raw_keywords, str) else raw_keywords
-    normalized_keywords: list[str] = []
-    seen_keywords: set[str] = set()
+@dataclass(frozen=True)
+class AliasProposal:
+    alias: str
+    canonical: str
+    source: AliasDecisionSource
+    confidence: float
+    entity_type: str | None
+    reasoning: str | None
 
-    for raw_value in raw_values:
-        cleaned_value = sanitize_and_normalize_extracted_text(str(raw_value), remove_inner_quotes=True)
-        cleaned_value = cleaned_value.replace('，', ',')
-        for raw_keyword in cleaned_value.split(','):
-            keyword = re.sub(r'\s+', ' ', raw_keyword).strip(' \t\r\n,.;')
-            if not keyword:
-                continue
-            keyword = _canonicalize_relation_keyword(keyword.lower())
-            if keyword in seen_keywords:
-                continue
-            normalized_keywords.append(keyword)
-            seen_keywords.add(keyword)
-            if max_keywords > 0 and len(normalized_keywords) >= max_keywords:
-                return ', '.join(normalized_keywords)
 
-    return ', '.join(normalized_keywords)
+@dataclass(frozen=True)
+class AliasRejection:
+    proposal: AliasProposal
+    reason: str
+
+
+@dataclass(frozen=True)
+class AliasPlan:
+    accepted: tuple[AliasProposal, ...]
+    rejected: tuple[AliasRejection, ...]
+    canonical_by_alias: dict[str, str]
 
 
 def _looks_like_action_verb_target_slot(value: str) -> bool:
@@ -1025,16 +931,16 @@ def _record_malformed_relation_diagnostic(
 
 
 def _filter_nodes_to_relation_endpoints(
-    maybe_nodes: dict[str, list[dict[str, Any]]],
-    maybe_edges: dict[tuple[str, str], list[dict[str, Any]]],
+    maybe_nodes: dict[str, list[EntityFact]],
+    maybe_edges: dict[RelationKey, list[RelationFact]],
     chunk_key: str,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, list[EntityFact]]:
     if not maybe_edges:
         if maybe_nodes:
             logger.debug('Dropping %d entity-only extraction records in %s', len(maybe_nodes), chunk_key)
         return {}
 
-    relation_endpoints = {endpoint for edge_key in maybe_edges for endpoint in edge_key}
+    relation_endpoints = {endpoint for edge_key in maybe_edges for endpoint in (edge_key.src, edge_key.tgt)}
     filtered_nodes = {
         entity_name: nodes for entity_name, nodes in maybe_nodes.items() if entity_name in relation_endpoints
     }
@@ -1045,11 +951,14 @@ def _filter_nodes_to_relation_endpoints(
 
 
 def _finalize_chunk_extraction_result(
-    maybe_nodes: dict[str, list[dict[str, Any]]],
-    maybe_edges: dict[tuple[str, str], list[dict[str, Any]]],
+    maybe_nodes: dict[str, list[EntityFact]],
+    maybe_edges: dict[RelationKey, list[RelationFact]],
     chunk_key: str,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[tuple[str, str], list[dict[str, Any]]]]:
-    return _filter_nodes_to_relation_endpoints(dict(maybe_nodes), dict(maybe_edges), chunk_key), dict(maybe_edges)
+) -> ChunkExtractionResult:
+    return ChunkExtractionResult(
+        nodes=_filter_nodes_to_relation_endpoints(dict(maybe_nodes), dict(maybe_edges), chunk_key),
+        edges=dict(maybe_edges),
+    )
 
 
 async def _handle_single_entity_extraction(
@@ -1058,7 +967,7 @@ async def _handle_single_entity_extraction(
     timestamp: int,
     file_path: str = 'unknown_source',
     entity_types: list[str] | None = None,
-):
+) -> EntityFact | None:
     if len(record_attributes) != 4 or 'entity' not in record_attributes[0]:
         if len(record_attributes) > 1 and 'entity' in record_attributes[0]:
             logger.warning(
@@ -1070,40 +979,13 @@ async def _handle_single_entity_extraction(
         return None
 
     try:
-        entity_name = sanitize_and_normalize_extracted_text(record_attributes[1], remove_inner_quotes=True)
-
-        # Validate entity name after all cleaning steps
-        if not entity_name or not entity_name.strip():
-            logger.info(f"Empty entity name found after sanitization. Original: '{record_attributes[1]}'")
-            return None
-
-        # Process entity type with same cleaning pipeline
-        entity_type = sanitize_and_normalize_extracted_text(record_attributes[2], remove_inner_quotes=True)
-
-        if not entity_type.strip() or any(char in entity_type for char in ["'", '(', ')', '<', '>', '|', '/', '\\']):
-            logger.warning(f'Entity extraction error: invalid entity type in: {record_attributes}')
-            return None
-
-        entity_type = _normalize_extracted_entity_type(entity_type, entity_types)
-
-        # Process entity description with same cleaning pipeline
-        entity_description = sanitize_and_normalize_extracted_text(record_attributes[3])
-
-        if not entity_description.strip():
-            logger.warning(
-                f"Entity extraction error: empty description for entity '{entity_name}' of type '{entity_type}'"
-            )
-            return None
-
-        return {
-            'entity_name': entity_name,
-            'entity_type': entity_type,
-            'description': entity_description,
-            'source_id': chunk_key,
-            'file_path': file_path,
-            'timestamp': timestamp,
-        }
-
+        return EntityFact.from_record(
+            record_attributes,
+            chunk_key,
+            timestamp,
+            file_path,
+            entity_types=entity_types,
+        )
     except ValueError as e:
         logger.error(f'Entity extraction failed due to encoding issues in chunk {chunk_key}: {e}')
         return None
@@ -1118,7 +1000,7 @@ async def _handle_single_relationship_extraction(
     timestamp: int,
     file_path: str = 'unknown_source',
     malformed_relation_counter: Counter[str] | None = None,
-):
+) -> RelationFact | None:
     if (
         len(record_attributes) != 5 or 'relation' not in record_attributes[0]
     ):  # treat "relationship" and "relation" interchangeable
@@ -1129,57 +1011,14 @@ async def _handle_single_relationship_extraction(
         return None
 
     try:
-        source = sanitize_and_normalize_extracted_text(record_attributes[1], remove_inner_quotes=True)
-        target = sanitize_and_normalize_extracted_text(record_attributes[2], remove_inner_quotes=True)
+        relation_fact = RelationFact.from_record(record_attributes, chunk_key, timestamp, file_path)
+        if relation_fact is not None:
+            return relation_fact
 
-        # Validate entity names after all cleaning steps
-        if not source:
-            diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
-            if diagnostic is not None:
-                _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
-            else:
-                logger.info(f"Empty source entity found after sanitization. Original: '{record_attributes[1]}'")
-            return None
-
-        if not target:
-            diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
-            if diagnostic is not None:
-                _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
-            else:
-                logger.info(f"Empty target entity found after sanitization. Original: '{record_attributes[2]}'")
-            return None
-
-        if source == target:
-            diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
-            if diagnostic is not None:
-                _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
-            else:
-                logger.debug(f'Relationship source and target are the same in: {record_attributes}')
-            return None
-
-        # Process keywords with same cleaning pipeline
-        edge_keywords = _normalize_relation_keywords(record_attributes[3])
-
-        # Process relationship description with same cleaning pipeline
-        edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
-
-        edge_source_id = chunk_key
-        weight = (
-            float(record_attributes[-1].strip('"').strip("'"))
-            if is_float_regex(record_attributes[-1].strip('"').strip("'"))
-            else 1.0
-        )
-
-        return {
-            'src_id': source,
-            'tgt_id': target,
-            'weight': weight,
-            'description': edge_description,
-            'keywords': edge_keywords,
-            'source_id': edge_source_id,
-            'file_path': file_path,
-            'timestamp': timestamp,
-        }
+        diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
+        if diagnostic is not None:
+            _record_malformed_relation_diagnostic(diagnostic, malformed_relation_counter)
+        return None
 
     except ValueError as e:
         logger.warning(f'Relationship extraction failed due to encoding issues in chunk {chunk_key}: {e}')
@@ -1260,8 +1099,8 @@ async def rebuild_knowledge_from_chunks(
         configured_entity_types = DEFAULT_ENTITY_TYPES
 
     # Process cached results to get entities and relationships for each chunk
-    chunk_entities = {}  # chunk_id -> {entity_name: [entity_data]}
-    chunk_relationships = {}  # chunk_id -> {(src, tgt): [relationship_data]}
+    chunk_entities: dict[str, defaultdict[str, list[EntityFact]]] = {}
+    chunk_relationships: dict[str, defaultdict[RelationKey, list[RelationFact]]] = {}
 
     for chunk_id, results in cached_results.items():
         try:
@@ -1271,7 +1110,7 @@ async def rebuild_knowledge_from_chunks(
 
             # process multiple LLM extraction results for a single chunk_id
             for result in results:
-                entities, relationships = await _rebuild_from_extraction_result(
+                extraction = await _rebuild_from_extraction_result(
                     text_chunks_storage=text_chunks_storage,
                     chunk_id=chunk_id,
                     extraction_result=result[0],
@@ -1281,7 +1120,7 @@ async def rebuild_knowledge_from_chunks(
 
                 # Merge entities and relationships from this extraction result
                 # Compare description lengths and keep the better version for the same chunk_id
-                for entity_name, entity_list in entities.items():
+                for entity_name, entity_list in extraction.nodes.items():
                     if entity_name not in chunk_entities[chunk_id]:
                         # New entity for this chunk_id
                         chunk_entities[chunk_id][entity_name].extend(entity_list)
@@ -1290,8 +1129,8 @@ async def rebuild_knowledge_from_chunks(
                         chunk_entities[chunk_id][entity_name].extend(entity_list)
                     else:
                         # Compare description lengths and keep the better one
-                        existing_desc_len = len(chunk_entities[chunk_id][entity_name][0].get('description', '') or '')
-                        new_desc_len = len(entity_list[0].get('description', '') or '')
+                        existing_desc_len = len(chunk_entities[chunk_id][entity_name][0].description or '')
+                        new_desc_len = len(entity_list[0].description or '')
 
                         if new_desc_len > existing_desc_len:
                             # Replace with the new entity that has longer description
@@ -1299,7 +1138,7 @@ async def rebuild_knowledge_from_chunks(
                         # Otherwise keep existing version
 
                 # Compare description lengths and keep the better version for the same chunk_id
-                for rel_key, rel_list in relationships.items():
+                for rel_key, rel_list in extraction.edges.items():
                     if rel_key not in chunk_relationships[chunk_id]:
                         # New relationship for this chunk_id
                         chunk_relationships[chunk_id][rel_key].extend(rel_list)
@@ -1308,8 +1147,8 @@ async def rebuild_knowledge_from_chunks(
                         chunk_relationships[chunk_id][rel_key].extend(rel_list)
                     else:
                         # Compare description lengths and keep the better one
-                        existing_desc_len = len(chunk_relationships[chunk_id][rel_key][0].get('description', '') or '')
-                        new_desc_len = len(rel_list[0].get('description', '') or '')
+                        existing_desc_len = len(chunk_relationships[chunk_id][rel_key][0].description or '')
+                        new_desc_len = len(rel_list[0].description or '')
 
                         if new_desc_len > existing_desc_len:
                             # Replace with the new relationship that has longer description
@@ -1542,7 +1381,7 @@ async def _process_extraction_result(
     tuple_delimiter: str = '<|#|>',
     completion_delimiter: str = '<|COMPLETE|>',
     entity_types: list[str] | None = None,
-) -> tuple[dict, dict]:
+) -> ChunkExtractionResult:
     """Process a single extraction result (either initial or gleaning).
 
     This parser returns all structurally valid entity and relationship records
@@ -1551,8 +1390,8 @@ async def _process_extraction_result(
     chunk have been merged, so later relations can preserve earlier entity
     metadata.
     """
-    maybe_nodes = defaultdict(list)
-    maybe_edges = defaultdict(list)
+    maybe_nodes: defaultdict[str, list[EntityFact]] = defaultdict(list)
+    maybe_edges: defaultdict[RelationKey, list[RelationFact]] = defaultdict(list)
     malformed_relation_counter: Counter[str] = Counter()
 
     if completion_delimiter not in result:
@@ -1616,13 +1455,12 @@ async def _process_extraction_result(
         )
         if entity_data is not None:
             truncated_name = _truncate_entity_identifier(
-                entity_data['entity_name'],
+                entity_data.name,
                 DEFAULT_ENTITY_NAME_MAX_LENGTH,
                 chunk_key,
                 'Entity name',
             )
-            entity_data['entity_name'] = truncated_name
-            maybe_nodes[truncated_name].append(entity_data)
+            maybe_nodes[truncated_name].append(entity_data.with_name(truncated_name))
             continue
 
         # Try to parse as relationship
@@ -1635,25 +1473,27 @@ async def _process_extraction_result(
         )
         if relationship_data is not None:
             truncated_source = _truncate_entity_identifier(
-                relationship_data['src_id'],
+                relationship_data.key.src,
                 DEFAULT_ENTITY_NAME_MAX_LENGTH,
                 chunk_key,
                 'Relation entity',
             )
             truncated_target = _truncate_entity_identifier(
-                relationship_data['tgt_id'],
+                relationship_data.key.tgt,
                 DEFAULT_ENTITY_NAME_MAX_LENGTH,
                 chunk_key,
                 'Relation entity',
             )
-            relationship_data['src_id'] = truncated_source
-            relationship_data['tgt_id'] = truncated_target
-            maybe_edges[(truncated_source, truncated_target)].append(relationship_data)
+            if truncated_source == truncated_target:
+                logger.debug('Skipping relation that became a self-loop after truncation: %s', relationship_data.key)
+                continue
+            relation_key = RelationKey(truncated_source, truncated_target)
+            maybe_edges[relation_key].append(relationship_data.with_key(relation_key))
 
     if malformed_relation_counter:
         logger.info('%s: skipped malformed relation records by reason: %s', chunk_key, dict(malformed_relation_counter))
 
-    return dict(maybe_nodes), dict(maybe_edges)
+    return ChunkExtractionResult(nodes=dict(maybe_nodes), edges=dict(maybe_edges))
 
 
 async def _rebuild_from_extraction_result(
@@ -1662,7 +1502,7 @@ async def _rebuild_from_extraction_result(
     chunk_id: str,
     timestamp: int,
     entity_types: list[str] | None = None,
-) -> tuple[dict, dict]:
+) -> ChunkExtractionResult:
     """Parse cached extraction result using the same logic as extract_entities
 
     Args:
@@ -1671,7 +1511,7 @@ async def _rebuild_from_extraction_result(
         chunk_id: The chunk ID for source tracking
 
     Returns:
-        Tuple of (entities_dict, relationships_dict)
+        Typed chunk extraction result with entity and relationship facts
     """
 
     # Get chunk data for file_path from storage
@@ -1847,12 +1687,12 @@ async def _rebuild_single_entity(
     seen_paths = set()
 
     for entity_data in all_entity_data:
-        if entity_data.get('description'):
-            descriptions.append(entity_data['description'])
-        if entity_data.get('entity_type'):
-            entity_types.append(entity_data['entity_type'])
-        if entity_data.get('file_path'):
-            file_path = entity_data['file_path']
+        if entity_data.description:
+            descriptions.append(entity_data.description)
+        if entity_data.entity_type:
+            entity_types.append(entity_data.entity_type)
+        if entity_data.file_path:
+            file_path = entity_data.file_path
             if file_path and file_path not in seen_paths:
                 file_paths_list.append(file_path)
                 seen_paths.add(file_path)
@@ -1966,15 +1806,25 @@ async def _rebuild_single_relationship(
         identifier=f'`{src}`~`{tgt}`',
     )
 
-    # Collect all relationship data from relevant chunks
-    all_relationship_data = []
+    # Collect relationship data from relevant chunks. Graph storage is undirected,
+    # so rebuild requests may arrive in canonical storage order even when the
+    # surviving extraction fact used the opposite direction. Prefer exact
+    # direction facts when available, and only fall back to reverse facts for
+    # storage compatibility; do not merge inverse evidence into the direct edge.
+    direct_relationship_data: list[RelationFact] = []
+    reverse_relationship_data: list[RelationFact] = []
+    direct_key = RelationKey(src, tgt)
+    reverse_key = RelationKey(tgt, src)
     for chunk_id in limited_chunk_ids:
-        if chunk_id in chunk_relationships:
-            # Check both (src, tgt) and (tgt, src) since relationships can be bidirectional
-            for edge_key in [(src, tgt), (tgt, src)]:
-                if edge_key in chunk_relationships[chunk_id]:
-                    all_relationship_data.extend(chunk_relationships[chunk_id][edge_key])
+        if chunk_id not in chunk_relationships:
+            continue
 
+        chunk_relations = chunk_relationships[chunk_id]
+        direct_relationship_data.extend(chunk_relations.get(direct_key, []))
+        reverse_relationship_data.extend(chunk_relations.get(reverse_key, []))
+
+    selected_relation_key = direct_key if direct_relationship_data else reverse_key
+    all_relationship_data = direct_relationship_data or reverse_relationship_data
     if not all_relationship_data:
         logger.warning(f'No relation data found for `{src}-{tgt}`')
         return
@@ -1987,14 +1837,14 @@ async def _rebuild_single_relationship(
     seen_paths = set()
 
     for rel_data in all_relationship_data:
-        if rel_data.get('description'):
-            descriptions.append(rel_data['description'])
-        if rel_data.get('keywords'):
-            keywords.append(rel_data['keywords'])
-        if rel_data.get('weight'):
-            weights.append(rel_data['weight'])
-        if rel_data.get('file_path'):
-            file_path = rel_data['file_path']
+        if rel_data.description:
+            descriptions.append(rel_data.description)
+        if rel_data.keywords:
+            keywords.append(rel_data.keywords)
+        if rel_data.weight:
+            weights.append(rel_data.weight)
+        if rel_data.file_path:
+            file_path = rel_data.file_path
             if file_path and file_path not in seen_paths:
                 file_paths_list.append(file_path)
                 seen_paths.add(file_path)
@@ -2020,7 +1870,7 @@ async def _rebuild_single_relationship(
     description_list = list(dict.fromkeys(descriptions))
     keywords = list(dict.fromkeys(keywords))
 
-    combined_keywords = _normalize_relation_keywords(keywords) if keywords else current_relationship.get('keywords', '')
+    combined_keywords = normalize_relation_keywords(keywords) if keywords else current_relationship.get('keywords', '')
 
     weight = sum(weights) if weights else current_relationship.get('weight', 1.0)
 
@@ -2069,7 +1919,7 @@ async def _rebuild_single_relationship(
     configured_entity_types = addon_params.get('entity_types') if isinstance(addon_params, dict) else None
     if not isinstance(configured_entity_types, list):
         configured_entity_types = DEFAULT_ENTITY_TYPES
-    missing_entity_type = _normalize_extracted_entity_type('unknown', configured_entity_types)
+    missing_entity_type = normalize_extracted_entity_type('unknown', configured_entity_types)
 
     for node_id in {src, tgt}:
         if not (await knowledge_graph_inst.has_node(node_id)):
@@ -2119,34 +1969,30 @@ async def _rebuild_single_relationship(
 
     await knowledge_graph_inst.upsert_edge(src, tgt, updated_relationship_data)
 
-    # Update relationship in vector database. Use a canonical record id for
-    # pair-level deduplication, but preserve the extracted source/target direction
-    # in the vector payload and searchable content.
-    canonical_src, canonical_tgt = sorted((src, tgt))
-    try:
-        rel_vdb_id = compute_mdhash_id(canonical_src + canonical_tgt, prefix='rel-')
-        rel_vdb_id_reverse = compute_mdhash_id(canonical_tgt + canonical_src, prefix='rel-')
+    relation_summary = RelationSummary(
+        key=selected_relation_key,
+        predicate=RelationPredicate.from_raw(combined_keywords),
+        description=final_description,
+        weight=weight,
+        source_id=updated_relationship_data['source_id'],
+        file_path=updated_relationship_data['file_path'],
+        created_at=int(updated_relationship_data.get('created_at') or time.time()),
+        truncate=updated_relationship_data.get('truncate', ''),
+        semantics=RelationSemantics.from_text(combined_keywords, final_description),
+    )
+    relation_projection = build_relation_storage_projection(relation_summary)
 
+    # Update relationship in vector database.
+    try:
         # Delete old vector records first (both directions to be safe)
         try:
-            await relationships_vdb.delete([rel_vdb_id, rel_vdb_id_reverse])
+            await relationships_vdb.delete(relation_projection.relation_vdb_delete_ids)
         except Exception as e:
-            logger.debug(f'Could not delete old relationship vector records {rel_vdb_id}, {rel_vdb_id_reverse}: {e}')
+            logger.debug(
+                f'Could not delete old relationship vector records {relation_projection.relation_vdb_delete_ids}: {e}'
+            )
 
-        # Insert new vector record
-        rel_content = f'{combined_keywords}\t{src}\n{tgt}\n{final_description}'
-        vdb_data = {
-            rel_vdb_id: {
-                'src_id': src,
-                'tgt_id': tgt,
-                'source_id': updated_relationship_data['source_id'],
-                'content': rel_content,
-                'keywords': combined_keywords,
-                'description': final_description,
-                'weight': weight,
-                'file_path': updated_relationship_data['file_path'],
-            }
-        }
+        vdb_data = relation_projection.relation_vdb_payload
 
         # Use safe operation wrapper - VDB failure must throw exception
         await safe_vdb_operation_with_exception(
@@ -2179,7 +2025,7 @@ async def _rebuild_single_relationship(
 
 async def _merge_nodes_then_upsert(
     entity_name: str,
-    nodes_data: list[dict],
+    nodes_data: list[EntityFact],
     knowledge_graph_inst: BaseGraphStorage,
     global_config: GlobalConfig,
     pipeline_status: dict[str, Any] | None = None,
@@ -2201,7 +2047,7 @@ async def _merge_nodes_then_upsert(
         already_file_paths.extend(already_node['file_path'].split(GRAPH_FIELD_SEP))
         already_description.extend(already_node['description'].split(GRAPH_FIELD_SEP))
 
-    new_source_ids = [dp['source_id'] for dp in nodes_data if dp.get('source_id')]
+    new_source_ids = [dp.source_id for dp in nodes_data if dp.source_id]
 
     existing_full_source_ids = []
     if entity_chunks_storage is not None:
@@ -2240,7 +2086,7 @@ async def _merge_nodes_then_upsert(
         allowed_source_ids = set(source_ids)
         filtered_nodes = []
         for dp in nodes_data:
-            source_id = dp.get('source_id')
+            source_id = dp.source_id
             # Skip descriptions sourced from chunks dropped by the limitation cap
             if source_id and source_id not in allowed_source_ids and source_id not in existing_full_source_ids:
                 continue
@@ -2267,13 +2113,13 @@ async def _merge_nodes_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(source_ids)
 
     # 6.2 Finalize entity type by highest count
-    all_types = [dp['entity_type'] for dp in nodes_data] + already_entity_types
+    all_types = [dp.entity_type for dp in nodes_data] + already_entity_types
     entity_type = sorted(Counter(all_types).items(), key=lambda x: x[1], reverse=True)[0][0] if all_types else 'UNKNOWN'
 
     # 7. Deduplicate nodes by description, keeping first occurrence in the same document
     unique_nodes = {}
     for dp in nodes_data:
-        desc = dp.get('description')
+        desc = dp.description
         if not desc:
             continue
         if desc not in unique_nodes:
@@ -2282,9 +2128,9 @@ async def _merge_nodes_then_upsert(
     # Sort description by timestamp, then by description length when timestamps are the same
     sorted_nodes = sorted(
         unique_nodes.values(),
-        key=lambda x: (x.get('timestamp', 0), -len(x.get('description', ''))),
+        key=lambda x: (x.timestamp, -len(x.description)),
     )
-    sorted_descriptions = [dp['description'] for dp in sorted_nodes]
+    sorted_descriptions = [dp.description for dp in sorted_nodes]
 
     # Combine already_description with sorted new descriptions, deduplicating across both
     combined_descriptions = already_description + sorted_descriptions
@@ -2325,7 +2171,7 @@ async def _merge_nodes_then_upsert(
 
     # Collect from new data
     for dp in nodes_data:
-        file_path_item = dp.get('file_path')
+        file_path_item = dp.file_path
         if file_path_item and file_path_item not in seen_paths:
             file_paths_list.append(file_path_item)
             seen_paths.add(file_path_item)
@@ -2413,7 +2259,7 @@ async def _merge_nodes_then_upsert(
 async def _merge_edges_then_upsert(
     src_id: str,
     tgt_id: str,
-    edges_data: list[dict],
+    edges_data: list[RelationFact],
     knowledge_graph_inst: BaseGraphStorage,
     global_config: GlobalConfig,
     pipeline_status: dict[str, Any] | None = None,
@@ -2458,7 +2304,7 @@ async def _merge_edges_then_upsert(
             if already_edge.get('keywords') is not None:
                 already_keywords.extend(split_string_by_multi_markers(already_edge['keywords'], [GRAPH_FIELD_SEP]))
 
-    new_source_ids = [dp['source_id'] for dp in edges_data if dp.get('source_id')]
+    new_source_ids = [dp.source_id for dp in edges_data if dp.source_id]
 
     storage_key = make_relation_chunk_key(src_id, tgt_id)
     existing_full_source_ids = []
@@ -2498,7 +2344,7 @@ async def _merge_edges_then_upsert(
         allowed_source_ids = set(source_ids)
         filtered_edges = []
         for dp in edges_data:
-            source_id = dp.get('source_id')
+            source_id = dp.source_id
             # Skip relationship fragments sourced from chunks dropped by keep oldest cap
             if source_id and source_id not in allowed_source_ids and source_id not in existing_full_source_ids:
                 continue
@@ -2525,20 +2371,20 @@ async def _merge_edges_then_upsert(
     source_id = GRAPH_FIELD_SEP.join(source_ids)
 
     # 6.2 Finalize weight by summing new edges and existing weights
-    weight = sum([dp['weight'] for dp in edges_data] + already_weights)
+    weight = sum([dp.weight for dp in edges_data] + already_weights)
 
     # 6.2 Finalize keywords by merging existing and new keywords
-    keywords = _normalize_relation_keywords(
+    keywords = normalize_relation_keywords(
         [
             *already_keywords,
-            *[edge.get('keywords', '') for edge in edges_data if edge.get('keywords')],
+            *[edge.keywords for edge in edges_data if edge.keywords],
         ]
     )
 
     # 7. Deduplicate by description, keeping first occurrence in the same document
     unique_edges = {}
     for dp in edges_data:
-        description_value = dp.get('description')
+        description_value = dp.description
         if not description_value:
             continue
         if description_value not in unique_edges:
@@ -2547,9 +2393,9 @@ async def _merge_edges_then_upsert(
     # Sort description by timestamp, then by description length (largest to smallest) when timestamps are the same
     sorted_edges = sorted(
         unique_edges.values(),
-        key=lambda x: (x.get('timestamp', 0), -len(x.get('description', ''))),
+        key=lambda x: (x.timestamp, -len(x.description)),
     )
-    sorted_descriptions = [dp['description'] for dp in sorted_edges]
+    sorted_descriptions = [dp.description for dp in sorted_edges]
 
     # Combine already_description with sorted new descriptions, deduplicating across both
     combined_descriptions = already_description + sorted_descriptions
@@ -2591,7 +2437,7 @@ async def _merge_edges_then_upsert(
 
     # Collect from new data
     for dp in edges_data:
-        file_path_item = dp.get('file_path')
+        file_path_item = dp.file_path
         if file_path_item and file_path_item not in seen_paths:
             file_paths_list.append(file_path_item)
             seen_paths.add(file_path_item)
@@ -2654,7 +2500,7 @@ async def _merge_edges_then_upsert(
     configured_entity_types = addon_params.get('entity_types') if isinstance(addon_params, dict) else None
     if not isinstance(configured_entity_types, list):
         configured_entity_types = DEFAULT_ENTITY_TYPES
-    missing_entity_type = _normalize_extracted_entity_type('unknown', configured_entity_types)
+    missing_entity_type = normalize_extracted_entity_type('unknown', configured_entity_types)
 
     for need_insert_id in [src_id, tgt_id]:
         # Optimization: Use get_node instead of has_node + get_node
@@ -2778,133 +2624,175 @@ async def _merge_edges_then_upsert(
                 await update_pipeline_status(pipeline_status, pipeline_status_lock, status_message)
 
     edge_created_at = int(time.time())
+    relation_summary = RelationSummary(
+        key=RelationKey(src_id, tgt_id),
+        predicate=RelationPredicate.from_raw(keywords),
+        description=description,
+        weight=weight,
+        source_id=source_id,
+        file_path=file_path,
+        created_at=edge_created_at,
+        truncate=truncation_info,
+        semantics=RelationSemantics.from_text(keywords, description),
+    )
+    relation_projection = build_relation_storage_projection(relation_summary)
     await knowledge_graph_inst.upsert_edge(
         src_id,
         tgt_id,
-        edge_data={
-            'weight': weight,
-            'description': description,
-            'keywords': keywords,
-            'source_id': source_id,
-            'file_path': file_path,
-            'created_at': edge_created_at,
-            'truncate': truncation_info,
-        },
+        edge_data=relation_projection.graph_edge_data,
     )
 
     edge_data = {
         'src_id': src_id,
         'tgt_id': tgt_id,
-        'description': description,
-        'keywords': keywords,
-        'source_id': source_id,
-        'file_path': file_path,
-        'created_at': edge_created_at,
-        'truncate': truncation_info,
-        'weight': weight,
+        **relation_projection.graph_edge_data,
     }
-
-    # Use a canonical record id for pair-level deduplication, but preserve the
-    # extracted source/target direction in the vector payload and searchable content.
-    canonical_src, canonical_tgt = sorted((src_id, tgt_id))
-
-    rel_vdb_id = compute_mdhash_id(canonical_src + canonical_tgt, prefix='rel-')
-    rel_vdb_id_reverse = compute_mdhash_id(canonical_tgt + canonical_src, prefix='rel-')
-    rel_delete_ids = [rel_vdb_id, rel_vdb_id_reverse]
-    rel_content = f'{keywords}\t{src_id}\n{tgt_id}\n{description}'
-    rel_vdb_payload = {
-        rel_vdb_id: {
-            'src_id': src_id,
-            'tgt_id': tgt_id,
-            'source_id': source_id,
-            'content': rel_content,
-            'keywords': keywords,
-            'description': description,
-            'weight': weight,
-            'file_path': file_path,
-        }
-    }
-    return edge_data, entity_vdb_payloads, rel_vdb_payload, rel_delete_ids
+    return (
+        edge_data,
+        entity_vdb_payloads,
+        relation_projection.relation_vdb_payload,
+        relation_projection.relation_vdb_delete_ids,
+    )
 
 
 async def _resolve_entity_aliases_for_batch(
-    all_nodes: dict[str, list],
-    all_edges: dict[tuple, list],
+    all_nodes: dict[str, list[EntityFact]],
+    all_edges: dict[RelationKey, list[RelationFact]],
     entity_vdb: BaseVectorStorage,
     global_config: GlobalConfig,
-) -> tuple[dict[str, list], dict[tuple, list]]:
-    """Resolve entity aliases before merging into the knowledge graph.
-
-    This function checks each extracted entity against existing entities
-    in the VDB and the alias cache. If a match is found, the entity name
-    is rewritten to the canonical form.
-
-    Uses LLM-based resolution:
-    1. Cache check first (instant, free)
-    2. VDB similarity search for candidates
-    3. LLM batch review for decisions
-
-    Args:
-        all_nodes: Dict mapping entity names to list of entity data
-        all_edges: Dict mapping (src, tgt) tuples to list of edge data
-        entity_vdb: Entity vector database for similarity search
-        global_config: Global configuration dict
-
-    Returns:
-        Tuple of (rewritten_nodes, rewritten_edges) with canonical names
-    """
+) -> tuple[dict[str, list[EntityFact]], dict[RelationKey, list[RelationFact]]]:
+    """Plan and apply safe entity aliases before graph merge."""
     from yar.entity_resolution import (
         EntityResolutionConfig,
         get_cached_alias,
         llm_review_entities_batch,
         store_alias,
     )
+    from yar.entity_resolution.resolver import _alias_auto_apply_block_reason
 
-    # Get entity resolution config
     entity_resolution_config = global_config.get('entity_resolution_config')
     if entity_resolution_config is None:
         entity_resolution_config = EntityResolutionConfig()
     elif isinstance(entity_resolution_config, dict):
-        # Handle case where global_config was created via asdict() which converts nested dataclasses to dicts
         entity_resolution_config = EntityResolutionConfig(**entity_resolution_config)
 
-    # Check if auto-resolution is enabled
     if not entity_resolution_config.enabled or not entity_resolution_config.auto_resolve_on_extraction:
         return all_nodes, all_edges
 
     workspace = global_config.get('workspace', '')
 
-    # Try to get database for alias cache
     db = None
     try:
         _db_required = getattr(entity_vdb, '_db_required', None)
         if _db_required is not None:
             db = _db_required()
     except (RuntimeError, AttributeError):
-        pass  # Not PostgreSQL or not initialized - skip alias cache
+        pass
 
-    # Build alias map: original_name -> canonical_name
-    alias_map: dict[str, str] = {}
-    entity_names = list(all_nodes.keys())
+    def _normal_alias_endpoint(value: Any) -> str:
+        normalized = sanitize_and_normalize_extracted_text(str(value), remove_inner_quotes=True)
+        return re.sub(r'\s+', ' ', normalized).strip().casefold()
 
-    logger.debug(f'[{workspace}] Resolving aliases for {len(entity_names)} entities')
+    def _entity_type_for(name: str, entity_types: dict[str, str]) -> str:
+        return entity_types.get(name) or entity_types.get(_normal_alias_endpoint(name), 'Unknown')
 
-    # Step 1: Check alias cache for known mappings (always done first)
+    def _resolve_alias_chain(name: str, mapping: dict[str, str]) -> str:
+        seen: set[str] = set()
+        current = name
+        while current in mapping and current not in seen:
+            seen.add(current)
+            current = mapping[current]
+        return current
+
+    def _self_loop_after_mapping(mapping: dict[str, str]) -> tuple[RelationKey, str] | None:
+        for edge_key in all_edges:
+            resolved_src = _resolve_alias_chain(edge_key.src, mapping)
+            resolved_tgt = _resolve_alias_chain(edge_key.tgt, mapping)
+            if _normal_alias_endpoint(resolved_src) and _normal_alias_endpoint(resolved_src) == _normal_alias_endpoint(
+                resolved_tgt
+            ):
+                return edge_key, resolved_src
+        return None
+
+    def _build_alias_plan(proposals: list[AliasProposal], entity_types: dict[str, str]) -> AliasPlan:
+        accepted: list[AliasProposal] = []
+        rejected: list[AliasRejection] = []
+        mapping: dict[str, str] = {}
+
+        for proposal in proposals:
+            alias_key = _normal_alias_endpoint(proposal.alias)
+            canonical_key = _normal_alias_endpoint(proposal.canonical)
+            if not alias_key or not canonical_key or alias_key == canonical_key:
+                rejected.append(AliasRejection(proposal, 'empty or identity alias proposal'))
+                continue
+
+            block_reason = _alias_auto_apply_block_reason(
+                proposal.alias,
+                proposal.canonical,
+                proposal.entity_type or _entity_type_for(proposal.alias, entity_types),
+                _entity_type_for(proposal.canonical, entity_types),
+            )
+            if block_reason is not None:
+                rejected.append(AliasRejection(proposal, block_reason))
+                continue
+
+            trial_mapping = dict(mapping)
+            trial_mapping[proposal.alias] = proposal.canonical
+            compressed_mapping = {
+                alias: _resolve_alias_chain(canonical, trial_mapping) for alias, canonical in trial_mapping.items()
+            }
+            collapsed_edge = _self_loop_after_mapping(compressed_mapping)
+            if collapsed_edge is not None:
+                edge_key, collapsed_name = collapsed_edge
+                rejected.append(
+                    AliasRejection(
+                        proposal,
+                        f'would collapse relation edge {edge_key.src}->{edge_key.tgt} into {collapsed_name}',
+                    )
+                )
+                continue
+
+            mapping = compressed_mapping
+            accepted.append(proposal)
+
+        return AliasPlan(accepted=tuple(accepted), rejected=tuple(rejected), canonical_by_alias=mapping)
+
+    entity_types_map: dict[str, str] = {}
+    for entity_name, entities_list in all_nodes.items():
+        if entities_list:
+            entity_types_map[entity_name] = entities_list[0].entity_type
+            entity_types_map[_normal_alias_endpoint(entity_name)] = entities_list[0].entity_type
+
+    entity_names = sorted(
+        {*all_nodes.keys(), *(endpoint for edge_key in all_edges for endpoint in (edge_key.src, edge_key.tgt))}
+    )
+    logger.debug(f'[{workspace}] Resolving aliases for {len(entity_names)} graph entity names')
+
+    proposals: list[AliasProposal] = []
+    proposed_names: set[str] = set()
+
     if db is not None:
         for entity_name in entity_names:
             try:
                 cached = await get_cached_alias(entity_name, db, workspace)
                 if cached:
-                    canonical, _method, _confidence = cached
-                    alias_map[entity_name] = canonical
-                    logger.debug(f'[{workspace}] Cached alias: {entity_name} → {canonical}')
+                    canonical, _method, confidence = cached
+                    proposals.append(
+                        AliasProposal(
+                            alias=entity_name,
+                            canonical=canonical,
+                            source=AliasDecisionSource.CACHE,
+                            confidence=float(confidence or 0.0),
+                            entity_type=_entity_type_for(entity_name, entity_types_map),
+                            reasoning=None,
+                        )
+                    )
+                    proposed_names.add(entity_name)
+                    logger.debug(f'[{workspace}] Cached alias proposal: {entity_name} -> {canonical}')
             except Exception as e:
                 logger.debug(f'[{workspace}] Alias cache lookup failed for {entity_name}: {e}')
 
-    # Get remaining entities not resolved from cache
-    remaining = [n for n in entity_names if n not in alias_map]
-
-    # Step 2: LLM-based resolution for remaining entities
+    remaining = [name for name in entity_names if name not in proposed_names]
     if remaining:
         llm_model_func = global_config.get('llm_model_func')
         if llm_model_func is None:
@@ -2912,25 +2800,13 @@ async def _resolve_entity_aliases_for_batch(
         else:
             logger.debug(f'[{workspace}] Using LLM-based resolution for {len(remaining)} entities')
 
-            # Helper to call LLM with proper signature
             async def llm_fn(user_prompt: str, system_prompt: str | None = None) -> str:
                 if system_prompt:
                     return await llm_model_func(user_prompt, system_prompt=system_prompt)
                 return await llm_model_func(user_prompt)
 
-            # Extract entity types from all_nodes for LLM context
-            entity_types_map: dict[str, str] = {}
-            for entity_name, entities_list in all_nodes.items():
-                if entities_list and isinstance(entities_list, list) and len(entities_list) > 0:
-                    # Get the most common entity type from the list
-                    first_entity = entities_list[0]
-                    if isinstance(first_entity, dict):
-                        entity_types_map[entity_name] = first_entity.get('entity_type', 'Unknown')
-
-            # Process in batches
             for i in range(0, len(remaining), entity_resolution_config.batch_size):
                 batch = remaining[i : i + entity_resolution_config.batch_size]
-
                 try:
                     batch_result = await llm_review_entities_batch(
                         new_entities=batch,
@@ -2939,59 +2815,72 @@ async def _resolve_entity_aliases_for_batch(
                         config=entity_resolution_config,
                         entity_types=entity_types_map,
                     )
-
-                    for r in batch_result.results:
-                        if r.matches_existing and r.confidence >= entity_resolution_config.min_confidence:
-                            alias_map[r.new_entity] = r.canonical
-                            logger.debug(
-                                f'[{workspace}] LLM match: {r.new_entity} → {r.canonical} ({r.confidence:.2f})'
+                    for result in batch_result.results:
+                        if result.matches_existing and result.confidence >= entity_resolution_config.min_confidence:
+                            proposals.append(
+                                AliasProposal(
+                                    alias=result.new_entity,
+                                    canonical=result.canonical,
+                                    source=AliasDecisionSource.LLM,
+                                    confidence=result.confidence,
+                                    entity_type=result.entity_type,
+                                    reasoning=result.reasoning,
+                                )
                             )
-
-                            # Store in alias cache
-                            if db is not None and entity_resolution_config.auto_apply:
-                                try:
-                                    await store_alias(
-                                        alias=r.new_entity,
-                                        canonical=r.canonical,
-                                        method='llm',
-                                        confidence=r.confidence,
-                                        db=db,
-                                        workspace=workspace,
-                                        llm_reasoning=r.reasoning,
-                                        entity_type=r.entity_type,
-                                    )
-                                except Exception as e:
-                                    logger.debug(f'[{workspace}] Failed to store LLM alias: {e}')
-
+                            logger.debug(
+                                f'[{workspace}] LLM alias proposal: '
+                                f'{result.new_entity} -> {result.canonical} ({result.confidence:.2f})'
+                            )
                 except Exception as e:
                     logger.warning(f'[{workspace}] LLM batch review failed: {e}')
 
-    # If no aliases found, return original data
-    if not alias_map:
+    if not proposals:
         return all_nodes, all_edges
 
-    logger.info(f'[{workspace}] Resolved {len(alias_map)} entity aliases')
+    alias_plan = _build_alias_plan(proposals, entity_types_map)
+    for rejection in alias_plan.rejected:
+        logger.warning(
+            f'[{workspace}] Rejected {rejection.proposal.source.value} alias '
+            f'{rejection.proposal.alias} -> {rejection.proposal.canonical}: {rejection.reason}'
+        )
 
-    # Rewrite all_nodes with canonical names
-    new_all_nodes: dict[str, list] = defaultdict(list)
+    if not alias_plan.accepted:
+        return all_nodes, all_edges
+
+    logger.info(f'[{workspace}] Resolved {len(alias_plan.accepted)} entity aliases')
+
+    new_all_nodes: dict[str, list[EntityFact]] = defaultdict(list)
     for entity_name, entities in all_nodes.items():
-        canonical = alias_map.get(entity_name, entity_name)
-        new_all_nodes[canonical].extend(entities)
+        canonical = _resolve_alias_chain(entity_name, alias_plan.canonical_by_alias)
+        new_all_nodes[canonical].extend(entity.with_name(canonical) for entity in entities)
 
-    # Rewrite all_edges with canonical names
-    new_all_edges: dict[tuple, list] = defaultdict(list)
+    new_all_edges: dict[RelationKey, list[RelationFact]] = defaultdict(list)
     for edge_key, edges in all_edges.items():
-        src, tgt = edge_key
-        new_src = alias_map.get(src, src)
-        new_tgt = alias_map.get(tgt, tgt)
-        # Skip self-loops created by aliasing
-        if new_src == new_tgt:
-            logger.debug(f'[{workspace}] Skipping self-loop: {src}-{tgt} → {new_src}')
+        new_src = _resolve_alias_chain(edge_key.src, alias_plan.canonical_by_alias)
+        new_tgt = _resolve_alias_chain(edge_key.tgt, alias_plan.canonical_by_alias)
+        if _normal_alias_endpoint(new_src) == _normal_alias_endpoint(new_tgt):
+            logger.warning(f'[{workspace}] Alias plan produced unexpected self-loop: {edge_key.src}-{edge_key.tgt}')
             continue
-        if new_src is None or new_tgt is None:
-            continue
-        new_key = (new_src, new_tgt)
-        new_all_edges[new_key].extend(edges)
+        new_key = RelationKey(new_src, new_tgt)
+        new_all_edges[new_key].extend(edge.with_key(new_key) for edge in edges)
+
+    if db is not None and entity_resolution_config.auto_apply:
+        for proposal in alias_plan.accepted:
+            if proposal.source != AliasDecisionSource.LLM:
+                continue
+            try:
+                await store_alias(
+                    alias=proposal.alias,
+                    canonical=proposal.canonical,
+                    method='llm',
+                    confidence=proposal.confidence,
+                    db=db,
+                    workspace=workspace,
+                    llm_reasoning=proposal.reasoning,
+                    entity_type=proposal.entity_type,
+                )
+            except Exception as e:
+                logger.debug(f'[{workspace}] Failed to store LLM alias: {e}')
 
     return dict(new_all_nodes), dict(new_all_edges)
 
@@ -3175,7 +3064,7 @@ async def merge_nodes_and_edges(
 
             workspace = global_config.get('workspace', '')
             namespace = f'{workspace}:GraphDB' if workspace else 'GraphDB'
-            sorted_edge_key = sorted([edge_key[0], edge_key[1]])
+            sorted_edge_key = list(edge_key.storage_pair)
 
             async with get_storage_keyed_lock(
                 sorted_edge_key,
@@ -3187,8 +3076,8 @@ async def merge_nodes_and_edges(
 
                     logger.debug(f'Processing relation {sorted_edge_key}')
                     edge_data, ent_vdb, rel_vdb, rel_del = await _merge_edges_then_upsert(
-                        edge_key[0],
-                        edge_key[1],
+                        edge_key.src,
+                        edge_key.tgt,
                         edges,
                         knowledge_graph_inst,
                         global_config,
@@ -3622,7 +3511,7 @@ async def extract_entities(
             cache_keys_collector=cache_keys_collector,
         )
 
-        maybe_nodes, maybe_edges = await _process_extraction_result(
+        extraction = await _process_extraction_result(
             final_result,
             chunk_key,
             timestamp,
@@ -3631,7 +3520,8 @@ async def extract_entities(
             completion_delimiter=context_base['completion_delimiter'],
             entity_types=entity_types,
         )
-
+        maybe_nodes = extraction.nodes
+        maybe_edges = extraction.edges
         # Gleaning support
         if allow_gleaning and entity_extract_max_gleaning > 0:
             history = pack_user_ass_to_openai_messages(user_prompt, final_result)
@@ -3644,7 +3534,7 @@ async def extract_entities(
                 cache_keys_collector=cache_keys_collector,
                 history_messages=history,
             )
-            glean_nodes, glean_edges = await _process_extraction_result(
+            glean_extraction = await _process_extraction_result(
                 glean_result,
                 chunk_key,
                 timestamp,
@@ -3653,24 +3543,22 @@ async def extract_entities(
                 completion_delimiter=context_base['completion_delimiter'],
                 entity_types=entity_types,
             )
-            for entity_name, glean_entities in glean_nodes.items():
+            for entity_name, glean_entities in glean_extraction.nodes.items():
                 if entity_name in maybe_nodes:
-                    if len(glean_entities[0].get('description', '') or '') > len(
-                        maybe_nodes[entity_name][0].get('description', '') or ''
-                    ):
+                    if len(glean_entities[0].description or '') > len(maybe_nodes[entity_name][0].description or ''):
                         maybe_nodes[entity_name] = list(glean_entities)
                 else:
                     maybe_nodes[entity_name] = list(glean_entities)
-            for edge_key, glean_edge_list in glean_edges.items():
+            for edge_key, glean_edge_list in glean_extraction.edges.items():
                 if edge_key in maybe_edges:
-                    if len(glean_edge_list[0].get('description', '') or '') > len(
-                        maybe_edges[edge_key][0].get('description', '') or ''
-                    ):
+                    if len(glean_edge_list[0].description or '') > len(maybe_edges[edge_key][0].description or ''):
                         maybe_edges[edge_key] = list(glean_edge_list)
                 else:
                     maybe_edges[edge_key] = list(glean_edge_list)
 
-        maybe_nodes, maybe_edges = _finalize_chunk_extraction_result(maybe_nodes, maybe_edges, chunk_key)
+        finalized_extraction = _finalize_chunk_extraction_result(maybe_nodes, maybe_edges, chunk_key)
+        maybe_nodes = finalized_extraction.nodes
+        maybe_edges = finalized_extraction.edges
         if cache_keys_collector and text_chunks_storage:
             await update_chunk_cache_list(chunk_key, text_chunks_storage, cache_keys_collector, 'entity_extraction')
 
@@ -3781,7 +3669,7 @@ async def extract_entities(
                 section_text = sections[chunk_key]
                 file_path = chunk_dp.get('file_path', 'unknown_source')
                 try:
-                    nodes, edges = await _process_extraction_result(
+                    extraction = await _process_extraction_result(
                         section_text,
                         chunk_key,
                         timestamp,
@@ -3790,12 +3678,16 @@ async def extract_entities(
                         completion_delimiter=context_base['completion_delimiter'],
                         entity_types=entity_types,
                     )
-                    nodes, edges = _finalize_chunk_extraction_result(nodes, edges, chunk_key)
-                    results.append((nodes, edges))
+                    finalized_extraction = _finalize_chunk_extraction_result(
+                        extraction.nodes,
+                        extraction.edges,
+                        chunk_key,
+                    )
+                    results.append((finalized_extraction.nodes, finalized_extraction.edges))
                     processed_chunks += 1
                     log_message = (
                         f'Chunk {processed_chunks} of {total_chunks} extracted '
-                        f'{len(nodes)} Ent + {len(edges)} Rel {chunk_key}'
+                        f'{len(finalized_extraction.nodes)} Ent + {len(finalized_extraction.edges)} Rel {chunk_key}'
                     )
                     logger.info(log_message)
                     await update_pipeline_status(pipeline_status, pipeline_status_lock, log_message)
@@ -5260,8 +5152,23 @@ async def _perform_kg_search(
             f'top_type={str(final_entities[0].get("entity_type", "?"))!r}'
         )
 
+    supplemental_relations = []
+    if query_param.mode in {'hybrid', 'mix'} and ll_keywords and not final_entities:
+        supplemental_query = '\n'.join(part for part in (query, ll_keywords) if part)
+        supplemental_relations, _ = await _get_edge_data(
+            ll_keywords,
+            knowledge_graph_inst,
+            relationships_vdb,
+            query_param,
+            query=supplemental_query,
+        )
+        if supplemental_relations:
+            logger.info(
+                f'Supplemental relation query from low-level keywords added {len(supplemental_relations)} candidates'
+            )
+
     merged_relations: dict[tuple[str, str], tuple[float, int, int, dict[str, Any]]] = {}
-    for source_priority, source_relations in enumerate((local_relations, global_relations)):
+    for source_priority, source_relations in enumerate((local_relations, supplemental_relations, global_relations)):
         for index, relation in enumerate(source_relations):
             rel_key = _relation_key(relation)
             if rel_key is None:
@@ -5543,7 +5450,7 @@ async def _merge_all_chunks(
     if chunk_tracking is None:
         chunk_tracking = {}
 
-    chunk_ranking_query = '\n'.join(part for part in [query, *(facet_terms or [])] if part)
+    chunk_ranking_query = '\n'.join(part for part in [query, *(facet_terms or []), *(topic_terms or [])] if part)
     entity_chunks: list[dict[str, Any]] = []
     if filtered_entities and text_chunks_db and query_param is not None and knowledge_graph_inst is not None:
         entity_chunks = await _find_related_text_unit_from_entities(
@@ -7309,6 +7216,23 @@ async def _find_related_text_unit_from_relations(
     if not relations_with_chunks:
         logger.info(f'Find no additional relations-related chunks from {len(edge_datas)} relations')
         return []
+
+    relation_focus_terms = _tokenize_relevance_terms(query or '')
+    if relation_focus_terms:
+        relations_with_chunks = _rank_records_by_query_focus(
+            relations_with_chunks,
+            relation_focus_terms,
+            lambda relation_info: ' '.join(
+                str(value)
+                for value in (
+                    relation_info.get('relation_data', {}).get('src_id'),
+                    relation_info.get('relation_data', {}).get('tgt_id'),
+                    relation_info.get('relation_data', {}).get('keywords'),
+                    relation_info.get('relation_data', {}).get('description'),
+                )
+                if value
+            ),
+        )
 
     # Step 3: Sort chunks for each relationship by occurrence count (higher count = higher priority)
     total_relation_chunks = 0

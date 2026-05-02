@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from yar.evaluation.eval_rag_quality import RAGEvaluator
 from yar.evaluation.retrieval_eval import doc_hit_at_k, hit_at_k, mrr, recall_at_k
 
 
@@ -77,3 +80,85 @@ def test_metric_handles_duplicate_retrieved_ids() -> None:
     gold = {'a'}
 
     assert hit_at_k(retrieved, gold, 1) is True
+
+
+def test_case_mode_override_takes_precedence_over_dataset_retrieval_mode(tmp_path) -> None:
+    dataset_path = tmp_path / 'qa_pairs.json'
+    dataset_path.write_text(
+        json.dumps(
+            {
+                'qa_pairs': [
+                    {
+                        'question': 'What are the japan-specific activities?',
+                        'answer': 'Expected answer',
+                        'project': 'Sophie',
+                        'source_documents': ['Japanese iCMC Operations Managers Dairy life Handbook_V1.0.pdf'],
+                        'retrieval_mode': 'naive',
+                    }
+                ]
+            }
+        )
+    )
+
+    evaluator = RAGEvaluator(
+        test_dataset_path=dataset_path,
+        selected_case_numbers=[1],
+        case_mode_overrides={1: 'hybrid'},
+    )
+
+    assert evaluator._load_test_dataset()[0]['mode'] == 'hybrid'
+    assert 'retrieval_mode' not in evaluator._load_test_dataset()[0]
+
+    payload = evaluator._build_query_payload(
+        'question text', evaluator._load_test_dataset()[0], include_response_type=False
+    )
+    assert payload['mode'] == 'hybrid'
+
+
+def test_dataset_retrieval_mode_applies_without_case_mode_override(tmp_path) -> None:
+    dataset_path = tmp_path / 'qa_pairs.json'
+    dataset_path.write_text(
+        json.dumps(
+            {
+                'qa_pairs': [
+                    {
+                        'question': 'What are the japan-specific activities?',
+                        'answer': 'Expected answer',
+                        'project': 'Sophie',
+                        'source_documents': ['Japanese iCMC Operations Managers Dairy life Handbook_V1.0.pdf'],
+                        'retrieval_mode': 'naive',
+                    }
+                ]
+            }
+        )
+    )
+
+    evaluator = RAGEvaluator(test_dataset_path=dataset_path, selected_case_numbers=[1])
+
+    assert evaluator._load_test_dataset()[0]['retrieval_mode'] == 'naive'
+
+
+def test_build_query_payload_uses_dataset_retrieval_mode_without_case_override(tmp_path) -> None:
+    dataset_path = tmp_path / 'qa_pairs.json'
+    dataset_path.write_text(
+        json.dumps(
+            {
+                'qa_pairs': [
+                    {
+                        'question': 'What are the japan-specific activities?',
+                        'answer': 'Expected answer',
+                        'project': 'Sophie',
+                        'source_documents': ['Japanese iCMC Operations Managers Dairy life Handbook_V1.0.pdf'],
+                        'retrieval_mode': 'naive',
+                    }
+                ]
+            }
+        )
+    )
+
+    evaluator = RAGEvaluator(test_dataset_path=dataset_path, selected_case_numbers=[1])
+
+    payload = evaluator._build_query_payload(
+        'question text', evaluator._load_test_dataset()[0], include_response_type=False
+    )
+    assert payload['mode'] == 'naive'

@@ -1324,7 +1324,7 @@ class RAGEvaluator:
             override_mode = case_mode_overrides.get(active_case_number)
             if override_mode:
                 normalized_case['mode'] = override_mode
-            if raw_case.get('retrieval_mode'):
+            elif raw_case.get('retrieval_mode'):
                 normalized_case['retrieval_mode'] = raw_case['retrieval_mode']
             if raw_case.get('disable_cache') is True:
                 normalized_case['disable_cache'] = True
@@ -1403,7 +1403,7 @@ class RAGEvaluator:
                 payload['mode'] = test_case['mode']
                 if self.debug_mode:
                     logger.info('[DEBUG] Using mode override: %s', test_case['mode'])
-            if test_case.get('retrieval_mode'):
+            elif test_case.get('retrieval_mode'):
                 payload['mode'] = test_case['retrieval_mode']
                 if self.debug_mode:
                     logger.info('[DEBUG] Using retrieval mode override: %s', test_case['retrieval_mode'])
@@ -1550,12 +1550,13 @@ class RAGEvaluator:
         """Evaluate retrieval quality for a single test case."""
         async with retrieval_semaphore:
             question = test_case['question']
+            retrieval_question = _resolve_benchmark_query(question, test_case)
             case_number = int(test_case.get('test_number', idx))
             expected_documents = _collect_expected_documents(test_case.get('source_documents'))
             try:
                 result = await self._post_query(
                     '/query/data',
-                    self._build_query_payload(question, test_case, include_response_type=False),
+                    self._build_query_payload(retrieval_question, test_case, include_response_type=False),
                     client,
                 )
                 if result.get('status') not in {None, 'success'}:

@@ -30,6 +30,17 @@ INCOMPATIBLE_TYPE_PAIRS: set[frozenset[str]] = {
     frozenset({'person', 'concept'}),
     frozenset({'location', 'organization'}),
     frozenset({'location', 'event'}),
+    frozenset({'artifact', 'technology'}),
+    frozenset({'concept', 'document'}),
+    frozenset({'document', 'event'}),
+    frozenset({'event', 'artifact'}),
+    frozenset({'event', 'organization'}),
+    frozenset({'event', 'product'}),
+    frozenset({'method', 'artifact'}),
+    frozenset({'method', 'person'}),
+    frozenset({'method', 'product'}),
+    frozenset({'organization', 'document'}),
+    frozenset({'organization', 'technology'}),
     frozenset({'organization', 'concept'}),
 }
 
@@ -67,6 +78,119 @@ def _types_are_compatible(type_a: str, type_b: str) -> bool:
     return pair not in INCOMPATIBLE_TYPE_PAIRS
 
 
+_MONTH_ALIASES = {
+    'jan': '01',
+    'january': '01',
+    'feb': '02',
+    'february': '02',
+    'mar': '03',
+    'march': '03',
+    'apr': '04',
+    'april': '04',
+    'may': '05',
+    'jun': '06',
+    'june': '06',
+    'jul': '07',
+    'july': '07',
+    'aug': '08',
+    'august': '08',
+    'sep': '09',
+    'sept': '09',
+    'september': '09',
+    'oct': '10',
+    'october': '10',
+    'nov': '11',
+    'november': '11',
+    'dec': '12',
+    'december': '12',
+}
+
+
+def _normalized_alias_text(value: str) -> str:
+    normalized = normalize_unicode_for_entity_matching(value).casefold()
+    return re.sub(r'[^a-z0-9]+', ' ', normalized).strip()
+
+
+def _calendar_key(value: str) -> tuple[str, ...] | None:
+    normalized = _normalized_alias_text(value)
+    if not normalized:
+        return None
+
+    year_match = re.fullmatch(r'(?:19|20)\d{2}', normalized)
+    if year_match:
+        return ('year', normalized)
+
+    quarter_match = re.fullmatch(r'(?:q|quarter)\s*([1-4])\s*((?:19|20)\d{2})', normalized)
+    if quarter_match:
+        return ('quarter', quarter_match.group(2), quarter_match.group(1))
+
+    quarter_match = re.fullmatch(r'((?:19|20)\d{2})\s*(?:q|quarter)\s*([1-4])', normalized)
+    if quarter_match:
+        return ('quarter', quarter_match.group(1), quarter_match.group(2))
+
+    month_match = re.fullmatch(r'([a-z]+)\s*((?:19|20)\d{2})', normalized)
+    if month_match and month_match.group(1) in _MONTH_ALIASES:
+        return ('month', month_match.group(2), _MONTH_ALIASES[month_match.group(1)])
+
+    month_match = re.fullmatch(r'((?:19|20)\d{2})\s*([a-z]+)', normalized)
+    if month_match and month_match.group(2) in _MONTH_ALIASES:
+        return ('month', month_match.group(1), _MONTH_ALIASES[month_match.group(2)])
+
+    return None
+
+
+_DOSE_OR_QUANTITY_UNIT_PATTERN = re.compile(
+    r'(?<!\w)\d+(?:\.\d+)?\s*(?:%|percent|mg|mcg|ug|g|kg|ml|l|iu|units?|mmol|umol|mol|ng)(?!\w)'
+)
+
+
+def _numeric_tokens(value: str) -> set[str]:
+    return set(re.findall(r'\d+(?:\.\d+)?', _normalized_alias_text(value)))
+
+
+def _has_dose_or_quantity_token(value: str) -> bool:
+    normalized = normalize_unicode_for_entity_matching(value).casefold()
+    normalized = normalized.replace('\u00b5', 'u').replace('\u03bc', 'u')
+    return bool(_DOSE_OR_QUANTITY_UNIT_PATTERN.search(normalized))
+
+
+def _looks_like_numbered_short_code(value: str) -> bool:
+    compact = re.sub(r'[^a-z0-9]+', '', normalize_unicode_for_entity_matching(value).casefold())
+    return bool(re.fullmatch(r'[a-z]{2,8}\d+[a-z]?', compact))
+
+
+def _alias_auto_apply_block_reason(
+    alias: str,
+    canonical: str,
+    alias_type: str,
+    canonical_type: str,
+) -> str | None:
+    if not _types_are_compatible(alias_type, canonical_type):
+        return f'incompatible types: {alias_type or "Unknown"} vs {canonical_type or "Unknown"}'
+
+    alias_calendar = _calendar_key(alias)
+    canonical_calendar = _calendar_key(canonical)
+    if (alias_calendar or canonical_calendar) and alias_calendar != canonical_calendar:
+        return 'non-equivalent calendar aliases'
+
+    alias_numbers = _numeric_tokens(alias)
+    canonical_numbers = _numeric_tokens(canonical)
+    if alias_numbers and canonical_numbers and alias_numbers != canonical_numbers:
+        return 'conflicting numeric tokens'
+    if alias_numbers and not canonical_numbers:
+        if _looks_like_numbered_short_code(alias):
+            return 'numbered short-code alias lacks matching canonical number'
+        if _has_dose_or_quantity_token(alias):
+            return 'dose/quantity alias lacks matching canonical number'
+    if canonical_numbers and not alias_numbers:
+        if _looks_like_numbered_short_code(canonical):
+            return 'canonical numbered short code lacks matching alias number'
+        if _has_dose_or_quantity_token(canonical):
+            return 'canonical dose/quantity alias lacks matching alias number'
+
+    return None
+
+
 def _extract_type_from_content(content: str | None) -> str:
     """Extract entity type from content string.
 
@@ -96,6 +220,7 @@ def _extract_type_from_content(content: str | None) -> str:
                 return potential_type
 
     return 'Unknown'
+
 
 if TYPE_CHECKING:
     from yar.base import BaseVectorStorage
@@ -152,6 +277,7 @@ async def get_cached_alias(
         Tuple of (canonical_entity, method, confidence) if found, None otherwise
     """
     from yar.kg.postgres_impl import SQL_TEMPLATES
+
     # Apply Unicode normalization before cache lookup for consistent matching
     normalized_alias = normalize_unicode_for_entity_matching(alias).lower().strip()
 
@@ -196,6 +322,7 @@ async def store_alias(
     from datetime import datetime, timezone
 
     from yar.kg.postgres_impl import SQL_TEMPLATES
+
     # Apply Unicode normalization before storing for consistent matching
     normalized_alias = normalize_unicode_for_entity_matching(alias).lower().strip()
 
@@ -239,6 +366,7 @@ def _parse_llm_json_response(response: str) -> list[dict[str, Any]]:
 
     Returns empty list on parse failure.
     """
+
     def _normalize_parsed(parsed: Any) -> list[dict[str, Any]]:
         if isinstance(parsed, dict):
             return [parsed]
@@ -335,13 +463,9 @@ async def llm_review_entities_batch(
                 # for better typo/abbreviation detection, fall back to VDB-only
                 hybrid_search = getattr(entity_vdb, 'hybrid_entity_search', None)
                 if hybrid_search is not None:
-                    candidates = await hybrid_search(
-                        entity_name, top_k=config.candidates_per_entity
-                    )
+                    candidates = await hybrid_search(entity_name, top_k=config.candidates_per_entity)
                 else:
-                    candidates = await entity_vdb.query(
-                        entity_name, top_k=config.candidates_per_entity
-                    )
+                    candidates = await entity_vdb.query(entity_name, top_k=config.candidates_per_entity)
 
                 # Extract candidate names and types, filtering duplicates
                 candidate_info: list[tuple[str, str]] = []
@@ -366,13 +490,9 @@ async def llm_review_entities_batch(
                     for candidate_name, _ in candidate_info[:3]:  # Limit to top 3 for efficiency
                         try:
                             if hybrid_search is not None:
-                                reverse_results = await hybrid_search(
-                                    candidate_name, top_k=5
-                                )
+                                reverse_results = await hybrid_search(candidate_name, top_k=5)
                             else:
-                                reverse_results = await entity_vdb.query(
-                                    candidate_name, top_k=5
-                                )
+                                reverse_results = await entity_vdb.query(candidate_name, top_k=5)
                             # If new entity appears in reverse results, strengthen the match
                             # by ensuring the candidate is included (it already is, but this
                             # confirms bidirectional relevance for LLM context)
@@ -407,20 +527,14 @@ async def llm_review_entities_batch(
         entity_type = entity_types.get(entity_name, 'Unknown') if entity_types else 'Unknown'
         if candidates:
             # Include candidate types to help LLM make type-aware decisions
-            candidates_str = ', '.join(
-                f'"{name}" (type: {ctype})' for name, ctype in candidates[:5]
-            )
+            candidates_str = ', '.join(f'"{name}" (type: {ctype})' for name, ctype in candidates[:5])
             # Build type map for post-validation
             for name, ctype in candidates:
                 candidate_type_map[name] = ctype
-            prompt_parts.append(
-                f'{i}. New: "{entity_name}" (type: {entity_type})\n'
-                f'   Candidates: [{candidates_str}]'
-            )
+            prompt_parts.append(f'{i}. New: "{entity_name}" (type: {entity_type})\n   Candidates: [{candidates_str}]')
         else:
             prompt_parts.append(
-                f'{i}. New: "{entity_name}" (type: {entity_type})\n'
-                f'   Candidates: [none - this is likely a new entity]'
+                f'{i}. New: "{entity_name}" (type: {entity_type})\n   Candidates: [none - this is likely a new entity]'
             )
 
     if not prompt_parts:
@@ -428,9 +542,7 @@ async def llm_review_entities_batch(
 
     # Step 3: Call LLM
     system_prompt = PROMPTS.get('entity_review_system_prompt', '')
-    user_prompt = PROMPTS.get('entity_batch_review_prompt', '').format(
-        entity_candidates='\n\n'.join(prompt_parts)
-    )
+    user_prompt = PROMPTS.get('entity_batch_review_prompt', '').format(entity_candidates='\n\n'.join(prompt_parts))
 
     try:
         response = await llm_fn(user_prompt, system_prompt)
@@ -490,15 +602,22 @@ async def llm_review_entities_batch(
             matches = False
             canonical = new_entity
 
-        # Apply type compatibility validation as safety net
-        # Even if LLM says match, reject if types are clearly incompatible
-        if matches and candidate_type_map:
+        # Apply deterministic auto-apply safety checks after LLM review.
+        # High-confidence LLM matches can still collapse distinct typed entities,
+        # dates, doses, or numbered codes; keep those as separate entities.
+        if matches:
             new_type = entity_types.get(new_entity, 'Unknown') if entity_types else 'Unknown'
             canonical_type = candidate_type_map.get(canonical, 'Unknown')
-            if not _types_are_compatible(new_type, canonical_type):
+            block_reason = _alias_auto_apply_block_reason(
+                new_entity,
+                canonical,
+                new_type,
+                canonical_type,
+            )
+            if block_reason:
                 logger.warning(
-                    f'Type mismatch override: "{new_entity}" ({new_type}) '
-                    f'cannot match "{canonical}" ({canonical_type})'
+                    f'Alias auto-apply veto: "{new_entity}" ({new_type}) '
+                    f'cannot match "{canonical}" ({canonical_type}): {block_reason}'
                 )
                 matches = False
                 canonical = new_entity
@@ -560,9 +679,7 @@ async def llm_review_entity_pairs(
         return []
 
     # Format pairs for prompt
-    pairs_text = '\n'.join(
-        f'{i}. "{a}" vs "{b}"' for i, (a, b) in enumerate(pairs, 1)
-    )
+    pairs_text = '\n'.join(f'{i}. "{a}" vs "{b}"' for i, (a, b) in enumerate(pairs, 1))
 
     system_prompt = PROMPTS.get('entity_review_system_prompt', '')
     user_prompt = PROMPTS.get('entity_review_user_prompt', '').format(pairs=pairs_text)

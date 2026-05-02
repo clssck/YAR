@@ -14,7 +14,6 @@ This module tests:
 from __future__ import annotations
 
 import asyncio
-import inspect
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -26,6 +25,20 @@ from yar.constants import (
     DEFAULT_SUMMARY_LANGUAGE,
     GRAPH_FIELD_SEP,
 )
+from yar.entity_resolution.config import EntityResolutionConfig
+from yar.graph_model import (
+    ChunkExtractionResult,
+    EntityFact,
+    RelationFacet,
+    RelationFact,
+    RelationKey,
+    RelationPolarity,
+    RelationPredicate,
+    RelationSemantics,
+    RelationSummary,
+    build_relation_storage_projection,
+    normalize_relation_keywords,
+)
 from yar.operate import (
     _build_context_str,
     _build_prompt_chunk_context,
@@ -35,6 +48,7 @@ from yar.operate import (
     _enrich_local_keywords,
     _filter_nodes_to_relation_endpoints,
     _find_most_related_edges_from_entities,
+    _find_related_text_unit_from_relations,
     _generate_multi_facet_hyde,
     _get_edge_data,
     _get_node_data,
@@ -43,7 +57,6 @@ from yar.operate import (
     _merge_all_chunks,
     _merge_edges_then_upsert,
     _normalize_query_shaped_response,
-    _normalize_relation_keywords,
     _perform_kg_search,
     _prepare_visible_reference_payload,
     _process_extraction_result,
@@ -59,10 +72,144 @@ from yar.operate import (
     extract_keywords_only,
     get_keywords_from_query,
     kg_query,
-    merge_nodes_and_edges,
 )
 from yar.prompt import PROMPTS
 from yar.utils import process_chunks_unified
+
+
+def _relation_fact(
+    source: str,
+    target: str,
+    *,
+    description: str,
+    keywords: str,
+    chunk_id: str = 'chunk-1',
+    file_path: str = 'source.txt',
+    timestamp: int = 1,
+) -> RelationFact:
+    fact = RelationFact.from_record(
+        ['relation', source, target, keywords, description],
+        chunk_id,
+        timestamp,
+        file_path,
+    )
+    assert fact is not None
+    return fact
+
+
+def _entity_fact(
+    name: str,
+    *,
+    entity_type: str = 'concept',
+    description: str = 'Entity description.',
+    chunk_id: str = 'chunk-1',
+    file_path: str = 'source.txt',
+    timestamp: int = 1,
+) -> EntityFact:
+    fact = EntityFact.from_record(
+        ['entity', name, entity_type, description],
+        chunk_id,
+        timestamp,
+        file_path,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+    assert fact is not None
+    return fact
+
+
+@pytest.mark.offline
+def test_entity_fact_from_record_normalizes_and_preserves_provenance():
+    fact = EntityFact.from_record(
+        ['entity', ' Launch Owner ', 'role', ' Owns launch readiness. '],
+        'chunk-entity',
+        123,
+        'launch.pptx',
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    assert fact == EntityFact(
+        name='Launch Owner',
+        entity_type='person',
+        description='Owns launch readiness.',
+        source_id='chunk-entity',
+        file_path='launch.pptx',
+        timestamp=123,
+    )
+
+
+@pytest.mark.offline
+def test_relation_fact_from_record_preserves_direction_and_semantics():
+    fact = RelationFact.from_record(
+        [
+            'relation',
+            'Intervention Delay',
+            'Launch Readiness',
+            'impacts',
+            'The delay could impact launch readiness, but there was no evidence it improved quality.',
+        ],
+        'chunk-relation',
+        456,
+        'launch.pptx',
+    )
+
+    assert fact is not None
+    assert fact.key == RelationKey('Intervention Delay', 'Launch Readiness')
+    assert fact.key.storage_pair == ('Intervention Delay', 'Launch Readiness')
+    assert fact.key != RelationKey('Launch Readiness', 'Intervention Delay')
+    assert fact.keywords == 'impacts'
+    assert fact.description.startswith('The delay could impact launch readiness')
+    assert fact.source_id == 'chunk-relation'
+    assert fact.file_path == 'launch.pptx'
+    assert fact.timestamp == 456
+    assert fact.semantics.polarity == RelationPolarity.NEGATIVE_EVIDENCE
+    assert {RelationFacet.IMPACT, RelationFacet.CONSEQUENCE, RelationFacet.EVIDENCE} <= fact.semantics.facets
+
+
+@pytest.mark.offline
+def test_relation_fact_from_record_rejects_malformed_and_self_loop_records():
+    assert RelationFact.from_record(['relation', 'A', 'supports', 'A supports B.'], 'chunk', 1) is None
+    assert RelationFact.from_record(['relation', 'A', 'A', 'supports', 'A supports itself.'], 'chunk', 1) is None
+
+
+@pytest.mark.offline
+def test_relation_storage_projection_preserves_external_schema_and_direction():
+    summary = RelationSummary(
+        key=RelationKey('Later Evidence', 'Earlier Decision'),
+        predicate=RelationPredicate.from_raw('influenced by'),
+        description='Later evidence influenced the earlier decision.',
+        weight=1.5,
+        source_id='chunk-projection',
+        file_path='projection.pptx',
+        created_at=789,
+        truncate='Later Evidence' + GRAPH_FIELD_SEP + 'Earlier Decision',
+        semantics=RelationSemantics.from_text('influenced by', 'Later evidence influenced the earlier decision.'),
+    )
+
+    projection = build_relation_storage_projection(summary)
+    payload = next(iter(projection.relation_vdb_payload.values()))
+
+    assert projection.graph_edge_data == {
+        'weight': 1.5,
+        'description': 'Later evidence influenced the earlier decision.',
+        'keywords': 'influenced by',
+        'source_id': 'chunk-projection',
+        'file_path': 'projection.pptx',
+        'created_at': 789,
+        'truncate': 'Later Evidence' + GRAPH_FIELD_SEP + 'Earlier Decision',
+    }
+    assert set(payload) == {
+        'src_id',
+        'tgt_id',
+        'source_id',
+        'content',
+        'keywords',
+        'description',
+        'weight',
+        'file_path',
+    }
+    assert payload['src_id'] == 'Later Evidence'
+    assert payload['tgt_id'] == 'Earlier Decision'
+    assert payload['content'].startswith('influenced by\tLater Evidence\nEarlier Decision\n')
 
 
 @pytest.mark.offline
@@ -103,16 +250,14 @@ async def test_merge_edges_preserves_directed_relation_vector_payload():
         source,
         target,
         [
-            {
-                'src_id': source,
-                'tgt_id': target,
-                'weight': 1.0,
-                'description': 'The delay communication was sent to Kripa Ram.',
-                'keywords': 'sent to',
-                'source_id': chunk_id,
-                'file_path': file_path,
-                'timestamp': 1,
-            }
+            _relation_fact(
+                source,
+                target,
+                description='The delay communication was sent to Kripa Ram.',
+                keywords='sent to',
+                chunk_id=chunk_id,
+                file_path=file_path,
+            )
         ],
         graph,
         {
@@ -131,8 +276,67 @@ async def test_merge_edges_preserves_directed_relation_vector_payload():
     assert graph.upserted_edges[0][1] == target
     assert rel_payload['src_id'] == source
     assert rel_payload['tgt_id'] == target
-    assert rel_payload['content'].splitlines()[:2] == [f'sent to\t{source}', target]
+    assert rel_payload['content'].splitlines()[:2] == [f'sends to\t{source}', target]
     assert len(rel_delete_ids) == 2
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_adds_relation_search_hints_for_impact_and_negative_evidence():
+    source = 'Intervention Delay'
+    target = 'Launch Readiness'
+    chunk_id = 'chunk-impact'
+    description = 'The delay could impact launch readiness, but there was no evidence it improved quality.'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+            self.upserted_nodes = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': chunk_id,
+                'description': f'{node_id} description',
+                'entity_type': 'event',
+                'file_path': 'source.pptx',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            self.upserted_nodes.append((node_id, node_data))
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    _edge_data, _ent_vdb, rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [
+            _relation_fact(
+                source,
+                target,
+                description=description,
+                keywords='impacts',
+                chunk_id=chunk_id,
+                file_path='source.pptx',
+            )
+        ],
+        FakeGraphStorage(),
+        {
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    rel_payload = next(iter(rel_vdb.values()))
+    assert rel_payload['content'].splitlines()[:3] == [f'impacts\t{source}', target, description]
+    assert 'impact consequence effect result outcome' in rel_payload['content']
+    assert 'negative evidence no evidence insufficient evidence not supported' in rel_payload['content']
 
 
 @pytest.mark.offline
@@ -165,16 +369,14 @@ async def test_merge_edges_assigns_configured_type_to_missing_endpoint_nodes():
         source,
         target,
         [
-            {
-                'src_id': source,
-                'tgt_id': target,
-                'weight': 1.0,
-                'description': 'The source is related to the target.',
-                'keywords': 'related to',
-                'source_id': chunk_id,
-                'file_path': file_path,
-                'timestamp': 1,
-            }
+            _relation_fact(
+                source,
+                target,
+                description='The source is related to the target.',
+                keywords='related to',
+                chunk_id=chunk_id,
+                file_path=file_path,
+            )
         ],
         graph,
         {
@@ -194,25 +396,34 @@ async def test_merge_edges_assigns_configured_type_to_missing_endpoint_nodes():
 @pytest.mark.offline
 def test_normalize_relation_keywords_splits_and_deduplicates_labels():
     assert (
-        _normalize_relation_keywords([' Uses, supports ', 'uses,Requires', '', 'SUPPORTS'])
-        == 'uses, supports, requires'
+        normalize_relation_keywords([' Uses, supports ', 'uses,Requires', '', 'SUPPORTS']) == 'uses, supports, requires'
     )
 
 
 @pytest.mark.offline
 def test_normalize_relation_keywords_canonicalizes_without_inverting_direction():
     assert (
-        _normalize_relation_keywords(
+        normalize_relation_keywords(
             ['manufactured by, manufactured, evaluates, evaluated in'],
             max_keywords=10,
         )
         == 'manufactured by, manufactures, evaluates, evaluated in'
     )
+    assert (
+        normalize_relation_keywords(
+            [
+                'participated in, participated, attends, attended',
+                'submitted to, sent to, included participant',
+            ],
+            max_keywords=10,
+        )
+        == 'participates in, attends, submits to, sends to, included participant'
+    )
 
 
 @pytest.mark.offline
 def test_normalize_relation_keywords_bounds_labels_to_first_three():
-    assert _normalize_relation_keywords('supports, requires, evaluates, approves') == 'supports, requires, evaluates'
+    assert normalize_relation_keywords('supports, requires, evaluates, approves') == 'supports, requires, evaluates'
 
 
 @pytest.mark.offline
@@ -244,7 +455,7 @@ async def test_process_extraction_result_skips_4field_action_relation_without_da
         ]
     )
 
-    nodes, edges = await _process_extraction_result(
+    extraction = await _process_extraction_result(
         raw_result,
         'chunk-obeya',
         1234567890,
@@ -253,7 +464,8 @@ async def test_process_extraction_result_skips_4field_action_relation_without_da
         completion_delimiter=completion_delimiter,
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
-
+    nodes = extraction.nodes
+    edges = extraction.edges
     assert set(nodes) == {'Obeya'}
     assert edges == {}
     assert _filter_nodes_to_relation_endpoints(nodes, edges, 'chunk-obeya') == {}
@@ -275,7 +487,7 @@ async def test_process_extraction_result_accepts_corrected_5field_relation():
         ]
     )
 
-    nodes, edges = await _process_extraction_result(
+    extraction = await _process_extraction_result(
         raw_result,
         'chunk-obeya',
         1234567890,
@@ -284,10 +496,11 @@ async def test_process_extraction_result_accepts_corrected_5field_relation():
         completion_delimiter=completion_delimiter,
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
-
+    nodes = extraction.nodes
+    edges = extraction.edges
     assert set(nodes) == {'Obeya', 'Launch Preparation'}
-    assert set(edges) == {('Obeya', 'Launch Preparation')}
-    assert edges[('Obeya', 'Launch Preparation')][0]['keywords'] == 'supports'
+    assert set(edges) == {RelationKey('Obeya', 'Launch Preparation')}
+    assert edges[RelationKey('Obeya', 'Launch Preparation')][0].keywords == 'supports'
 
 
 @pytest.mark.offline
@@ -330,16 +543,15 @@ async def test_merge_edges_bounds_keywords_but_preserves_relation_descriptions()
         source,
         target,
         [
-            {
-                'src_id': source,
-                'tgt_id': target,
-                'weight': 1.0,
-                'description': description,
-                'keywords': keyword,
-                'source_id': f'chunk-{index}',
-                'file_path': 'source.pptx',
-                'timestamp': index,
-            }
+            _relation_fact(
+                source,
+                target,
+                description=description,
+                keywords=keyword,
+                chunk_id=f'chunk-{index}',
+                file_path='source.pptx',
+                timestamp=index,
+            )
             for index, (description, keyword) in enumerate(
                 zip(descriptions, ['supports', 'requires', 'evaluates', 'approves'], strict=True),
                 start=1,
@@ -419,17 +631,15 @@ async def test_rebuild_relationship_uses_configured_type_for_missing_endpoint_no
         chunk_ids=[chunk_id],
         chunk_relationships={
             chunk_id: {
-                (source, target): [
-                    {
-                        'src_id': source,
-                        'tgt_id': target,
-                        'weight': 1.0,
-                        'description': 'The source supports the target.',
-                        'keywords': 'Supports, uses, supports',
-                        'source_id': chunk_id,
-                        'file_path': file_path,
-                        'timestamp': 1,
-                    }
+                RelationKey(source, target): [
+                    _relation_fact(
+                        source,
+                        target,
+                        description='The source supports the target.',
+                        keywords='Supports, uses, supports',
+                        chunk_id=chunk_id,
+                        file_path=file_path,
+                    )
                 ]
             }
         },
@@ -448,16 +658,297 @@ async def test_rebuild_relationship_uses_configured_type_for_missing_endpoint_no
     assert next(iter(rel_vdb.payloads.values()))['keywords'] == 'supports, uses'
 
 
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_rebuild_relationship_prefers_direct_facts_over_inverse_facts():
+    source = 'A Entity'
+    target = 'B Entity'
+    chunk_id = 'chunk-direct'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def get_edge(self, source_node_id, target_node_id):
+            return {
+                'description': 'Existing relation.',
+                'keywords': 'existing',
+                'weight': 1.0,
+                'source_id': chunk_id,
+                'file_path': 'existing.txt',
+            }
+
+        async def has_node(self, node_id):
+            return True
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeVectorStorage:
+        def __init__(self):
+            self.deleted = []
+            self.payloads = {}
+
+        async def delete(self, ids):
+            self.deleted.extend(ids)
+
+        async def upsert(self, payload):
+            self.payloads.update(payload)
+
+    graph = FakeGraphStorage()
+    rel_vdb = FakeVectorStorage()
+
+    await _rebuild_single_relationship(
+        knowledge_graph_inst=graph,
+        relationships_vdb=rel_vdb,
+        entities_vdb=FakeVectorStorage(),
+        src=source,
+        tgt=target,
+        chunk_ids=[chunk_id],
+        chunk_relationships={
+            chunk_id: {
+                RelationKey(source, target): [
+                    _relation_fact(source, target, description='A supports B.', keywords='supports', chunk_id=chunk_id)
+                ],
+                RelationKey(target, source): [
+                    _relation_fact(target, source, description='B blocks A.', keywords='blocks', chunk_id=chunk_id)
+                ],
+            }
+        },
+        llm_response_cache=None,
+        global_config={
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    assert graph.upserted_edges == [
+        (
+            source,
+            target,
+            {
+                'description': 'A supports B.',
+                'keywords': 'supports',
+                'weight': 1.0,
+                'source_id': chunk_id,
+                'file_path': 'source.txt',
+                'truncate': '',
+            },
+        )
+    ]
+    payload = next(iter(rel_vdb.payloads.values()))
+    assert payload['src_id'] == source
+    assert payload['tgt_id'] == target
+    assert payload['description'] == 'A supports B.'
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_rebuild_relationship_reverse_fallback_preserves_fact_direction():
+    source = 'A Entity'
+    target = 'B Entity'
+    chunk_id = 'chunk-reverse'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def get_edge(self, source_node_id, target_node_id):
+            return {
+                'description': 'Existing relation.',
+                'keywords': 'existing',
+                'weight': 1.0,
+                'source_id': chunk_id,
+                'file_path': 'existing.txt',
+            }
+
+        async def has_node(self, node_id):
+            return True
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeVectorStorage:
+        def __init__(self):
+            self.deleted = []
+            self.payloads = {}
+
+        async def delete(self, ids):
+            self.deleted.extend(ids)
+
+        async def upsert(self, payload):
+            self.payloads.update(payload)
+
+    graph = FakeGraphStorage()
+    rel_vdb = FakeVectorStorage()
+
+    await _rebuild_single_relationship(
+        knowledge_graph_inst=graph,
+        relationships_vdb=rel_vdb,
+        entities_vdb=FakeVectorStorage(),
+        src=source,
+        tgt=target,
+        chunk_ids=[chunk_id],
+        chunk_relationships={
+            chunk_id: {
+                RelationKey(target, source): [
+                    _relation_fact(target, source, description='B blocks A.', keywords='blocks', chunk_id=chunk_id)
+                ]
+            }
+        },
+        llm_response_cache=None,
+        global_config={
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    assert graph.upserted_edges[0][0:2] == (source, target)
+    assert graph.upserted_edges[0][2]['description'] == 'B blocks A.'
+    payload = next(iter(rel_vdb.payloads.values()))
+    assert payload['src_id'] == target
+    assert payload['tgt_id'] == source
+    assert payload['content'].startswith('blocks\tB Entity\nA Entity\nB blocks A.')
+
+
 def test_edge_grouping_preserves_extracted_relation_direction():
-    """Directional relationships must not be normalized to lexical endpoint order."""
+    """Directional relationships remain distinct typed relation keys."""
+    forward = _relation_fact(
+        'B Entity',
+        'A Entity',
+        description='B Entity supports A Entity.',
+        keywords='supports',
+    )
+    reverse = _relation_fact(
+        'A Entity',
+        'B Entity',
+        description='A Entity supports B Entity.',
+        keywords='supports',
+    )
 
-    merge_source = inspect.getsource(merge_nodes_and_edges)
-    alias_source = inspect.getsource(_resolve_entity_aliases_for_batch)
+    all_edges: dict[RelationKey, list[RelationFact]] = {}
+    for relation in (forward, reverse):
+        all_edges.setdefault(relation.key, []).append(relation)
 
-    assert 'all_edges[edge_key].extend(edges)' in merge_source
-    assert 'tuple(sorted(edge_key))' not in merge_source
-    assert 'new_key = (new_src, new_tgt)' in alias_source
-    assert 'tuple(sorted(nodes_to_sort))' not in alias_source
+    assert set(all_edges) == {RelationKey('B Entity', 'A Entity'), RelationKey('A Entity', 'B Entity')}
+    assert all_edges[RelationKey('B Entity', 'A Entity')][0].key == RelationKey('B Entity', 'A Entity')
+    assert all_edges[RelationKey('A Entity', 'B Entity')][0].key == RelationKey('A Entity', 'B Entity')
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_alias_resolution_skips_alias_that_would_collapse_existing_edge():
+    """Alias auto-apply must not erase a real relation by turning it into a self-loop."""
+
+    class FakeEntityVdb:
+        async def hybrid_entity_search(self, entity_name, *, top_k):
+            if entity_name == 'Sanofi':
+                return [{'entity_name': 'Sanofi MSAT Goa', 'entity_type': 'Organization'}]
+            return []
+
+    llm_response = (
+        '[{"new_entity": "Sanofi", "matches_existing": true, '
+        '"canonical": "Sanofi MSAT Goa", "confidence": 0.95, '
+        '"reasoning": "LLM considered this the same organization"}]'
+    )
+    llm_model_func = AsyncMock(return_value=llm_response)
+    all_nodes = {
+        'Sanofi': [_entity_fact('Sanofi', entity_type='organization', description='Sanofi')],
+        'Sanofi MSAT Goa': [_entity_fact('Sanofi MSAT Goa', entity_type='organization', description='Sanofi MSAT Goa')],
+    }
+    all_edges = {
+        RelationKey('Sanofi', 'Sanofi MSAT Goa'): [
+            _relation_fact(
+                'Sanofi',
+                'Sanofi MSAT Goa',
+                description='Sanofi works with Sanofi MSAT Goa.',
+                keywords='works with',
+            )
+        ]
+    }
+    expected_nodes = {entity_name: list(entity_facts) for entity_name, entity_facts in all_nodes.items()}
+    expected_edges = {edge_key: list(edge_facts) for edge_key, edge_facts in all_edges.items()}
+
+    resolved_nodes, resolved_edges = await _resolve_entity_aliases_for_batch(
+        all_nodes=all_nodes,
+        all_edges=all_edges,
+        entity_vdb=FakeEntityVdb(),
+        global_config={
+            'workspace': 'default',
+            'llm_model_func': llm_model_func,
+            'entity_resolution_config': EntityResolutionConfig(
+                enabled=True,
+                auto_resolve_on_extraction=True,
+                auto_apply=True,
+            ),
+        },
+    )
+
+    assert resolved_nodes == expected_nodes
+    assert resolved_edges == expected_edges
+    llm_model_func.assert_awaited_once()
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_alias_resolution_skips_alias_that_would_collapse_edge_after_prior_alias():
+    """Batch aliases must be checked together so two accepted aliases cannot erase an edge."""
+
+    class FakeEntityVdb:
+        async def hybrid_entity_search(self, entity_name, *, top_k):
+            if entity_name in {'Sanofi', 'Sanofi MSAT'}:
+                return [{'entity_name': 'Sanofi MSAT Goa', 'entity_type': 'Organization'}]
+            return []
+
+    llm_response = (
+        '['
+        '{"new_entity": "Sanofi", "matches_existing": true, '
+        '"canonical": "Sanofi MSAT Goa", "confidence": 0.95, '
+        '"reasoning": "abbreviation"}, '
+        '{"new_entity": "Sanofi MSAT", "matches_existing": true, '
+        '"canonical": "Sanofi MSAT Goa", "confidence": 0.95, '
+        '"reasoning": "abbreviation"}'
+        ']'
+    )
+    llm_model_func = AsyncMock(return_value=llm_response)
+    all_nodes = {
+        'Sanofi': [_entity_fact('Sanofi', entity_type='organization', description='Sanofi')],
+        'Sanofi MSAT': [_entity_fact('Sanofi MSAT', entity_type='organization', description='Sanofi MSAT')],
+        'Sanofi MSAT Goa': [_entity_fact('Sanofi MSAT Goa', entity_type='organization', description='Sanofi MSAT Goa')],
+    }
+    edge_records = [
+        _relation_fact(
+            'Sanofi',
+            'Sanofi MSAT',
+            description='Sanofi works with Sanofi MSAT.',
+            keywords='works with',
+        )
+    ]
+    all_edges = {RelationKey('Sanofi', 'Sanofi MSAT'): edge_records}
+
+    resolved_nodes, resolved_edges = await _resolve_entity_aliases_for_batch(
+        all_nodes=all_nodes,
+        all_edges=all_edges,
+        entity_vdb=FakeEntityVdb(),
+        global_config={
+            'workspace': 'default',
+            'llm_model_func': llm_model_func,
+            'entity_resolution_config': EntityResolutionConfig(
+                enabled=True,
+                auto_resolve_on_extraction=True,
+                auto_apply=True,
+            ),
+        },
+    )
+
+    assert set(resolved_nodes) == {'Sanofi MSAT', 'Sanofi MSAT Goa'}
+    resolved_key = RelationKey('Sanofi MSAT Goa', 'Sanofi MSAT')
+    assert set(resolved_edges) == {resolved_key}
+    assert resolved_edges[resolved_key][0].key == resolved_key
+    assert all(edge_key.src != edge_key.tgt for edge_key in resolved_edges)
+    llm_model_func.assert_awaited_once()
 
 
 @pytest.mark.offline
@@ -477,7 +968,7 @@ async def test_process_extraction_result_normalizes_types_before_chunk_filtering
         ]
     )
 
-    nodes, edges = await _process_extraction_result(
+    extraction = await _process_extraction_result(
         raw_result,
         'chunk-1',
         1234567890,
@@ -486,13 +977,14 @@ async def test_process_extraction_result_normalizes_types_before_chunk_filtering
         completion_delimiter=completion_delimiter,
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
-
+    nodes = extraction.nodes
+    edges = extraction.edges
     assert set(nodes) == {'Connected Person', 'Unsupported Widget', 'Isolated Author'}
-    assert set(edges) == {('Connected Person', 'Unsupported Widget')}
-    assert nodes['Connected Person'][0]['entity_type'] == 'person'
-    assert nodes['Unsupported Widget'][0]['entity_type'] == 'concept'
+    assert set(edges) == {RelationKey('Connected Person', 'Unsupported Widget')}
+    assert nodes['Connected Person'][0].entity_type == 'person'
+    assert nodes['Unsupported Widget'][0].entity_type == 'concept'
     assert all(
-        record['entity_type'] in {entity_type.lower() for entity_type in DEFAULT_ENTITY_TYPES}
+        record.entity_type in {entity_type.lower() for entity_type in DEFAULT_ENTITY_TYPES}
         for records in nodes.values()
         for record in records
     )
@@ -512,7 +1004,7 @@ async def test_chunk_entity_filter_drops_entity_only_outputs():
         f'{tuple_delimiter}A heading with no explicit relation.\n{completion_delimiter}'
     )
 
-    nodes, edges = await _process_extraction_result(
+    extraction = await _process_extraction_result(
         raw_result,
         'chunk-1',
         1234567890,
@@ -521,7 +1013,8 @@ async def test_chunk_entity_filter_drops_entity_only_outputs():
         completion_delimiter=completion_delimiter,
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
-
+    nodes = extraction.nodes
+    edges = extraction.edges
     assert set(nodes) == {'Standalone Topic'}
     assert _filter_nodes_to_relation_endpoints(nodes, edges, 'chunk-1') == {}
 
@@ -546,7 +1039,7 @@ async def test_chunk_entity_filter_preserves_entities_connected_by_later_pass():
         ]
     )
 
-    initial_nodes, initial_edges = await _process_extraction_result(
+    initial_extraction = await _process_extraction_result(
         initial_result,
         'chunk-1',
         1234567890,
@@ -555,7 +1048,7 @@ async def test_chunk_entity_filter_preserves_entities_connected_by_later_pass():
         completion_delimiter=completion_delimiter,
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
-    glean_nodes, glean_edges = await _process_extraction_result(
+    glean_extraction = await _process_extraction_result(
         glean_result,
         'chunk-1',
         1234567891,
@@ -564,15 +1057,18 @@ async def test_chunk_entity_filter_preserves_entities_connected_by_later_pass():
         completion_delimiter=completion_delimiter,
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
-
+    initial_nodes = initial_extraction.nodes
+    initial_edges = initial_extraction.edges
+    glean_nodes = glean_extraction.nodes
+    glean_edges = glean_extraction.edges
     merged_nodes = {**initial_nodes, **glean_nodes}
     merged_edges = {**initial_edges, **glean_edges}
 
     filtered_nodes = _filter_nodes_to_relation_endpoints(merged_nodes, merged_edges, 'chunk-1')
 
     assert set(filtered_nodes) == {'Initial Source', 'Initial Target'}
-    assert filtered_nodes['Initial Source'][0]['description'] == 'Detailed source metadata.'
-    assert set(merged_edges) == {('Initial Source', 'Initial Target')}
+    assert filtered_nodes['Initial Source'][0].description == 'Detailed source metadata.'
+    assert set(merged_edges) == {RelationKey('Initial Source', 'Initial Target')}
 
 
 class TestEntityFilterMatching:
@@ -1398,7 +1894,10 @@ class TestExtractEntities:
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
-            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+            patch(
+                'yar.operate._process_extraction_result',
+                new=AsyncMock(return_value=ChunkExtractionResult(nodes={}, edges={})),
+            ),
         ):
             result = await extract_entities(
                 chunks=chunks,
@@ -1460,7 +1959,10 @@ class TestExtractEntities:
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
-            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+            patch(
+                'yar.operate._process_extraction_result',
+                new=AsyncMock(return_value=ChunkExtractionResult(nodes={}, edges={})),
+            ),
         ):
             result = await extract_entities(chunks=chunks, global_config=global_config)
 
@@ -1471,7 +1973,10 @@ class TestExtractEntities:
         with (
             patch.dict('os.environ', {'ENTITY_EXTRACT_BATCH_SIZE': '20'}, clear=False),
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
-            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+            patch(
+                'yar.operate._process_extraction_result',
+                new=AsyncMock(return_value=ChunkExtractionResult(nodes={}, edges={})),
+            ),
         ):
             result = await extract_entities(chunks=chunks, global_config=global_config)
 
@@ -1511,7 +2016,7 @@ class TestExtractEntities:
 
         async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
             captured_sections.append((chunk_key, section_text.strip()))
-            return {}, {}
+            return ChunkExtractionResult(nodes={}, edges={})
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
@@ -1570,7 +2075,7 @@ class TestExtractEntities:
 
         async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
             captured_sections.append((chunk_key, section_text.strip()))
-            return {}, {}
+            return ChunkExtractionResult(nodes={}, edges={})
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
@@ -1643,7 +2148,7 @@ class TestExtractEntities:
 
         async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
             captured_sections.append((chunk_key, section_text.strip()))
-            return {}, {}
+            return ChunkExtractionResult(nodes={}, edges={})
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
@@ -1706,7 +2211,7 @@ class TestExtractEntities:
 
         async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
             captured_sections.append((chunk_key, section_text.strip()))
-            return {}, {}
+            return ChunkExtractionResult(nodes={}, edges={})
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
@@ -1781,7 +2286,7 @@ class TestExtractEntities:
 
         async def fake_process_extraction(section_text, chunk_key, *_args, **_kwargs):
             captured_sections.append((chunk_key, section_text.strip()))
-            return {}, {}
+            return ChunkExtractionResult(nodes={}, edges={})
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
@@ -1849,7 +2354,10 @@ class TestExtractEntities:
 
         with (
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
-            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+            patch(
+                'yar.operate._process_extraction_result',
+                new=AsyncMock(return_value=ChunkExtractionResult(nodes={}, edges={})),
+            ),
         ):
             result = await extract_entities(
                 chunks=chunks,
@@ -1959,7 +2467,10 @@ class TestExtractEntities:
         with (
             patch.dict('os.environ', {'ENTITY_EXTRACT_BATCH_SIZE': '1'}, clear=False),
             patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache) as llm_mock,
-            patch('yar.operate._process_extraction_result', new=AsyncMock(return_value=({}, {}))),
+            patch(
+                'yar.operate._process_extraction_result',
+                new=AsyncMock(return_value=ChunkExtractionResult(nodes={}, edges={})),
+            ),
         ):
             first_result, second_result = await asyncio.gather(
                 extract_entities(chunks=make_chunks('doc-a'), global_config=dict(global_config)),
@@ -2381,6 +2892,35 @@ class TestPerformKgSearchScoreAwareMerge:
             ('e', 'f'),
         ]
         assert result['final_relations'][0].get('src_id') == 'a'
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_supplements_relations_from_low_level_keywords_when_entities_miss(self):
+        query_param = QueryParam(mode='hybrid', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        global_relations = [{'src_id': 'Handbook', 'tgt_id': 'Abbreviations', 'score': 0.2}]
+        supplemental_relations = [{'src_id': 'Japan submission task force', 'tgt_id': 'J-CTD', 'score': 0.95}]
+        edge_mock = AsyncMock(side_effect=[(global_relations, []), (supplemental_relations, [])])
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))),
+            patch('yar.operate._get_edge_data', new=edge_mock),
+        ):
+            result = await _perform_kg_search(
+                query='What are the japan-specific activities?',
+                ll_keywords='Foreign Manufacturer Accreditation, J-CTD',
+                hl_keywords='Japanese iCMC Operations Managers handbook',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        assert edge_mock.await_count == 2
+        assert edge_mock.await_args_list[1].args[0] == 'Foreign Manufacturer Accreditation, J-CTD'
+        assert result['final_relations'][0]['tgt_id'] == 'J-CTD'
 
 
 @pytest.mark.offline
@@ -3138,6 +3678,70 @@ class TestResponseQualityControls:
         assert [chunk['chunk_id'] for chunk in merged[:2]] == ['shared', 'weak-vector']
         assert merged[0]['source_type'] == 'entity+relationship+vector'
         assert merged[0]['merge_score'] > merged[1]['merge_score']
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_uses_low_level_terms_for_relation_chunk_selection(self):
+        query_param = QueryParam(mode='hybrid', top_k=4, chunk_top_k=4)
+        relation_chunk_mock = AsyncMock(return_value=[])
+
+        with patch('yar.operate._find_related_text_unit_from_relations', new=relation_chunk_mock):
+            await _merge_all_chunks(
+                filtered_entities=[],
+                filtered_relations=[{'src_id': 'Japan Handbook', 'tgt_id': 'FMA'}],
+                vector_chunks=[],
+                query='What are the japan-specific activities?',
+                topic_terms=['Foreign Manufacturer Accreditation', 'J-CTD'],
+                facet_terms=['Japanese iCMC Operations Managers handbook'],
+                text_chunks_db=MagicMock(),
+                query_param=query_param,
+            )
+
+        ranking_query = relation_chunk_mock.await_args.args[4]
+        assert 'What are the japan-specific activities?' in ranking_query
+        assert 'Japanese iCMC Operations Managers handbook' in ranking_query
+        assert 'Foreign Manufacturer Accreditation' in ranking_query
+        assert 'J-CTD' in ranking_query
+
+    @pytest.mark.asyncio
+    async def test_relation_chunk_selection_prioritizes_low_level_relation_matches(self):
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {
+            'kg_chunk_pick_method': 'WEIGHT',
+            'related_chunk_number': 1,
+        }
+
+        async def fake_get_by_ids(chunk_ids):
+            return [{'content': f'chunk {chunk_id}', 'file_path': 'source.md'} for chunk_id in chunk_ids]
+
+        text_chunks_db.get_by_ids = AsyncMock(side_effect=fake_get_by_ids)
+        weighted_polling_mock = Mock(return_value=[])
+        relations = [
+            {
+                'src_id': 'Japanese iCMC Handbook',
+                'tgt_id': 'Abbreviations',
+                'keywords': 'references',
+                'description': 'The handbook references abbreviations.',
+                'source_id': 'chunk-generic',
+            },
+            {
+                'src_id': 'Japan submission task force',
+                'tgt_id': 'J-CTD',
+                'keywords': 'prepares',
+                'description': 'The Japan team prepares the J-CTD package.',
+                'source_id': 'chunk-jctd',
+            },
+        ]
+
+        with patch('yar.operate.pick_by_weighted_polling', new=weighted_polling_mock):
+            await _find_related_text_unit_from_relations(
+                relations,
+                QueryParam(mode='hybrid', top_k=4, chunk_top_k=4),
+                text_chunks_db,
+                query='What are the japan-specific activities?\nJ-CTD',
+            )
+
+        ranked_relations = weighted_polling_mock.call_args.args[0]
+        assert ranked_relations[0]['relation_data']['tgt_id'] == 'J-CTD'
 
     @pytest.mark.asyncio
     async def test_find_most_related_edges_filters_hub_edges_by_query_focus(self):

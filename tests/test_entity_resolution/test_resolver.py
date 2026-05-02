@@ -18,6 +18,7 @@ import pytest
 
 from yar.entity_resolution.config import DEFAULT_CONFIG, EntityResolutionConfig
 from yar.entity_resolution.resolver import (
+    _alias_auto_apply_block_reason,
     _extract_type_from_content,
     _parse_llm_json_response,
     _types_are_compatible,
@@ -461,9 +462,7 @@ class TestLLMReviewEntitiesBatch:
     """Tests for llm_review_entities_batch function."""
 
     @pytest.mark.asyncio
-    async def test_disabled_config_returns_empty(
-        self, mock_entity_vdb, mock_llm_fn, disabled_config
-    ):
+    async def test_disabled_config_returns_empty(self, mock_entity_vdb, mock_llm_fn, disabled_config):
         """Disabled config should return empty result."""
         result = await llm_review_entities_batch(
             new_entities=['FDA', 'WHO'],
@@ -567,9 +566,7 @@ class TestLLMReviewEntitiesBatch:
         assert mock_entity_vdb.hybrid_entity_search.call_count >= 2
 
     @pytest.mark.asyncio
-    async def test_fallback_to_vdb_query_when_no_hybrid(
-        self, mock_entity_vdb, mock_llm_fn
-    ):
+    async def test_fallback_to_vdb_query_when_no_hybrid(self, mock_entity_vdb, mock_llm_fn):
         """Should fall back to VDB query when hybrid_entity_search unavailable."""
         del mock_entity_vdb.hybrid_entity_search  # Remove hybrid search
         mock_entity_vdb.query = AsyncMock(return_value=[])
@@ -585,9 +582,7 @@ class TestLLMReviewEntitiesBatch:
         mock_entity_vdb.query.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_confidence_threshold_applied(
-        self, mock_entity_vdb, mock_llm_fn, config_low_confidence
-    ):
+    async def test_confidence_threshold_applied(self, mock_entity_vdb, mock_llm_fn, config_low_confidence):
         """Matches below confidence threshold should be rejected."""
         mock_entity_vdb.hybrid_entity_search = AsyncMock(return_value=[])
         # Return match with high confidence (above 0.5 threshold)
@@ -659,9 +654,7 @@ class TestLLMReviewEntitiesBatch:
             assert 'LLM review failed' in r.reasoning
 
     @pytest.mark.asyncio
-    async def test_missing_entities_in_response_handled(
-        self, mock_entity_vdb, mock_llm_fn
-    ):
+    async def test_missing_entities_in_response_handled(self, mock_entity_vdb, mock_llm_fn):
         """Entities not in LLM response should be added as new."""
         mock_entity_vdb.hybrid_entity_search = AsyncMock(return_value=[])
         # LLM only returns one of two entities
@@ -709,9 +702,7 @@ class TestLLMReviewEntitiesBatch:
     @pytest.mark.asyncio
     async def test_no_vdb_all_new(self, mock_llm_fn):
         """Without VDB, all entities should have no candidates."""
-        mock_llm_fn.return_value = json.dumps(
-            [{'new_entity': 'Test', 'matches_existing': False, 'canonical': 'Test'}]
-        )
+        mock_llm_fn.return_value = json.dumps([{'new_entity': 'Test', 'matches_existing': False, 'canonical': 'Test'}])
 
         result = await llm_review_entities_batch(
             new_entities=['Test'],
@@ -728,9 +719,7 @@ class TestLLMReviewEntitiesBatch:
     @pytest.mark.asyncio
     async def test_vdb_error_handled_gracefully(self, mock_entity_vdb, mock_llm_fn):
         """VDB query errors should be handled gracefully."""
-        mock_entity_vdb.hybrid_entity_search = AsyncMock(
-            side_effect=Exception('VDB error')
-        )
+        mock_entity_vdb.hybrid_entity_search = AsyncMock(side_effect=Exception('VDB error'))
         mock_llm_fn.return_value = '[]'
 
         # Should not raise
@@ -764,9 +753,7 @@ class TestLLMReviewEntityPairs:
             [{'pair_id': 1, 'same_entity': True, 'canonical': 'FDA', 'confidence': 0.99}]
         )
 
-        result = await llm_review_entity_pairs(
-            pairs=[('FDA', 'US FDA')], llm_fn=mock_llm_fn
-        )
+        result = await llm_review_entity_pairs(pairs=[('FDA', 'US FDA')], llm_fn=mock_llm_fn)
 
         assert len(result) == 1
         assert result[0]['same_entity'] is True
@@ -785,9 +772,7 @@ class TestLLMReviewEntityPairs:
             ]
         )
 
-        result = await llm_review_entity_pairs(
-            pairs=[('Apple Inc', 'Apple Records')], llm_fn=mock_llm_fn
-        )
+        result = await llm_review_entity_pairs(pairs=[('Apple Inc', 'Apple Records')], llm_fn=mock_llm_fn)
 
         assert len(result) == 1
         assert result[0]['same_entity'] is False
@@ -803,9 +788,7 @@ class TestLLMReviewEntityPairs:
             ]
         )
 
-        result = await llm_review_entity_pairs(
-            pairs=[('A', 'B'), ('C', 'D'), ('E', 'F')], llm_fn=mock_llm_fn
-        )
+        result = await llm_review_entity_pairs(pairs=[('A', 'B'), ('C', 'D'), ('E', 'F')], llm_fn=mock_llm_fn)
 
         assert len(result) == 3
 
@@ -814,9 +797,7 @@ class TestLLMReviewEntityPairs:
         """LLM error should return empty list."""
         mock_llm_fn.side_effect = Exception('LLM error')
 
-        result = await llm_review_entity_pairs(
-            pairs=[('A', 'B')], llm_fn=mock_llm_fn
-        )
+        result = await llm_review_entity_pairs(pairs=[('A', 'B')], llm_fn=mock_llm_fn)
 
         assert result == []
 
@@ -828,9 +809,7 @@ class TestResolveEntity:
     """Tests for resolve_entity function."""
 
     @pytest.mark.asyncio
-    async def test_disabled_returns_new(
-        self, mock_entity_vdb, mock_llm_fn, mock_db, disabled_config
-    ):
+    async def test_disabled_returns_new(self, mock_entity_vdb, mock_llm_fn, mock_db, disabled_config):
         """Disabled config should return 'new' immediately."""
         result = await resolve_entity(
             entity_name='FDA',
@@ -954,9 +933,7 @@ class TestResolveEntity:
         mock_db.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_no_auto_apply_skips_storage(
-        self, mock_entity_vdb, mock_llm_fn, mock_db, config_no_auto_apply
-    ):
+    async def test_no_auto_apply_skips_storage(self, mock_entity_vdb, mock_llm_fn, mock_db, config_no_auto_apply):
         """Without auto_apply, matches should not be stored."""
         mock_db.query = AsyncMock(return_value=None)
         mock_entity_vdb.hybrid_entity_search = AsyncMock(return_value=[])
@@ -1010,9 +987,7 @@ class TestResolveEntity:
         assert result.matched_entity == 'US FDA'
 
     @pytest.mark.asyncio
-    async def test_empty_llm_response_returns_none(
-        self, mock_entity_vdb, mock_llm_fn, mock_db
-    ):
+    async def test_empty_llm_response_returns_none(self, mock_entity_vdb, mock_llm_fn, mock_db):
         """Empty LLM response should return 'new' with 'none' method."""
         mock_db.query = AsyncMock(return_value=None)
         mock_entity_vdb.hybrid_entity_search = AsyncMock(return_value=[])
@@ -1029,9 +1004,7 @@ class TestResolveEntity:
         assert result.method == 'none'
 
     @pytest.mark.asyncio
-    async def test_source_doc_id_passed_to_store(
-        self, mock_entity_vdb, mock_llm_fn, mock_db
-    ):
+    async def test_source_doc_id_passed_to_store(self, mock_entity_vdb, mock_llm_fn, mock_db):
         """source_doc_id should be passed when storing alias."""
         mock_db.query = AsyncMock(return_value=None)
         mock_entity_vdb.hybrid_entity_search = AsyncMock(return_value=[])
@@ -1060,9 +1033,7 @@ class TestResolveEntity:
         assert data['source_doc_id'] == 'doc123'
 
     @pytest.mark.asyncio
-    async def test_entity_type_passed_to_store(
-        self, mock_entity_vdb, mock_llm_fn, mock_db
-    ):
+    async def test_entity_type_passed_to_store(self, mock_entity_vdb, mock_llm_fn, mock_db):
         """entity_type should be passed when storing alias."""
         mock_db.query = AsyncMock(return_value=None)
         mock_entity_vdb.hybrid_entity_search = AsyncMock(return_value=[])
@@ -1145,7 +1116,7 @@ class TestEdgeCases:
         response = '[{"new_entity": "entity\'; DROP TABLE aliases;--", "canonical": "Safe"}]'
         result = _parse_llm_json_response(response)
         # The malicious content is just data, not executed
-        assert "DROP TABLE" in result[0]['new_entity']
+        assert 'DROP TABLE' in result[0]['new_entity']
 
     def test_boundary_confidence_zero(self):
         """Zero confidence should be handled."""
@@ -1179,9 +1150,7 @@ class TestResolutionFlow:
     """Tests for complete resolution flow scenarios."""
 
     @pytest.mark.asyncio
-    async def test_full_resolution_with_cache_and_llm(
-        self, mock_entity_vdb, mock_llm_fn, mock_db
-    ):
+    async def test_full_resolution_with_cache_and_llm(self, mock_entity_vdb, mock_llm_fn, mock_db):
         """Test complete flow: cache miss -> VDB search -> LLM -> cache store."""
         # Setup: Cache miss, VDB returns candidates, LLM finds match
         mock_db.query = AsyncMock(return_value=None)
@@ -1232,9 +1201,7 @@ class TestResolutionFlow:
         assert mock_db.execute.called
 
     @pytest.mark.asyncio
-    async def test_batch_review_with_multiple_matches(
-        self, mock_entity_vdb, mock_llm_fn
-    ):
+    async def test_batch_review_with_multiple_matches(self, mock_entity_vdb, mock_llm_fn):
         """Test batch review with multiple entities and various outcomes."""
         mock_entity_vdb.hybrid_entity_search = AsyncMock(
             side_effect=[
@@ -1329,6 +1296,22 @@ class TestTypesAreCompatible:
         """Person and Event types are incompatible."""
         assert _types_are_compatible('Person', 'Event') is False
 
+    def test_observed_graph_alias_type_mismatches_incompatible(self):
+        """Observed high-confidence false-positive type pairs should not auto-merge."""
+        incompatible_pairs = [
+            ('Event', 'Artifact'),
+            ('Event', 'Organization'),
+            ('Technology', 'Organization'),
+            ('Document', 'Event'),
+            ('Method', 'Person'),
+            ('Concept', 'Document'),
+            ('Artifact', 'Technology'),
+            ('Organization', 'Document'),
+        ]
+
+        for alias_type, canonical_type in incompatible_pairs:
+            assert _types_are_compatible(alias_type, canonical_type) is False
+
     def test_case_insensitive(self):
         """Type comparison should be case insensitive."""
         assert _types_are_compatible('PERSON', 'person') is True
@@ -1340,27 +1323,177 @@ class TestTypesAreCompatible:
         assert _types_are_compatible('Organization', ' Organization ') is True
 
 
+class TestAliasAutoApplySafety:
+    """Tests for deterministic alias auto-apply vetoes."""
+
+    def test_equivalent_month_alias_is_safe(self):
+        assert _alias_auto_apply_block_reason('Dec 2020', 'December 2020', 'Event', 'Event') is None
+
+    def test_bare_year_does_not_merge_to_specific_month(self):
+        assert _alias_auto_apply_block_reason('2022', 'May 2022', 'Event', 'Event') == 'non-equivalent calendar aliases'
+
+    def test_quarter_does_not_merge_to_specific_month(self):
+        assert (
+            _alias_auto_apply_block_reason('Q1 2022', 'May 2022', 'Event', 'Event') == 'non-equivalent calendar aliases'
+        )
+
+    def test_conflicting_dose_numbers_are_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('20 mg PFP', '50mg PFP', 'Artifact', 'Artifact')
+            == 'conflicting numeric tokens'
+        )
+
+    def test_dose_alias_without_canonical_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('20 mg PFP', 'PFP', 'Artifact', 'Artifact')
+            == 'dose/quantity alias lacks matching canonical number'
+        )
+
+    def test_canonical_dose_alias_without_alias_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('PFP', '20 mg PFP', 'Artifact', 'Artifact')
+            == 'canonical dose/quantity alias lacks matching alias number'
+        )
+
+    def test_percent_dose_alias_without_canonical_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('20% PFP', 'PFP', 'Artifact', 'Artifact')
+            == 'dose/quantity alias lacks matching canonical number'
+        )
+
+    def test_canonical_percent_dose_alias_without_alias_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('PFP', '20% PFP', 'Artifact', 'Artifact')
+            == 'canonical dose/quantity alias lacks matching alias number'
+        )
+
+    def test_numbered_short_code_without_canonical_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('USP 1', 'United States Pharmacopeia', 'Document', 'Document')
+            == 'numbered short-code alias lacks matching canonical number'
+        )
+
+    def test_known_abbreviation_without_number_remains_safe(self):
+        assert (
+            _alias_auto_apply_block_reason(
+                'FDA',
+                'Food and Drug Administration',
+                'Organization',
+                'Organization',
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
+    async def test_batch_review_vetoes_high_confidence_type_mismatch(self, mock_entity_vdb, mock_llm_fn):
+        """LLM confidence should not override deterministic alias safety checks."""
+        mock_entity_vdb.hybrid_entity_search = AsyncMock(
+            return_value=[{'entity_name': '50mg PFP', 'entity_type': 'Artifact'}]
+        )
+        mock_llm_fn.return_value = json.dumps(
+            [
+                {
+                    'new_entity': '50 mg prefilled pen pk study design',
+                    'matches_existing': True,
+                    'canonical': '50mg PFP',
+                    'confidence': 1.0,
+                    'reasoning': 'High-confidence but wrong type merge',
+                }
+            ]
+        )
+
+        result = await llm_review_entities_batch(
+            new_entities=['50 mg prefilled pen pk study design'],
+            entity_vdb=mock_entity_vdb,
+            llm_fn=mock_llm_fn,
+            entity_types={'50 mg prefilled pen pk study design': 'Event'},
+        )
+
+        assert result.match_count == 0
+        assert result.new_count == 1
+        assert result.results[0].matches_existing is False
+        assert result.results[0].canonical == '50 mg prefilled pen pk study design'
+
+    @pytest.mark.asyncio
+    async def test_batch_review_vetoes_high_confidence_numeric_conflict(self, mock_entity_vdb, mock_llm_fn):
+        mock_entity_vdb.hybrid_entity_search = AsyncMock(
+            return_value=[{'entity_name': '50mg PFP', 'entity_type': 'Artifact'}]
+        )
+        mock_llm_fn.return_value = json.dumps(
+            [
+                {
+                    'new_entity': '20 mg PFP',
+                    'matches_existing': True,
+                    'canonical': '50mg PFP',
+                    'confidence': 0.99,
+                    'reasoning': 'Both are PFP dose presentations',
+                }
+            ]
+        )
+
+        result = await llm_review_entities_batch(
+            new_entities=['20 mg PFP'],
+            entity_vdb=mock_entity_vdb,
+            llm_fn=mock_llm_fn,
+            entity_types={'20 mg PFP': 'Artifact'},
+        )
+
+        assert result.match_count == 0
+        assert result.results[0].matches_existing is False
+        assert result.results[0].canonical == '20 mg PFP'
+
+    @pytest.mark.asyncio
+    async def test_batch_review_vetoes_high_confidence_dose_alias_without_canonical_number(
+        self, mock_entity_vdb, mock_llm_fn
+    ):
+        mock_entity_vdb.hybrid_entity_search = AsyncMock(
+            return_value=[{'entity_name': 'PFP', 'entity_type': 'Artifact'}]
+        )
+        mock_llm_fn.return_value = json.dumps(
+            [
+                {
+                    'new_entity': '20 mg PFP',
+                    'matches_existing': True,
+                    'canonical': 'PFP',
+                    'confidence': 0.99,
+                    'reasoning': 'Dose-specific presentation treated as abbreviation',
+                }
+            ]
+        )
+
+        result = await llm_review_entities_batch(
+            new_entities=['20 mg PFP'],
+            entity_vdb=mock_entity_vdb,
+            llm_fn=mock_llm_fn,
+            entity_types={'20 mg PFP': 'Artifact'},
+        )
+
+        assert result.match_count == 0
+        assert result.results[0].matches_existing is False
+        assert result.results[0].canonical == '20 mg PFP'
+
+
 class TestExtractTypeFromContent:
     """Tests for _extract_type_from_content function."""
 
     def test_standard_format(self):
         """Extract type from standard entity content format."""
-        content = "Apple Inc\nOrganization: Apple Inc is a technology company..."
+        content = 'Apple Inc\nOrganization: Apple Inc is a technology company...'
         assert _extract_type_from_content(content) == 'Organization'
 
     def test_person_format(self):
         """Extract Person type from content."""
-        content = "John Smith\nPerson: John Smith is a software engineer..."
+        content = 'John Smith\nPerson: John Smith is a software engineer...'
         assert _extract_type_from_content(content) == 'Person'
 
     def test_location_format(self):
         """Extract Location type from content."""
-        content = "New York City\nLocation: New York City is the largest city..."
+        content = 'New York City\nLocation: New York City is the largest city...'
         assert _extract_type_from_content(content) == 'Location'
 
     def test_no_type_returns_unknown(self):
         """Return Unknown when no type can be extracted."""
-        content = "Just some random text without proper format"
+        content = 'Just some random text without proper format'
         assert _extract_type_from_content(content) == 'Unknown'
 
     def test_empty_content(self):
@@ -1370,17 +1503,17 @@ class TestExtractTypeFromContent:
 
     def test_single_line_content(self):
         """Return Unknown for single-line content."""
-        content = "Apple Inc"
+        content = 'Apple Inc'
         assert _extract_type_from_content(content) == 'Unknown'
 
     def test_type_with_spaces_rejected(self):
         """Types with spaces should not be extracted (likely not a type)."""
-        content = "Entity Name\nSome long description: with colon but not type"
+        content = 'Entity Name\nSome long description: with colon but not type'
         assert _extract_type_from_content(content) == 'Unknown'
 
     def test_very_long_type_rejected(self):
         """Very long types should not be extracted."""
-        content = "Entity Name\nThisIsAVeryLongStringThatIsDefinitelyNotAnEntityTypeBecauseTypesAreShort: description"
+        content = 'Entity Name\nThisIsAVeryLongStringThatIsDefinitelyNotAnEntityTypeBecauseTypesAreShort: description'
         assert _extract_type_from_content(content) == 'Unknown'
 
 
