@@ -2538,6 +2538,7 @@ class YAR:
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 chunks_vdb=self.chunks_vdb,
+                relation_chunks_storage=self.relation_chunks,
             )
         elif effective_param.mode == 'naive':
             logger.debug(f'[aquery_data] Using naive_query for mode: {effective_param.mode}')
@@ -2656,6 +2657,7 @@ class YAR:
                     hashing_kv=self.llm_response_cache,
                     system_prompt=system_prompt,
                     chunks_vdb=self.chunks_vdb,
+                    relation_chunks_storage=self.relation_chunks,
                 )
             elif effective_param.mode == 'naive':
                 query_result = await naive_query(

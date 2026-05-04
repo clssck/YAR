@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import aiohttp
@@ -33,10 +34,87 @@ RERANK_PROVIDERS = {
 }
 
 
+_LOCAL_RERANK_STOPWORDS = {
+    'a',
+    'an',
+    'and',
+    'are',
+    'as',
+    'at',
+    'be',
+    'by',
+    'do',
+    'does',
+    'for',
+    'from',
+    'how',
+    'in',
+    'is',
+    'of',
+    'on',
+    'or',
+    'that',
+    'the',
+    'to',
+    'was',
+    'what',
+    'when',
+    'where',
+    'which',
+    'who',
+    'with',
+}
+_LOCAL_RERANK_TERM_RE = re.compile(r'[a-z0-9]+(?:[._/-][a-z0-9]+)*')
+
+
+def _local_rerank_terms(text: str) -> list[str]:
+    return [
+        token
+        for token in _LOCAL_RERANK_TERM_RE.findall(str(text).casefold())
+        if len(token) > 2 and token not in _LOCAL_RERANK_STOPWORDS
+    ]
+
+
+def _score_local_rerank_document(query_terms: list[str], query_phrases: list[str], document: str) -> float:
+    document_text = str(document).casefold()
+    document_terms = set(_local_rerank_terms(document_text))
+    if not query_terms or not document_terms:
+        return 0.0
+
+    query_term_set = set(query_terms)
+    overlap = query_term_set & document_terms
+    recall = len(overlap) / len(query_term_set)
+    precision = len(overlap) / len(document_terms)
+    phrase_bonus = sum(0.25 for phrase in query_phrases if phrase and phrase in document_text)
+    number_bonus = 0.15 * len({term for term in overlap if any(char.isdigit() for char in term)})
+    return recall + (0.35 * precision) + phrase_bonus + number_bonus
+
+
 def create_local_rerank_func(model_name: str | None = None):
-    """Stub - local reranking disabled. Use RERANK_BINDING env vars for API reranking."""
-    logger.warning('Local reranking disabled. Use RERANK_BINDING env var for API reranking.')
-    return None
+    """Create a dependency-free lexical reranker for local/offline retrieval experiments."""
+
+    async def rerank_func(query: str, documents: list[str], top_n: int | None = None, **kwargs):
+        query_terms = _local_rerank_terms(query)
+        query_phrases = [
+            ' '.join(match.group(0).casefold().split())
+            for match in re.finditer(
+                r'\b(?:[a-z0-9]+(?:[._/-][a-z0-9]+)*\s+){1,5}[a-z0-9]+(?:[._/-][a-z0-9]+)*\b', query
+            )
+        ]
+        scored = [
+            {
+                'index': index,
+                'relevance_score': _score_local_rerank_document(query_terms, query_phrases, document),
+            }
+            for index, document in enumerate(documents)
+        ]
+        scored.sort(key=lambda item: (item['relevance_score'], -item['index']), reverse=True)
+        if top_n is not None:
+            return scored[: max(top_n, 0)]
+        return scored
+
+    logger.info('Local lexical reranking configured%s', f' ({model_name})' if model_name else '')
+    return rerank_func
 
 
 def create_rerank_func(
@@ -54,8 +132,8 @@ def create_rerank_func(
     can be passed directly or read from environment variables.
 
     Args:
-        binding: Provider binding (cohere, jina, aliyun, deepinfra, openai).
-                 Falls back to RERANK_BINDING env var.
+        binding: Provider binding (cohere, jina, aliyun, deepinfra, openai, local).
+                 Falls back to RERANK_BINDING env var. `local` uses dependency-free lexical scoring.
         model: Model name. Falls back to RERANK_MODEL env var.
         base_url: API endpoint. Falls back to RERANK_BINDING_HOST env var
                   or provider default.
@@ -73,6 +151,9 @@ def create_rerank_func(
     """
     # Resolve configuration from args or env vars
     binding = (binding or os.getenv('RERANK_BINDING', 'cohere')).lower()
+    if binding == 'local':
+        return create_local_rerank_func(model)
+
     model = model or os.getenv('RERANK_MODEL', DEFAULT_RERANK_MODEL)
 
     # Get provider defaults

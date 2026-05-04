@@ -140,7 +140,8 @@ def _calendar_key(value: str) -> tuple[str, ...] | None:
 
 
 _DOSE_OR_QUANTITY_UNIT_PATTERN = re.compile(
-    r'(?<!\w)\d+(?:\.\d+)?\s*(?:%|percent|mg|mcg|ug|g|kg|ml|l|iu|units?|mmol|umol|mol|ng)(?!\w)'
+    r'(?<!\w)\d+(?:\.\d+)?\s*(?:%|(?:(?i:percent|mg|mcg|ug|g|kg|ml|l|iu|units?|mmol|umol|mol|ng))'
+    r'(?=$|[^\w]|[A-Z]))'
 )
 
 
@@ -149,7 +150,7 @@ def _numeric_tokens(value: str) -> set[str]:
 
 
 def _has_dose_or_quantity_token(value: str) -> bool:
-    normalized = normalize_unicode_for_entity_matching(value).casefold()
+    normalized = normalize_unicode_for_entity_matching(value)
     normalized = normalized.replace('\u00b5', 'u').replace('\u03bc', 'u')
     return bool(_DOSE_OR_QUANTITY_UNIT_PATTERN.search(normalized))
 

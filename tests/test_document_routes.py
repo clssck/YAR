@@ -702,6 +702,7 @@ class TestDocumentExtractionDispatch:
             'llm_binding_host': 'http://llm-host/v1',
             'llm_binding_api_key': 'llm-key',
             'pdf_decrypt_password': 'secret',
+            'chunk_size': 1200,
         }
         global_args.update(binding_overrides)
 
@@ -727,6 +728,7 @@ class TestDocumentExtractionDispatch:
             base_url=expected_base_url,
             api_key=expected_api_key,
             pdf_password='secret',
+            chunk_token_size=1200,
         )
         assert result.content == 'vision markdown'
         assert result.pre_chunks == ['chunk']

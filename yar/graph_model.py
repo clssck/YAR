@@ -81,6 +81,10 @@ _RELATION_KEYWORD_CANONICAL_MAP = {
     'collaborated': 'collaborates',
     'collaborates': 'collaborates',
     'collaborating': 'collaborates',
+    'collaborate with': 'collaborates with',
+    'collaborated with': 'collaborates with',
+    'collaborates with': 'collaborates with',
+    'collaborating with': 'collaborates with',
     'develop': 'develops',
     'developed': 'develops',
     'developing': 'develops',
@@ -116,10 +120,22 @@ _RELATION_KEYWORD_CANONICAL_MAP = {
     'produced': 'produces',
     'produces': 'produces',
     'producing': 'produces',
+    'pose risk of': 'poses risk of',
+    'pose risk to': 'poses risk to',
+    'posed risk of': 'poses risk of',
+    'posed risk to': 'poses risk to',
+    'poses risk of': 'poses risk of',
+    'poses risk to': 'poses risk to',
+    'poses risks of': 'poses risk of',
+    'poses risks to': 'poses risk to',
     'require': 'requires',
     'required': 'requires',
     'requires': 'requires',
     'requiring': 'requires',
+    'represent': 'represents',
+    'represented': 'represents',
+    'representing': 'represents',
+    'represents': 'represents',
     'review': 'reviews',
     'reviewed': 'reviews',
     'reviews': 'reviews',
@@ -160,10 +176,51 @@ _RELATION_KEYWORD_CANONICAL_MAP = {
     'utilizes': 'uses',
     'utilizing': 'uses',
 }
+
+_RELATION_SEARCH_HINT_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ('represented by', 'represents', 'representative', 'on behalf'),
+        'contributor contributes representative represented on behalf working group member',
+    ),
+    (
+        ('collaborates with', 'collaborates', 'collaboration', 'alliance', 'partnership'),
+        'collaboration partnership alliance joint transition relationship',
+    ),
+    (
+        ('includes', 'included in', 'specifies', 'adds to', 'recommendations for'),
+        'document section recommendation manual dossier specification included',
+    ),
+    (
+        ('requires', 'must align', 'must be contacted', 'contacted for'),
+        'requirement required contact approval workflow',
+    ),
+)
+_PREDICATE_ALIASES: dict[str, str] = {
+    'applies': 'uses',
+    'apply': 'uses',
+    'mitigates': 'mitigates',
+    'supportedby': 'supported_by',
+    'dependson': 'depends_on',
+}
+
+_DIRECTIONAL_RELATION_KEYWORD_SWAP_MAP = {
+    'represented by': 'represents',
+    'is represented by': 'represents',
+    'was represented by': 'represents',
+    'were represented by': 'represents',
+}
+
+
+def _predicate_alias_key(keyword: str) -> str:
+    return re.sub(r'[-\s]+', '', keyword.casefold())
+
+
 _RELATION_IMPACT_PHRASES = (
     'affect',
     'affected',
     'affects',
+    'can pose risk',
+    'can pose risks',
     'cause',
     'caused',
     'causes',
@@ -180,6 +237,12 @@ _RELATION_IMPACT_PHRASES = (
     'leads to',
     'outcome',
     'outcomes',
+    'pose risk',
+    'pose risks',
+    'poses risk',
+    'poses risks',
+    'risk to',
+    'risks to',
     'resulted in',
     'resulting in',
     'results in',
@@ -204,14 +267,11 @@ _RELATION_NEGATIVE_EVIDENCE_PHRASES = (
 def _canonicalize_relation_keyword(keyword: str) -> str:
     # Exact-phrase mapping only. Do not collapse inverse forms such as
     # "manufactured by", "used in", or "evaluated in" unless direction is also changed.
-    return _RELATION_KEYWORD_CANONICAL_MAP.get(keyword, keyword)
+    canonical = _RELATION_KEYWORD_CANONICAL_MAP.get(keyword, keyword)
+    return _PREDICATE_ALIASES.get(_predicate_alias_key(canonical), canonical)
 
 
-def normalize_relation_keyword_terms(
-    raw_keywords: str | Iterable[str],
-    *,
-    max_keywords: int = _RELATION_KEYWORD_LIMIT,
-) -> tuple[str, ...]:
+def _raw_relation_keyword_terms(raw_keywords: str | Iterable[str]) -> tuple[str, ...]:
     raw_values = [raw_keywords] if isinstance(raw_keywords, str) else raw_keywords
     normalized_keywords: list[str] = []
     seen_keywords: set[str] = set()
@@ -220,16 +280,31 @@ def normalize_relation_keyword_terms(
         cleaned_value = sanitize_and_normalize_extracted_text(str(raw_value), remove_inner_quotes=True)
         cleaned_value = cleaned_value.replace('，', ',')
         for raw_keyword in cleaned_value.split(','):
-            keyword = re.sub(r'\s+', ' ', raw_keyword).strip(' \t\r\n,.;')
-            if not keyword:
-                continue
-            keyword = _canonicalize_relation_keyword(keyword.lower())
-            if keyword in seen_keywords:
+            keyword = re.sub(r'\s+', ' ', raw_keyword).strip(' \t\r\n,.;').lower()
+            if not keyword or keyword in seen_keywords:
                 continue
             normalized_keywords.append(keyword)
             seen_keywords.add(keyword)
-            if max_keywords > 0 and len(normalized_keywords) >= max_keywords:
-                return tuple(normalized_keywords)
+
+    return tuple(normalized_keywords)
+
+
+def normalize_relation_keyword_terms(
+    raw_keywords: str | Iterable[str],
+    *,
+    max_keywords: int = _RELATION_KEYWORD_LIMIT,
+) -> tuple[str, ...]:
+    normalized_keywords: list[str] = []
+    seen_keywords: set[str] = set()
+
+    for keyword in _raw_relation_keyword_terms(raw_keywords):
+        keyword = _canonicalize_relation_keyword(keyword)
+        if keyword in seen_keywords:
+            continue
+        normalized_keywords.append(keyword)
+        seen_keywords.add(keyword)
+        if max_keywords > 0 and len(normalized_keywords) >= max_keywords:
+            return tuple(normalized_keywords)
 
     return tuple(normalized_keywords)
 
@@ -242,6 +317,18 @@ def normalize_relation_keywords(
     return ', '.join(normalize_relation_keyword_terms(raw_keywords, max_keywords=max_keywords))
 
 
+def normalize_relation_direction(
+    source: str,
+    target: str,
+    raw_keywords: str | Iterable[str],
+) -> tuple[str, str, tuple[str, ...]]:
+    raw_terms = _raw_relation_keyword_terms(raw_keywords)
+    if raw_terms and all(term in _DIRECTIONAL_RELATION_KEYWORD_SWAP_MAP for term in raw_terms):
+        swapped_keywords = [_DIRECTIONAL_RELATION_KEYWORD_SWAP_MAP[term] for term in raw_terms]
+        return target, source, normalize_relation_keyword_terms(swapped_keywords)
+    return source, target, normalize_relation_keyword_terms(raw_terms)
+
+
 def _contains_phrase(value: str, phrase: str) -> bool:
     if ' ' in phrase:
         return phrase in value
@@ -251,10 +338,18 @@ def _contains_phrase(value: str, phrase: str) -> bool:
 def relation_semantic_search_hints(keywords: str, description: str) -> str:
     normalized = f'{keywords} {description}'.casefold()
     hints: list[str] = []
+
+    def add_hint(hint: str) -> None:
+        if hint and hint not in hints:
+            hints.append(hint)
+
     if any(_contains_phrase(normalized, phrase) for phrase in _RELATION_IMPACT_PHRASES):
-        hints.append('impact consequence effect result outcome')
+        add_hint('impact consequence effect result outcome')
     if any(_contains_phrase(normalized, phrase) for phrase in _RELATION_NEGATIVE_EVIDENCE_PHRASES):
-        hints.append('negative evidence no evidence insufficient evidence not supported')
+        add_hint('negative evidence no evidence insufficient evidence not supported')
+    for triggers, hint in _RELATION_SEARCH_HINT_RULES:
+        if any(_contains_phrase(normalized, trigger) for trigger in triggers):
+            add_hint(hint)
     return '; '.join(hints)
 
 
@@ -392,6 +487,7 @@ class RelationFact:
     file_path: str
     timestamp: int
     semantics: RelationSemantics
+    evidence_spans: tuple[str, ...] = ()
 
     @classmethod
     def from_record(
@@ -400,6 +496,7 @@ class RelationFact:
         chunk_key: str,
         timestamp: int,
         file_path: str = 'unknown_source',
+        evidence_spans: Iterable[str] = (),
     ) -> RelationFact | None:
         if len(record_attributes) != 5 or 'relation' not in record_attributes[0]:
             return None
@@ -409,7 +506,8 @@ class RelationFact:
         if not source or not target or source == target:
             return None
 
-        predicate = RelationPredicate.from_raw(record_attributes[3])
+        source, target, normalized_keywords = normalize_relation_direction(source, target, record_attributes[3])
+        predicate = RelationPredicate(normalized_keywords)
         edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
         weight = (
             float(record_attributes[-1].strip('"').strip("'"))
@@ -425,6 +523,7 @@ class RelationFact:
             file_path=file_path,
             timestamp=timestamp,
             semantics=RelationSemantics.from_text(predicate.text, edge_description),
+            evidence_spans=tuple(dict.fromkeys(str(span).strip() for span in evidence_spans if str(span).strip())),
         )
 
     @property
@@ -437,6 +536,11 @@ class RelationFact:
 
     def with_key(self, key: RelationKey) -> RelationFact:
         return replace(self, key=key, semantics=RelationSemantics.from_text(self.predicate.text, self.evidence_text))
+
+    def with_evidence_spans(self, evidence_spans: Iterable[str]) -> RelationFact:
+        return replace(
+            self, evidence_spans=tuple(dict.fromkeys(str(span).strip() for span in evidence_spans if str(span).strip()))
+        )
 
 
 @dataclass(frozen=True)
@@ -456,6 +560,7 @@ class RelationSummary:
     created_at: int
     truncate: str
     semantics: RelationSemantics
+    evidence_spans: tuple[str, ...] = ()
 
     @property
     def keywords(self) -> str:
@@ -471,8 +576,22 @@ class RelationStorageProjection:
 
 
 def build_relation_vector_content(summary: RelationSummary) -> str:
-    base_content = f'{summary.keywords}\t{summary.key.src}\n{summary.key.tgt}\n{summary.description}'
+    base_content = '\n'.join(
+        [
+            f'{summary.keywords}\t{summary.key.src}',
+            summary.key.tgt,
+            summary.description,
+            f'relation: {summary.key.src} --{summary.keywords}--> {summary.key.tgt}',
+            f'source_entity: {summary.key.src}',
+            f'target_entity: {summary.key.tgt}',
+            f'predicate: {summary.keywords}',
+        ]
+    )
     semantic_lines: list[str] = []
+    if summary.evidence_spans:
+        semantic_lines.append(
+            'evidence_spans: ' + ' | '.join(dict.fromkeys(span for span in summary.evidence_spans if span))
+        )
     if summary.semantics.polarity != RelationPolarity.AFFIRMATIVE:
         semantic_lines.append(f'polarity: {summary.semantics.polarity.value}')
     if summary.semantics.facets:

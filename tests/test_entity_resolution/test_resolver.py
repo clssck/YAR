@@ -1367,6 +1367,30 @@ class TestAliasAutoApplySafety:
             == 'canonical dose/quantity alias lacks matching alias number'
         )
 
+    def test_compact_percent_dose_alias_without_canonical_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('20%PFP', 'PFP', 'Artifact', 'Artifact')
+            == 'dose/quantity alias lacks matching canonical number'
+        )
+
+    def test_compact_unit_dose_alias_without_canonical_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('20mgPFP', 'PFP', 'Artifact', 'Artifact')
+            == 'dose/quantity alias lacks matching canonical number'
+        )
+
+    def test_compact_canonical_unit_dose_without_alias_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('PFP', '20mgPFP', 'Artifact', 'Artifact')
+            == 'canonical dose/quantity alias lacks matching alias number'
+        )
+
+    def test_compact_canonical_percent_dose_without_alias_number_is_blocked(self):
+        assert (
+            _alias_auto_apply_block_reason('PFP', '20%PFP', 'Artifact', 'Artifact')
+            == 'canonical dose/quantity alias lacks matching alias number'
+        )
+
     def test_numbered_short_code_without_canonical_number_is_blocked(self):
         assert (
             _alias_auto_apply_block_reason('USP 1', 'United States Pharmacopeia', 'Document', 'Document')

@@ -2947,11 +2947,7 @@ def _chunk_text_tokens(content: str) -> set[str]:
 
     Lowercased, alphanumeric tokens only.
     """
-    return {
-        token
-        for token in re.findall(r'[a-z0-9]+', content.lower())
-        if token not in _LEXICAL_STOPWORDS
-    }
+    return {token for token in re.findall(r'[a-z0-9]+', content.lower()) if token not in _LEXICAL_STOPWORDS}
 
 
 def _mmr_reorder(
@@ -3010,11 +3006,9 @@ def _mmr_reorder(
         scored_chunks.append((index, chunk, token_set, relevance))
 
     if len(scored_chunks) < 2:
-        reordered_chunks = [chunk for _, chunk, _, _ in scored_chunks] + [
-            chunk for _, chunk in empty_content_chunks
-        ]
+        reordered_chunks = [chunk for _, chunk, _, _ in scored_chunks] + [chunk for _, chunk in empty_content_chunks]
         if max_keep is not None:
-            return reordered_chunks[:max(max_keep, 0)]
+            return reordered_chunks[: max(max_keep, 0)]
         return reordered_chunks
 
     def jaccard_similarity(left: set[str], right: set[str]) -> float:
@@ -3044,11 +3038,9 @@ def _mmr_reorder(
         )
         selected_chunks.append(remaining_chunks.pop(best_position))
 
-    reordered_chunks = [chunk for _, chunk, _, _ in selected_chunks] + [
-        chunk for _, chunk in empty_content_chunks
-    ]
+    reordered_chunks = [chunk for _, chunk, _, _ in selected_chunks] + [chunk for _, chunk in empty_content_chunks]
     if max_keep is not None:
-        return reordered_chunks[:max(max_keep, 0)]
+        return reordered_chunks[: max(max_keep, 0)]
     return reordered_chunks
 
 
@@ -3238,17 +3230,31 @@ def _infer_preferred_entity_types(normalized_query: str) -> list[str]:
     """
     if not normalized_query:
         return []
-    if re.search(r'^(who is|who are|who was|who were|who founded|who leads|who runs|who manages|who heads)\b', normalized_query):
+    if re.search(
+        r'^(who is|who are|who was|who were|who founded|who leads|who runs|who manages|who heads)\b', normalized_query
+    ):
         return ['Person', 'Organization']
-    if re.search(r'\b(which|what)\s+(company|companies|organization|organizations|firm|agency|institution|institutions)\b', normalized_query):
+    if re.search(
+        r'\b(which|what)\s+(company|companies|organization|organizations|firm|agency|institution|institutions)\b',
+        normalized_query,
+    ):
         return ['Organization']
-    if re.search(r'\bwho (founded|owns|manufactures|makes|produces|develops|sells|markets|sponsored|approved)\b', normalized_query):
+    if re.search(
+        r'\bwho (founded|owns|manufactures|makes|produces|develops|sells|markets|sponsored|approved)\b',
+        normalized_query,
+    ):
         return ['Person', 'Organization']
     if re.search(r'^(where|where is|where was|where did|where does)\b', normalized_query):
         return ['Location']
-    if re.search(r'\b(which|what)\s+(product|products|model|models|drug|drugs|technology|technologies|device|devices)\b', normalized_query):
+    if re.search(
+        r'\b(which|what)\s+(product|products|model|models|drug|drugs|technology|technologies|device|devices)\b',
+        normalized_query,
+    ):
         return ['Product', 'Technology']
-    if re.search(r'\b(what is the mechanism|how does it work|how does .* work|what is the process|what are the steps)\b', normalized_query):
+    if re.search(
+        r'\b(what is the mechanism|how does it work|how does .* work|what is the process|what are the steps)\b',
+        normalized_query,
+    ):
         return ['Method', 'Concept']
     if re.search(r'^(when (was|were|did|does)|in what year|what year)\b', normalized_query):
         return ['Event']
@@ -3262,9 +3268,7 @@ def analyze_query_intent(query: str) -> dict[str, Any]:
     allow_single_document_expansion, recommended_mode, preferred_entity_types.
     """
     profile = _classify_intent_kind(query)
-    profile['preferred_entity_types'] = _infer_preferred_entity_types(
-        ' '.join((query or '').casefold().split())
-    )
+    profile['preferred_entity_types'] = _infer_preferred_entity_types(' '.join((query or '').casefold().split()))
     return profile
 
 
@@ -3380,7 +3384,7 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'recommended_chunk_limit': 6,
             'per_document_limit': 2,
             'allow_single_document_expansion': True,
-            'recommended_mode': 'local',
+            'recommended_mode': 'mix',
         }
     if is_mitigation:
         return {
@@ -3428,7 +3432,7 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'recommended_chunk_limit': 4,
             'per_document_limit': 1,
             'allow_single_document_expansion': True,
-            'recommended_mode': 'local',
+            'recommended_mode': 'hybrid',
         }
     if is_binary and not is_comparison:
         return {
@@ -4195,12 +4199,17 @@ def convert_to_user_format(
     # Convert chunks format (chunks already contain complete data)
     formatted_chunks = []
     for _i, chunk in enumerate(chunks):
+        content = chunk.get('context_content') or chunk.get('content', '')
         chunk_data = {
             'reference_id': chunk.get('reference_id', ''),
-            'content': chunk.get('content', ''),
+            'content': content,
             'file_path': chunk.get('file_path', 'unknown_source'),
             'chunk_id': chunk.get('chunk_id', ''),
         }
+        if chunk.get('context_content') and chunk.get('content') != chunk.get('context_content'):
+            chunk_data['raw_content'] = chunk.get('content', '')
+        if chunk.get('evidence_spans'):
+            chunk_data['evidence_spans'] = chunk.get('evidence_spans', [])
         formatted_chunks.append(chunk_data)
 
     logger.debug(f'[convert_to_user_format] Formatted {len(formatted_chunks)}/{len(chunks)} chunks')

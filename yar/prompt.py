@@ -84,6 +84,8 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
         *   **Organization-Event:** approved, authorized, sponsored, conducted
         *   **Person-Event:** won, achieved, broke record in, presented at (NOT just "participated in")
         *   **Event-Location:** held in, took place in, hosted by
+        *   **Risk/Impact:** explicit "X poses risk to Y", "X can impact Y", "X mitigates risk to Y", or "X prevents Y" statements ARE relationships. Extract the risk source or mitigation as `source_entity`, the affected outcome as `target_entity`, and use action keywords such as `poses risk to`, `impacts`, `mitigates risk to`, or `prevents`.
+        *   **Risk targets as entities:** when a risk/impact statement explicitly names domain outcomes (e.g., product quality, accurate dosing, device compatibility, regulatory updates), extract those outcomes as `concept` entities so the relation is searchable. Do not invent unstated risks, and do not extract loose adjectives or generic qualities without an explicit risk/impact relation.
     *   **N-ary Decomposition:** statements with >2 entities -> decompose to binary relationships.
         *   **Example:** "Pfizer and BioNTech developed the COVID-19 vaccine" → extract "Pfizer developed COVID-19 Vaccine" AND "BioNTech developed COVID-19 Vaccine" AND "Pfizer partnered with BioNTech"
     *   **Relationship Details:** for each binary relationship, extract:
@@ -387,6 +389,28 @@ relation{tuple_delimiter}Primary Stability Commercial Stopper{tuple_delimiter}St
 {completion_delimiter}
 
 """,
+    """<Entity_types>
+["Person","Organization","Location","Event","Concept","Method","Technology","Product","Document","Data","Artifact"]
+
+<Input Text>
+```
+# Executive summary
+* The use of CSTDs can pose risks to product quality and accurate dosing.
+* The CSTD Strategy Recommendations mitigate risks to product quality and accurate dosing.
+```
+
+<Output>
+entity{tuple_delimiter}CSTD{tuple_delimiter}artifact{tuple_delimiter}CSTD is a closed system transfer device whose use can pose risks to product quality and accurate dosing.
+entity{tuple_delimiter}Product Quality{tuple_delimiter}concept{tuple_delimiter}Product Quality is the affected outcome that CSTD use can put at risk and that CSTD Strategy Recommendations mitigate.
+entity{tuple_delimiter}Accurate Dosing{tuple_delimiter}concept{tuple_delimiter}Accurate Dosing is the affected outcome that CSTD use can put at risk and that CSTD Strategy Recommendations mitigate.
+entity{tuple_delimiter}CSTD Strategy Recommendations{tuple_delimiter}document{tuple_delimiter}CSTD Strategy Recommendations mitigate risks to product quality and accurate dosing.
+relation{tuple_delimiter}CSTD{tuple_delimiter}Product Quality{tuple_delimiter}poses risk to{tuple_delimiter}The use of CSTDs can pose risks to product quality.
+relation{tuple_delimiter}CSTD{tuple_delimiter}Accurate Dosing{tuple_delimiter}poses risk to{tuple_delimiter}The use of CSTDs can pose risks to accurate dosing.
+relation{tuple_delimiter}CSTD Strategy Recommendations{tuple_delimiter}Product Quality{tuple_delimiter}mitigates risk to{tuple_delimiter}CSTD Strategy Recommendations mitigate risks to product quality.
+relation{tuple_delimiter}CSTD Strategy Recommendations{tuple_delimiter}Accurate Dosing{tuple_delimiter}mitigates risk to{tuple_delimiter}CSTD Strategy Recommendations mitigate risks to accurate dosing.
+{completion_delimiter}
+
+""",
 ]
 
 PROMPTS['summarize_entity_descriptions'] = """---Role---
@@ -453,6 +477,7 @@ Direct, well-structured answer; integrate Knowledge Graph + Document Chunks from
   - START with direct answer. No "Based on the context..." preamble.
   - Knowledge Graph entities/relationships: primary source for entity facts, attributes, connections.
   - Document Chunks: evidence, quotes, supporting detail.
+  - If a chunk includes `evidence_spans`, treat those spans as the first-pass support for the answer and verify each claim against them before using broader chunk text.
   - Synthesize both into coherent response.
   - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
   - Multi-part questions: address each part explicitly, not a single blend.
@@ -515,6 +540,7 @@ Direct, well-structured answer; synthesize Document Chunks from **Context**.
 1. Answer Strategy:
   - START with direct answer. No "Based on the context..." preamble.
   - Extract relevant facts from chunks; synthesize into coherent response.
+  - If a chunk includes `evidence_spans`, treat those spans as the first-pass support for the answer and verify each claim against them before using broader chunk text.
   - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
   - "What is X" / single-fact: state fact in first sentence, then context.
   - For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
@@ -574,6 +600,7 @@ PROMPTS['kg_query_context'] = """
 # Document Chunks
 
 Use chunks below to answer. Treat any IDs or metadata as internal bookkeeping; do not surface raw field names or raw ids.
+Evidence spans, when present, are extractive support hints from the same chunk or graph relation. Prefer them for grounding before using broader chunk or relation text.
 
 ```json
 {text_chunks_str}
@@ -586,6 +613,7 @@ PROMPTS['naive_query_context'] = """
 # Document Chunks
 
 Use chunks below to answer. Treat any IDs or metadata as internal bookkeeping; do not surface raw field names or raw ids.
+Evidence spans, when present, are extractive support hints from the same chunk. Prefer them for grounding before using the full chunk text.
 
 ```json
 {text_chunks_str}

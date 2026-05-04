@@ -181,6 +181,8 @@ TOTAL_TIMEOUT_SECONDS = 180.0
 EVAL_USER_PROMPT = os.getenv(
     'EVAL_USER_PROMPT',
     'Answer confidently and directly based on the provided context. '
+    'For lessons learned, key steps, best practices, or recommendations, answer only the exact requested item: '
+    'extract concise heading/action labels from the most relevant context and do not include background, examples, costs, rationale, or implementation details unless explicitly asked. '
     'For list/count/enumeration questions, start by restating the requested subject using the user question wording, preserve source numbering, and include each listed item explicitly. '
     'If the context has a numbered list, copy the list item labels and key sub-bullets closely instead of compressing them into broad prose. '
     'For yes/no questions, start with "Yes" or "No" and immediately give one brief evidence-based sentence that cites or closely paraphrases the key supporting phrase from the context. '
@@ -190,6 +192,19 @@ EVAL_USER_PROMPT = os.getenv(
     'Synthesize information across sources. Avoid phrases like "does not explicitly mention" '
     'or "context does not detail". If information is partial, provide only the supported portion and stop there.',
 )
+
+EVAL_EVIDENCE_GROUNDING_PROMPT = (
+    'Use extractive evidence spans from the retrieved context as first-pass support. '
+    'Internally select the shortest exact context span(s) supporting each factual clause; '
+    'preserve numbers, dates, table cells, row labels, and quoted wording exactly. '
+    'Cite the supporting [n] when reference ids are present, and answer only from claims '
+    'that those spans or the surrounding chunk text directly support. '
+    'Do not use or mention benchmark ground_truth, expected_answer, or context_reference. '
+    'For binary feasibility, acceptability, or endorsement questions, start with Yes or No '
+    'only when the context itself contains a final approval or recommendation; otherwise '
+    'answer with pending or conditional wording.'
+)
+
 
 # RAGAS AnswerRelevancy strictness - number of questions generated per answer
 # Lower = less strict (1-2), Higher = more strict (3-5). Default 3 often too harsh.
@@ -867,6 +882,61 @@ def _resolve_benchmark_query(question: str, test_case: dict[str, Any] | None) ->
     return str(retrieval_query) if retrieval_query else question
 
 
+def _build_eval_user_prompt(test_case: dict[str, Any] | None) -> str:
+    """Compose generation-only benchmark prompt invariants without changing retrieval payloads."""
+    prompt_parts = [EVAL_USER_PROMPT, EVAL_EVIDENCE_GROUNDING_PROMPT]
+    if test_case and test_case.get('retrieval_query') and test_case.get('question'):
+        prompt_parts.append(
+            'The query text may contain retrieval keywords; answer this benchmark question exactly: '
+            f'{test_case["question"]}'
+        )
+    return ' '.join(prompt_parts)
+
+
+_REFERENCE_FOCUS_STOPWORDS = {
+    'about',
+    'after',
+    'before',
+    'between',
+    'does',
+    'from',
+    'have',
+    'into',
+    'should',
+    'standard',
+    'their',
+    'there',
+    'what',
+    'when',
+    'where',
+    'which',
+    'with',
+}
+
+
+def _reference_focus_units(focus_terms: list[str] | None) -> tuple[set[str], tuple[str, ...]]:
+    tokens: set[str] = set()
+    phrases: list[str] = []
+    for raw_term in focus_terms or []:
+        normalized = ' '.join(str(raw_term or '').casefold().split())
+        if not normalized:
+            continue
+        term_tokens = [
+            token
+            for token in re.findall(r'[a-z0-9]+(?:[._/-][a-z0-9]+)*', normalized)
+            if len(token) > 2 and token not in _REFERENCE_FOCUS_STOPWORDS
+        ]
+        tokens.update(term_tokens)
+        if ' ' in normalized and term_tokens:
+            phrases.append(normalized)
+        for duration in re.findall(
+            r'\b\d+\s*(?:-|to)\s*\d+\s*(?:m|month|months|w|week|weeks)\b',
+            normalized,
+        ):
+            phrases.append(' '.join(duration.split()))
+    return tokens, tuple(dict.fromkeys(phrases))
+
+
 def _references_from_chunks(
     chunks: Any,
     *,
@@ -877,21 +947,25 @@ def _references_from_chunks(
     if not isinstance(chunks, list):
         return []
 
-    def _score_chunk(chunk: dict[str, Any]) -> tuple[int, int]:
+    focus_tokens, focus_phrases = _reference_focus_units(focus_terms)
+
+    def _score_chunk(chunk: dict[str, Any]) -> tuple[float, int, int]:
         text = ' '.join(
             [
                 str(chunk.get('file_path') or ''),
                 str(chunk.get('content') or ''),
+                str(chunk.get('raw_content') or ''),
+                ' '.join(str(span) for span in chunk.get('evidence_spans') or []),
             ]
         ).casefold()
-        matches = 0
-        for term in focus_terms or []:
-            normalized_term = ' '.join(str(term or '').casefold().split())
-            if normalized_term and normalized_term in text:
-                matches += 1
-        return matches, len(text)
+        text_tokens = set(re.findall(r'[a-z0-9]+(?:[._/-][a-z0-9]+)*', text))
+        token_hits = len(focus_tokens & text_tokens)
+        phrase_hits = sum(1 for phrase in focus_phrases if phrase and phrase in text)
+        numeric_hits = len({token for token in focus_tokens & text_tokens if any(char.isdigit() for char in token)})
+        score = float(token_hits) + (3.0 * phrase_hits) + (2.0 * numeric_hits)
+        return score, phrase_hits, token_hits
 
-    scored_chunks: list[tuple[tuple[int, int], int, dict[str, Any]]] = []
+    scored_chunks: list[tuple[tuple[float, int, int], int, dict[str, Any]]] = []
     for index, chunk in enumerate(chunks):
         if not isinstance(chunk, dict):
             continue
@@ -900,8 +974,8 @@ def _references_from_chunks(
             continue
         scored_chunks.append((_score_chunk(chunk), index, chunk))
 
-    if focus_terms:
-        scored_chunks.sort(key=lambda item: (-item[0][0], -item[0][1], item[1]))
+    if focus_tokens or focus_phrases:
+        scored_chunks.sort(key=lambda item: (-item[0][0], -item[0][1], -item[0][2], item[1]))
 
     references: list[dict[str, Any]] = []
     for position, (_, _, chunk) in enumerate(scored_chunks[: max(limit, 1)], 1):
@@ -1397,7 +1471,7 @@ class RAGEvaluator:
         }
         if include_response_type:
             payload['response_type'] = 'Single Paragraph'
-            payload['user_prompt'] = EVAL_USER_PROMPT
+            payload['user_prompt'] = _build_eval_user_prompt(test_case)
         if test_case:
             if test_case.get('mode'):
                 payload['mode'] = test_case['mode']

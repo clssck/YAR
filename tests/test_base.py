@@ -491,6 +491,7 @@ class TestYARQueryMethods:
         rag.text_chunks = object()
         rag.chunks_vdb = object()
         rag.llm_response_cache = object()
+        rag.relation_chunks = object()
         rag._query_done = AsyncMock()
 
         original_param = QueryParam(
@@ -609,7 +610,7 @@ class TestYARQueryMethods:
                 'After US and EU submission of sarclisa what were the consequences?',
                 'mix',
             )
-            == 'local'
+            == 'mix'
         )
         assert (
             _resolve_effective_query_mode(
@@ -644,7 +645,7 @@ class TestYARQueryMethods:
                 'Does full detail were included covering 2 to 3 steps of reation in NeoGAA china submission?',
                 'mix',
             )
-            == 'local'
+            == 'hybrid'
         )
         assert (
             _resolve_effective_query_mode(
@@ -888,7 +889,7 @@ class TestEvaluationHarnessHelpers:
         )
 
         assert payload['response_type'] == 'Single Paragraph'
-        assert payload['user_prompt'] == EVAL_USER_PROMPT
+        assert payload['user_prompt'].startswith(EVAL_USER_PROMPT)
         assert 'Never answer with only Yes or No' in payload['user_prompt']
         assert 'brief evidence-based sentence' in payload['user_prompt']
         assert 'closely paraphrases the key supporting phrase' in payload['user_prompt']
@@ -896,6 +897,9 @@ class TestEvaluationHarnessHelpers:
         assert 'copy the list item labels and key sub-bullets closely' in payload['user_prompt']
         assert 'Do not add your own caution' in payload['user_prompt']
         assert 'keep it pending' in payload['user_prompt']
+        assert 'extractive evidence spans' in payload['user_prompt']
+        assert 'shortest exact context span(s)' in payload['user_prompt']
+        assert 'final approval or recommendation' in payload['user_prompt']
 
     def test_load_case_mode_overrides_validates_keys_and_modes(self, tmp_path):
         overrides_path = tmp_path / 'case_modes.json'

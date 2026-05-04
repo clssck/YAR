@@ -14,6 +14,7 @@ This module tests:
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -40,12 +41,16 @@ from yar.graph_model import (
     normalize_relation_keywords,
 )
 from yar.operate import (
+    _apply_token_truncation,
+    _attach_relation_evidence_from_storage,
     _build_context_str,
     _build_prompt_chunk_context,
     _build_query_context,
     _build_query_shaping_instructions,
     _classify_malformed_relation_record,
+    _derive_phrase_terms_for_chunk_search,
     _enrich_local_keywords,
+    _extract_supporting_evidence_spans,
     _filter_nodes_to_relation_endpoints,
     _find_most_related_edges_from_entities,
     _find_related_text_unit_from_relations,
@@ -60,6 +65,7 @@ from yar.operate import (
     _perform_kg_search,
     _prepare_visible_reference_payload,
     _process_extraction_result,
+    _rebuild_from_extraction_result,
     _rebuild_single_relationship,
     _resolve_entity_aliases_for_batch,
     _resolve_max_file_paths,
@@ -72,6 +78,7 @@ from yar.operate import (
     extract_keywords_only,
     get_keywords_from_query,
     kg_query,
+    naive_query,
 )
 from yar.prompt import PROMPTS
 from yar.utils import process_chunks_unified
@@ -166,6 +173,91 @@ def test_relation_fact_from_record_preserves_direction_and_semantics():
 
 
 @pytest.mark.offline
+@pytest.mark.asyncio
+async def test_relation_fact_extracts_table_row_evidence_from_source_content():
+    raw_result = (
+        'relation<|#|>CSTD strategy<|#|>Overdosing mitigation<|#|>uses<|#|>'
+        'CSTD strategy uses 20% PFP mock prep to mitigate overdosing.<|COMPLETE|>'
+    )
+    source_content = (
+        '<table><tr><th>Risk</th><th>Mitigation</th></tr>'
+        '<tr><td>Overdosing</td><td>CSTD strategy uses 20% PFP mock prep</td></tr></table>'
+    )
+
+    extraction = await _process_extraction_result(
+        raw_result,
+        'chunk-evidence',
+        456,
+        'strategy.html',
+        source_content=source_content,
+    )
+    relation = extraction.edges[RelationKey('CSTD strategy', 'Overdosing mitigation')][0]
+
+    assert relation.evidence_spans
+    assert relation.evidence_spans[0].startswith('Table row:')
+    assert '20% PFP mock prep' in relation.evidence_spans[0]
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_process_extraction_result_supplements_explicit_risk_relations_from_source():
+    extraction = await _process_extraction_result(
+        '<|COMPLETE|>',
+        'chunk-risk',
+        456,
+        'strategy.pptx',
+        source_content='* The use of CSTDs can pose risks to product quality and accurate dosing (literature and internal data).',
+    )
+
+    product_quality = extraction.edges[RelationKey('CSTD', 'Product Quality')][0]
+    accurate_dosing = extraction.edges[RelationKey('CSTD', 'Accurate Dosing')][0]
+
+    assert 'CSTD' in extraction.nodes
+    assert 'Product Quality' in extraction.nodes
+    assert 'Accurate Dosing' in extraction.nodes
+    assert product_quality.keywords == 'poses risk to'
+    assert accurate_dosing.keywords == 'poses risk to'
+    assert RelationFacet.IMPACT in product_quality.semantics.facets
+    assert product_quality.evidence_spans == (
+        'The use of CSTDs can pose risks to product quality and accurate dosing (literature and internal data)',
+    )
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_rebuild_from_extraction_result_uses_truncated_source_content_for_relation_evidence():
+    class SimpleTokenizer:
+        def encode(self, text):
+            return text.split()
+
+        def decode(self, tokens):
+            return ' '.join(tokens)
+
+    class FakeTextChunksStorage:
+        async def get_by_id(self, chunk_id):
+            return {
+                'file_path': 'strategy.html',
+                'content': ('Unrelated intro line. CSTD strategy uses 20% PFP mock prep to mitigate overdosing.'),
+            }
+
+    raw_result = (
+        'relation<|#|>CSTD strategy<|#|>Overdosing mitigation<|#|>uses<|#|>'
+        'CSTD strategy uses 20% PFP mock prep to mitigate overdosing.<|COMPLETE|>'
+    )
+
+    extraction = await _rebuild_from_extraction_result(
+        FakeTextChunksStorage(),
+        raw_result,
+        'chunk-rebuild',
+        456,
+        global_config={'tokenizer': SimpleTokenizer(), 'max_extract_input_tokens': 3},
+    )
+    relation = extraction.edges[RelationKey('CSTD strategy', 'Overdosing mitigation')][0]
+
+    assert relation.evidence_spans == ()
+
+
+@pytest.mark.offline
 def test_relation_fact_from_record_rejects_malformed_and_self_loop_records():
     assert RelationFact.from_record(['relation', 'A', 'supports', 'A supports B.'], 'chunk', 1) is None
     assert RelationFact.from_record(['relation', 'A', 'A', 'supports', 'A supports itself.'], 'chunk', 1) is None
@@ -210,6 +302,23 @@ def test_relation_storage_projection_preserves_external_schema_and_direction():
     assert payload['src_id'] == 'Later Evidence'
     assert payload['tgt_id'] == 'Earlier Decision'
     assert payload['content'].startswith('influenced by\tLater Evidence\nEarlier Decision\n')
+    evidence_summary = RelationSummary(
+        key=RelationKey('Later Evidence', 'Earlier Decision'),
+        predicate=RelationPredicate.from_raw('influenced by'),
+        description='Later evidence influenced the earlier decision.',
+        weight=1.5,
+        source_id='chunk-projection',
+        file_path='projection.pptx',
+        created_at=789,
+        truncate='',
+        semantics=RelationSemantics.from_text('influenced by', 'Later evidence influenced the earlier decision.'),
+        evidence_spans=('Table row: Decision: Earlier Decision | Evidence: Later Evidence',),
+    )
+    evidence_projection = build_relation_storage_projection(evidence_summary)
+    evidence_payload = next(iter(evidence_projection.relation_vdb_payload.values()))
+    assert 'evidence_spans' not in evidence_projection.graph_edge_data
+    assert 'evidence_spans' not in evidence_payload
+    assert 'evidence_spans: Table row: Decision:' in evidence_payload['content']
 
 
 @pytest.mark.offline
@@ -278,6 +387,192 @@ async def test_merge_edges_preserves_directed_relation_vector_payload():
     assert rel_payload['tgt_id'] == target
     assert rel_payload['content'].splitlines()[:2] == [f'sends to\t{source}', target]
     assert len(rel_delete_ids) == 2
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_stores_internal_relation_evidence_without_schema_drift():
+    source = 'CSTD strategy'
+    target = 'Overdosing mitigation'
+    chunk_id = 'chunk-evidence'
+    evidence_span = 'Table row: Risk: Overdosing | Mitigation: CSTD strategy uses 20% PFP mock prep'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': chunk_id,
+                'description': f'{node_id} description',
+                'entity_type': 'concept',
+                'file_path': 'strategy.html',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            return None
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeRelationChunks:
+        def __init__(self):
+            self.records = {}
+
+        async def get_by_id(self, key):
+            return self.records.get(key)
+
+        async def upsert(self, payload):
+            self.records.update(payload)
+
+    graph = FakeGraphStorage()
+    relation_chunks = FakeRelationChunks()
+    relation = _relation_fact(
+        source,
+        target,
+        description='CSTD strategy uses 20% PFP mock prep to mitigate overdosing.',
+        keywords='uses',
+        chunk_id=chunk_id,
+        file_path='strategy.html',
+    ).with_evidence_spans([evidence_span])
+
+    edge_data, _ent_vdb, rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [relation],
+        graph,
+        {
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+        },
+        relation_chunks_storage=relation_chunks,
+    )
+
+    storage_key = GRAPH_FIELD_SEP.join(sorted((source, target)))
+    stored_record = relation_chunks.records[storage_key]
+    rel_payload = next(iter(rel_vdb.values()))
+    assert stored_record['evidence_by_chunk'] == {chunk_id: [evidence_span]}
+    assert stored_record['evidence_spans'] == [evidence_span]
+    assert 'evidence_spans' not in graph.upserted_edges[0][2]
+    assert 'evidence_spans' not in rel_payload
+    assert 'evidence_spans: Table row: Risk:' in rel_payload['content']
+    assert 'evidence_spans' not in edge_data
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_attach_relation_evidence_from_storage_adds_prompt_only_spans():
+    source = 'CSTD strategy'
+    target = 'Overdosing mitigation'
+    chunk_id = 'chunk-evidence'
+    evidence_span = 'Table row: Risk: Overdosing | Mitigation: CSTD strategy uses 20% PFP mock prep'
+    storage_key = GRAPH_FIELD_SEP.join(sorted((source, target)))
+
+    class FakeRelationChunks:
+        def __init__(self):
+            self.records = {
+                storage_key: {
+                    'chunk_ids': [chunk_id],
+                    'count': 1,
+                    'evidence_by_chunk': {chunk_id: [evidence_span]},
+                }
+            }
+
+        async def get_by_id(self, key):
+            return self.records.get(key)
+
+    relations = [
+        {
+            'src_tgt': (source, target),
+            'source_id': chunk_id,
+            'description': 'CSTD strategy uses 20% PFP mock prep.',
+            'keywords': 'uses',
+        }
+    ]
+
+    enriched = await _attach_relation_evidence_from_storage(relations, FakeRelationChunks())
+
+    assert 'evidence_spans' not in relations[0]
+    assert enriched[0]['evidence_spans'] == [evidence_span]
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_attach_relation_evidence_uses_batch_get_by_ids_when_supported():
+    first_source = 'CSTD strategy'
+    first_target = 'Overdosing mitigation'
+    second_source = 'Japan submission task force'
+    second_target = 'J-CTD'
+    first_chunk = 'chunk-evidence-1'
+    second_chunk = 'chunk-evidence-2'
+    first_key = GRAPH_FIELD_SEP.join(sorted((first_source, first_target)))
+    second_key = GRAPH_FIELD_SEP.join(sorted((second_source, second_target)))
+    first_span = 'CSTD strategy mitigates overdosing through mock preparation.'
+    second_span = 'Japan submission task force prepares the J-CTD package.'
+
+    class FakeRelationChunks:
+        def __init__(self):
+            self.batch_calls = []
+            self.single_calls = []
+            self.records = {
+                first_key: {'evidence_by_chunk': {first_chunk: [first_span]}},
+                second_key: {'evidence_spans': [second_span]},
+            }
+
+        async def get_by_ids(self, keys):
+            self.batch_calls.append(keys)
+            return [self.records.get(key) for key in keys]
+
+        async def get_by_id(self, key):
+            self.single_calls.append(key)
+            return self.records.get(key)
+
+    storage = FakeRelationChunks()
+    relations = [
+        {'src_tgt': (first_source, first_target), 'source_id': first_chunk},
+        {'src_id': second_source, 'tgt_id': second_target, 'source_id': second_chunk},
+    ]
+
+    enriched = await _attach_relation_evidence_from_storage(relations, storage)
+
+    assert storage.batch_calls == [[first_key, second_key]]
+    assert storage.single_calls == []
+    assert enriched[0]['evidence_spans'] == [first_span]
+    assert enriched[1]['evidence_spans'] == [second_span]
+    assert 'evidence_spans' not in relations[0]
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_attach_relation_evidence_falls_back_to_per_id_when_no_batch():
+    source = 'Protocol'
+    target = 'Deviation'
+    chunk_id = 'chunk-fallback'
+    storage_key = GRAPH_FIELD_SEP.join(sorted((source, target)))
+    evidence_span = 'Protocol deviation evidence is listed in the source table.'
+
+    class FakeRelationChunks:
+        def __init__(self):
+            self.single_calls = []
+            self.records = {storage_key: {'evidence_by_chunk': {chunk_id: [evidence_span]}}}
+
+        async def get_by_id(self, key):
+            self.single_calls.append(key)
+            return self.records.get(key)
+
+    storage = FakeRelationChunks()
+    relations = [{'src_tgt': (source, target), 'source_id': chunk_id}]
+
+    enriched = await _attach_relation_evidence_from_storage(relations, storage)
+
+    assert storage.single_calls == [storage_key]
+    assert enriched[0]['evidence_spans'] == [evidence_span]
 
 
 @pytest.mark.offline
@@ -424,6 +719,199 @@ def test_normalize_relation_keywords_canonicalizes_without_inverting_direction()
 @pytest.mark.offline
 def test_normalize_relation_keywords_bounds_labels_to_first_three():
     assert normalize_relation_keywords('supports, requires, evaluates, approves') == 'supports, requires, evaluates'
+
+
+@pytest.mark.offline
+def test_relation_predicate_aliases_collapse_synonymous_surfaces():
+    predicate = RelationPredicate.from_raw(
+        [
+            'applies',
+            'apply',
+            'uses',
+            'supported by',
+            'depends on',
+            'mitigates',
+            'collaborated with',
+            'represented',
+            'poses risks to',
+        ],
+        max_keywords=10,
+    )
+
+    assert predicate.keywords == (
+        'uses',
+        'supported_by',
+        'depends_on',
+        'mitigates',
+        'collaborates with',
+        'represents',
+        'poses risk to',
+    )
+    assert predicate.text == ('uses, supported_by, depends_on, mitigates, collaborates with, represents, poses risk to')
+
+
+@pytest.mark.offline
+def test_relation_predicate_aliases_do_not_merge_antonyms():
+    predicate = RelationPredicate.from_raw(['supports', 'blocks', 'enables', 'prevents'], max_keywords=10)
+
+    assert predicate.keywords == ('supports', 'blocks', 'enables', 'prevents')
+
+
+@pytest.mark.offline
+def test_relation_semantics_classifies_risk_phrasing_as_impact():
+    semantics = RelationSemantics.from_text(
+        'poses risk to',
+        'The use of CSTDs can pose risks to product quality and accurate dosing.',
+    )
+
+    assert RelationFacet.IMPACT in semantics.facets
+    assert RelationFacet.CONSEQUENCE in semantics.facets
+
+    summary = RelationSummary(
+        key=RelationKey('CSTD', 'Product Quality'),
+        predicate=RelationPredicate.from_raw('poses risk to'),
+        description='The use of CSTDs can pose risks to product quality.',
+        weight=1.0,
+        source_id='chunk-risk',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=semantics,
+        evidence_spans=('The use of CSTDs can pose risks to product quality.',),
+    )
+    payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
+
+    assert 'search_hints: impact consequence effect result outcome' in payload['content']
+    assert 'relation: CSTD --poses risk to--> Product Quality' in payload['content']
+    assert 'source_entity: CSTD' in payload['content']
+    assert 'target_entity: Product Quality' in payload['content']
+
+
+@pytest.mark.offline
+def test_relation_vector_content_adds_predicate_specific_search_hints():
+    represented_summary = RelationSummary(
+        key=RelationKey('CSTD Strategy WG', 'Vasco Filipe'),
+        predicate=RelationPredicate.from_raw('represented by'),
+        description='Vasco Filipe represents the CSTD Strategy WG.',
+        weight=1.0,
+        source_id='chunk-represented',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text(
+            'represented by',
+            'Vasco Filipe represents the CSTD Strategy WG.',
+        ),
+    )
+    collaboration_summary = RelationSummary(
+        key=RelationKey('Sanofi MSAT Goa', 'Alnylam Pharmaceuticals'),
+        predicate=RelationPredicate.from_raw('collaborated with'),
+        description='Sanofi and Alnylam collaborated during the Fitusiran transition.',
+        weight=1.0,
+        source_id='chunk-collaboration',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text(
+            'collaborated with',
+            'Sanofi and Alnylam collaborated during the Fitusiran transition.',
+        ),
+    )
+
+    represented_payload = next(
+        iter(build_relation_storage_projection(represented_summary).relation_vdb_payload.values())
+    )
+    collaboration_payload = next(
+        iter(build_relation_storage_projection(collaboration_summary).relation_vdb_payload.values())
+    )
+
+    assert (
+        'search_hints: contributor contributes representative represented on behalf working group member'
+        in represented_payload['content']
+    )
+    assert 'collaboration partnership alliance joint transition relationship' in collaboration_payload['content']
+
+
+@pytest.mark.offline
+def test_relation_fact_preserves_direction_for_inverse_predicate():
+    fact = RelationFact.from_record(
+        [
+            'relation',
+            'CSTD Strategy WG',
+            'Vasco Filipe',
+            'represented by',
+            'The CSTD Strategy WG is represented by Vasco Filipe.',
+        ],
+        'chunk-represented',
+        123,
+        'source.md',
+    )
+
+    assert fact is not None
+    assert fact.key == RelationKey('Vasco Filipe', 'CSTD Strategy WG')
+    assert fact.predicate.text == 'represents'
+
+
+@pytest.mark.offline
+def test_relation_fact_keeps_mixed_inverse_predicates_unflipped():
+    fact = RelationFact.from_record(
+        [
+            'relation',
+            'CSTD Strategy WG',
+            'Vasco Filipe',
+            'represented by, includes',
+            'The CSTD Strategy WG is represented by Vasco Filipe and includes multiple workstreams.',
+        ],
+        'chunk-mixed',
+        123,
+        'source.md',
+    )
+
+    assert fact is not None
+    assert fact.key == RelationKey('CSTD Strategy WG', 'Vasco Filipe')
+    assert fact.predicate.text == 'represented by, includes'
+
+
+@pytest.mark.offline
+def test_normalize_relation_keywords_preserves_external_storage_shape():
+    predicate = RelationPredicate.from_raw('apply')
+    summary = RelationSummary(
+        key=RelationKey('Source', 'Target'),
+        predicate=predicate,
+        description='Source applies the target method.',
+        weight=2.0,
+        source_id='chunk-predicate',
+        file_path='source.md',
+        created_at=123,
+        truncate='no',
+        semantics=RelationSemantics.from_text(predicate.text, 'Source applies the target method.'),
+        evidence_spans=('Source applies the target method.',),
+    )
+
+    projection = build_relation_storage_projection(summary)
+    payload = next(iter(projection.relation_vdb_payload.values()))
+
+    assert projection.graph_edge_data['keywords'] == 'uses'
+    assert payload['keywords'] == 'uses'
+    assert set(projection.graph_edge_data) == {
+        'weight',
+        'description',
+        'keywords',
+        'source_id',
+        'file_path',
+        'created_at',
+        'truncate',
+    }
+    assert set(payload) == {
+        'src_id',
+        'tgt_id',
+        'source_id',
+        'content',
+        'keywords',
+        'description',
+        'weight',
+        'file_path',
+    }
 
 
 @pytest.mark.offline
@@ -740,6 +1228,99 @@ async def test_rebuild_relationship_prefers_direct_facts_over_inverse_facts():
     payload = next(iter(rel_vdb.payloads.values()))
     assert payload['src_id'] == source
     assert payload['tgt_id'] == target
+    assert payload['description'] == 'A supports B.'
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_rebuild_relationship_uses_only_selected_direction_source_ids():
+    source = 'A Entity'
+    target = 'B Entity'
+    direct_chunk_id = 'chunk-direct'
+    reverse_chunk_id = 'chunk-reverse'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def get_edge(self, source_node_id, target_node_id):
+            return {
+                'description': 'Existing relation.',
+                'keywords': 'existing',
+                'weight': 1.0,
+                'source_id': GRAPH_FIELD_SEP.join([direct_chunk_id, reverse_chunk_id]),
+                'file_path': 'existing.txt',
+            }
+
+        async def has_node(self, node_id):
+            return True
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeVectorStorage:
+        def __init__(self):
+            self.deleted = []
+            self.payloads = {}
+
+        async def delete(self, ids):
+            self.deleted.extend(ids)
+
+        async def upsert(self, payload):
+            self.payloads.update(payload)
+
+    graph = FakeGraphStorage()
+    rel_vdb = FakeVectorStorage()
+
+    await _rebuild_single_relationship(
+        knowledge_graph_inst=graph,
+        relationships_vdb=rel_vdb,
+        entities_vdb=FakeVectorStorage(),
+        src=source,
+        tgt=target,
+        chunk_ids=[direct_chunk_id, reverse_chunk_id],
+        chunk_relationships={
+            direct_chunk_id: {
+                RelationKey(source, target): [
+                    _relation_fact(
+                        source,
+                        target,
+                        description='A supports B.',
+                        keywords='supports',
+                        chunk_id=direct_chunk_id,
+                        file_path='direct.txt',
+                    )
+                ]
+            },
+            reverse_chunk_id: {
+                RelationKey(target, source): [
+                    _relation_fact(
+                        target,
+                        source,
+                        description='B blocks A.',
+                        keywords='blocks',
+                        chunk_id=reverse_chunk_id,
+                        file_path='reverse.txt',
+                    )
+                ]
+            },
+        },
+        llm_response_cache=None,
+        global_config={
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_file_paths': 10,
+        },
+    )
+
+    edge_data = graph.upserted_edges[0][2]
+    assert edge_data['description'] == 'A supports B.'
+    assert edge_data['source_id'] == direct_chunk_id
+    assert edge_data['file_path'] == 'direct.txt'
+    payload = next(iter(rel_vdb.payloads.values()))
+    assert payload['src_id'] == source
+    assert payload['tgt_id'] == target
+    assert payload['source_id'] == direct_chunk_id
     assert payload['description'] == 'A supports B.'
 
 
@@ -1080,6 +1661,19 @@ class TestEntityFilterMatching:
         assert not _matches_entity_filter('SARA lessons learned', 'iCMC NPP')
         assert not _matches_entity_filter('iCMC-NPP leader guidance', '')
 
+    def test_relation_matches_entity_filter_uses_relation_text_when_entities_miss(self):
+        relation = {
+            'src_id': 'Sanofi',
+            'tgt_id': 'Alnylam',
+            'description': 'Lessons learned from Fitusiran transition and collaboration.',
+            'keywords': 'collaborates with',
+        }
+
+        from yar.operate import _relation_matches_entity_filter
+
+        assert _relation_matches_entity_filter(relation, 'fitusiran', set())
+        assert not _relation_matches_entity_filter(relation, 'jctd', set())
+
     @pytest.mark.asyncio
     async def test_vector_context_filter_matches_hyphenated_source_metadata(self):
         chunks_vdb = MagicMock()
@@ -1122,6 +1716,108 @@ class TestEntityFilterMatching:
         chunks = await _get_vector_context('What must the leader avoid?', chunks_vdb, query_param)
 
         assert chunks == []
+
+    @pytest.mark.asyncio
+    async def test_naive_query_passes_low_level_phrases_to_chunk_search(self):
+        query_param = QueryParam(
+            mode='naive',
+            top_k=5,
+            chunk_top_k=5,
+            ll_keywords=['J-CTD', 'shipping validation between the US and Japan', 'sales limits'],
+            only_need_context=True,
+            enable_bm25_fusion=True,
+            model_func=AsyncMock(return_value='unused'),
+        )
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        global_config = {
+            'tokenizer': MagicMock(encode=Mock(side_effect=lambda text: text.split())),
+            'max_total_tokens': 4000,
+        }
+        vector_chunk = {
+            'content': 'Shipping Validation is executed between US and JP.',
+            'file_path': 'Japanese iCMC Operations Managers handbook.pdf',
+            'chunk_id': 'chunk-japan',
+        }
+        vector_context_mock = AsyncMock(return_value=[vector_chunk])
+
+        with (
+            patch('yar.operate._get_vector_context', new=vector_context_mock),
+            patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=[vector_chunk])),
+        ):
+            result = await naive_query(
+                'Japanese iCMC Operations Managers handbook FMA J-CTD shipping validation sales limits',
+                chunks_vdb,
+                query_param,
+                global_config,
+            )
+
+        assert result.raw_data['metadata']['processing_info']['total_chunks_found'] == 1
+        assert vector_context_mock.await_args.kwargs['phrase_terms'] == [
+            'shipping validation between the US and Japan',
+            'sales limits',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_naive_query_derives_query_phrases_when_keywords_are_empty(self):
+        query_param = QueryParam(
+            mode='naive',
+            top_k=5,
+            chunk_top_k=5,
+            ll_keywords=[],
+            only_need_context=True,
+            enable_bm25_fusion=True,
+            model_func=AsyncMock(return_value='unused'),
+        )
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        global_config = {
+            'tokenizer': MagicMock(encode=Mock(side_effect=lambda text: text.split())),
+            'max_total_tokens': 4000,
+        }
+        vector_chunk = {
+            'content': 'Shipment to depot happens 1-3 months before Start packaging.',
+            'file_path': 'workflow.pdf',
+            'chunk_id': 'chunk-shipment',
+        }
+        vector_context_mock = AsyncMock(return_value=[vector_chunk])
+
+        with (
+            patch('yar.operate._get_vector_context', new=vector_context_mock),
+            patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=[vector_chunk])),
+        ):
+            await naive_query(
+                'What is the standard duration of shipment to depot?',
+                chunks_vdb,
+                query_param,
+                global_config,
+            )
+
+        assert vector_context_mock.await_args.kwargs['phrase_terms'] == ['shipment to depot']
+
+    def test_derive_phrase_terms_prefers_explicit_low_level_keywords(self):
+        assert _derive_phrase_terms_for_chunk_search(
+            'What is the standard duration of shipment to depot?',
+            ['explicit retrieval phrase'],
+        ) == ['explicit retrieval phrase']
+
+    def test_supporting_evidence_spans_linearize_html_tables_and_workflows(self):
+        content = """
+        <table><thead><tr><th>Challenge</th><th>Mitigation</th></tr></thead>
+        <tbody><tr><td>How to avoid overdosing?</td><td>Confirm the dose (Mock prep)</td></tr></tbody></table>
+        ## Timeline Stages
+        * 6-3 months before Start packaging
+        * Batch shipped and Issue DP transfer Order and shipment TC
+        """
+
+        spans = _extract_supporting_evidence_spans(
+            content,
+            query='What was put in place to mitigate overdosing and shipment to depot?',
+        )
+
+        assert any('Challenge: How to avoid overdosing?' in span for span in spans)
+        assert any('Mitigation: Confirm the dose (Mock prep)' in span for span in spans)
+        assert any('Workflow timeline and shipment evidence' in span for span in spans)
 
 
 # ============================================================================
@@ -1915,6 +2611,70 @@ class TestExtractEntities:
         assert len(captured_prompts) == 1
         assert 'TRUNCATED_CONTENT' in captured_prompts[0]
         assert content not in captured_prompts[0]
+
+    @pytest.mark.asyncio
+    async def test_extract_entities_batch_parsing_uses_truncated_source_content(self):
+        """Batch relation provenance must use the same text sent to the extraction prompt."""
+        from yar.operate import extract_entities
+
+        tokenizer = Mock()
+        tokenizer.encode.side_effect = lambda text: list(text)
+        tokenizer.decode.side_effect = lambda tokens: ''.join(tokens)
+        chunks: dict[str, TextChunkSchema] = {
+            'chunk-alpha': {
+                'tokens': 10,
+                'content': 'ALPHA hidden evidence outside prompt',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 0,
+            },
+            'chunk-bravo': {
+                'tokens': 10,
+                'content': 'BRAVO hidden evidence outside prompt',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+        }
+        captured_prompts: list[str] = []
+        captured_source_content: dict[str, str] = {}
+
+        async def fake_use_llm_with_cache(prompt, *_args, **_kwargs):
+            captured_prompts.append(prompt)
+            return (
+                '[CHUNK: chunk-alpha]\nsection-alpha\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}\n'
+                '[CHUNK: chunk-bravo]\nsection-bravo\n'
+                f'{PROMPTS["DEFAULT_COMPLETION_DELIMITER"]}',
+                1234567890,
+            )
+
+        async def fake_process_extraction(_section_text, chunk_key, *_args, **kwargs):
+            captured_source_content[chunk_key] = kwargs['source_content']
+            return ChunkExtractionResult(nodes={}, edges={})
+
+        with (
+            patch.dict('os.environ', {'ENTITY_EXTRACT_BATCH_SIZE': '2'}),
+            patch('yar.operate.use_llm_func_with_cache', side_effect=fake_use_llm_with_cache),
+            patch('yar.operate._process_extraction_result', new=AsyncMock(side_effect=fake_process_extraction)),
+        ):
+            result = await extract_entities(
+                chunks=chunks,
+                global_config={
+                    'llm_model_func': AsyncMock(return_value='unused'),
+                    'entity_extract_max_gleaning': 0,
+                    'max_extract_input_tokens': 5,
+                    'tokenizer': tokenizer,
+                    'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE, 'entity_types': ['PERSON']},
+                    'llm_model_max_async': 1,
+                },
+            )
+
+        assert isinstance(result, list)
+        assert len(captured_prompts) == 1
+        assert 'ALPHA' in captured_prompts[0]
+        assert 'BRAVO' in captured_prompts[0]
+        assert chunks['chunk-alpha']['content'] not in captured_prompts[0]
+        assert chunks['chunk-bravo']['content'] not in captured_prompts[0]
+        assert captured_source_content == {'chunk-alpha': 'ALPHA', 'chunk-bravo': 'BRAVO'}
 
     @pytest.mark.asyncio
     async def test_extract_entities_caps_default_batch_size_and_honors_override(self):
@@ -2894,13 +3654,60 @@ class TestPerformKgSearchScoreAwareMerge:
         assert result['final_relations'][0].get('src_id') == 'a'
 
     @pytest.mark.asyncio
-    async def test_hybrid_search_supplements_relations_from_low_level_keywords_when_entities_miss(self):
+    async def test_perform_kg_search_preserves_conflicting_relation_pair_when_polarity_differs(self):
+        query_param = QueryParam(mode='hybrid', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        local_relations = [
+            {
+                'src_id': 'Treatment',
+                'tgt_id': 'Outcome',
+                'keywords': 'supports',
+                'description': 'Treatment supports the outcome.',
+                'score': 0.8,
+            }
+        ]
+        global_relations = [
+            {
+                'src_id': 'Outcome',
+                'tgt_id': 'Treatment',
+                'keywords': 'blocks',
+                'description': 'Outcome blocks the treatment.',
+                'score': 0.7,
+            }
+        ]
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], local_relations))),
+            patch('yar.operate._get_edge_data', new=AsyncMock(return_value=(global_relations, []))),
+        ):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='local-keyword',
+                hl_keywords='global-keyword',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        assert [(relation['src_id'], relation['tgt_id']) for relation in result['final_relations']] == [
+            ('Treatment', 'Outcome'),
+            ('Outcome', 'Treatment'),
+        ]
+        assert all(relation.get('relation_conflict') is True for relation in result['final_relations'])
+        assert result['final_relations'][0]['relation_conflict_predicates'] == ['blocks']
+        assert result['final_relations'][1]['relation_conflict_predicates'] == ['supports']
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_uses_only_primary_relation_sources_when_entities_miss(self):
         query_param = QueryParam(mode='hybrid', top_k=3)
         text_chunks_db = MagicMock()
         text_chunks_db.global_config = {}
         global_relations = [{'src_id': 'Handbook', 'tgt_id': 'Abbreviations', 'score': 0.2}]
-        supplemental_relations = [{'src_id': 'Japan submission task force', 'tgt_id': 'J-CTD', 'score': 0.95}]
-        edge_mock = AsyncMock(side_effect=[(global_relations, []), (supplemental_relations, [])])
+        edge_mock = AsyncMock(return_value=(global_relations, []))
 
         with (
             patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))),
@@ -2918,9 +3725,58 @@ class TestPerformKgSearchScoreAwareMerge:
                 chunks_vdb=None,
             )
 
-        assert edge_mock.await_count == 2
-        assert edge_mock.await_args_list[1].args[0] == 'Foreign Manufacturer Accreditation, J-CTD'
-        assert result['final_relations'][0]['tgt_id'] == 'J-CTD'
+        edge_mock.assert_awaited_once()
+        assert result['final_relations'] == global_relations
+
+    @pytest.mark.asyncio
+    async def test_global_search_does_not_retry_low_level_relations_when_primary_misses(self):
+        query_param = QueryParam(mode='global', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        edge_mock = AsyncMock(return_value=([], []))
+
+        with patch('yar.operate._get_edge_data', new=edge_mock):
+            result = await _perform_kg_search(
+                query='What risks does the CSTD strategy address for product quality and dosing?',
+                ll_keywords='CSTD strategy, product quality, dosing',
+                hl_keywords='risk mitigation, product quality, dosing, manufacturing strategy',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        edge_mock.assert_awaited_once()
+        assert (
+            edge_mock.await_args_list[0].args[0] == 'risk mitigation, product quality, dosing, manufacturing strategy'
+        )
+        assert result['final_relations'] == []
+
+    @pytest.mark.asyncio
+    async def test_global_search_uses_single_relation_query_when_primary_hits(self):
+        query_param = QueryParam(mode='global', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        global_relations = [{'src_id': 'Risk', 'tgt_id': 'Mitigation', 'score': 0.8}]
+        edge_mock = AsyncMock(return_value=(global_relations, []))
+
+        with patch('yar.operate._get_edge_data', new=edge_mock):
+            result = await _perform_kg_search(
+                query='What risks does the CSTD strategy address?',
+                ll_keywords='CSTD strategy',
+                hl_keywords='risk mitigation',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        edge_mock.assert_awaited_once()
+        assert result['final_relations'] == global_relations
 
 
 @pytest.mark.offline
@@ -3101,7 +3957,7 @@ class TestEntityQueryEmbeddingReuse:
         assert [node['entity_name'] for node in node_datas] == ['AlphaOne', 'BetaOne']
 
     @pytest.mark.asyncio
-    async def test_get_edge_data_queries_terms_concurrently(self):
+    async def test_get_edge_data_uses_single_primary_relationship_query(self):
         relationships_vdb = MagicMock()
         relationships_vdb.cosine_better_than_threshold = 0.2
 
@@ -3121,20 +3977,24 @@ class TestEntityQueryEmbeddingReuse:
             }
         )
 
-        started_terms: list[str] = []
-        all_started = asyncio.Event()
+        query_terms: list[str] = []
 
         async def query_relationship(term, *, top_k):
-            started_terms.append(term)
-            if len(started_terms) == 2:
-                all_started.set()
-            await asyncio.wait_for(all_started.wait(), timeout=0.1)
+            query_terms.append(term)
             return [
                 {
-                    'src_id': f'{term.title()} Source',
-                    'tgt_id': f'{term.title()} Target',
+                    'src_id': 'Alpha Source',
+                    'tgt_id': 'Alpha Target',
                     'score': 0.9,
-                }
+                    'source_type': 'vector+bm25',
+                    'bm25_score': 0.4,
+                },
+                {
+                    'src_id': 'Beta Source',
+                    'tgt_id': 'Beta Target',
+                    'score': 0.8,
+                    'source_type': 'bm25',
+                },
             ][:top_k]
 
         relationships_vdb.query = AsyncMock(side_effect=query_relationship)
@@ -3146,16 +4006,107 @@ class TestEntityQueryEmbeddingReuse:
             QueryParam(mode='global', top_k=2),
         )
 
-        assert started_terms == ['alpha', 'beta']
+        assert query_terms == ['alpha, beta']
         assert [(edge['src_id'], edge['tgt_id']) for edge in edge_datas] == [
             ('Alpha Source', 'Alpha Target'),
             ('Beta Source', 'Beta Target'),
         ]
+        assert edge_datas[0]['source_type'] == 'vector+bm25'
+        assert edge_datas[0]['bm25_score'] == 0.4
         assert [entity['entity_name'] for entity in entity_datas] == [
             'Alpha Source',
             'Alpha Target',
             'Beta Source',
             'Beta Target',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_get_edge_data_uses_primary_query_and_focus_ranks_results(self):
+        relationships_vdb = MagicMock()
+        relationships_vdb.cosine_better_than_threshold = 0.2
+
+        relation_props = {
+            ('Sanofi MSAT Goa', 'CSTD Strategy Proposal'): {
+                'description': 'Sanofi develops the CSTD strategy proposal.',
+                'keywords': 'develops',
+                'weight': 1.0,
+            },
+            ('Sanofi MSAT Goa', 'CSTD'): {
+                'description': 'CSTD strategy mitigates product quality and accurate dosing risks.',
+                'keywords': 'mitigates',
+                'weight': 2.0,
+            },
+        }
+
+        knowledge_graph_inst = MagicMock()
+
+        async def get_edges_batch(edge_pairs):
+            edge_data = {}
+            for edge_pair in edge_pairs:
+                pair = (edge_pair['src'], edge_pair['tgt'])
+                if pair in relation_props:
+                    edge_data[pair] = relation_props[pair]
+            return edge_data
+
+        knowledge_graph_inst.get_edges_batch = AsyncMock(side_effect=get_edges_batch)
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'Sanofi MSAT Goa': {'entity_type': 'ORG', 'description': 'Sanofi'},
+                'CSTD Strategy Proposal': {'entity_type': 'DOCUMENT', 'description': 'Strategy proposal'},
+                'CSTD': {'entity_type': 'DEVICE', 'description': 'Closed system transfer device'},
+            }
+        )
+
+        query_terms: list[str] = []
+
+        async def query_relationship(term, *, top_k):
+            query_terms.append(term)
+            assert term == 'CSTD strategy, product quality, dosing'
+            return [
+                {
+                    'src_id': 'Sanofi MSAT Goa',
+                    'tgt_id': 'CSTD Strategy Proposal',
+                    'source_type': 'vector',
+                    'score': 0.8,
+                },
+                {
+                    'src_id': 'Sanofi MSAT Goa',
+                    'tgt_id': 'CSTD',
+                    'source_type': 'bm25',
+                    'score': 0.7,
+                },
+            ][:top_k]
+
+        relationships_vdb.query = AsyncMock(side_effect=query_relationship)
+
+        with patch('yar.operate.logger.info') as info_mock:
+            edge_datas, entity_datas = await _get_edge_data(
+                'CSTD strategy, product quality, dosing',
+                knowledge_graph_inst,
+                relationships_vdb,
+                QueryParam(mode='global', top_k=2),
+                query='What risks does the CSTD strategy address for product quality and dosing?',
+            )
+
+        assert query_terms == ['CSTD strategy, product quality, dosing']
+        assert [(edge['src_id'], edge['tgt_id']) for edge in edge_datas] == [
+            ('Sanofi MSAT Goa', 'CSTD'),
+            ('Sanofi MSAT Goa', 'CSTD Strategy Proposal'),
+        ]
+        assert edge_datas[0]['query_focus_overlap'] > edge_datas[1]['query_focus_overlap']
+        diagnostic_call = next(
+            call for call in info_mock.call_args_list if call.args[0] == 'Relation primary ranking: %s'
+        )
+        diagnostic_payload = json.loads(diagnostic_call.args[1])
+        assert diagnostic_payload['query'] == 'CSTD strategy, product quality, dosing'
+        assert diagnostic_payload['raw_candidates'] == 2
+        assert diagnostic_payload['deduplicated_candidates'] == 2
+        assert diagnostic_payload['graph_validated'] == 2
+        assert diagnostic_payload['ranked'][0]['source_type'] == 'bm25'
+        assert [entity['entity_name'] for entity in entity_datas] == [
+            'Sanofi MSAT Goa',
+            'CSTD',
+            'CSTD Strategy Proposal',
         ]
 
 
@@ -3710,11 +4661,15 @@ class TestResponseQualityControls:
             'related_chunk_number': 1,
         }
 
+        chunk_payloads = {
+            'chunk-generic': {'content': 'A generic handbook abbreviations index.', 'file_path': 'source.md'},
+            'chunk-jctd': {'content': 'The Japan team prepares the J-CTD package.', 'file_path': 'source.md'},
+        }
+
         async def fake_get_by_ids(chunk_ids):
-            return [{'content': f'chunk {chunk_id}', 'file_path': 'source.md'} for chunk_id in chunk_ids]
+            return [chunk_payloads[chunk_id] for chunk_id in chunk_ids]
 
         text_chunks_db.get_by_ids = AsyncMock(side_effect=fake_get_by_ids)
-        weighted_polling_mock = Mock(return_value=[])
         relations = [
             {
                 'src_id': 'Japanese iCMC Handbook',
@@ -3732,16 +4687,14 @@ class TestResponseQualityControls:
             },
         ]
 
-        with patch('yar.operate.pick_by_weighted_polling', new=weighted_polling_mock):
-            await _find_related_text_unit_from_relations(
-                relations,
-                QueryParam(mode='hybrid', top_k=4, chunk_top_k=4),
-                text_chunks_db,
-                query='What are the japan-specific activities?\nJ-CTD',
-            )
+        result_chunks = await _find_related_text_unit_from_relations(
+            relations,
+            QueryParam(mode='hybrid', top_k=4, chunk_top_k=4),
+            text_chunks_db,
+            query='What are the japan-specific activities?\nJ-CTD',
+        )
 
-        ranked_relations = weighted_polling_mock.call_args.args[0]
-        assert ranked_relations[0]['relation_data']['tgt_id'] == 'J-CTD'
+        assert result_chunks[0]['chunk_id'] == 'chunk-jctd'
 
     @pytest.mark.asyncio
     async def test_find_most_related_edges_filters_hub_edges_by_query_focus(self):
@@ -3776,6 +4729,47 @@ class TestResponseQualityControls:
 
         assert [edge['src_tgt'] for edge in edges] == [('Diabetes', 'Diabetic foot')]
         assert edges[0]['query_focus_overlap'] > 0.0
+
+    @pytest.mark.asyncio
+    async def test_find_most_related_edges_preserves_storage_direction_for_relation_context(self):
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_edges_batch = AsyncMock(
+            return_value={'Zeta Source': [('Zeta Source', 'Alpha Target')]}
+        )
+        knowledge_graph_inst.get_edges_batch = AsyncMock(
+            return_value={
+                ('Alpha Target', 'Zeta Source'): {
+                    'description': 'Zeta Source causes Alpha Target.',
+                    'keywords': 'causes',
+                    'weight': 2.0,
+                }
+            }
+        )
+        knowledge_graph_inst.edge_degrees_batch = AsyncMock(return_value={('Alpha Target', 'Zeta Source'): 7})
+
+        edges = await _find_most_related_edges_from_entities(
+            [{'entity_name': 'Zeta Source'}],
+            QueryParam(mode='local', top_k=5),
+            knowledge_graph_inst,
+            query='What does Zeta Source cause?',
+        )
+
+        assert edges[0]['src_tgt'] == ('Zeta Source', 'Alpha Target')
+        assert edges[0]['rank'] == 7
+        edges[0]['evidence_spans'] = ['Table row: Source: Zeta Source | Target: Alpha Target']
+        truncated = await _apply_token_truncation(
+            {'final_entities': [], 'final_relations': edges},
+            QueryParam(mode='mix'),
+            {
+                'tokenizer': MagicMock(encode=Mock(side_effect=lambda text: text.split())),
+                'max_entity_tokens': 100,
+                'max_relation_tokens': 100,
+            },
+        )
+        assert truncated['relations_context'][0]['relation'] == 'Zeta Source --causes--> Alpha Target'
+        assert truncated['relations_context'][0]['evidence_spans'] == [
+            'Table row: Source: Zeta Source | Target: Alpha Target'
+        ]
 
     @pytest.mark.asyncio
     async def test_merge_all_chunks_prefers_evolution_chunks_over_generic_topic_matches(self):
@@ -3843,6 +4837,168 @@ class TestResponseQualityControls:
 
         assert [chunk['chunk_id'] for chunk in merged] == ['long-term-complications']
         assert merged[0]['heading_relevance'] > 0.0
+
+    @pytest.mark.asyncio
+    async def test_apply_token_truncation_renders_directional_relation_context(self):
+        tokenizer = MagicMock(encode=Mock(side_effect=lambda text: text.split()))
+        result = await _apply_token_truncation(
+            {
+                'final_entities': [],
+                'final_relations': [
+                    {
+                        'src_id': 'Japan submission task force',
+                        'tgt_id': 'J-CTD',
+                        'keywords': 'prepares',
+                        'description': 'The Japan team prepares the J-CTD package.',
+                        'created_at': 1,
+                    }
+                ],
+            },
+            QueryParam(mode='mix'),
+            {
+                'tokenizer': tokenizer,
+                'max_entity_tokens': 100,
+                'max_relation_tokens': 100,
+            },
+        )
+
+        assert result['relations_context'][0]['relation'] == 'Japan submission task force --prepares--> J-CTD'
+        assert result['relations_context'][0]['source'] == 'Japan submission task force'
+        assert result['relations_context'][0]['target'] == 'J-CTD'
+
+    @pytest.mark.asyncio
+    async def test_apply_token_truncation_prefers_evidence_supported_relations_within_budget(self):
+        tokenizer = MagicMock(encode=Mock(side_effect=lambda _text: [0] * 10))
+        unsupported_relation = {
+            'src_id': 'Generic strategy',
+            'tgt_id': 'Outcome',
+            'keywords': 'related_to',
+            'description': 'Generic strategy is related to the outcome.',
+            'score': 0.5,
+        }
+        supported_relation = {
+            'src_id': 'CSTD strategy',
+            'tgt_id': 'Overdosing mitigation',
+            'keywords': 'mitigates',
+            'description': 'CSTD strategy mitigates overdosing.',
+            'score': 0.5,
+            'evidence_spans': ['CSTD strategy mitigates overdosing in the source table.'],
+        }
+
+        result = await _apply_token_truncation(
+            {
+                'query': 'Which mitigation evidence addresses overdosing?',
+                'final_entities': [],
+                'final_relations': [unsupported_relation, supported_relation],
+            },
+            QueryParam(mode='mix', max_relation_tokens=10),
+            {
+                'tokenizer': tokenizer,
+                'max_entity_tokens': 100,
+                'max_relation_tokens': 10,
+            },
+        )
+
+        assert result['relations_context'][0]['entity1'] == 'CSTD strategy'
+        assert result['filtered_relations'] == [supported_relation]
+        assert '__rerank_score' not in supported_relation
+
+    @pytest.mark.asyncio
+    async def test_apply_token_truncation_does_not_change_relations_context_keys(self):
+        tokenizer = MagicMock(encode=Mock(side_effect=lambda _text: [0] * 5))
+        result = await _apply_token_truncation(
+            {
+                'query': 'Which mitigation evidence addresses overdosing?',
+                'final_entities': [],
+                'final_relations': [
+                    {
+                        'src_id': 'CSTD strategy',
+                        'tgt_id': 'Overdosing mitigation',
+                        'keywords': 'mitigates',
+                        'description': 'CSTD strategy mitigates overdosing.',
+                        'score': 0.5,
+                        'created_at': 1,
+                        'file_path': 'source.md',
+                        'evidence_spans': ['CSTD strategy mitigates overdosing in the source table.'],
+                    }
+                ],
+            },
+            QueryParam(mode='mix', max_relation_tokens=100),
+            {
+                'tokenizer': tokenizer,
+                'max_entity_tokens': 100,
+                'max_relation_tokens': 100,
+            },
+        )
+
+        allowed_keys = {
+            'entity1',
+            'entity2',
+            'source',
+            'target',
+            'predicate',
+            'relation',
+            'description',
+            'created_at',
+            'file_path',
+            'evidence_spans',
+        }
+        assert set(result['relations_context'][0]) <= allowed_keys
+        assert result['relations_context'][0]['evidence_spans'] == [
+            'CSTD strategy mitigates overdosing in the source table.'
+        ]
+
+    @pytest.mark.asyncio
+    async def test_apply_token_truncation_marks_conflicting_relations_in_prompt_context(self):
+        tokenizer = MagicMock(encode=Mock(side_effect=lambda _text: [0] * 5))
+        result = await _apply_token_truncation(
+            {
+                'query': 'Does treatment support or block the outcome?',
+                'final_entities': [],
+                'final_relations': [
+                    {
+                        'src_id': 'Treatment',
+                        'tgt_id': 'Outcome',
+                        'keywords': 'supports',
+                        'description': 'Treatment supports the outcome.',
+                        'relation_conflict': True,
+                        'relation_conflict_predicates': ['blocks'],
+                    },
+                    {
+                        'src_id': 'Outcome',
+                        'tgt_id': 'Treatment',
+                        'keywords': 'blocks',
+                        'description': 'Outcome blocks the treatment.',
+                        'relation_conflict': True,
+                        'relation_conflict_predicates': ['supports'],
+                    },
+                ],
+            },
+            QueryParam(mode='mix', max_relation_tokens=100),
+            {
+                'tokenizer': tokenizer,
+                'max_entity_tokens': 100,
+                'max_relation_tokens': 100,
+            },
+        )
+
+        assert result['relations_context'][0]['relation'] == 'Treatment --supports; conflict: blocks--> Outcome'
+        assert result['relations_context'][1]['relation'] == 'Outcome --blocks; conflict: supports--> Treatment'
+        assert all('relation_conflict' not in relation for relation in result['relations_context'])
+        assert all('relation_conflict' not in relation for relation in result['filtered_relations'])
+        allowed_keys = {
+            'entity1',
+            'entity2',
+            'source',
+            'target',
+            'predicate',
+            'relation',
+            'description',
+            'created_at',
+            'file_path',
+            'evidence_spans',
+        }
+        assert all(set(relation) <= allowed_keys for relation in result['relations_context'])
 
     @pytest.mark.asyncio
     async def test_build_context_str_dedupes_visible_alias_references_without_changing_prompt_chunks(self):

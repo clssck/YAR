@@ -608,20 +608,15 @@ def create_app(args):
     if args.enable_rerank:
         rerank_binding = os.getenv('RERANK_BINDING', 'cohere').lower()
 
-        if rerank_binding == 'local':
-            # Local reranking is disabled - suggest using API reranking
-            logger.warning('Local reranking is disabled. Set RERANK_BINDING to cohere/jina/openai/etc.')
-            rerank_model_func = None
-        else:
-            # Use unified rerank factory for all API-based rerankers
-            from yar.rerank import create_rerank_func
+        # Use unified rerank factory for API and dependency-free local rerankers.
+        from yar.rerank import create_rerank_func
 
-            try:
-                rerank_model_func = create_rerank_func(binding=rerank_binding)
-            except Exception as e:
-                logger.error(f'Failed to initialize reranker: {e}')
-                logger.warning('Continuing without reranking')
-                rerank_model_func = None
+        try:
+            rerank_model_func = create_rerank_func(binding=rerank_binding)
+        except Exception as e:
+            logger.error(f'Failed to initialize reranker: {e}')
+            logger.warning('Continuing without reranking')
+            rerank_model_func = None
     else:
         logger.info('Reranking is disabled')
 

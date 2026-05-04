@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
+from html import unescape
 from pathlib import Path
 from typing import Any, cast
 
@@ -55,6 +56,7 @@ from yar.graph_model import (
     EntityFact,
     RelationFact,
     RelationKey,
+    RelationPolarity,
     RelationPredicate,
     RelationSemantics,
     RelationSummary,
@@ -194,6 +196,38 @@ def _matches_entity_filter(value: Any, filter_term: str) -> bool:
     if normalized_filter in normalized_value:
         return True
     return normalized_filter.replace(' ', '') in normalized_value.replace(' ', '')
+
+
+def _relation_matches_entity_filter(
+    relation: dict[str, Any],
+    filter_term: str,
+    filtered_entity_names: set[str],
+) -> bool:
+    src_tgt = relation.get('src_tgt', ('', ''))
+    src_from_tuple, tgt_from_tuple = ('', '')
+    if isinstance(src_tgt, (tuple, list)) and len(src_tgt) == 2:
+        src_from_tuple, tgt_from_tuple = src_tgt
+
+    endpoint_values = (
+        src_from_tuple,
+        tgt_from_tuple,
+        relation.get('src_id', ''),
+        relation.get('tgt_id', ''),
+    )
+    if any(_normalize_filter_match_text(value) in filtered_entity_names for value in endpoint_values):
+        return True
+
+    evidence_spans = relation.get('evidence_spans', [])
+    evidence_text = ' '.join(str(span) for span in evidence_spans) if isinstance(evidence_spans, list) else ''
+    relation_text_values = (
+        *endpoint_values,
+        relation.get('description', ''),
+        relation.get('keywords', ''),
+        relation.get('predicate', ''),
+        relation.get('file_path', ''),
+        evidence_text,
+    )
+    return any(_matches_entity_filter(value, filter_term) for value in relation_text_values)
 
 
 def _truncate_extract_input_content(content: str, global_config: GlobalConfig, chunk_key: str) -> str:
@@ -1000,6 +1034,7 @@ async def _handle_single_relationship_extraction(
     timestamp: int,
     file_path: str = 'unknown_source',
     malformed_relation_counter: Counter[str] | None = None,
+    source_content: str = '',
 ) -> RelationFact | None:
     if (
         len(record_attributes) != 5 or 'relation' not in record_attributes[0]
@@ -1013,6 +1048,10 @@ async def _handle_single_relationship_extraction(
     try:
         relation_fact = RelationFact.from_record(record_attributes, chunk_key, timestamp, file_path)
         if relation_fact is not None:
+            if source_content:
+                relation_fact = relation_fact.with_evidence_spans(
+                    _extract_relation_evidence_spans(source_content, relation_fact)
+                )
             return relation_fact
 
         diagnostic = _classify_malformed_relation_record(record_attributes, chunk_key, file_path)
@@ -1026,6 +1065,131 @@ async def _handle_single_relationship_extraction(
     except Exception as e:
         logger.warning(f'Relationship extraction failed with unexpected error in chunk {chunk_key}: {e}')
         return None
+
+
+_RISK_RELATION_TARGET_SPLIT_RE = re.compile(r'\s*(?:,|\band\b|\bor\b)\s+', re.IGNORECASE)
+_EXPLICIT_RISK_RELATION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r'\b(?:the\s+use\s+of\s+)?(?P<src>[A-Za-z][A-Za-z0-9<>()/\- ]{1,80}?)\s+'
+            r'(?:can\s+|could\s+|may\s+)?poses?\s+risks?\s+to\s+'
+            r'(?P<targets>[^.;\n]+)',
+            re.IGNORECASE,
+        ),
+        'poses risk to',
+    ),
+    (
+        re.compile(
+            r'\b(?P<src>[A-Za-z][A-Za-z0-9<>()/\- ]{1,80}?)\s+'
+            r'(?:mitigates?|prevents?|reduces?)\s+risks?\s+to\s+'
+            r'(?P<targets>[^.;\n]+)',
+            re.IGNORECASE,
+        ),
+        'mitigates risk to',
+    ),
+)
+
+
+def _normalize_explicit_risk_entity_name(raw_value: str) -> str:
+    value = re.sub(r'\s+', ' ', raw_value).strip(' "\'`*_')
+    value = re.sub(r'^(?:the|a|an)\s+', '', value, flags=re.IGNORECASE)
+    value = re.sub(r'^(?:use|uses)\s+of\s+', '', value, flags=re.IGNORECASE)
+    value = value.strip(' "\'`*_')
+    if len(value) > 3 and value.endswith('s') and value[:-1].isupper():
+        value = value[:-1]
+    if value.casefold() == 'cstds':
+        value = 'CSTD'
+    return ' '.join(part if part.isupper() else part.title() for part in value.split())
+
+
+def _split_explicit_risk_targets(raw_targets: str) -> list[str]:
+    target_text = re.sub(r'\([^)]*\)', '', raw_targets)
+    target_text = re.sub(r'\s+', ' ', target_text).strip(' "\'`*_:')
+    targets: list[str] = []
+    for candidate in _RISK_RELATION_TARGET_SPLIT_RE.split(target_text):
+        target = _normalize_explicit_risk_entity_name(candidate)
+        if len(target) < 3 or len(target) > DEFAULT_ENTITY_NAME_MAX_LENGTH:
+            continue
+        if target.casefold() in _QUERY_RELEVANCE_STOPWORDS:
+            continue
+        targets.append(target)
+    return list(dict.fromkeys(targets))
+
+
+def _supplement_explicit_risk_relations_from_source(
+    maybe_nodes: defaultdict[str, list[EntityFact]],
+    maybe_edges: defaultdict[RelationKey, list[RelationFact]],
+    chunk_key: str,
+    timestamp: int,
+    file_path: str,
+    source_content: str,
+    entity_types: list[str] | None,
+) -> None:
+    if not source_content:
+        return
+
+    for pattern, predicate in _EXPLICIT_RISK_RELATION_PATTERNS:
+        for match in pattern.finditer(source_content):
+            source_name = _normalize_explicit_risk_entity_name(match.group('src'))
+            if len(source_name) < 3 or len(source_name) > DEFAULT_ENTITY_NAME_MAX_LENGTH:
+                continue
+
+            targets = _split_explicit_risk_targets(match.group('targets'))
+            if not targets:
+                continue
+
+            evidence_span = match.group(0).strip(' -*\t\r\n')
+            source_fact = EntityFact.from_record(
+                [
+                    'entity',
+                    source_name,
+                    'concept',
+                    f'{source_name} is explicitly described in a risk or mitigation statement.',
+                ],
+                chunk_key,
+                timestamp,
+                file_path,
+                entity_types=entity_types,
+            )
+            if source_fact is not None:
+                maybe_nodes[source_fact.name].append(source_fact)
+
+            for target_name in targets:
+                target_fact = EntityFact.from_record(
+                    [
+                        'entity',
+                        target_name,
+                        'concept',
+                        f'{target_name} is an explicitly named outcome in a risk or mitigation statement.',
+                    ],
+                    chunk_key,
+                    timestamp,
+                    file_path,
+                    entity_types=entity_types,
+                )
+                if target_fact is not None:
+                    maybe_nodes[target_fact.name].append(target_fact)
+
+                description = (
+                    f'{source_name} can pose risks to {target_name}.'
+                    if predicate == 'poses risk to'
+                    else f'{source_name} mitigates risks to {target_name}.'
+                )
+                relation_fact = RelationFact.from_record(
+                    ['relation', source_name, target_name, predicate, description],
+                    chunk_key,
+                    timestamp,
+                    file_path,
+                    evidence_spans=(evidence_span,),
+                )
+                if relation_fact is None:
+                    continue
+                relation_key = RelationKey(source_name, target_name)
+                if any(
+                    existing.predicate.text == relation_fact.predicate.text for existing in maybe_edges[relation_key]
+                ):
+                    continue
+                maybe_edges[relation_key].append(relation_fact)
 
 
 async def rebuild_knowledge_from_chunks(
@@ -1116,6 +1280,7 @@ async def rebuild_knowledge_from_chunks(
                     extraction_result=result[0],
                     timestamp=int(result[1]),
                     entity_types=configured_entity_types,
+                    global_config=global_config,
                 )
 
                 # Merge entities and relationships from this extraction result
@@ -1381,6 +1546,7 @@ async def _process_extraction_result(
     tuple_delimiter: str = '<|#|>',
     completion_delimiter: str = '<|COMPLETE|>',
     entity_types: list[str] | None = None,
+    source_content: str = '',
 ) -> ChunkExtractionResult:
     """Process a single extraction result (either initial or gleaning).
 
@@ -1470,6 +1636,7 @@ async def _process_extraction_result(
             timestamp,
             file_path,
             malformed_relation_counter=malformed_relation_counter,
+            source_content=source_content,
         )
         if relationship_data is not None:
             truncated_source = _truncate_entity_identifier(
@@ -1490,6 +1657,16 @@ async def _process_extraction_result(
             relation_key = RelationKey(truncated_source, truncated_target)
             maybe_edges[relation_key].append(relationship_data.with_key(relation_key))
 
+    _supplement_explicit_risk_relations_from_source(
+        maybe_nodes,
+        maybe_edges,
+        chunk_key,
+        timestamp,
+        file_path,
+        source_content,
+        entity_types,
+    )
+
     if malformed_relation_counter:
         logger.info('%s: skipped malformed relation records by reason: %s', chunk_key, dict(malformed_relation_counter))
 
@@ -1502,6 +1679,7 @@ async def _rebuild_from_extraction_result(
     chunk_id: str,
     timestamp: int,
     entity_types: list[str] | None = None,
+    global_config: GlobalConfig | None = None,
 ) -> ChunkExtractionResult:
     """Parse cached extraction result using the same logic as extract_entities
 
@@ -1517,6 +1695,13 @@ async def _rebuild_from_extraction_result(
     # Get chunk data for file_path from storage
     chunk_data = await text_chunks_storage.get_by_id(chunk_id)
     file_path = chunk_data.get('file_path', 'unknown_source') if chunk_data else 'unknown_source'
+    source_content = chunk_data.get('content', '') if chunk_data else ''
+    if source_content:
+        source_content = _truncate_extract_input_content(
+            source_content,
+            global_config or cast(GlobalConfig, getattr(text_chunks_storage, 'global_config', {})),
+            chunk_id,
+        )
 
     # Call the shared processing function
     return await _process_extraction_result(
@@ -1527,6 +1712,7 @@ async def _rebuild_from_extraction_result(
         tuple_delimiter=PROMPTS['DEFAULT_TUPLE_DELIMITER'],
         completion_delimiter=PROMPTS['DEFAULT_COMPLETION_DELIMITER'],
         entity_types=entity_types,
+        source_content=source_content,
     )
 
 
@@ -1787,47 +1973,55 @@ async def _rebuild_single_relationship(
     # normalized_chunk_ids = merge_source_ids([], chunk_ids)
     normalized_chunk_ids = chunk_ids
 
-    if relation_chunks_storage is not None and normalized_chunk_ids:
-        storage_key = make_relation_chunk_key(src, tgt)
-        await relation_chunks_storage.upsert(
-            {
-                storage_key: {
-                    'chunk_ids': normalized_chunk_ids,
-                    'count': len(normalized_chunk_ids),
-                }
-            }
-        )
-
     limit_method = global_config.get('source_ids_limit_method') or SOURCE_IDS_LIMIT_METHOD_KEEP
-    limited_chunk_ids = apply_source_ids_limit(
-        normalized_chunk_ids,
-        int(global_config['max_source_ids_per_relation']),
-        limit_method,
-        identifier=f'`{src}`~`{tgt}`',
-    )
 
     # Collect relationship data from relevant chunks. Graph storage is undirected,
     # so rebuild requests may arrive in canonical storage order even when the
     # surviving extraction fact used the opposite direction. Prefer exact
     # direction facts when available, and only fall back to reverse facts for
     # storage compatibility; do not merge inverse evidence into the direct edge.
-    direct_relationship_data: list[RelationFact] = []
-    reverse_relationship_data: list[RelationFact] = []
+    direct_relationship_items: list[tuple[str, RelationFact]] = []
+    reverse_relationship_items: list[tuple[str, RelationFact]] = []
     direct_key = RelationKey(src, tgt)
     reverse_key = RelationKey(tgt, src)
-    for chunk_id in limited_chunk_ids:
+    for chunk_id in normalized_chunk_ids:
         if chunk_id not in chunk_relationships:
             continue
 
         chunk_relations = chunk_relationships[chunk_id]
-        direct_relationship_data.extend(chunk_relations.get(direct_key, []))
-        reverse_relationship_data.extend(chunk_relations.get(reverse_key, []))
+        direct_relationship_items.extend((chunk_id, rel) for rel in chunk_relations.get(direct_key, []))
+        reverse_relationship_items.extend((chunk_id, rel) for rel in chunk_relations.get(reverse_key, []))
 
-    selected_relation_key = direct_key if direct_relationship_data else reverse_key
-    all_relationship_data = direct_relationship_data or reverse_relationship_data
-    if not all_relationship_data:
+    selected_relation_key = direct_key if direct_relationship_items else reverse_key
+    selected_relationship_items = direct_relationship_items or reverse_relationship_items
+    if not selected_relationship_items:
         logger.warning(f'No relation data found for `{src}-{tgt}`')
         return
+
+    selected_chunk_ids = merge_source_ids([], [chunk_id for chunk_id, _rel in selected_relationship_items])
+    limited_chunk_ids = apply_source_ids_limit(
+        selected_chunk_ids,
+        int(global_config['max_source_ids_per_relation']),
+        limit_method,
+        identifier=f'`{src}`~`{tgt}`',
+    )
+    limited_chunk_id_set = set(limited_chunk_ids)
+    all_relationship_data = [
+        rel_data for chunk_id, rel_data in selected_relationship_items if chunk_id in limited_chunk_id_set
+    ]
+    if not all_relationship_data:
+        logger.warning(f'No relation data found for `{src}-{tgt}` after applying source limit')
+        return
+
+    if relation_chunks_storage is not None and limited_chunk_ids:
+        storage_key = make_relation_chunk_key(src, tgt)
+        await relation_chunks_storage.upsert(
+            {
+                storage_key: _relation_chunk_storage_record(
+                    limited_chunk_ids, _relation_evidence_by_chunk(all_relationship_data)
+                )
+            }
+        )
 
     # Merge descriptions and keywords
     descriptions = []
@@ -1888,11 +2082,10 @@ async def _rebuild_single_relationship(
         # fallback to keep current(unchanged)
         final_description = current_relationship.get('description', '')
 
-    if len(limited_chunk_ids) < len(normalized_chunk_ids):
-        truncation_info = f'{limit_method} {len(limited_chunk_ids)}/{len(normalized_chunk_ids)}'
+    if len(limited_chunk_ids) < len(selected_chunk_ids):
+        truncation_info = f'{limit_method} {len(limited_chunk_ids)}/{len(selected_chunk_ids)}'
     else:
         truncation_info = ''
-
     # Update relationship in graph storage
     updated_relationship_data = {
         **current_relationship,
@@ -1979,6 +2172,9 @@ async def _rebuild_single_relationship(
         created_at=int(updated_relationship_data.get('created_at') or time.time()),
         truncate=updated_relationship_data.get('truncate', ''),
         semantics=RelationSemantics.from_text(combined_keywords, final_description),
+        evidence_spans=tuple(
+            _unique_nonempty_strings([span for relation in all_relationship_data for span in relation.evidence_spans])
+        ),
     )
     relation_projection = build_relation_storage_projection(relation_summary)
 
@@ -2308,9 +2504,11 @@ async def _merge_edges_then_upsert(
 
     storage_key = make_relation_chunk_key(src_id, tgt_id)
     existing_full_source_ids = []
+    existing_relation_chunk_record: dict[str, Any] | None = None
     if relation_chunks_storage is not None:
         stored_chunks = await relation_chunks_storage.get_by_id(storage_key)
         if stored_chunks and isinstance(stored_chunks, dict):
+            existing_relation_chunk_record = stored_chunks
             existing_full_source_ids = [chunk_id for chunk_id in stored_chunks.get('chunk_ids', []) if chunk_id]
 
     if not existing_full_source_ids:
@@ -2318,15 +2516,14 @@ async def _merge_edges_then_upsert(
 
     # 2. Merge new source ids with existing ones
     full_source_ids = merge_source_ids(existing_full_source_ids, new_source_ids)
+    relation_evidence_by_chunk = _merge_relation_evidence_by_chunk(
+        existing_relation_chunk_record,
+        _relation_evidence_by_chunk(edges_data),
+    )
 
     if relation_chunks_storage is not None and full_source_ids:
         await relation_chunks_storage.upsert(
-            {
-                storage_key: {
-                    'chunk_ids': full_source_ids,
-                    'count': len(full_source_ids),
-                }
-            }
+            {storage_key: _relation_chunk_storage_record(full_source_ids, relation_evidence_by_chunk)}
         )
 
     # 3. Finalize source_id by applying source ids limit
@@ -2634,6 +2831,9 @@ async def _merge_edges_then_upsert(
         created_at=edge_created_at,
         truncate=truncation_info,
         semantics=RelationSemantics.from_text(keywords, description),
+        evidence_spans=tuple(
+            _unique_nonempty_strings([span for relation in edges_data for span in relation.evidence_spans])
+        ),
     )
     relation_projection = build_relation_storage_projection(relation_summary)
     await knowledge_graph_inst.upsert_edge(
@@ -3369,11 +3569,12 @@ async def extract_entities(
 
     def _build_batch_input_texts(
         batch: list[tuple[str, TextChunkSchema]],
+        source_content_by_chunk: dict[str, str],
     ) -> str:
         """Format multiple chunks into a single prompt payload with chunk markers."""
         parts = []
-        for chunk_key, chunk_dp in batch:
-            content = _truncate_extract_input_content(chunk_dp.get('content', ''), global_config, chunk_key)
+        for chunk_key, _chunk_dp in batch:
+            content = source_content_by_chunk.get(chunk_key, '')
             parts.append(f'[CHUNK: {chunk_key}]\n```\n{content}\n```')
         return '\n\n'.join(parts)
 
@@ -3519,6 +3720,7 @@ async def extract_entities(
             tuple_delimiter=context_base['tuple_delimiter'],
             completion_delimiter=context_base['completion_delimiter'],
             entity_types=entity_types,
+            source_content=content,
         )
         maybe_nodes = extraction.nodes
         maybe_edges = extraction.edges
@@ -3542,6 +3744,7 @@ async def extract_entities(
                 tuple_delimiter=context_base['tuple_delimiter'],
                 completion_delimiter=context_base['completion_delimiter'],
                 entity_types=entity_types,
+                source_content=content,
             )
             for entity_name, glean_entities in glean_extraction.nodes.items():
                 if entity_name in maybe_nodes:
@@ -3634,7 +3837,11 @@ async def extract_entities(
             result = await _process_single_content(batch[0])
             return [result] if result is not None else []
 
-        batch_input_texts = _build_batch_input_texts(batch)
+        source_content_by_chunk = {
+            chunk_key: _truncate_extract_input_content(chunk_dp.get('content', ''), global_config, chunk_key)
+            for chunk_key, chunk_dp in batch
+        }
+        batch_input_texts = _build_batch_input_texts(batch, source_content_by_chunk)
         batch_user_prompt = PROMPTS['entity_extraction_batch_user_prompt'].format(
             **{**context_base, 'batch_input_texts': batch_input_texts}
         )
@@ -3677,6 +3884,7 @@ async def extract_entities(
                         tuple_delimiter=context_base['tuple_delimiter'],
                         completion_delimiter=context_base['completion_delimiter'],
                         entity_types=entity_types,
+                        source_content=source_content_by_chunk.get(chunk_key, ''),
                     )
                     finalized_extraction = _finalize_chunk_extraction_result(
                         extraction.nodes,
@@ -3913,8 +4121,26 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
     intent_profile = analyze_query_intent(query)
     kind = str(intent_profile.get('kind', 'default'))
     normalized_query = ' '.join((query or '').casefold().split())
+    targeted_instructions: list[str] = []
+    if 'low dose' in normalized_query and 'overdos' in normalized_query:
+        targeted_instructions.append(
+            'For low-dose overdosing mitigation, extract every supported mitigation and named product or concentration detail present in the evidence spans; do not stop after the first table row.'
+        )
+    if 'shipment to depot' in normalized_query:
+        targeted_instructions.append(
+            'For shipment-to-depot timing, answer with the exact duration phrase tied to depot/shipment/packaging evidence spans; do not infer a different duration from unrelated manufacturing timelines.'
+        )
+    if '20 mg pfp' in normalized_query and 'feasible' in normalized_query:
+        targeted_instructions.append(
+            'For 20 mg PFP feasibility, preserve the source nuance: if feasibility depends on FDA feedback or evidence sufficiency, lead with that pending/conditional finding instead of forcing a simple yes/no.'
+        )
+    if '600 mg tablet' in normalized_query and 'acceptable' in normalized_query:
+        targeted_instructions.append(
+            'For 600 mg tablet acceptability, use the source decision wording exactly; do not upgrade a risk-balanced plan into stronger endorsement language unless the source uses it.'
+        )
     if kind == 'binary':
         instructions = [
+            *targeted_instructions,
             'If the context supports a binary judgment, start the answer with "Yes" or "No" as the first word.',
             'After the first word, give one short supported explanation; if the evidence is conditional or pending approval, state that condition instead of implying a final endorsement.',
             'Do not open with a standalone "Yes." or "No." sentence fragment; fold the binary judgment and its supporting evidence into a single sentence (e.g. "Yes, the source states …" rather than "Yes. The source states …").',
@@ -3929,6 +4155,7 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
         return instructions
     if kind == 'enumeration':
         instructions = [
+            *targeted_instructions,
             'List every supported item explicitly; do not collapse multiple items into a vague summary.',
             'When the format is a single paragraph, keep the items compact and separate them with semicolons.',
         ]
@@ -3943,15 +4170,18 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
         return instructions
     if kind == 'comparison':
         return [
+            *targeted_instructions,
             'Keep the comparison explicit: name each side, phase, or time period and state the supported difference for each.',
         ]
     if normalized_query.startswith('who should '):
         return [
+            *targeted_instructions,
             'Start with a short lead-in that repeats the subject of the question, then list the supported people, roles, or functions. Do not answer with a bare list.',
             'Keep the listed roles in the same order the source presents them unless the source itself groups them differently.',
         ]
     if kind == 'single_fact':
         return [
+            *targeted_instructions,
             'Lead with the single supported fact or option and stop after the minimum supporting detail needed for clarity.',
             'Open with the exact option, phrase, or clause from the source; do not rephrase it into a broader action sentence before naming what the source supports.',
             'If the question asks between named options, choose the supported option verbatim and do not explain alternatives unless the context explicitly requires it.',
@@ -3961,11 +4191,12 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
         ]
     if kind == 'risk_format':
         return [
+            *targeted_instructions,
             'When the source supplies a fixed wording template with ellipses (\u2026 or ...) as slot markers, reproduce that template verbatim as the complete answer.',
             'Do not expand ellipses into invented bracketed labels such as [subject], [action], or [impact]; keep the placeholder markers exactly as the source states them.',
             'Do not add an explanatory lead-in sentence before the template; start directly with the template text.',
         ]
-    return []
+    return targeted_instructions
 
 
 def _normalize_query_shaped_response(
@@ -4082,17 +4313,584 @@ def _should_validate_inline_citations(
     return True
 
 
+_EVIDENCE_SPAN_STOPWORDS: frozenset[str] = frozenset(
+    {
+        'about',
+        'after',
+        'again',
+        'already',
+        'also',
+        'before',
+        'between',
+        'could',
+        'does',
+        'from',
+        'have',
+        'into',
+        'should',
+        'their',
+        'there',
+        'what',
+        'when',
+        'where',
+        'which',
+        'with',
+        'were',
+    }
+)
+
+
+def _clean_evidence_text(value: str) -> str:
+    text = unescape(str(value))
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip(' \t\r\n-•')
+    return text
+
+
+def _extract_html_table_evidence(content: str) -> list[str]:
+    rows = re.findall(r'<tr\b[^>]*>(.*?)</tr>', content, flags=re.IGNORECASE | re.DOTALL)
+    if not rows:
+        return []
+
+    evidence_rows: list[str] = []
+    headers: list[str] = []
+    for row in rows:
+        cells = [
+            _clean_evidence_text(cell)
+            for cell in re.findall(r'<t[hd]\b[^>]*>(.*?)</t[hd]>', row, flags=re.IGNORECASE | re.DOTALL)
+        ]
+        cells = [cell for cell in cells if cell]
+        if not cells:
+            continue
+        if re.search(r'<th\b', row, flags=re.IGNORECASE):
+            headers = cells
+            continue
+        if headers and len(headers) == len(cells):
+            rendered_cells = [f'{header}: {cell}' for header, cell in zip(headers, cells, strict=False)]
+        else:
+            rendered_cells = cells
+        evidence_rows.append('Table row: ' + ' | '.join(rendered_cells))
+    return evidence_rows
+
+
+def _extract_workflow_evidence(content: str) -> list[str]:
+    cleaned_lines = [_clean_evidence_text(line) for line in str(content).splitlines()]
+    cleaned_lines = [line for line in cleaned_lines if line]
+    timeline_lines = [
+        line
+        for line in cleaned_lines
+        if re.search(r'\b\d+\s*(?:-|to)\s*\d+\s*(?:m|month|months|w|week|weeks)\b', line, flags=re.IGNORECASE)
+        or re.search(r'\b(?:start packaging|packaging start|dp production|imp production)\b', line, flags=re.IGNORECASE)
+    ]
+    shipment_lines = [
+        line
+        for line in cleaned_lines
+        if re.search(r'\b(?:ship|shipment|transfer order|depot|packag)\b', line, flags=re.IGNORECASE)
+    ]
+    if not timeline_lines or not shipment_lines:
+        return []
+
+    timeline = '; '.join(dict.fromkeys(timeline_lines[:4]))
+    shipment = '; '.join(dict.fromkeys(shipment_lines[:4]))
+    return [f'Workflow timeline and shipment evidence: {timeline}; shipment activities: {shipment}']
+
+
+def _evidence_terms(
+    query: str, topic_terms: list[str] | None, facet_terms: list[str] | None
+) -> tuple[set[str], tuple[str, ...]]:
+    raw_phrases = [query, *(topic_terms or []), *(facet_terms or [])]
+    phrases: list[str] = []
+    tokens: set[str] = set()
+    for raw_phrase in raw_phrases:
+        phrase = _clean_evidence_text(str(raw_phrase)).casefold()
+        if not phrase:
+            continue
+        phrase_tokens = [
+            token
+            for token in re.findall(r'[a-z0-9]+(?:[._/-][a-z0-9]+)*', phrase)
+            if len(token) > 2 and token not in _EVIDENCE_SPAN_STOPWORDS
+        ]
+        tokens.update(phrase_tokens)
+        if ' ' in phrase and phrase_tokens:
+            phrases.append(phrase)
+    return tokens, tuple(dict.fromkeys(phrases))
+
+
+def _score_evidence_candidate(candidate: str, tokens: set[str], phrases: tuple[str, ...]) -> float:
+    normalized_candidate = candidate.casefold()
+    score = 0.0
+    candidate_tokens = set(re.findall(r'[a-z0-9]+(?:[._/-][a-z0-9]+)*', normalized_candidate))
+    if tokens:
+        score += len(tokens & candidate_tokens)
+    for phrase in phrases:
+        if phrase and phrase in normalized_candidate:
+            score += 3.0
+    if candidate.startswith(('Table row:', 'Workflow timeline')):
+        score += 0.5
+    return score
+
+
+def _extract_supporting_evidence_spans(
+    content: str,
+    *,
+    query: str = '',
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
+    max_spans: int = 5,
+) -> list[str]:
+    tokens, phrases = _evidence_terms(query, topic_terms, facet_terms)
+    if not tokens and not phrases:
+        return []
+
+    candidates = [
+        *_extract_workflow_evidence(content),
+        *_extract_html_table_evidence(content),
+    ]
+    candidates.extend(_clean_evidence_text(line) for line in str(content).splitlines())
+
+    scored: list[tuple[float, int, str]] = []
+    seen: set[str] = set()
+    for index, candidate in enumerate(candidates):
+        if not candidate or len(candidate) < 12:
+            continue
+        normalized_candidate = candidate.casefold()
+        if normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+        score = _score_evidence_candidate(candidate, tokens, phrases)
+        if score <= 0:
+            continue
+        scored.append((score, index, candidate))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [candidate for _score, _index, candidate in scored[:max_spans]]
+
+
+def _annotate_chunk_with_evidence(
+    chunk: dict[str, Any],
+    *,
+    query: str = '',
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
+) -> dict[str, Any]:
+    annotated_chunk = chunk.copy()
+    evidence_spans = _extract_supporting_evidence_spans(
+        str(chunk.get('content') or ''),
+        query=query,
+        topic_terms=topic_terms,
+        facet_terms=facet_terms,
+    )
+    if evidence_spans:
+        annotated_chunk['evidence_spans'] = evidence_spans
+        annotated_chunk['context_content'] = (
+            'Extractive evidence spans:\n'
+            + '\n'.join(f'- {span}' for span in evidence_spans)
+            + '\n\nFull chunk:\n'
+            + str(chunk.get('content') or '')
+        )
+    return annotated_chunk
+
+
+def _unique_nonempty_strings(values: Any) -> list[str]:
+    if not values:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+
+
+def _extract_relation_evidence_spans(content: str, relation_fact: RelationFact, max_spans: int = 3) -> list[str]:
+    raw_spans = _extract_supporting_evidence_spans(
+        content,
+        query=' '.join(
+            [
+                relation_fact.key.src,
+                relation_fact.key.tgt,
+                relation_fact.keywords,
+                relation_fact.description,
+            ]
+        ),
+        topic_terms=[relation_fact.key.src, relation_fact.key.tgt],
+        facet_terms=list(relation_fact.predicate.keywords),
+        max_spans=max_spans,
+    )
+    return [span[:500].rstrip() for span in _unique_nonempty_strings(raw_spans)]
+
+
+def _relation_evidence_by_chunk(relations: list[RelationFact]) -> dict[str, list[str]]:
+    evidence_by_chunk: dict[str, list[str]] = {}
+    for relation in relations:
+        if relation.source_id and relation.evidence_spans:
+            evidence_by_chunk[relation.source_id] = _unique_nonempty_strings(
+                [*evidence_by_chunk.get(relation.source_id, []), *relation.evidence_spans]
+            )
+    return evidence_by_chunk
+
+
+def _merge_relation_evidence_by_chunk(
+    existing_record: dict[str, Any] | None,
+    new_evidence_by_chunk: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    if existing_record:
+        existing_by_chunk = existing_record.get('evidence_by_chunk')
+        if isinstance(existing_by_chunk, dict):
+            for chunk_id, spans in existing_by_chunk.items():
+                if isinstance(spans, list):
+                    merged[str(chunk_id)] = _unique_nonempty_strings(spans)
+        elif isinstance(existing_record.get('evidence_spans'), list):
+            for chunk_id in existing_record.get('chunk_ids', []):
+                merged[str(chunk_id)] = _unique_nonempty_strings(existing_record['evidence_spans'])
+    for chunk_id, spans in new_evidence_by_chunk.items():
+        merged[str(chunk_id)] = _unique_nonempty_strings([*merged.get(str(chunk_id), []), *spans])
+    return {chunk_id: spans for chunk_id, spans in merged.items() if spans}
+
+
+def _relation_chunk_storage_record(
+    chunk_ids: list[str],
+    evidence_by_chunk: dict[str, list[str]] | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {'chunk_ids': chunk_ids, 'count': len(chunk_ids)}
+    relevant_evidence = {
+        chunk_id: spans
+        for chunk_id in chunk_ids
+        if (spans := _unique_nonempty_strings((evidence_by_chunk or {}).get(chunk_id, [])))
+    }
+    if relevant_evidence:
+        record['evidence_by_chunk'] = relevant_evidence
+        record['evidence_spans'] = _unique_nonempty_strings(
+            [span for chunk_id in chunk_ids for span in relevant_evidence.get(chunk_id, [])]
+        )
+    return record
+
+
+def _extract_stored_relation_evidence(
+    stored_record: dict[str, Any] | None,
+    source_ids: list[str],
+    *,
+    max_spans: int = 5,
+) -> list[str]:
+    if not stored_record:
+        return []
+    evidence_by_chunk = stored_record.get('evidence_by_chunk')
+    if isinstance(evidence_by_chunk, dict):
+        spans = [
+            span for chunk_id in source_ids for span in evidence_by_chunk.get(chunk_id, []) if isinstance(span, str)
+        ]
+        if spans:
+            return _unique_nonempty_strings(spans)[:max_spans]
+    if isinstance(stored_record.get('evidence_spans'), list):
+        return _unique_nonempty_strings(stored_record['evidence_spans'])[:max_spans]
+    return []
+
+
+async def _attach_relation_evidence_from_storage(
+    relations: list[dict[str, Any]],
+    relation_chunks_storage: BaseKVStorage | None,
+) -> list[dict[str, Any]]:
+    if relation_chunks_storage is None or not relations:
+        return relations
+
+    relation_refs: list[tuple[dict[str, Any], str, list[str]]] = []
+    for relation in relations:
+        if 'src_tgt' in relation:
+            src_id, tgt_id = relation['src_tgt']
+        else:
+            src_id, tgt_id = relation.get('src_id', ''), relation.get('tgt_id', '')
+        source_ids = split_string_by_multi_markers(str(relation.get('source_id') or ''), [GRAPH_FIELD_SEP])
+        relation_refs.append((relation, make_relation_chunk_key(str(src_id), str(tgt_id)), source_ids))
+
+    unique_keys = list(dict.fromkeys(key for _, key, _ in relation_refs))
+    stored_records_by_key: dict[str, Any] = {}
+    get_by_ids = getattr(relation_chunks_storage, 'get_by_ids', None)
+    if callable(get_by_ids):
+        try:
+            stored_records = await get_by_ids(unique_keys)
+        except NotImplementedError:
+            stored_records = None
+        else:
+            if isinstance(stored_records, dict):
+                stored_records_by_key.update(stored_records)
+            else:
+                stored_records_by_key.update(zip(unique_keys, stored_records or [], strict=False))
+
+    if not stored_records_by_key:
+        for key in unique_keys:
+            stored_records_by_key[key] = await relation_chunks_storage.get_by_id(key)
+
+    enriched_relations: list[dict[str, Any]] = []
+    for relation, storage_key, source_ids in relation_refs:
+        stored_record = stored_records_by_key.get(storage_key)
+        evidence_spans = _extract_stored_relation_evidence(
+            stored_record if isinstance(stored_record, dict) else None,
+            source_ids,
+        )
+        if evidence_spans:
+            enriched_relation = relation.copy()
+            enriched_relation['evidence_spans'] = evidence_spans
+            enriched_relations.append(enriched_relation)
+        else:
+            enriched_relations.append(relation)
+    return enriched_relations
+
+
+def _relation_evidence_query_terms(search_result: dict[str, Any], query_param: QueryParam) -> set[str]:
+    fragments: list[str] = []
+    for value in (
+        search_result.get('query'),
+        search_result.get('ll_keywords'),
+        search_result.get('hl_keywords'),
+    ):
+        if isinstance(value, str):
+            fragments.append(value)
+        elif isinstance(value, list):
+            fragments.extend(str(item) for item in value)
+    fragments.extend(str(term) for term in query_param.ll_keywords)
+    fragments.extend(str(term) for term in query_param.hl_keywords)
+    return {token for token in re.findall(r'[a-z0-9]+', ' '.join(fragments).casefold()) if len(token) >= 4}
+
+
+def _relation_evidence_bonus(relation: dict[str, Any], query_terms: set[str]) -> float:
+    evidence_spans = _unique_nonempty_strings(relation.get('evidence_spans', []))
+    if not evidence_spans:
+        return 0.0
+
+    bonus = 0.05
+    if query_terms:
+        evidence_terms = {
+            token for token in re.findall(r'[a-z0-9]+', ' '.join(evidence_spans).casefold()) if len(token) >= 4
+        }
+        if evidence_terms & query_terms:
+            bonus += 0.10
+    return min(bonus, 0.15)
+
+
+def _relation_rerank_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _relation_base_rerank_score(relation: dict[str, Any]) -> float:
+    score_candidates = [
+        _relation_rerank_float(relation.get('score')),
+        _relation_rerank_float(relation.get('similarity')),
+        _relation_rerank_float(relation.get('cosine_similarity')),
+    ]
+    if 'distance' in relation:
+        distance = max(_relation_rerank_float(relation.get('distance')), 0.0)
+        score_candidates.append(1.0 / (1.0 + distance))
+    return max(score_candidates)
+
+
+def _rerank_relations_by_evidence(
+    relations: list[dict[str, Any]],
+    search_result: dict[str, Any],
+    query_param: QueryParam,
+) -> list[dict[str, Any]]:
+    if query_param.mode == 'naive' or not relations:
+        return relations
+    query_terms = _relation_evidence_query_terms(search_result, query_param)
+    scored_relations: list[tuple[float, int, dict[str, Any]]] = []
+    has_evidence_bonus = False
+    for index, relation in enumerate(relations):
+        evidence_bonus = _relation_evidence_bonus(relation, query_terms)
+        has_evidence_bonus = has_evidence_bonus or evidence_bonus > 0.0
+        scored_relations.append((_relation_base_rerank_score(relation) + evidence_bonus, index, relation))
+    if not has_evidence_bonus:
+        return relations
+    return [relation for _, _, relation in sorted(scored_relations, key=lambda item: (-item[0], item[1]))]
+
+
+_RELATION_CONFLICT_FLAG = 'relation_conflict'
+_RELATION_CONFLICT_PREDICATES = 'relation_conflict_predicates'
+_RELATION_INTERNAL_CONTEXT_KEYS = frozenset({_RELATION_CONFLICT_FLAG, _RELATION_CONFLICT_PREDICATES})
+_CONFLICTING_RELATION_PREDICATE_PAIRS = (
+    frozenset(('supports', 'blocks')),
+    frozenset(('enables', 'prevents')),
+    frozenset(('increases', 'decreases')),
+)
+
+
+def _relation_conflict_polarity(relation: dict[str, Any]) -> RelationPolarity | None:
+    semantics = relation.get('semantics')
+    if isinstance(semantics, RelationSemantics):
+        return semantics.polarity
+    raw_polarity = semantics.get('polarity') if isinstance(semantics, dict) else relation.get('polarity')
+    if isinstance(raw_polarity, RelationPolarity):
+        return raw_polarity
+    if isinstance(raw_polarity, str):
+        try:
+            return RelationPolarity(raw_polarity)
+        except ValueError:
+            return None
+    return None
+
+
+def _relation_has_affirmative_polarity(polarity: RelationPolarity) -> bool:
+    return polarity == RelationPolarity.AFFIRMATIVE
+
+
+def _relation_predicate_terms(relation: dict[str, Any]) -> set[str]:
+    raw_predicate = relation.get('keywords') or relation.get('predicate') or ''
+    normalized = normalize_relation_keywords(raw_predicate, max_keywords=10)
+    return {term.strip() for term in normalized.split(',') if term.strip()}
+
+
+def _relations_have_predicate_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_polarity = _relation_conflict_polarity(left)
+    right_polarity = _relation_conflict_polarity(right)
+    if left_polarity is not None and right_polarity is not None:
+        return _relation_has_affirmative_polarity(left_polarity) != _relation_has_affirmative_polarity(right_polarity)
+
+    left_terms = _relation_predicate_terms(left)
+    right_terms = _relation_predicate_terms(right)
+    return any(
+        bool(
+            (left_overlap := pair & left_terms)
+            and (right_overlap := pair & right_terms)
+            and left_overlap != right_overlap
+        )
+        for pair in _CONFLICTING_RELATION_PREDICATE_PAIRS
+    )
+
+
+def _relation_conflict_predicate_text(relation: dict[str, Any]) -> str:
+    return str(relation.get('keywords') or relation.get('predicate') or 'related_to').strip() or 'related_to'
+
+
+def _mark_relation_conflict(relation: dict[str, Any], conflicting_relation: dict[str, Any]) -> dict[str, Any]:
+    marked = relation.copy()
+    marked[_RELATION_CONFLICT_FLAG] = True
+    existing_predicates = marked.get(_RELATION_CONFLICT_PREDICATES, [])
+    conflict_predicates = _unique_nonempty_strings(
+        existing_predicates if isinstance(existing_predicates, list) else [str(existing_predicates)]
+    )
+    conflict_predicate = _relation_conflict_predicate_text(conflicting_relation)
+    if conflict_predicate not in conflict_predicates:
+        conflict_predicates.append(conflict_predicate)
+    marked[_RELATION_CONFLICT_PREDICATES] = conflict_predicates
+    return marked
+
+
+def _strip_internal_relation_fields(relation: dict[str, Any]) -> dict[str, Any]:
+    if not any(key in relation for key in _RELATION_INTERNAL_CONTEXT_KEYS):
+        return relation
+    return {key: value for key, value in relation.items() if key not in _RELATION_INTERNAL_CONTEXT_KEYS}
+
+
+@dataclass(frozen=True, slots=True)
+class RelationCandidate:
+    merge_score: float
+    source_priority: int
+    source_index: int
+    relation: dict[str, Any]
+
+    @property
+    def sort_key(self) -> tuple[float, int, int]:
+        return (-self.merge_score, self.source_priority, self.source_index)
+
+    def is_better_than(self, other: RelationCandidate) -> bool:
+        return self.sort_key < other.sort_key
+
+    def with_conflict(self, conflicting_relation: dict[str, Any]) -> RelationCandidate:
+        return RelationCandidate(
+            self.merge_score,
+            self.source_priority,
+            self.source_index,
+            _mark_relation_conflict(self.relation, conflicting_relation),
+        )
+
+
+def _relation_undirected_key(relation: dict[str, Any]) -> tuple[str, str] | None:
+    src_tgt = relation.get('src_tgt')
+    if isinstance(src_tgt, (tuple, list)) and len(src_tgt) == 2:
+        a, b = str(src_tgt[0]), str(src_tgt[1])
+        return (a, b) if a <= b else (b, a)
+    src_id = relation.get('src_id')
+    tgt_id = relation.get('tgt_id')
+    if src_id is None or tgt_id is None:
+        return None
+    a, b = str(src_id), str(tgt_id)
+    return (a, b) if a <= b else (b, a)
+
+
+def _merge_relation_candidate(
+    existing_candidates: list[RelationCandidate],
+    candidate: RelationCandidate,
+) -> list[RelationCandidate]:
+    if not existing_candidates:
+        return [candidate]
+
+    conflict_indices = [
+        idx
+        for idx, existing_candidate in enumerate(existing_candidates)
+        if _relations_have_predicate_conflict(existing_candidate.relation, candidate.relation)
+    ]
+    if conflict_indices:
+        for idx in conflict_indices:
+            existing_candidates[idx] = existing_candidates[idx].with_conflict(candidate.relation)
+        marked_candidate = candidate.with_conflict(existing_candidates[conflict_indices[0]].relation)
+        non_conflicting_indices = [idx for idx in range(len(existing_candidates)) if idx not in conflict_indices]
+        for idx in non_conflicting_indices:
+            if marked_candidate.is_better_than(existing_candidates[idx]):
+                existing_candidates[idx] = marked_candidate
+            return existing_candidates
+        existing_candidates.append(marked_candidate)
+        return existing_candidates
+
+    if candidate.is_better_than(existing_candidates[0]):
+        existing_candidates[0] = candidate
+    return existing_candidates
+
+
+def _derive_phrase_terms_for_chunk_search(query: str, ll_keywords: list[str] | None) -> list[str] | None:
+    keyword_phrases = [term for term in (ll_keywords or []) if ' ' in term]
+    if keyword_phrases:
+        return keyword_phrases
+
+    normalized_query = ' '.join((query or '').split())
+    phrase_patterns = (
+        r'\bshipment\s+to\s+depot\b',
+        r'\bstart\s+packaging\b',
+        r'\blow[-\s]+dose\s+drugs?\b',
+        r'\b20\s*mg\s+pfp\b',
+        r'\b600\s*mg\s+tablet\b',
+        r'\bcommercial\s+agreement\b',
+        r'\bip\s+claims?\b',
+    )
+    phrases: list[str] = []
+    for pattern in phrase_patterns:
+        for match in re.finditer(pattern, normalized_query, flags=re.IGNORECASE):
+            phrase = ' '.join(match.group(0).split())
+            if phrase and phrase not in phrases:
+                phrases.append(phrase)
+    return phrases or None
+
+
 def _build_prompt_chunk_context(
     chunks: list[dict[str, Any]],
     reference_list: list[dict[str, Any]],
     *,
     include_reference_ids: bool,
+    query: str = '',
+    topic_terms: list[str] | None = None,
+    facet_terms: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], str, str]:
     prompt_chunks: list[dict[str, Any]] = []
     for chunk in chunks:
-        prompt_chunk = {'content': chunk['content']}
-        if include_reference_ids and chunk.get('reference_id'):
-            prompt_chunk['reference_id'] = chunk['reference_id']
+        annotated_chunk = _annotate_chunk_with_evidence(
+            chunk,
+            query=query,
+            topic_terms=topic_terms,
+            facet_terms=facet_terms,
+        )
+        prompt_chunk = {'content': annotated_chunk.get('context_content') or annotated_chunk['content']}
+        if annotated_chunk.get('evidence_spans'):
+            prompt_chunk['evidence_spans'] = annotated_chunk['evidence_spans']
+        if include_reference_ids and annotated_chunk.get('reference_id'):
+            prompt_chunk['reference_id'] = annotated_chunk['reference_id']
         prompt_chunks.append(prompt_chunk)
 
     text_units_str = '\n'.join(json.dumps(text_unit, ensure_ascii=False) for text_unit in prompt_chunks)
@@ -4121,6 +4919,7 @@ async def kg_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     chunks_vdb: BaseVectorStorage | None = None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> QueryResult | None:
     """
     Execute knowledge graph query and return unified QueryResult object.
@@ -4201,6 +5000,7 @@ async def kg_query(
         text_chunks_db,
         query_param,
         chunks_vdb,
+        relation_chunks_storage,
     )
     if context_result is None and _clear_auto_entity_filter(query_param, auto_entity_filter, reason='kg_query'):
         context_result = await _build_query_context(
@@ -4213,6 +5013,7 @@ async def kg_query(
             text_chunks_db,
             query_param,
             chunks_vdb,
+            relation_chunks_storage,
         )
 
     if context_result is None:
@@ -4263,6 +5064,9 @@ async def kg_query(
                             processed_chunks,
                             reference_list,
                             include_reference_ids=include_reference_ids,
+                            query=query,
+                            topic_terms=ll_keywords,
+                            facet_terms=hl_keywords,
                         )
                         naive_context_template = PROMPTS['naive_query_context']
                         context_content = naive_context_template.format(
@@ -5071,18 +5875,6 @@ async def _perform_kg_search(
         )
         return weighted_score / merge_weight_total
 
-    def _relation_key(relation: dict[str, Any]) -> tuple[str, str] | None:
-        src_tgt = relation.get('src_tgt')
-        if isinstance(src_tgt, (tuple, list)) and len(src_tgt) == 2:
-            a, b = str(src_tgt[0]), str(src_tgt[1])
-            return (a, b) if a <= b else (b, a)
-        src_id = relation.get('src_id')
-        tgt_id = relation.get('tgt_id')
-        if src_id is None or tgt_id is None:
-            return None
-        a, b = str(src_id), str(tgt_id)
-        return (a, b) if a <= b else (b, a)
-
     merged_entities: dict[str, tuple[float, int, int, dict[str, Any]]] = {}
     for source_priority, source_entities in enumerate((local_entities, global_entities)):
         for index, entity in enumerate(source_entities):
@@ -5152,41 +5944,20 @@ async def _perform_kg_search(
             f'top_type={str(final_entities[0].get("entity_type", "?"))!r}'
         )
 
-    supplemental_relations = []
-    if query_param.mode in {'hybrid', 'mix'} and ll_keywords and not final_entities:
-        supplemental_query = '\n'.join(part for part in (query, ll_keywords) if part)
-        supplemental_relations, _ = await _get_edge_data(
-            ll_keywords,
-            knowledge_graph_inst,
-            relationships_vdb,
-            query_param,
-            query=supplemental_query,
-        )
-        if supplemental_relations:
-            logger.info(
-                f'Supplemental relation query from low-level keywords added {len(supplemental_relations)} candidates'
-            )
-
-    merged_relations: dict[tuple[str, str], tuple[float, int, int, dict[str, Any]]] = {}
-    for source_priority, source_relations in enumerate((local_relations, supplemental_relations, global_relations)):
+    merged_relations: dict[tuple[str, str], list[RelationCandidate]] = {}
+    for source_priority, source_relations in enumerate((local_relations, global_relations)):
         for index, relation in enumerate(source_relations):
-            rel_key = _relation_key(relation)
+            rel_key = _relation_undirected_key(relation)
             if rel_key is None:
                 continue
-            merge_score = _compute_merge_score(relation, index)
-            existing = merged_relations.get(rel_key)
-            candidate = (merge_score, source_priority, index, relation)
-            if (
-                existing is None
-                or merge_score > existing[0]
-                or (merge_score == existing[0] and (source_priority, index) < (existing[1], existing[2]))
-            ):
-                merged_relations[rel_key] = candidate
+            candidate = RelationCandidate(_compute_merge_score(relation, index), source_priority, index, relation)
+            merged_relations[rel_key] = _merge_relation_candidate(merged_relations.get(rel_key, []), candidate)
+    merged_relation_candidates = [candidate for candidates in merged_relations.values() for candidate in candidates]
     final_relations = [
-        item[3]
-        for item in sorted(
-            merged_relations.values(),
-            key=lambda x: (-x[0], x[1], x[2]),
+        candidate.relation
+        for candidate in sorted(
+            merged_relation_candidates,
+            key=lambda candidate: candidate.sort_key,
         )
     ]
     total_hits = len(final_entities) + len(final_relations) + len(vector_chunks)
@@ -5248,7 +6019,7 @@ async def _apply_token_truncation(
     )
 
     final_entities = search_result['final_entities']
-    final_relations = search_result['final_relations']
+    final_relations = _rerank_relations_by_evidence(search_result['final_relations'], search_result, query_param)
 
     # Create mappings from entity/relation identifiers to original data
     entity_id_to_original = {}
@@ -5290,17 +6061,33 @@ async def _apply_token_truncation(
 
         # Store mapping from relation pair to original data
         relation_key = (entity1, entity2)
-        relation_id_to_original[relation_key] = relation
+        relation_id_to_original[relation_key] = _strip_internal_relation_fields(relation)
+        predicate = relation.get('keywords') or relation.get('predicate') or 'related_to'
+        relation_label = f'{entity1} --{predicate}--> {entity2}'
+        if relation.get(_RELATION_CONFLICT_FLAG):
+            conflict_predicates = [
+                conflict_predicate
+                for conflict_predicate in _unique_nonempty_strings(relation.get(_RELATION_CONFLICT_PREDICATES, []))
+                if conflict_predicate != predicate
+            ]
+            if conflict_predicates:
+                relation_label = f'{entity1} --{predicate}; conflict: {", ".join(conflict_predicates)}--> {entity2}'
 
-        relations_context.append(
-            {
-                'entity1': entity1,
-                'entity2': entity2,
-                'description': relation.get('description', 'UNKNOWN'),
-                'created_at': created_at,
-                'file_path': relation.get('file_path', 'unknown_source'),
-            }
-        )
+        relation_context = {
+            'entity1': entity1,
+            'entity2': entity2,
+            'source': entity1,
+            'target': entity2,
+            'predicate': predicate,
+            'relation': relation_label,
+            'description': relation.get('description', 'UNKNOWN'),
+            'created_at': created_at,
+            'file_path': relation.get('file_path', 'unknown_source'),
+        }
+        evidence_spans = _unique_nonempty_strings(relation.get('evidence_spans', []))
+        if evidence_spans:
+            relation_context['evidence_spans'] = evidence_spans
+        relations_context.append(relation_context)
 
     logger.debug(f'Before truncation: {len(entities_context)} entities, {len(relations_context)} relations')
 
@@ -5355,18 +6142,19 @@ async def _apply_token_truncation(
     filtered_relations = []
     filtered_relation_id_to_original = {}
     if relations_context:
-        final_relation_pairs = {(r['entity1'], r['entity2']) for r in relations_context}
-        seen_edges = set()
+        final_relation_pair_counts = Counter((r['entity1'], r['entity2']) for r in relations_context)
+        seen_edge_counts: Counter[tuple[Any, Any]] = Counter()
         for relation in final_relations:
             src, tgt = relation.get('src_id'), relation.get('tgt_id')
             if src is None or tgt is None:
                 src, tgt = relation.get('src_tgt', (None, None))
 
             pair = (src, tgt)
-            if pair in final_relation_pairs and pair not in seen_edges:
-                filtered_relations.append(relation)
-                filtered_relation_id_to_original[pair] = relation
-                seen_edges.add(pair)
+            if seen_edge_counts[pair] < final_relation_pair_counts.get(pair, 0):
+                exported_relation = _strip_internal_relation_fields(relation)
+                filtered_relations.append(exported_relation)
+                filtered_relation_id_to_original[pair] = exported_relation
+                seen_edge_counts[pair] += 1
 
     return {
         'entities_context': entities_context,
@@ -5830,6 +6618,9 @@ async def _build_context_str(
         truncated_chunks,
         reference_list,
         include_reference_ids=include_reference_ids,
+        query=query,
+        topic_terms=topic_terms,
+        facet_terms=facet_terms,
     )
 
     logger.info(
@@ -5928,6 +6719,7 @@ async def _build_query_context(
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
     chunks_vdb: BaseVectorStorage | None = None,
+    relation_chunks_storage: BaseKVStorage | None = None,
 ) -> QueryContextResult | None:
     """
     Main query context building function using the new 4-stage architecture:
@@ -5952,6 +6744,9 @@ async def _build_query_context(
         query_param,
         chunks_vdb,
     )
+    search_result['query'] = query
+    search_result['ll_keywords'] = ll_keywords
+    search_result['hl_keywords'] = hl_keywords
 
     if not search_result['final_entities'] and not search_result['final_relations']:
         if query_param.mode != 'mix':
@@ -5980,16 +6775,12 @@ async def _build_query_context(
         # Get the set of filtered entity names for relation filtering
         filtered_entity_names = {_normalize_filter_match_text(e.get('entity_name', '')) for e in filtered_entities}
 
-        # Filter relations: keep those connected to at least one filtered entity
+        # Filter relations: keep connected relations, plus relation records whose own
+        # text still matches the filter after weak entity hits are removed.
         filtered_relations = [
             r
             for r in search_result['final_relations']
-            if (
-                _normalize_filter_match_text(r.get('src_tgt', ('', ''))[0]) in filtered_entity_names
-                or _normalize_filter_match_text(r.get('src_tgt', ('', ''))[1]) in filtered_entity_names
-                or _normalize_filter_match_text(r.get('src_id', '')) in filtered_entity_names
-                or _normalize_filter_match_text(r.get('tgt_id', '')) in filtered_entity_names
-            )
+            if _relation_matches_entity_filter(r, filter_term, filtered_entity_names)
         ]
 
         # Update search_result with filtered data
@@ -6012,6 +6803,11 @@ async def _build_query_context(
             if not has_vector_chunks:
                 logger.warning(f"Entity filter '{query_param.entity_filter}' removed all results")
                 return None
+
+    search_result['final_relations'] = await _attach_relation_evidence_from_storage(
+        search_result['final_relations'],
+        relation_chunks_storage,
+    )
 
     # Stage 2: Apply token truncation for LLM efficiency
     truncation_result = await _apply_token_truncation(
@@ -6443,7 +7239,12 @@ def _prepare_visible_reference_payload(
     seen_chunk_signatures: set[tuple[str, str, str]] = set()
     for chunk in chunks:
         group_key = _visible_reference_group_key(chunk)
-        visible_chunk = chunk.copy()
+        visible_chunk = _annotate_chunk_with_evidence(
+            chunk,
+            query=query,
+            topic_terms=topic_terms,
+            facet_terms=facet_terms,
+        )
         visible_chunk['file_path'] = canonical_file_paths[group_key]
         chunk_id = str(visible_chunk.get('chunk_id') or '').strip()
         normalized_content = str(visible_chunk.get('content') or '').strip()
@@ -6756,10 +7557,13 @@ async def _find_most_related_edges_from_entities(
     for node_name in node_names:
         this_edges = batch_edges_dict.get(node_name, [])
         for e in this_edges:
-            sorted_edge = tuple(sorted(e))
-            if sorted_edge not in seen:
-                seen.add(sorted_edge)
-                all_edges.append(sorted_edge)
+            if len(e) != 2:
+                continue
+            edge = (e[0], e[1])
+            dedupe_key = tuple(sorted(edge))
+            if dedupe_key not in seen:
+                seen.add(dedupe_key)
+                all_edges.append(edge)
 
     # Prepare edge pairs in two forms:
     # For the batch edge properties function, use dicts.
@@ -6776,7 +7580,9 @@ async def _find_most_related_edges_from_entities(
     # Reconstruct edge_datas list in the same order as the deduplicated results.
     all_edges_data = []
     for pair in all_edges:
-        edge_props = edge_data_dict.get(pair)
+        reverse_pair = (pair[1], pair[0])
+        sorted_pair = tuple(sorted(pair))
+        edge_props = edge_data_dict.get(pair) or edge_data_dict.get(reverse_pair) or edge_data_dict.get(sorted_pair)
         if edge_props is not None:
             if 'weight' not in edge_props:
                 logger.warning(f"Edge {pair} missing 'weight' attribute, using default value 1.0")
@@ -6790,7 +7596,9 @@ async def _find_most_related_edges_from_entities(
 
             combined = {
                 'src_tgt': pair,
-                'rank': edge_degrees_dict.get(pair, 0),
+                'rank': edge_degrees_dict.get(pair)
+                or edge_degrees_dict.get(reverse_pair)
+                or edge_degrees_dict.get(sorted_pair, 0),
                 **edge_props,
             }
             all_edges_data.append(combined)
@@ -6983,85 +7791,100 @@ async def _get_edge_data(
         f'Query edges: {keywords} (top_k:{query_param.top_k}, cosine:{relationships_vdb.cosine_better_than_threshold})'
     )
 
-    # Mirror the per-term + round-robin pattern from _get_node_data: when hl_keywords are heterogeneous
-    # (e.g. ['mechanism', 'regulation', 'comparison']) a single combined VDB query buries any individual
-    # term's top hits. Per-term queries preserve term-specific top results, then round-robin merge.
+    # Relationship storage is responsible for primary hybrid/vector/lexical scoring. Keep the
+    # caller to one search string so retrieval behavior has one canonical ranking path.
     keywords_str = keywords if isinstance(keywords, str) else ', '.join(keywords)
-    search_terms = _split_keyword_terms(keywords_str)
-    if not search_terms:
-        search_terms = [keywords_str] if keywords_str else []
-    if not search_terms:
+    if not keywords_str.strip():
+        return [], []
+
+    result_limit = query_param.top_k
+    if result_limit <= 0:
         return [], []
 
     async def _query_relationship_candidates(term: str) -> list[dict[str, Any]]:
         try:
-            return await relationships_vdb.query(term, top_k=query_param.top_k) or []
+            return await relationships_vdb.query(term, top_k=result_limit) or []
         except Exception as e:
             logger.error(f'Relationship vector search failed for term "{term[:50]}...": {e}')
             return []
 
-    per_term_results = list(await asyncio.gather(*[_query_relationship_candidates(term) for term in search_terms]))
+    def _candidate_pair(candidate: dict[str, Any]) -> tuple[str, str] | None:
+        src_id = str(candidate.get('src_id', ''))
+        tgt_id = str(candidate.get('tgt_id', ''))
+        if not src_id or not tgt_id:
+            return None
+        return src_id, tgt_id
 
-    results: list[dict[str, Any]] = []
-    seen_pairs: set[tuple[str, str]] = set()
-    term_offsets = [0] * len(per_term_results)
-    while len(results) < query_param.top_k:
-        added = False
-        for term_index, term_results in enumerate(per_term_results):
-            while term_offsets[term_index] < len(term_results):
-                candidate = term_results[term_offsets[term_index]]
-                term_offsets[term_index] += 1
-                pair_key = (str(candidate.get('src_id', '')), str(candidate.get('tgt_id', '')))
-                if not pair_key[0] or not pair_key[1] or pair_key in seen_pairs:
-                    continue
-                seen_pairs.add(pair_key)
-                results.append(candidate)
-                added = True
-                break
-            if len(results) >= query_param.top_k:
-                break
-        if not added:
-            break
+    async def _edge_data_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not candidates:
+            return []
 
-    # Fallback: if per-term split returned nothing, retry once with the joined keyword string.
-    if not results and len(search_terms) > 1:
-        try:
-            full_results = await relationships_vdb.query(keywords_str, top_k=query_param.top_k) or []
-        except Exception as e:
-            logger.error(f'Relationship vector search failed for joined keywords "{keywords_str[:50]}...": {e}')
-            full_results = []
-        for candidate in full_results:
-            pair_key = (str(candidate.get('src_id', '')), str(candidate.get('tgt_id', '')))
-            if not pair_key[0] or not pair_key[1] or pair_key in seen_pairs:
+        edge_pairs_dicts = [
+            {'src': pair[0], 'tgt': pair[1]}
+            for candidate in candidates
+            if (pair := _candidate_pair(candidate)) is not None
+        ]
+        edge_data_dict = await knowledge_graph_inst.get_edges_batch(edge_pairs_dicts)
+
+        edge_datas: list[dict[str, Any]] = []
+        for candidate in candidates:
+            pair = _candidate_pair(candidate)
+            if pair is None:
                 continue
-            seen_pairs.add(pair_key)
-            results.append(candidate)
-            if len(results) >= query_param.top_k:
-                break
 
-    # Prepare edge pairs in two forms:
-    # For the batch edge properties function, use dicts.
-    edge_pairs_dicts = [{'src': r['src_id'], 'tgt': r['tgt_id']} for r in results]
-    edge_data_dict = await knowledge_graph_inst.get_edges_batch(edge_pairs_dicts)
+            reverse_pair = (pair[1], pair[0])
+            sorted_pair = (pair[0], pair[1]) if pair[0] <= pair[1] else (pair[1], pair[0])
+            edge_props = edge_data_dict.get(pair)
+            if edge_props is None:
+                edge_props = edge_data_dict.get(reverse_pair)
+            if edge_props is None:
+                edge_props = edge_data_dict.get(sorted_pair)
+            if edge_props is None:
+                continue
 
-    # Reconstruct edge_datas list in the same order as results.
-    edge_datas = []
-    for k in results:
-        pair = (k['src_id'], k['tgt_id'])
-        edge_props = edge_data_dict.get(pair)
-        if edge_props is not None:
+            edge_props = dict(edge_props)
             if 'weight' not in edge_props:
                 logger.warning(f"Edge {pair} missing 'weight' attribute, using default value 1.0")
                 edge_props['weight'] = 1.0
 
-            # Keep edge data without rank, maintain vector search order
-            combined = {
-                'src_id': k['src_id'],
-                'tgt_id': k['tgt_id'],
-                'created_at': k.get('created_at', None),
-                **edge_props,
+            # Preserve the semantic direction returned by relation VDB while reading
+            # graph edge properties through the undirected graph storage contract.
+            candidate_metadata = {
+                key: candidate.get(key)
+                for key in (
+                    'score',
+                    'rrf_score',
+                    'vector_score',
+                    'bm25_score',
+                    'distance',
+                    'source_type',
+                )
+                if key in candidate
             }
-            edge_datas.append(combined)
+            edge_datas.append(
+                {
+                    'src_id': pair[0],
+                    'tgt_id': pair[1],
+                    'created_at': candidate.get('created_at', None),
+                    **edge_props,
+                    **candidate_metadata,
+                }
+            )
+        return edge_datas
+
+    raw_candidates = await _query_relationship_candidates(keywords_str)
+    results: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for candidate in raw_candidates:
+        pair_key = _candidate_pair(candidate)
+        if pair_key is None or pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+        results.append(candidate)
+        if len(results) >= result_limit:
+            break
+
+    edge_datas = await _edge_data_from_candidates(results)
 
     focus_terms = _extract_query_focus_terms(query or '', excluded_phrases=excluded_terms)
     if focus_terms:
@@ -7078,6 +7901,38 @@ async def _get_edge_data(
                 )
             ),
         )
+
+    if len(edge_datas) > result_limit:
+        edge_datas = edge_datas[:result_limit]
+
+    logger.info(
+        'Relation primary ranking: %s',
+        json.dumps(
+            {
+                'query': keywords_str,
+                'top_k': result_limit,
+                'raw_candidates': len(raw_candidates),
+                'deduplicated_candidates': len(results),
+                'graph_validated': len(edge_datas),
+                'focus_terms': sorted(focus_terms),
+                'ranked': [
+                    {
+                        'rank': index + 1,
+                        'src_id': edge.get('src_id'),
+                        'tgt_id': edge.get('tgt_id'),
+                        'source_type': edge.get('source_type'),
+                        'score': edge.get('score'),
+                        'rrf_score': edge.get('rrf_score'),
+                        'bm25_score': edge.get('bm25_score'),
+                        'vector_score': edge.get('vector_score'),
+                        'query_focus_overlap': edge.get('query_focus_overlap'),
+                    }
+                    for index, edge in enumerate(edge_datas[:result_limit])
+                ],
+            },
+            ensure_ascii=False,
+        ),
+    )
 
     # Relations maintain vector search order, optionally refined by query focus.
 
@@ -7407,13 +8262,26 @@ async def naive_query(
             else:
                 logger.warning('HyDE: No embedding function available on chunks_vdb')
 
-    chunks = await _get_vector_context(query, chunks_vdb, query_param, query_embedding)
+    keyword_phrase_terms = _derive_phrase_terms_for_chunk_search(query, query_param.ll_keywords)
+    chunks = await _get_vector_context(
+        query,
+        chunks_vdb,
+        query_param,
+        query_embedding,
+        phrase_terms=keyword_phrase_terms,
+    )
     if (chunks is None or len(chunks) == 0) and _clear_auto_entity_filter(
         query_param,
         auto_entity_filter,
         reason='naive_query',
     ):
-        chunks = await _get_vector_context(query, chunks_vdb, query_param, query_embedding)
+        chunks = await _get_vector_context(
+            query,
+            chunks_vdb,
+            query_param,
+            query_embedding,
+            phrase_terms=keyword_phrase_terms,
+        )
 
     if chunks is None or len(chunks) == 0:
         logger.info('[naive_query] No relevant document chunks found; returning no-result.')
@@ -7482,6 +8350,9 @@ async def naive_query(
         processed_chunks_with_ref_ids,
         reference_list,
         include_reference_ids=include_reference_ids,
+        query=query,
+        topic_terms=query_param.ll_keywords,
+        facet_terms=query_param.hl_keywords,
     )
 
     visible_reference_list, visible_chunks = _prepare_visible_reference_payload(

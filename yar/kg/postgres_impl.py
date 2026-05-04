@@ -79,6 +79,36 @@ TS_RANK_CD_FLAG = int(os.getenv('YAR_TS_RANK_FLAG', '32'))
 VECTOR_FETCH_MULTIPLIER = float(os.getenv('YAR_VECTOR_FETCH_MULT', '2.0'))
 BM25_FETCH_BASE_MULTIPLIER = float(os.getenv('YAR_BM25_FETCH_MULT', '2.0'))
 
+_RELATION_LEXICAL_EXPANSION_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...], float], ...] = (
+    (
+        ('contributor', 'contributors', 'contributes', 'contribution', 'member', 'on behalf'),
+        ('represented by', 'represents', 'representative', 'on behalf'),
+        3.0,
+    ),
+    (
+        ('collaboration', 'collaborate', 'collaborated', 'partnership', 'alliance'),
+        ('collaborates with', 'collaboration', 'partnership', 'alliance', 'restructured alliance'),
+        1.5,
+    ),
+    (
+        ('risk', 'risks', 'hazard', 'hazards'),
+        ('poses risk to', 'poses risk of', 'mitigates risk', 'impact consequence'),
+        2.0,
+    ),
+    (
+        ('recommendation', 'recommendations', 'manual', 'dossier', 'criteria', 'instructions', 'flow chart'),
+        ('includes recommendations for', 'included in', 'specified in', 'adds to', 'requires'),
+        1.5,
+    ),
+)
+
+
+def _relation_query_contains(query: str, signal: str) -> bool:
+    if ' ' in signal:
+        return signal in query
+    return bool(re.search(rf'\b{re.escape(signal)}\b', query))
+
+
 # Default batch size for executemany operations
 # Adjust based on your data size and database resources
 EXECUTEMANY_BATCH_SIZE = int(os.getenv('POSTGRES_EXECUTEMANY_BATCH_SIZE', '500'))
@@ -1934,6 +1964,12 @@ class PostgreSQLDB:
                     [
                         ('idx_yar_vdb_entity_chunk_ids_gin', 'YAR_VDB_ENTITY', 'USING gin (chunk_ids)'),
                         ('idx_yar_vdb_relation_chunk_ids_gin', 'YAR_VDB_RELATION', 'USING gin (chunk_ids)'),
+                        (
+                            'idx_yar_vdb_relation_content_fts_gin',
+                            'YAR_VDB_RELATION',
+                            "USING gin (to_tsvector('english', "
+                            "COALESCE(source_id, '') || ' ' || COALESCE(target_id, '') || ' ' || COALESCE(content, '')))",
+                        ),
                     ]
                 )
 
@@ -3722,6 +3758,156 @@ class PGVectorStorage(BaseVectorStorage):
 
         await db.executemany(upsert_sql, batch_data)
 
+    @staticmethod
+    def _relationship_lexical_query_terms(query: str) -> list[tuple[str, float]]:
+        weighted_terms: list[tuple[str, float]] = []
+
+        def add_term(value: str, weight: float = 1.0) -> None:
+            term = re.sub(r'\s+', ' ', value).strip()
+            if not term:
+                return
+            for index, (existing_term, existing_weight) in enumerate(weighted_terms):
+                if existing_term == term:
+                    weighted_terms[index] = (existing_term, max(existing_weight, weight))
+                    return
+            weighted_terms.append((term, weight))
+
+        full_query = query.strip()
+        if full_query:
+            add_term(full_query)
+        for raw_term in re.split(r'[,;\n]+', query):
+            add_term(raw_term)
+
+        normalized_query = query.casefold()
+        for signals, expansions, expansion_weight in _RELATION_LEXICAL_EXPANSION_RULES:
+            if any(_relation_query_contains(normalized_query, signal) for signal in signals):
+                for expansion in expansions:
+                    add_term(expansion, expansion_weight)
+
+        return weighted_terms[:12]
+
+    @staticmethod
+    def _relationship_lexical_terms(query: str) -> list[str]:
+        return [term for term, _weight in PGVectorStorage._relationship_lexical_query_terms(query)]
+
+    async def _query_relationships_hybrid(
+        self,
+        query: str,
+        top_k: int,
+        embedding_values: list[float],
+    ) -> list[dict[str, Any]]:
+        if top_k <= 0:
+            return []
+
+        db = self._db_required()
+        distance_op = VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC]
+        fetch_k = max(top_k, math.ceil(top_k * VECTOR_FETCH_MULTIPLIER))
+        distance_expr = f'r.content_vector {distance_op} $2'
+        vector_sql = f"""
+            SELECT r.id,
+                   r.source_id AS src_id,
+                   r.target_id AS tgt_id,
+                   EXTRACT(EPOCH FROM r.create_time)::BIGINT AS created_at,
+                   {distance_expr} AS distance,
+                   (1 - ({distance_expr})) AS vector_score,
+                   'vector' AS source_type
+            FROM YAR_VDB_RELATION r
+            WHERE r.workspace = $1
+              AND {distance_expr} < $3
+            ORDER BY {distance_expr}
+            LIMIT $4;
+        """
+        vector_params = [
+            self.workspace,
+            embedding_values,
+            1 - self.cosine_better_than_threshold,
+            fetch_k,
+        ]
+
+        language = _validate_fts_language('english')
+        lexical_terms_with_weights = self._relationship_lexical_query_terms(query)
+        lexical_sql = f"""
+            WITH query_terms(term, term_weight) AS (
+                SELECT *
+                FROM unnest($2::text[], $3::float8[]) AS query_terms(term, term_weight)
+            )
+            SELECT r.id,
+                   r.source_id AS src_id,
+                   r.target_id AS tgt_id,
+                   EXTRACT(EPOCH FROM r.create_time)::BIGINT AS created_at,
+                   MAX(
+                       ts_rank_cd(
+                           to_tsvector(
+                               '{language}',
+                               COALESCE(r.source_id, '') || ' ' || COALESCE(r.target_id, '') || ' ' || COALESCE(r.content, '')
+                           ),
+                           plainto_tsquery('{language}', query_terms.term),
+                           {TS_RANK_CD_FLAG}
+                       ) * query_terms.term_weight
+                   ) AS bm25_score,
+                   'bm25' AS source_type
+            FROM YAR_VDB_RELATION r
+            JOIN query_terms
+              ON to_tsvector(
+                     '{language}',
+                     COALESCE(r.source_id, '') || ' ' || COALESCE(r.target_id, '') || ' ' || COALESCE(r.content, '')
+                 ) @@ plainto_tsquery('{language}', query_terms.term)
+            WHERE r.workspace = $1
+            GROUP BY r.id, r.source_id, r.target_id, r.create_time
+            ORDER BY bm25_score DESC
+            LIMIT $4;
+        """
+
+        async def _run_vector() -> list[dict[str, Any]]:
+            rows = await db.query(vector_sql, params=vector_params, multirows=True)
+            return [dict(row) for row in rows] if rows else []
+
+        async def _run_lexical() -> list[dict[str, Any]]:
+            if not lexical_terms_with_weights:
+                return []
+            rows = await db.query(
+                lexical_sql,
+                params=[
+                    self.workspace,
+                    [term for term, _weight in lexical_terms_with_weights],
+                    [weight for _term, weight in lexical_terms_with_weights],
+                    fetch_k,
+                ],
+                multirows=True,
+            )
+            return [dict(row) for row in rows] if rows else []
+
+        from yar.utils import reciprocal_rank_fusion
+
+        vector_results, lexical_results = await asyncio.gather(_run_vector(), _run_lexical())
+        fused_results = reciprocal_rank_fusion([vector_results, lexical_results], id_key='id', k=RRF_K)
+        vector_by_id = {str(item.get('id')): item for item in vector_results if item.get('id') is not None}
+        lexical_by_id = {str(item.get('id')): item for item in lexical_results if item.get('id') is not None}
+
+        enriched_results: list[dict[str, Any]] = []
+        for item in fused_results[:top_k]:
+            item_id = str(item.get('id'))
+            vector_item = vector_by_id.get(item_id)
+            lexical_item = lexical_by_id.get(item_id)
+            enriched = item.copy()
+            source_types: list[str] = []
+            if vector_item is not None:
+                enriched['distance'] = vector_item.get('distance')
+                enriched['vector_score'] = vector_item.get('vector_score')
+                source_types.append('vector')
+            if lexical_item is not None:
+                enriched['bm25_score'] = lexical_item.get('bm25_score')
+                source_types.append('bm25')
+            enriched['source_type'] = '+'.join(source_types) if source_types else enriched.get('source_type', 'unknown')
+            enriched['score'] = enriched.get('rrf_score', 0.0)
+            enriched_results.append(enriched)
+
+        logger.debug(
+            f'[{self.workspace}] Relation hybrid query: {len(vector_results)} vector + '
+            f'{len(lexical_results)} BM25 → {len(enriched_results)} fused'
+        )
+        return enriched_results
+
     #################### query method ###############
     async def query(self, query: str, top_k: int, query_embedding: list[float] | None = None) -> list[dict[str, Any]]:
         if query_embedding is not None:
@@ -3730,6 +3916,9 @@ class PGVectorStorage(BaseVectorStorage):
             embeddings = await self.embedding_func([query], _priority=5)  # higher priority for query
             embedding = embeddings[0]
         embedding_values = normalize_vector_param(embedding)
+
+        if is_namespace(self.namespace, NameSpace.VECTOR_STORE_RELATIONSHIPS):
+            return await self._query_relationships_hybrid(query, top_k, embedding_values)
 
         sql = SQL_TEMPLATES[self.namespace].format(
             distance_op=VECTOR_DISTANCE_OP[VECTOR_DISTANCE_METRIC],

@@ -138,6 +138,23 @@ class TestEntityExtractionPrompts:
         assert 'relation{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}Clinic Ph3 Stopper' in examples
         assert 'relation{tuple_delimiter}Stopper Design{tuple_delimiter}3 mL Cartridge' in examples
 
+    def test_entity_extraction_covers_risk_impact_relations(self):
+        """Prompt should extract explicit risk/impact targets as relations."""
+        prompt = PROMPTS['entity_extraction_system_prompt']
+        examples = '\n'.join(PROMPTS['entity_extraction_examples'])
+
+        assert 'explicit "X poses risk to Y"' in prompt
+        assert 'Risk targets as entities' in prompt
+        assert 'product quality, accurate dosing' in prompt
+        assert 'without an explicit risk/impact relation' in prompt
+        assert 'entity{tuple_delimiter}Product Quality{tuple_delimiter}concept' in examples
+        assert 'entity{tuple_delimiter}Accurate Dosing{tuple_delimiter}concept' in examples
+        assert 'relation{tuple_delimiter}CSTD{tuple_delimiter}Product Quality{tuple_delimiter}poses risk to' in examples
+        assert (
+            'relation{tuple_delimiter}CSTD Strategy Recommendations{tuple_delimiter}Accurate Dosing{tuple_delimiter}mitigates risk to'
+            in examples
+        )
+
     def test_entity_extraction_examples_do_not_emit_orphans(self):
         """Every example entity should be covered by at least one example relation."""
         tuple_marker = '{tuple_delimiter}'

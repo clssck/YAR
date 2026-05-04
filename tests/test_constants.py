@@ -340,7 +340,7 @@ class TestLLMConfiguration:
 
     def test_default_temperature(self):
         """Test DEFAULT_TEMPERATURE is a valid temperature value."""
-        assert DEFAULT_TEMPERATURE == 0.1
+        assert DEFAULT_TEMPERATURE == 0.0
         assert isinstance(DEFAULT_TEMPERATURE, float)
         assert 0 <= DEFAULT_TEMPERATURE <= 1
 

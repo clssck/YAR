@@ -43,6 +43,7 @@ from yar.utils import (
     compute_args_hash,
     compute_incremental_chunk_ids,
     compute_mdhash_id,
+    convert_to_user_format,
     cosine_similarity,
     create_prefixed_exception,
     fix_tuple_delimiter_corruption,
@@ -70,6 +71,31 @@ from yar.utils import (
     subtract_source_ids,
     write_json,
 )
+
+
+def test_convert_to_user_format_prefers_context_content_and_preserves_raw_chunk() -> None:
+    result = convert_to_user_format(
+        [],
+        [],
+        [
+            {
+                'reference_id': '1',
+                'content': 'Raw chunk text',
+                'context_content': 'Extractive evidence spans:\n- Raw chunk text',
+                'evidence_spans': ['Raw chunk text'],
+                'file_path': 'source.md',
+                'chunk_id': 'chunk-1',
+            }
+        ],
+        [{'reference_id': '1', 'file_path': 'source.md'}],
+        'naive',
+    )
+
+    chunk = result['data']['chunks'][0]
+    assert chunk['content'] == 'Extractive evidence spans:\n- Raw chunk text'
+    assert chunk['raw_content'] == 'Raw chunk text'
+    assert chunk['evidence_spans'] == ['Raw chunk text']
+    assert chunk['chunk_id'] == 'chunk-1'
 
 
 class TestHashFunctions:
@@ -239,9 +265,9 @@ class TestJSONHandling:
     def test_sanitize_string_for_json_with_surrogates(self):
         """Test sanitizing string with surrogate characters."""
         # Create a string with surrogate characters
-        dirty_text = 'Test\uD800string'
+        dirty_text = 'Test\ud800string'
         result = _sanitize_string_for_json(dirty_text)
-        assert '\uD800' not in result
+        assert '\ud800' not in result
         assert result == 'Teststring'
 
 
@@ -317,17 +343,17 @@ class TestUnicodeNormalization:
     def test_normalize_unicode_for_entity_matching_zero_width(self):
         """Test removing zero-width characters."""
         # Unicode zero-width space
-        text = 'Micro\u200Bsoft'
+        text = 'Micro\u200bsoft'
         result = normalize_unicode_for_entity_matching(text)
-        assert '\u200B' not in result
+        assert '\u200b' not in result
         assert result == 'Microsoft'
 
     def test_normalize_unicode_for_entity_matching_bidirectional(self):
         """Test removing bidirectional control characters."""
-        text = 'Test\u202Atext\u202C'
+        text = 'Test\u202atext\u202c'
         result = normalize_unicode_for_entity_matching(text)
-        assert '\u202A' not in result
-        assert '\u202C' not in result
+        assert '\u202a' not in result
+        assert '\u202c' not in result
 
     def test_normalize_unicode_for_entity_matching_empty(self):
         """Test normalizing empty string."""
@@ -337,7 +363,7 @@ class TestUnicodeNormalization:
     def test_normalize_math_alphanumerics(self):
         """Test normalizing mathematical alphanumeric symbols."""
         # Mathematical bold A (U+1D400)
-        text = '\U0001D400pple'
+        text = '\U0001d400pple'
         result = _normalize_math_alphanumerics(text)
         # Should normalize to regular A
         assert result == 'Apple'
@@ -356,7 +382,7 @@ class TestUnicodeNormalization:
     def test_sanitize_text_for_encoding_surrogate_removal(self):
         """Test removal of surrogate characters."""
         # String with surrogate character
-        text = 'Test\uD800data'
+        text = 'Test\ud800data'
         # Should raise ValueError for uncleanable encoding issues
         with pytest.raises(ValueError) as exc_info:
             sanitize_text_for_encoding(text)
@@ -485,9 +511,7 @@ class TestVectorOperations:
 
     def test_reciprocal_rank_fusion_single_list(self):
         """Test RRF with single result list."""
-        results = [
-            [{'id': 'doc1'}, {'id': 'doc2'}, {'id': 'doc3'}]
-        ]
+        results = [[{'id': 'doc1'}, {'id': 'doc2'}, {'id': 'doc3'}]]
         merged = reciprocal_rank_fusion(results)
         assert len(merged) == 3
         assert merged[0]['id'] == 'doc1'
@@ -782,13 +806,11 @@ class TestContentSummarization:
         result = remove_think_tags(text)
         assert result == 'Answer about xxxxxx more content'
 
-
     def test_remove_think_tags_multiple_blocks(self):
         """Multiple <think> blocks are all removed."""
         text = '<think>r1</think>Answer<think>r2</think> more'
         result = remove_think_tags(text)
         assert result == 'Answer more'
-
 
     def test_remove_think_tags_orphan_with_angle_brackets(self):
         """Orphaned </think> prefix containing '<' chars is still removed."""
@@ -796,19 +818,18 @@ class TestContentSummarization:
         result = remove_think_tags(text)
         assert result == 'final answer'
 
-
     def test_remove_think_tags_empty_block(self):
         """Empty think block is removed."""
         text = '<think></think>Content.'
         result = remove_think_tags(text)
         assert result == 'Content.'
 
-
     def test_remove_think_tags_only_think(self):
         """Text that is only a think block returns empty string."""
         text = '<think>only reasoning</think>'
         result = remove_think_tags(text)
         assert result == ''
+
 
 class TestTupleDelimiterFix:
     """Tests for tuple delimiter corruption fixing."""
