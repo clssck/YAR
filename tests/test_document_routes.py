@@ -12,6 +12,7 @@ This module tests document management endpoints:
 Uses httpx AsyncClient with FastAPI's TestClient pattern and mocked dependencies.
 """
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,7 +21,16 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
-from yar.api.routers.document_routes import _update_db_with_s3_keys, create_document_routes
+from yar.api.routers.document_routes import (
+    _canonical_markdown_object_name,
+    _extraction_manifest_object_name,
+    _processed_markdown_object_name,
+    _update_db_with_s3_keys,
+    _upload_extraction_artifacts_to_s3,
+    _upload_processed_text_to_s3,
+    create_document_routes,
+    pipeline_process_bytes_with_s3,
+)
 
 # =============================================================================
 # Fixtures
@@ -118,6 +128,92 @@ class TestHelperFunctions:
         result = format_datetime('2025-01-19T12:00:00Z')
         assert result == '2025-01-19T12:00:00Z'
 
+    def test_processed_markdown_object_name_uses_source_stem(self):
+        assert _processed_markdown_object_name('Q1 Research Deck.pptx') == 'Q1 Research Deck.processed.md'
+
+    def test_canonical_and_manifest_object_names_use_source_stem(self):
+        assert _canonical_markdown_object_name('Q1 Research Deck.pptx') == 'Q1 Research Deck.canonical.md'
+        assert _extraction_manifest_object_name('Q1 Research Deck.pptx') == 'Q1 Research Deck.extraction.json'
+
+    @pytest.mark.parametrize(
+        ('source_filename', 'expected'),
+        [
+            ('reports/Q1\\Slides\x01.PDF', 'reportsQ1Slides.processed.md'),
+            ('\x00/\\..', 'document.processed.md'),
+            (None, 'document.processed.md'),
+        ],
+    )
+    def test_processed_markdown_object_name_strips_unsafe_chars_and_falls_back(
+        self, source_filename: str | None, expected: str
+    ):
+        assert _processed_markdown_object_name(source_filename) == expected
+
+    @pytest.mark.asyncio
+    async def test_upload_processed_text_to_s3_uses_source_derived_object_name(self):
+        s3_client = MagicMock()
+        s3_client.upload_object = AsyncMock()
+
+        s3_key = await _upload_processed_text_to_s3(
+            s3_client=s3_client,
+            workspace='default',
+            doc_id='doc_123',
+            extracted_text='# Extracted',
+            source_filename='Q1 Research Deck.pptx',
+        )
+
+        assert s3_key == 'default/doc_123/Q1 Research Deck.processed.md'
+        s3_client.upload_object.assert_awaited_once_with(
+            key=s3_key,
+            data=b'# Extracted',
+            content_type='text/markdown; charset=utf-8',
+        )
+
+    @pytest.mark.asyncio
+    async def test_upload_extraction_artifacts_to_s3_writes_processed_canonical_and_manifest(self):
+        s3_client = MagicMock()
+        s3_client.upload_object = AsyncMock()
+
+        keys = await _upload_extraction_artifacts_to_s3(
+            s3_client=s3_client,
+            workspace='default',
+            doc_id='doc_123',
+            extracted_text='# Processed',
+            source_filename='Q1 Research Deck.pptx',
+            metadata={
+                'canonical_content': '# Canonical',
+                'extraction_manifest': {'schema_version': 1, 'quality_report': {'page_count': 1}},
+            },
+        )
+
+        assert keys == {
+            'processed_s3_key': 'default/doc_123/Q1 Research Deck.processed.md',
+            'canonical_s3_key': 'default/doc_123/Q1 Research Deck.canonical.md',
+            'extraction_manifest_s3_key': 'default/doc_123/Q1 Research Deck.extraction.json',
+        }
+        uploaded_keys = [call.kwargs['key'] for call in s3_client.upload_object.await_args_list]
+        assert uploaded_keys == list(keys.values())
+        manifest_call = s3_client.upload_object.await_args_list[2]
+        assert manifest_call.kwargs['content_type'] == 'application/json; charset=utf-8'
+        assert b'"page_count": 1' in manifest_call.kwargs['data']
+
+    @pytest.mark.asyncio
+    async def test_upload_extraction_artifacts_cleans_partial_uploads_on_failure(self):
+        s3_client = MagicMock()
+        s3_client.upload_object = AsyncMock(side_effect=[None, RuntimeError('canonical failed')])
+        s3_client.delete_object = AsyncMock()
+
+        with pytest.raises(RuntimeError, match='canonical failed'):
+            await _upload_extraction_artifacts_to_s3(
+                s3_client=s3_client,
+                workspace='default',
+                doc_id='doc_123',
+                extracted_text='# Processed',
+                source_filename='Q1 Research Deck.pptx',
+                metadata={'canonical_content': '# Canonical'},
+            )
+
+        s3_client.delete_object.assert_awaited_once_with('default/doc_123/Q1 Research Deck.processed.md')
+
     @pytest.mark.asyncio
     async def test_update_db_with_s3_keys_keeps_original_chunk_file_path(self):
         """Processed Markdown S3 keys must not replace chunk source identity."""
@@ -130,16 +226,170 @@ class TestHelperFunctions:
         await _update_db_with_s3_keys(
             rag=rag,
             doc_id='doc-1',
-            original_s3_key='default/doc-1/original.pptx',
-            processed_s3_key='default/doc-1/processed.md',
+            original_s3_key='default/doc-1/Q1 Research Deck.pptx',
+            processed_s3_key='default/doc-1/Q1 Research Deck.processed.md',
         )
 
-        rag.doc_status.update_s3_key.assert_awaited_once_with('doc-1', 'default/doc-1/original.pptx')
+        rag.doc_status.update_s3_key.assert_not_awaited()
         rag.text_chunks.update_s3_key_by_doc_id.assert_awaited_once_with(
             full_doc_id='doc-1',
-            s3_key='default/doc-1/processed.md',
+            s3_key='default/doc-1/Q1 Research Deck.processed.md',
         )
         assert 'archive_url' not in rag.text_chunks.update_s3_key_by_doc_id.await_args.kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('upload_result', 'upload_error', 'expected_chunk_s3_key'),
+        [
+            (
+                'default/doc_123/Q1 Research Deck.processed.md',
+                None,
+                'default/doc_123/Q1 Research Deck.processed.md',
+            ),
+            (
+                None,
+                RuntimeError('upload failed'),
+                'default/doc_123/Q1 Research Deck.pptx',
+            ),
+        ],
+    )
+    async def test_pipeline_process_bytes_uses_processed_chunk_key_or_original_fallback(
+        self,
+        upload_result: str | None,
+        upload_error: Exception | None,
+        expected_chunk_s3_key: str,
+    ):
+        from yar.api.routers import document_routes as routes
+
+        rag = MagicMock()
+        rag.workspace = 'default'
+        rag.chunk_token_size = 1200
+        rag.chunk_overlap_token_size = 100
+        rag.apipeline_enqueue_documents = AsyncMock()
+        rag.apipeline_enqueue_error_documents = AsyncMock()
+        rag.apipeline_process_enqueue_documents = AsyncMock()
+        rag.doc_status = MagicMock()
+        rag.text_chunks = MagicMock()
+        rag.text_chunks.update_s3_key_by_doc_id = AsyncMock(return_value=1)
+
+        upload_mock = AsyncMock(return_value=upload_result)
+        if upload_error is not None:
+            upload_mock.side_effect = upload_error
+
+        with (
+            patch.object(
+                routes,
+                '_dispatch_document_extraction',
+                AsyncMock(return_value=routes.DocumentExtractionResult(content='Extracted content')),
+            ),
+            patch.object(routes, '_upload_processed_text_to_s3', upload_mock),
+        ):
+            result = await pipeline_process_bytes_with_s3(
+                rag=rag,
+                file_content=b'%PDF-1.7',
+                filename='Q1 Research Deck.pptx',
+                mime_type='application/pdf',
+                s3_client=MagicMock(),
+                s3_doc_id='doc_123',
+                s3_original_key='default/doc_123/Q1 Research Deck.pptx',
+                track_id='upload_test',
+            )
+
+        assert result == upload_result
+        rag.apipeline_enqueue_documents.assert_awaited_once()
+        enqueue_metadata = rag.apipeline_enqueue_documents.await_args.kwargs['metadata']
+        assert enqueue_metadata['s3_key'] == expected_chunk_s3_key
+        assert set(enqueue_metadata) >= {'s3_key', 'chunk_token_size'}
+
+    @pytest.mark.asyncio
+    async def test_pipeline_process_bytes_uploads_spreadsheet_sidecars_and_uses_processed_key(self):
+        from yar.api.routers import document_routes as routes
+
+        rag = MagicMock()
+        rag.workspace = 'default'
+        rag.chunk_token_size = 1200
+        rag.chunk_overlap_token_size = 100
+        rag.apipeline_enqueue_documents = AsyncMock()
+        rag.apipeline_enqueue_error_documents = AsyncMock()
+        rag.apipeline_process_enqueue_documents = AsyncMock()
+        rag.doc_status = MagicMock()
+        rag.text_chunks = MagicMock()
+        rag.text_chunks.update_s3_key_by_doc_id = AsyncMock(return_value=1)
+
+        extraction_metadata = {
+            'canonical_content': '# Canonical spreadsheet',
+            'extraction_manifest': {'schema_version': 1, 'extractor': 'vision'},
+        }
+        extraction_result = routes.DocumentExtractionResult(
+            content='# Processed spreadsheet',
+            extractor='vision',
+            metadata=extraction_metadata,
+        )
+        artifact_keys = {
+            'processed_s3_key': 'default/doc_123/budget.processed.md',
+            'canonical_s3_key': 'default/doc_123/budget.canonical.md',
+            'extraction_manifest_s3_key': 'default/doc_123/budget.extraction.json',
+        }
+
+        with (
+            patch.object(
+                routes,
+                '_dispatch_document_extraction',
+                AsyncMock(return_value=extraction_result),
+            ),
+            patch.object(
+                routes,
+                '_upload_extraction_artifacts_to_s3',
+                AsyncMock(return_value=artifact_keys),
+            ) as upload_artifacts_mock,
+        ):
+            result = await pipeline_process_bytes_with_s3(
+                rag=rag,
+                file_content=b'xlsx-bytes',
+                filename='budget.xlsx',
+                mime_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                s3_client=MagicMock(),
+                s3_doc_id='doc_123',
+                s3_original_key='default/doc_123/budget.xlsx',
+                track_id='upload_test',
+            )
+
+        assert result == 'default/doc_123/budget.processed.md'
+        upload_artifacts_mock.assert_awaited_once()
+        assert upload_artifacts_mock.await_args.kwargs['metadata'] == extraction_metadata
+        enqueue_metadata = rag.apipeline_enqueue_documents.await_args.kwargs['metadata']
+        assert enqueue_metadata['s3_key'] == 'default/doc_123/budget.processed.md'
+        assert enqueue_metadata['canonical_s3_key'] == 'default/doc_123/budget.canonical.md'
+        assert enqueue_metadata['extraction_manifest_s3_key'] == 'default/doc_123/budget.extraction.json'
+
+    @pytest.mark.asyncio
+    async def test_pipeline_process_bytes_swallows_shutdown_cancellation(self):
+        from yar.api.routers import document_routes as routes
+
+        rag = MagicMock()
+        rag.workspace = 'default'
+        rag.chunk_token_size = 1200
+        rag.chunk_overlap_token_size = 100
+        rag.apipeline_enqueue_error_documents = AsyncMock()
+
+        with patch.object(
+            routes,
+            '_dispatch_document_extraction',
+            AsyncMock(side_effect=asyncio.CancelledError),
+        ):
+            result = await pipeline_process_bytes_with_s3(
+                rag=rag,
+                file_content=b'%PDF-1.7',
+                filename='Q1 Research Deck.pptx',
+                mime_type='application/pdf',
+                s3_client=MagicMock(),
+                s3_doc_id='doc_123',
+                s3_original_key='default/doc_123/Q1 Research Deck.pptx',
+                track_id='upload_test',
+            )
+
+        assert result is None
+        rag.apipeline_enqueue_error_documents.assert_not_awaited()
 
     def test_format_datetime_with_none(self):
         """Test that None returns None."""
@@ -177,6 +427,49 @@ class TestHelperFunctions:
         with pytest.raises(HTTPException) as exc_info:
             sanitize_filename('   ', Path('/tmp'))
         assert exc_info.value.status_code == 400
+
+
+@pytest.mark.offline
+class TestUploadEndpointS3Keys:
+    @pytest.mark.asyncio
+    async def test_upload_s3_original_object_uses_sanitized_uploaded_filename(self, mock_rag, mock_doc_manager):
+        s3_client = MagicMock()
+        s3_client.upload_object = AsyncMock()
+
+        app = FastAPI()
+        with (
+            patch('yar.api.routers.document_routes.global_args') as mock_global_args,
+            patch(
+                'yar.api.routers.document_routes.pipeline_process_bytes_with_s3',
+                new_callable=AsyncMock,
+            ) as process_mock,
+        ):
+            mock_global_args.max_upload_size_mb = 100
+            router = create_document_routes(
+                rag=mock_rag,
+                doc_manager=mock_doc_manager,
+                api_key=None,
+                s3_client=s3_client,
+            )
+            app.include_router(router)
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url='http://test',
+            ) as test_client:
+                response = await test_client.post(
+                    '/documents/upload',
+                    files={'file': ('Q1 Research Deck.pdf', b'%PDF-1.7', 'application/pdf')},
+                )
+
+        assert response.status_code == 200
+        uploaded_key = s3_client.upload_object.await_args.kwargs['key']
+        assert uploaded_key.startswith('default/doc_')
+        assert uploaded_key.endswith('/Q1 Research Deck.pdf')
+        assert '/original.' not in uploaded_key
+        process_mock.assert_awaited_once()
+        assert process_mock.await_args.args[2] == 'Q1 Research Deck.pdf'
+        assert process_mock.await_args.args[6] == uploaded_key
 
 
 # =============================================================================
@@ -665,6 +958,9 @@ class TestDocumentExtractionDispatch:
         assert manager.is_supported_file('slides.docx') is True
         assert manager.is_supported_file('deck.PPSX') is True
         assert manager.is_supported_file('notes.odt') is True
+        assert manager.is_supported_file('budget.xlsx') is True
+        assert manager.is_supported_file('legacy.xls') is False
+        assert manager.is_supported_file('open.ods') is False
         assert manager.is_supported_file('archive.zip') is False
 
     @pytest.mark.asyncio
@@ -706,6 +1002,7 @@ class TestDocumentExtractionDispatch:
         }
         global_args.update(binding_overrides)
 
+        tokenizer = object()
         with (
             patch.object(routes, 'global_args', SimpleNamespace(**global_args)),
             patch.object(
@@ -718,6 +1015,7 @@ class TestDocumentExtractionDispatch:
                 b'%PDF-1.7',
                 filename='report.pdf',
                 mime_type='application/pdf',
+                tokenizer=tokenizer,
             )
 
         extract_mock.assert_awaited_once_with(
@@ -729,12 +1027,44 @@ class TestDocumentExtractionDispatch:
             api_key=expected_api_key,
             pdf_password='secret',
             chunk_token_size=1200,
+            tokenizer=tokenizer,
         )
         assert result.content == 'vision markdown'
         assert result.pre_chunks == ['chunk']
         assert result.tables == [{'name': 'table'}]
         assert result.extractor == 'vision'
         assert result.metadata == {'pages': 1}
+
+    @pytest.mark.asyncio
+    async def test_dispatch_routes_xlsx_to_vision(self):
+        from yar.api.routers import document_routes as routes
+
+        vision_result = routes.DocumentExtractionResult(content='spreadsheet markdown', extractor='vision')
+        with (
+            patch.object(
+                routes,
+                '_extract_document_with_vision_bytes',
+                AsyncMock(return_value=vision_result),
+            ) as vision_mock,
+            patch.object(routes, '_decode_text_document_bytes') as decode_mock,
+        ):
+            tokenizer = object()
+            result = await routes._dispatch_document_extraction(
+                file_content=b'xlsx-bytes',
+                filename='budget.XLSX',
+                mime_type='application/octet-stream',
+                error_prefix='[Bytes Extraction]',
+                tokenizer=tokenizer,
+            )
+
+        assert result is vision_result
+        vision_mock.assert_awaited_once_with(
+            b'xlsx-bytes',
+            filename='budget.XLSX',
+            mime_type='application/octet-stream',
+            tokenizer=tokenizer,
+        )
+        decode_mock.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_dispatch_routes_pdf_to_vision(self):

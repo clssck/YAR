@@ -10,10 +10,34 @@ import yar.document.vision_adapter as vision
 from yar.document.vision_adapter import _get_pdf_page_count, _render_pdf_page_range
 
 
+class _WhitespaceTokenizer:
+    def encode(self, content: str) -> list[int]:
+        return list(range(len(content.split())))
+
+    def decode(self, tokens: list[int]) -> str:
+        return ' '.join(str(token) for token in tokens)
+
+
 def _make_chat_response(content: str, finish_reason: str = 'stop') -> SimpleNamespace:
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=finish_reason)]
     )
+
+
+async def _to_thread_result_for_pages(pages):
+    async def _run(func):
+        if getattr(func, 'func', None) is vision._extract_native_pdf_page_texts:
+            return {}
+        return pages
+
+    return _run
+
+
+@pytest.fixture(autouse=True)
+def _clear_vision_page_cache():
+    vision._PAGE_RESULT_CACHE.clear()
+    yield
+    vision._PAGE_RESULT_CACHE.clear()
 
 
 @pytest.mark.offline
@@ -32,8 +56,10 @@ class TestVisionAdapter:
         )
         client.close = AsyncMock()
 
+        tokenizer = _WhitespaceTokenizer()
+        to_thread_result = await _to_thread_result_for_pages(pages)
         with (
-            patch.object(vision.asyncio, 'to_thread', AsyncMock(return_value=pages)) as to_thread_mock,
+            patch.object(vision.asyncio, 'to_thread', AsyncMock(side_effect=to_thread_result)) as to_thread_mock,
             patch.object(vision, 'create_openai_async_client', return_value=client) as client_factory,
         ):
             result = await vision.extract_document_with_vision(
@@ -43,9 +69,10 @@ class TestVisionAdapter:
                 model='salmon',
                 base_url='http://litellm.example/v1',
                 api_key='test-key',
+                tokenizer=tokenizer,
             )
 
-        to_thread_mock.assert_awaited_once()
+        assert to_thread_mock.await_count == 2
         client_factory.assert_called_once_with(api_key='test-key', base_url='http://litellm.example/v1')
         # Batched: both pages sent in single call
         assert client.chat.completions.create.await_count == 1
@@ -72,6 +99,12 @@ class TestVisionAdapter:
         assert result.pre_chunks is not None
         assert len(result.pre_chunks) >= 1
         assert result.pre_chunks[0]['content']
+        assert result.pre_chunks[0]['tokens'] == len(tokenizer.encode(result.pre_chunks[0]['content']))
+        assert result.pre_chunks[0]['page_number'] == 1
+        assert result.pre_chunks[0]['page_start'] == 1
+        assert result.pre_chunks[0]['page_end'] == 1
+        assert result.pre_chunks[0]['page_numbers'] == [1]
+        assert result.pre_chunks[0]['tokens'] != (len(result.pre_chunks[0]['content']) + 3) // 4
         client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -103,9 +136,7 @@ class TestVisionAdapter:
 
         pages = [vision.RenderedPage(page_number=1, total_pages=1, media_type='image/png', image_bytes=b'page-one')]
         client = MagicMock()
-        client.chat.completions.create = AsyncMock(
-            side_effect=ProviderError('Key limit exceeded', status_code=403)
-        )
+        client.chat.completions.create = AsyncMock(side_effect=ProviderError('Key limit exceeded', status_code=403))
         client.close = AsyncMock()
 
         with (
@@ -152,6 +183,60 @@ class TestVisionAdapter:
         sleep_mock.assert_awaited_once_with(vision.RETRY_DELAY_SECONDS)
         assert 'Recovered text' in result.content
         assert result.warnings == []
+        client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_adaptive_split_retries_smaller_batches_after_multi_page_timeout(self, monkeypatch):
+        pages = [
+            vision.RenderedPage(page_number=1, total_pages=2, media_type='image/png', image_bytes=b'page-one'),
+            vision.RenderedPage(page_number=2, total_pages=2, media_type='image/png', image_bytes=b'page-two'),
+        ]
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=[
+                RuntimeError('temporary upstream timeout'),
+                _make_chat_response('<!-- PAGE 1 -->\n\nRecovered page one'),
+                _make_chat_response('<!-- PAGE 2 -->\n\nRecovered page two'),
+            ]
+        )
+
+        monkeypatch.setattr(vision, 'VISION_MAX_RETRIES', 1)
+
+        results, warnings = await vision._extract_batch_adaptively(client, 'salmon', pages)
+
+        assert [result.content for result in results] == ['Recovered page one', 'Recovered page two']
+        assert warnings == []
+        assert client.chat.completions.create.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_extract_document_with_vision_rejects_unrecovered_provider_failures(self, monkeypatch):
+        pages = [
+            vision.RenderedPage(page_number=1, total_pages=2, media_type='image/png', image_bytes=b'page-one'),
+            vision.RenderedPage(page_number=2, total_pages=2, media_type='image/png', image_bytes=b'page-two'),
+        ]
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=[
+                _make_chat_response('<!-- PAGE 1 -->\n\nRecovered page one'),
+                RuntimeError('temporary upstream timeout'),
+            ]
+        )
+        client.close = AsyncMock()
+
+        monkeypatch.setattr(vision, 'VISION_MAX_RETRIES', 1)
+
+        with (
+            patch.object(vision, '_compute_pages_per_call', return_value=1),
+            patch.object(vision.asyncio, 'to_thread', AsyncMock(return_value=pages)),
+            patch.object(vision, 'create_openai_async_client', return_value=client),
+        ):
+            with pytest.raises(vision.VisionExtractionError, match='refusing to index an incomplete document'):
+                await vision.extract_document_with_vision(
+                    b'fake-image',
+                    filename='scan.png',
+                    mime_type='image/png',
+                )
+
         client.close.assert_awaited_once()
 
     def test_is_vision_document_recognizes_office_extensions_and_mime_types(self):
@@ -273,6 +358,7 @@ class TestVisionAdapter:
 
         result_without = vision._content_with_context(chunk_without_ctx)
         assert result_without == chunk_without_ctx.content
+
 
 @pytest.mark.offline
 class TestStreamingPageRendering:

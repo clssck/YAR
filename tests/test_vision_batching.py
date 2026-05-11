@@ -16,6 +16,7 @@ from yar.document.vision_adapter import (
     _get_vision_concurrency_limit,
     _has_usable_content,
     _summarize_extraction_quality,
+    build_extraction_artifacts,
     stitch_extracted_pages,
 )
 
@@ -69,7 +70,7 @@ class TestStitchExtractedPages:
             ]
         )
 
-        assert stitched == '<!-- PAGE 1 -->\n\nAlpha\n\n<!-- PAGE 4 -->\n\n<p>Beta</p>'
+        assert stitched == '<!-- PAGE 1 -->\n\nAlpha\n\n<!-- PAGE 4 -->\n\nBeta'
         assert all(f'<!-- PAGE {page_number} -->' not in stitched for page_number in (2, 3))
         assert warnings == [
             ExtractionWarning(
@@ -115,6 +116,166 @@ class TestStitchExtractedPages:
 
         assert stitched == '<!-- PAGE 1 -->\n\nAlpha'
         assert warnings == extra_warnings
+
+    def test_normalizes_simple_html_blocks_outside_tables(self):
+        stitched, warnings = stitch_extracted_pages(
+            [
+                _page_result(
+                    1,
+                    '<p><strong>Objective</strong></p><ul><li>Alpha&nbsp;ready</li><li>Beta<br>review</li></ul>',
+                )
+            ]
+        )
+
+        assert '<p>' not in stitched
+        assert '<li>' not in stitched
+        assert 'Objective' in stitched
+        assert '- Alpha ready' in stitched
+        assert '- Beta review' in stitched
+        assert warnings == []
+
+    def test_converts_simple_html_tables_to_markdown(self):
+        stitched, warnings = stitch_extracted_pages(
+            [
+                _page_result(
+                    1,
+                    (
+                        '## Risk Table\n\n'
+                        '<table><thead><tr><th>Risk</th><th>Owner</th></tr></thead>'
+                        '<tbody><tr><td>Late batch</td><td>CMC</td></tr></tbody></table>'
+                    ),
+                )
+            ]
+        )
+
+        assert '<table' not in stitched
+        assert '| Risk | Owner |' in stitched
+        assert '| --- | --- |' in stitched
+        assert '| Late batch | CMC |' in stitched
+        assert warnings == []
+
+    def test_preserves_complex_html_tables(self):
+        html_table = '<table><tr><th colspan="2">Risk</th></tr><tr><td>A</td><td>B</td></tr></table>'
+
+        stitched, warnings = stitch_extracted_pages([_page_result(1, html_table)])
+
+        assert html_table in stitched
+        assert warnings == []
+
+    def test_removes_repeated_page_boilerplate_without_dropping_unique_content(self):
+        stitched, warnings = stitch_extracted_pages(
+            [
+                _page_result(1, '# Page One\n\nAlpha\n\nsanofi\n\nPage 1 of 3'),
+                _page_result(2, '# Page Two\n\nBeta\n\nsanofi\n\nPage 2 of 3'),
+                _page_result(3, '# Page Three\n\nGamma\n\nsanofi\n\nPage 3 of 3'),
+            ]
+        )
+
+        assert '\nsanofi' not in stitched.lower()
+        assert 'Page 1 of 3' not in stitched
+        assert 'Page 2 of 3' not in stitched
+        assert 'Page 3 of 3' not in stitched
+        assert 'Alpha' in stitched
+        assert 'Beta' in stitched
+        assert 'Gamma' in stitched
+        assert warnings == []
+
+    def test_removes_isolated_brand_boilerplate_on_single_page(self):
+        stitched, warnings = stitch_extracted_pages([_page_result(1, 'sanofi\n\n# sanofi\n\n# Title\n\nAlpha')])
+
+        assert 'sanofi' not in stitched.lower()
+        assert '# Title' in stitched
+        assert 'Alpha' in stitched
+        assert warnings == []
+
+    def test_preserves_repeated_meaningful_headings(self):
+        stitched, warnings = stitch_extracted_pages(
+            [
+                _page_result(1, '## Objective\n\nAlpha'),
+                _page_result(2, '## Objective\n\nBeta'),
+                _page_result(3, '## Objective\n\nGamma'),
+            ]
+        )
+
+        assert stitched.count('## Objective') == 3
+        assert warnings == []
+
+    def test_artifacts_keep_canonical_markers_for_dropped_pages(self):
+        artifacts = build_extraction_artifacts(
+            [
+                _page_result(1, 'Alpha content long enough for retrieval ' * 4),
+                _page_result(2, ''),
+                _page_result(3, 'sanofi'),
+            ],
+            page_count=3,
+            model='test-model',
+        )
+
+        assert artifacts.retrieval_content.count('<!-- PAGE') == 1
+        assert artifacts.canonical_content.count('<!-- PAGE') == 3
+        assert '<!-- YAR_PAGE_STATUS: empty -->' in artifacts.canonical_content
+        assert artifacts.quality_report.dropped_retrieval_pages == [2, 3]
+        assert artifacts.manifest['quality_report']['pages_emitted_canonical'] == 3
+
+    def test_artifacts_preserve_canonical_boilerplate_but_strip_retrieval(self):
+        artifacts = build_extraction_artifacts(
+            [
+                _page_result(1, '# Page One\n\nAlpha\n\nsanofi\n\nPage 1 of 3'),
+                _page_result(2, '# Page Two\n\nBeta\n\nsanofi\n\nPage 2 of 3'),
+                _page_result(3, '# Page Three\n\nGamma\n\nsanofi\n\nPage 3 of 3'),
+            ],
+            page_count=3,
+        )
+
+        assert 'sanofi' not in artifacts.retrieval_content.lower()
+        assert 'sanofi' in artifacts.canonical_content.lower()
+        assert artifacts.quality_report.pages_emitted_canonical == 3
+
+    def test_artifacts_use_native_fallback_only_for_tiny_pages(self):
+        artifacts = build_extraction_artifacts(
+            [
+                _page_result(1, 'Tiny'),
+                _page_result(2, 'Vision content is already sufficiently detailed ' * 4),
+            ],
+            page_count=2,
+            native_text_by_page={
+                1: 'Native page text with source-backed details and enough length for retrieval.',
+                2: 'Native text should not replace a healthy vision extraction.',
+            },
+        )
+
+        records = {record.page_number: record for record in artifacts.page_records}
+        assert records[1].source_method == 'vision_plus_native'
+        assert records[1].status == 'native_fallback'
+        assert records[2].source_method == 'vision'
+        assert 'Native text should not replace' not in records[2].retrieval_content
+        assert artifacts.quality_report.native_fallback_pages == [1]
+
+    def test_artifacts_count_and_preserve_complex_tables(self):
+        complex_table = '<table><tr><th colspan="2">Risk</th></tr><tr><td>A</td><td>B</td></tr></table>'
+
+        artifacts = build_extraction_artifacts([_page_result(1, complex_table)], page_count=1)
+
+        assert complex_table in artifacts.canonical_content
+        assert complex_table in artifacts.retrieval_content
+        assert artifacts.quality_report.table_counts['complex_html_tables'] == 1
+        assert artifacts.quality_report.pages_containing_tables == [1]
+
+    def test_page_cache_reuses_same_input_records(self):
+        first = PageResult(
+            page_number=1,
+            content='Cached page content with enough substance for retrieval.',
+            image_sha256='image-hash',
+            cache_key='cache-key',
+        )
+        first_artifacts = build_extraction_artifacts([first], page_count=1)
+        second = PageResult(page_number=1, content='', image_sha256='image-hash', cache_key='cache-key', cached=True)
+        second.content = first_artifacts.manifest['page_records'][0]['vision_content_raw']
+
+        second_artifacts = build_extraction_artifacts([second], page_count=1)
+
+        assert first_artifacts.retrieval_content == second_artifacts.retrieval_content
+        assert second_artifacts.page_records[0].cached is True
 
 
 @pytest.mark.offline
@@ -198,6 +359,19 @@ class TestBuildBatchVisionMessages:
 
         assert content[1]['image_url']['url'] == 'data:image/png;base64,' + base64.b64encode(b'page-one').decode()
         assert content[2]['image_url']['url'] == 'data:image/png;base64,' + base64.b64encode(b'page-two').decode()
+
+    def test_default_batch_prompt_requests_canonical_page_scoped_markdown(self):
+        messages = _build_batch_vision_messages([_rendered_page(1)])
+
+        prompt = messages[0]['content'][0]['text']
+        assert 'canonical, page-scoped Markdown' in prompt
+        assert "Preserve the page's reading order" in prompt
+        assert 'Use Markdown tables for simple tables' in prompt
+        assert 'use HTML <table> only when merged cells, multiline cells' in prompt
+        assert 'Strip repeated page footers, headers, and boilerplate' in prompt
+        assert 'Represent diagrams, timelines, flow charts, and infographics as structured sections' in prompt
+        assert 'Use [unclear] for unreadable text' in prompt
+        assert 'Do not invent missing text, values, labels, or relationships' in prompt
 
 
 @pytest.mark.offline

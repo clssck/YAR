@@ -5,6 +5,8 @@ This module contains all document-related routes for the YAR API.
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 import mimetypes
 import traceback
 from dataclasses import dataclass
@@ -18,7 +20,6 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
-    Form,
     HTTPException,
     UploadFile,
 )
@@ -120,6 +121,43 @@ def sanitize_filename(filename: str, input_dir: Path) -> str:
         raise HTTPException(status_code=400, detail='Invalid filename') from None
 
     return clean_name
+
+
+def _processed_markdown_object_name(source_filename: str | None) -> str:
+    """Return a safe processed Markdown object filename for an uploaded source file."""
+    clean_name = (
+        ''.join(
+            char
+            for char in (source_filename or '').replace('/', '').replace('\\', '')
+            if ord(char) >= 32 and char != '\x7f'
+        )
+        .strip()
+        .strip('.')
+    )
+    stem = Path(clean_name).stem.strip().strip('.') if clean_name else ''
+    return f'{stem or "document"}.processed.md'
+
+
+def _source_artifact_object_name(source_filename: str | None, suffix: str) -> str:
+    clean_name = (
+        ''.join(
+            char
+            for char in (source_filename or '').replace('/', '').replace('\\', '')
+            if ord(char) >= 32 and char != '\x7f'
+        )
+        .strip()
+        .strip('.')
+    )
+    stem = Path(clean_name).stem.strip().strip('.') if clean_name else ''
+    return f'{stem or "document"}{suffix}'
+
+
+def _canonical_markdown_object_name(source_filename: str | None) -> str:
+    return _source_artifact_object_name(source_filename, '.canonical.md')
+
+
+def _extraction_manifest_object_name(source_filename: str | None) -> str:
+    return _source_artifact_object_name(source_filename, '.extraction.json')
 
 
 class ScanResponse(BaseModel):
@@ -420,7 +458,6 @@ class DocStatusResponse(BaseModel):
     error_msg: str | None = Field(default=None, description='Error message if processing failed')
     metadata: dict[str, Any] | None = Field(default=None, description='Additional metadata about the document')
     file_path: str | None = Field(default=None, description='Path to the document file')
-    s3_key: str | None = Field(default=None, description='S3 storage key for archived documents')
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -436,7 +473,6 @@ class DocStatusResponse(BaseModel):
                 'error_msg': None,
                 'metadata': {'author': 'John Doe', 'year': 2025},
                 'file_path': 's3://yar/archive/default/doc_123456/research_paper.pdf',
-                's3_key': 'archive/default/doc_123456/research_paper.pdf',
             }
         }
     )
@@ -856,6 +892,7 @@ TEXT_LIKE_MIME_TYPES: frozenset[str] = frozenset(
         'text/yaml',
     }
 )
+
 SUPPORTED_DOCUMENT_EXTENSIONS: tuple[str, ...] = (
     *sorted(VISION_SUPPORTED_EXTENSIONS),
     *sorted(TEXT_LIKE_EXTENSIONS),
@@ -904,6 +941,8 @@ async def _extract_document_with_vision_bytes(
     *,
     filename: str,
     mime_type: str,
+    extraction_cache: dict[str, Any] | None = None,
+    tokenizer: Any | None = None,
 ) -> DocumentExtractionResult:
     vision_binding_host = getattr(global_args, 'vision_binding_host', None) or getattr(
         global_args, 'llm_binding_host', None
@@ -917,16 +956,20 @@ async def _extract_document_with_vision_bytes(
         configured_chunk_size = int(chunk_token_size) if chunk_token_size else None
     except (TypeError, ValueError):
         configured_chunk_size = None
-    result = await extract_document_with_vision(
-        file_content,
-        filename=filename,
-        mime_type=mime_type,
-        model=getattr(global_args, 'vision_model', 'salmon'),
-        base_url=vision_binding_host,
-        api_key=vision_binding_api_key,
-        pdf_password=getattr(global_args, 'pdf_decrypt_password', None),
-        chunk_token_size=configured_chunk_size,
-    )
+    extraction_kwargs: dict[str, Any] = {
+        'filename': filename,
+        'mime_type': mime_type,
+        'model': getattr(global_args, 'vision_model', 'salmon'),
+        'base_url': vision_binding_host,
+        'api_key': vision_binding_api_key,
+        'pdf_password': getattr(global_args, 'pdf_decrypt_password', None),
+        'chunk_token_size': configured_chunk_size,
+    }
+    if extraction_cache is not None:
+        extraction_kwargs['extraction_cache'] = extraction_cache
+    if tokenizer is not None:
+        extraction_kwargs['tokenizer'] = tokenizer
+    result = await extract_document_with_vision(file_content, **extraction_kwargs)
     return DocumentExtractionResult(
         content=result.content,
         pre_chunks=result.pre_chunks,
@@ -983,17 +1026,23 @@ async def _dispatch_document_extraction(
     filename: str,
     mime_type: str,
     error_prefix: str,
+    extraction_cache: dict[str, Any] | None = None,
+    tokenizer: Any | None = None,
 ) -> DocumentExtractionResult:
     normalized_mime = _normalize_dispatch_mime_type(mime_type)
     ext = Path(filename).suffix.lower()
 
     if is_vision_document(filename=filename, mime_type=normalized_mime):
         try:
-            result = await _extract_document_with_vision_bytes(
-                file_content,
-                filename=filename,
-                mime_type=normalized_mime or mime_type,
-            )
+            vision_kwargs: dict[str, Any] = {
+                'filename': filename,
+                'mime_type': normalized_mime or mime_type,
+            }
+            if extraction_cache is not None:
+                vision_kwargs['extraction_cache'] = extraction_cache
+            if tokenizer is not None:
+                vision_kwargs['tokenizer'] = tokenizer
+            result = await _extract_document_with_vision_bytes(file_content, **vision_kwargs)
         except Exception as exc:
             raise DocumentExtractionError(
                 error_description=f'{error_prefix}{_extension_label(filename, normalized_mime)} processing error',
@@ -1055,7 +1104,6 @@ async def pipeline_enqueue_file(
     metadata: dict[str, Any] | None = None,
     chunk_token_size: int | None = None,
     chunk_overlap_token_size: int | None = None,
-    chunking_preset: str | None = None,
 ) -> tuple[bool, str]:
     """Add a file to the queue after shared document extraction dispatch.
 
@@ -1066,10 +1114,9 @@ async def pipeline_enqueue_file(
         rag: YAR instance
         file_path: Path to the saved file
         track_id: Optional tracking ID, if not provided will be generated
-        metadata: Optional metadata dict (e.g., chunking_preset)
+        metadata: Optional metadata dict
         chunk_token_size: Max tokens per chunk (uses rag.chunk_token_size if None)
         chunk_overlap_token_size: Overlap tokens (uses rag.chunk_overlap_token_size if None)
-        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
 
     Returns:
         tuple: (success: bool, track_id: str)
@@ -1079,9 +1126,7 @@ async def pipeline_enqueue_file(
 
     effective_chunk_size = chunk_token_size or rag.chunk_token_size
     effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
-    effective_preset = chunking_preset or metadata.get('chunking_preset') if metadata else None
-    if effective_preset is None:
-        effective_preset = 'semantic'
+    _ = effective_overlap
 
     try:
         content = ''
@@ -1143,6 +1188,7 @@ async def pipeline_enqueue_file(
                 filename=file_path.name,
                 mime_type=mimetypes.guess_type(file_path.name)[0] or 'application/octet-stream',
                 error_prefix='[File Extraction]',
+                tokenizer=getattr(rag, 'tokenizer', None),
             )
             content = extracted.content
             pre_chunks = extracted.pre_chunks
@@ -1174,9 +1220,7 @@ async def pipeline_enqueue_file(
 
             try:
                 enqueue_metadata = metadata.copy() if metadata else {}
-                enqueue_metadata['chunking_preset'] = effective_preset
                 enqueue_metadata['chunk_token_size'] = effective_chunk_size
-                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
 
                 if pre_chunks:
                     enqueue_metadata['pre_chunks'] = pre_chunks
@@ -1265,15 +1309,15 @@ async def pipeline_enqueue_file_with_s3(
     metadata: dict[str, Any] | None = None,
     chunk_token_size: int | None = None,
     chunk_overlap_token_size: int | None = None,
-    chunking_preset: str | None = None,
     s3_client: S3Client | None = None,
     s3_doc_id: str | None = None,
+    original_s3_key: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Enqueue file for processing and upload extracted text to S3.
 
     This extends pipeline_enqueue_file to upload the extracted/OCR'd text
     to S3 before enqueueing. The processed text is stored at:
-    {workspace}/{doc_id}/processed.md
+    {workspace}/{doc_id}/<original-stem>.processed.md
 
     Args:
         rag: YAR instance
@@ -1282,9 +1326,9 @@ async def pipeline_enqueue_file_with_s3(
         metadata: Optional metadata dict
         chunk_token_size: Max tokens per chunk
         chunk_overlap_token_size: Overlap tokens
-        chunking_preset: Chunking preset
         s3_client: S3Client instance for uploading processed text
         s3_doc_id: Document ID for S3 path (used for S3 folder naming)
+        original_s3_key: S3 key of the original uploaded file (for chunk metadata fallback)
 
     Returns:
         Tuple of (processed_s3_key, content_doc_id):
@@ -1296,12 +1340,11 @@ async def pipeline_enqueue_file_with_s3(
 
     effective_chunk_size = chunk_token_size or rag.chunk_token_size
     effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
-    effective_preset = chunking_preset or (metadata.get('chunking_preset') if metadata else None)
-    if effective_preset is None:
-        effective_preset = 'semantic'
+    _ = effective_overlap
 
     processed_s3_key: str | None = None
     content_doc_id: str | None = None  # Actual doc ID based on extracted content
+    extraction_artifact_keys: dict[str, str] = {}
 
     try:
         content = ''
@@ -1356,6 +1399,15 @@ async def pipeline_enqueue_file_with_s3(
             logger.error(f'[File Extraction]Error reading file {file_path.name}: {e!s}')
             return (None, None)
 
+        extraction_cache = None
+        if s3_client and s3_doc_id:
+            extraction_cache = await _load_extraction_manifest_from_s3(
+                s3_client,
+                workspace=rag.workspace,
+                doc_id=s3_doc_id,
+                source_filename=file_path.name,
+            )
+
         # Process based on file type
         try:
             extracted = await _dispatch_document_extraction(
@@ -1363,9 +1415,12 @@ async def pipeline_enqueue_file_with_s3(
                 filename=file_path.name,
                 mime_type=mimetypes.guess_type(file_path.name)[0] or 'application/octet-stream',
                 error_prefix='[File Extraction]',
+                extraction_cache=extraction_cache,
+                tokenizer=getattr(rag, 'tokenizer', None),
             )
             content = extracted.content
             pre_chunks = extracted.pre_chunks
+            extraction_metadata = extracted.metadata or {}
         except DocumentExtractionError as e:
             await _enqueue_document_extraction_error(
                 rag,
@@ -1379,12 +1434,15 @@ async def pipeline_enqueue_file_with_s3(
         # Upload processed text to S3 if extraction succeeded
         if content and s3_client and s3_doc_id:
             try:
-                processed_s3_key = await _upload_processed_text_to_s3(
+                extraction_artifact_keys = await _upload_extraction_artifacts_to_s3(
                     s3_client=s3_client,
                     workspace=rag.workspace,
                     doc_id=s3_doc_id,
                     extracted_text=content,
+                    source_filename=file_path.name,
+                    metadata=extraction_metadata,
                 )
+                processed_s3_key = extraction_artifact_keys.get('processed_s3_key')
             except Exception as e:
                 logger.error(f'Failed to upload processed text to S3: {e}')
                 # Continue processing even if S3 upload fails
@@ -1407,10 +1465,14 @@ async def pipeline_enqueue_file_with_s3(
 
             try:
                 enqueue_metadata = metadata.copy() if metadata else {}
-                enqueue_metadata['chunking_preset'] = effective_preset
                 enqueue_metadata['chunk_token_size'] = effective_chunk_size
-                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
 
+                if processed_s3_key or original_s3_key:
+                    enqueue_metadata['s3_key'] = processed_s3_key or original_s3_key
+
+                for artifact_key_name in ('canonical_s3_key', 'extraction_manifest_s3_key'):
+                    if artifact_key_name in extraction_artifact_keys:
+                        enqueue_metadata[artifact_key_name] = extraction_artifact_keys[artifact_key_name]
                 if pre_chunks:
                     enqueue_metadata['pre_chunks'] = pre_chunks
 
@@ -1507,7 +1569,6 @@ async def pipeline_process_bytes_with_s3(
     metadata: dict[str, Any] | None = None,
     chunk_token_size: int | None = None,
     chunk_overlap_token_size: int | None = None,
-    chunking_preset: str | None = None,
 ) -> str | None:
     """Process document bytes directly without local file storage.
 
@@ -1529,7 +1590,6 @@ async def pipeline_process_bytes_with_s3(
         metadata: Optional metadata dict
         chunk_token_size: Max tokens per chunk
         chunk_overlap_token_size: Overlap tokens
-        chunking_preset: Chunking preset
 
     Returns:
         S3 key of the uploaded processed text, or None if processing failed
@@ -1539,12 +1599,11 @@ async def pipeline_process_bytes_with_s3(
 
     effective_chunk_size = chunk_token_size or rag.chunk_token_size
     effective_overlap = chunk_overlap_token_size or rag.chunk_overlap_token_size
-    effective_preset = chunking_preset or (metadata.get('chunking_preset') if metadata else None)
-    if effective_preset is None:
-        effective_preset = 'semantic'
+    _ = effective_overlap
 
     file_size = len(file_content)
     processed_s3_key: str | None = None
+    extraction_artifact_keys: dict[str, str] = {}
 
     try:
         content = ''
@@ -1552,14 +1611,27 @@ async def pipeline_process_bytes_with_s3(
 
         tables: list[Any] | None = None
 
+        extraction_cache = await _load_extraction_manifest_from_s3(
+            s3_client,
+            workspace=rag.workspace,
+            doc_id=s3_doc_id,
+            source_filename=filename,
+        )
+
         # Process based on file type
         try:
             extracted = await _dispatch_document_extraction(
-                file_content=file_content, filename=filename, mime_type=mime_type, error_prefix='[Bytes Extraction]'
+                file_content=file_content,
+                filename=filename,
+                mime_type=mime_type,
+                error_prefix='[Bytes Extraction]',
+                extraction_cache=extraction_cache,
+                tokenizer=getattr(rag, 'tokenizer', None),
             )
             content = extracted.content
             pre_chunks = extracted.pre_chunks
             tables = extracted.tables
+            extraction_metadata = extracted.metadata or {}
         except DocumentExtractionError as e:
             await _enqueue_document_extraction_error(
                 rag,
@@ -1586,13 +1658,16 @@ async def pipeline_process_bytes_with_s3(
                 return None
 
             try:
-                processed_s3_key = await _upload_processed_text_to_s3(
+                extraction_artifact_keys = await _upload_extraction_artifacts_to_s3(
                     s3_client=s3_client,
                     workspace=rag.workspace,
                     doc_id=s3_doc_id,
                     extracted_text=content,
                     tables=tables,
+                    source_filename=filename,
+                    metadata=extraction_metadata,
                 )
+                processed_s3_key = extraction_artifact_keys.get('processed_s3_key')
             except Exception as e:
                 logger.error(f'Failed to upload processed Markdown to S3: {e}')
                 # Continue processing even if S3 upload fails
@@ -1600,12 +1675,14 @@ async def pipeline_process_bytes_with_s3(
             # Insert into the RAG queue
             try:
                 enqueue_metadata = metadata.copy() if metadata else {}
-                enqueue_metadata['chunking_preset'] = effective_preset
                 enqueue_metadata['chunk_token_size'] = effective_chunk_size
-                enqueue_metadata['chunk_overlap_token_size'] = effective_overlap
-                # Pass original file's S3 key through metadata so chunks get it for citations
-                enqueue_metadata['s3_key'] = s3_original_key
+                # Pass the processed Markdown key through metadata so newly created chunks cite it.
+                # If processed upload failed, fall back to the original object's key.
+                enqueue_metadata['s3_key'] = processed_s3_key or s3_original_key
 
+                for artifact_key_name in ('canonical_s3_key', 'extraction_manifest_s3_key'):
+                    if artifact_key_name in extraction_artifact_keys:
+                        enqueue_metadata[artifact_key_name] = extraction_artifact_keys[artifact_key_name]
                 if pre_chunks:
                     enqueue_metadata['pre_chunks'] = pre_chunks
 
@@ -1658,6 +1735,13 @@ async def pipeline_process_bytes_with_s3(
             logger.error(f'No content extracted from bytes: {filename}')
             return None
 
+    except asyncio.CancelledError:
+        logger.info(
+            'Processing bytes %s cancelled before completion; original S3 object remains at %s',
+            filename,
+            s3_original_key,
+        )
+        return None
     except Exception as e:
         error_files = [
             {
@@ -1680,7 +1764,6 @@ async def pipeline_index_file(
     metadata: dict[str, Any] | None = None,
     chunk_token_size: int | None = None,
     chunk_overlap_token_size: int | None = None,
-    chunking_preset: str | None = None,
 ):
     """Index a file with track_id and optional chunking settings.
 
@@ -1688,10 +1771,9 @@ async def pipeline_index_file(
         rag: YAR instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
-        metadata: Optional metadata dict (e.g., chunking_preset)
+        metadata: Optional metadata dict
         chunk_token_size: Max tokens per chunk (uses rag default if None)
         chunk_overlap_token_size: Overlap tokens (uses rag default if None)
-        chunking_preset: Chunking preset - 'semantic', 'recursive', or None
     """
     try:
         success, _returned_track_id = await pipeline_enqueue_file(
@@ -1701,7 +1783,6 @@ async def pipeline_index_file(
             metadata,
             chunk_token_size,
             chunk_overlap_token_size,
-            chunking_preset,
         )
         if success:
             await rag.apipeline_process_enqueue_documents()
@@ -1786,7 +1867,7 @@ async def _upload_to_s3(
         workspace: Current workspace name
         doc_id: Document ID (computed from content hash)
         content: File content as bytes
-        filename: Filename for S3 storage (e.g., 'original.pdf')
+        filename: Filename for S3 storage (e.g., sanitized uploaded filename)
         content_type: MIME type of the file
 
     Returns:
@@ -1810,6 +1891,7 @@ async def _upload_processed_text_to_s3(
     workspace: str,
     doc_id: str,
     extracted_text: str,
+    source_filename: str,
     tables: list[Any] | None = None,
 ) -> str:
     """Upload extracted/OCR'd text to S3 as Markdown.
@@ -1822,6 +1904,7 @@ async def _upload_processed_text_to_s3(
         workspace: Current workspace name
         doc_id: Document ID (same as original file)
         extracted_text: The extracted text content from document processing
+        source_filename: Original uploaded filename used to derive the processed Markdown object name
         tables: Optional list of extracted tables with a `.markdown` property
 
     Returns:
@@ -1849,7 +1932,7 @@ async def _upload_processed_text_to_s3(
 
     markdown_content = ''.join(markdown_parts)
 
-    s3_key = f'{workspace}/{doc_id}/processed.md'
+    s3_key = f'{workspace}/{doc_id}/{_source_artifact_object_name(source_filename, ".processed.md")}'
     await s3_client.upload_object(
         key=s3_key,
         data=markdown_content.encode('utf-8'),
@@ -1859,17 +1942,159 @@ async def _upload_processed_text_to_s3(
     return s3_key
 
 
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _delete_s3_artifacts_best_effort(s3_client: S3Client, keys: list[str]) -> None:
+    delete_object = getattr(s3_client, 'delete_object', None)
+    if not callable(delete_object):
+        return
+    for key in keys:
+        try:
+            await _maybe_await(delete_object(key))
+        except Exception as exc:
+            logger.warning('Failed to clean up partial S3 extraction artifact %s: %s', key, exc)
+
+
+def _manifest_json_bytes(manifest: dict[str, Any]) -> bytes:
+    return (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode('utf-8')
+
+
+async def _upload_markdown_artifact_to_s3(
+    s3_client: S3Client,
+    *,
+    workspace: str,
+    doc_id: str,
+    source_filename: str,
+    suffix: str,
+    content: str,
+) -> str:
+    s3_key = f'{workspace}/{doc_id}/{_source_artifact_object_name(source_filename, suffix)}'
+    await s3_client.upload_object(
+        key=s3_key,
+        data=content.encode('utf-8'),
+        content_type='text/markdown; charset=utf-8',
+    )
+    logger.info('Uploaded Markdown extraction artifact to S3: %s', s3_key)
+    return s3_key
+
+
+async def _upload_json_artifact_to_s3(
+    s3_client: S3Client,
+    *,
+    workspace: str,
+    doc_id: str,
+    source_filename: str,
+    suffix: str,
+    content: dict[str, Any],
+) -> str:
+    s3_key = f'{workspace}/{doc_id}/{_source_artifact_object_name(source_filename, suffix)}'
+    await s3_client.upload_object(
+        key=s3_key,
+        data=_manifest_json_bytes(content),
+        content_type='application/json; charset=utf-8',
+    )
+    logger.info('Uploaded JSON extraction artifact to S3: %s', s3_key)
+    return s3_key
+
+
+async def _upload_extraction_artifacts_to_s3(
+    s3_client: S3Client,
+    *,
+    workspace: str,
+    doc_id: str,
+    extracted_text: str,
+    source_filename: str,
+    metadata: dict[str, Any] | None = None,
+    tables: list[Any] | None = None,
+) -> dict[str, str]:
+    uploaded_keys: list[str] = []
+    artifact_keys: dict[str, str] = {}
+    try:
+        processed_s3_key = await _upload_processed_text_to_s3(
+            s3_client=s3_client,
+            workspace=workspace,
+            doc_id=doc_id,
+            extracted_text=extracted_text,
+            source_filename=source_filename,
+            tables=tables,
+        )
+        if processed_s3_key:
+            uploaded_keys.append(processed_s3_key)
+            artifact_keys['processed_s3_key'] = processed_s3_key
+
+        canonical_content = (metadata or {}).get('canonical_content')
+        if isinstance(canonical_content, str) and canonical_content.strip():
+            canonical_s3_key = await _upload_markdown_artifact_to_s3(
+                s3_client,
+                workspace=workspace,
+                doc_id=doc_id,
+                source_filename=source_filename,
+                suffix='.canonical.md',
+                content=canonical_content,
+            )
+            uploaded_keys.append(canonical_s3_key)
+            artifact_keys['canonical_s3_key'] = canonical_s3_key
+
+        extraction_manifest = (metadata or {}).get('extraction_manifest')
+        if isinstance(extraction_manifest, dict):
+            manifest_s3_key = await _upload_json_artifact_to_s3(
+                s3_client,
+                workspace=workspace,
+                doc_id=doc_id,
+                source_filename=source_filename,
+                suffix='.extraction.json',
+                content=extraction_manifest,
+            )
+            uploaded_keys.append(manifest_s3_key)
+            artifact_keys['extraction_manifest_s3_key'] = manifest_s3_key
+    except Exception:
+        await _delete_s3_artifacts_best_effort(s3_client, uploaded_keys)
+        raise
+    return artifact_keys
+
+
+async def _load_extraction_manifest_from_s3(
+    s3_client: S3Client,
+    *,
+    workspace: str,
+    doc_id: str,
+    source_filename: str,
+) -> dict[str, Any] | None:
+    manifest_key = f'{workspace}/{doc_id}/{_extraction_manifest_object_name(source_filename)}'
+    object_exists = getattr(s3_client, 'object_exists', None)
+    get_object = getattr(s3_client, 'get_object', None)
+    if not callable(object_exists) or not callable(get_object):
+        return None
+    try:
+        exists = await _maybe_await(object_exists(manifest_key))
+        if exists is not True:
+            return None
+        object_content, _metadata = await _maybe_await(get_object(manifest_key))
+        raw_manifest = object_content if isinstance(object_content, str) else bytes(object_content).decode('utf-8')
+        manifest = json.loads(raw_manifest)
+    except Exception as exc:
+        logger.debug('Could not load extraction manifest cache %s: %s', manifest_key, exc)
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
 async def _update_db_with_s3_keys(
     rag: YAR,
     doc_id: str,
     original_s3_key: str,
     processed_s3_key: str | None = None,
 ):
-    """Update database with S3 keys for original and processed files.
+    """Update chunk/reference S3 keys after original and processed uploads.
 
-    Called after document processing completes. Updates:
-    - doc_status with original file S3 key
-    - text_chunks with processed text S3 key while preserving original file_path
+    Document-status table S3 keys are intentionally not persisted here; they are
+    no longer a UI/API contract for the documents table. Chunk and reference S3
+    keys are still maintained so previews/downloads can resolve the extracted
+    Markdown used for citations. This remains best-effort cleanup after document
+    processing succeeds.
 
     Args:
         rag: YAR instance for database updates
@@ -1877,13 +2102,11 @@ async def _update_db_with_s3_keys(
         original_s3_key: S3 key for the original uploaded file
         processed_s3_key: S3 key for the processed text (optional)
     """
-    logger.debug(f'_update_db_with_s3_keys: doc_id={doc_id}, s3_key={original_s3_key}')
+    logger.debug(
+        f'_update_db_with_s3_keys: doc_id={doc_id}, original_s3_key={original_s3_key}, '
+        f'processed_s3_key={processed_s3_key}'
+    )
     try:
-        # Update doc_status with original file S3 key
-        if hasattr(rag.doc_status, 'update_s3_key'):
-            await rag.doc_status.update_s3_key(doc_id, original_s3_key)  # type: ignore[misc]
-            logger.info(f'Updated doc_status with original s3_key: {original_s3_key}')
-
         # Update text_chunks with processed text S3 key
         if processed_s3_key and hasattr(rag.text_chunks, 'update_s3_key_by_doc_id'):
             updated_count = await rag.text_chunks.update_s3_key_by_doc_id(  # type: ignore[misc]
@@ -1938,6 +2161,7 @@ async def pipeline_index_file_with_s3(
         metadata=metadata,
         s3_client=s3_client,
         s3_doc_id=s3_doc_id,
+        original_s3_key=s3_original_key,
     )
 
     # Process the enqueued documents
@@ -2250,10 +2474,6 @@ def create_document_routes(
     async def upload_to_input_dir(
         background_tasks: BackgroundTasks,
         file: Annotated[UploadFile, File(...)],
-        chunking_preset: Annotated[
-            str | None,
-            Form(description="Chunking preset: 'semantic' (default), 'recursive', or empty for basic"),
-        ] = None,
     ):
         """
         Upload a file to the input directory and index it.
@@ -2265,9 +2485,6 @@ def create_document_routes(
         Args:
             background_tasks: FastAPI BackgroundTasks for async processing
             file (UploadFile): The file to be uploaded. It must have an allowed extension.
-            chunking_preset: Chunking strategy - 'semantic' (preserves meaning), 'recursive'
-                (splits by paragraphs/sentences/words), or None for basic chunking.
-                If not specified, uses the server default (CHUNKING_PRESET env var).
 
         Returns:
             InsertResponse: A response object containing the upload status and a message.
@@ -2310,9 +2527,8 @@ def create_document_routes(
             # Generate stable doc_id from content hash (S3 is mandatory)
             s3_doc_id = compute_mdhash_id(file_content, prefix='doc_')
 
-            # Determine original file extension and content type
-            original_ext = Path(safe_filename).suffix
-            original_s3_filename = f'original{original_ext}'
+            # Use the sanitized uploaded filename as the original S3 object name.
+            original_s3_filename = safe_filename
             content_type = file.content_type
             # Guess MIME type from filename if missing or generic (curl sends application/octet-stream)
             if not content_type or content_type == 'application/octet-stream':
@@ -2331,10 +2547,7 @@ def create_document_routes(
 
             track_id = generate_track_id('upload')
 
-            # Build metadata with chunking preset
             metadata: dict[str, Any] = {}
-            if chunking_preset:
-                metadata['chunking_preset'] = chunking_preset
 
             # Process bytes directly without saving to local filesystem
             # This extracts text, uploads processed text to S3, and enqueues
@@ -3155,7 +3368,6 @@ def create_document_routes(
                         error_msg=doc_status.error_msg,
                         metadata=doc_status.metadata,
                         file_path=doc_status.file_path,
-                        s3_key=doc_status.s3_key,
                     )
                 )
 
@@ -3235,7 +3447,6 @@ def create_document_routes(
                         error_msg=doc.error_msg,
                         metadata=doc.metadata,
                         file_path=doc.file_path,
-                        s3_key=doc.s3_key,
                     )
                 )
 
