@@ -54,6 +54,8 @@ __all__ = [
     'setup_logger',
     'sync_wrapper',
     'validate_and_fix_citations',
+    'validate_and_strip_unsupported_acronyms',
+    'validate_and_strip_unsupported_quotes',
 ]
 
 from yar.constants import (
@@ -4623,3 +4625,193 @@ def validate_and_fix_citations(
     if was_modified:
         return modified_text + references_section, True
     return response_text, False
+
+
+_QUOTED_STRING_RE = re.compile(
+    # Match double-quoted strings (straight or curly), at least 12 chars of
+    # content. Single quotes intentionally excluded — too many false positives
+    # from contractions and possessives.
+    r'["\u201c\u201d]([^"\u201c\u201d\n]{12,}?)["\u201c\u201d]'
+)
+
+_WORD_RE = re.compile(r'[a-z0-9]+')
+
+
+def _normalize_for_quote_match(text: str) -> str:
+    """Lowercase, keep only alphanumerics, collapse to single-spaced word tokens.
+
+    Eliminates whitespace, punctuation, and casing differences so a quote that
+    paraphrases capitalization or hyphenation still matches its source chunk.
+    """
+    if not text:
+        return ''
+    return ' '.join(_WORD_RE.findall(text.lower()))
+
+
+def validate_and_strip_unsupported_quotes(
+    response_text: str,
+    context: str,
+    *,
+    min_quote_chars: int = 12,
+) -> tuple[str, list[str]]:
+    """Strip quotation marks from any quoted string in ``response_text`` that
+    is not present in ``context``.
+
+    The generator sometimes fabricates verbatim quotes that sound plausible
+    for the document type — see comparison failures where the model invented
+    a "Post-execution control. Document the change vs CM only after real
+    implementation..." line that did not appear in any retrieved chunk. This
+    function catches those: it identifies double-quoted strings (straight or
+    curly), normalizes both quote and context (lowercase, alphanumeric-only,
+    single-spaced), and checks substring containment. If absent, the
+    quotation marks are stripped so the text reads as paraphrase rather than
+    a false verbatim claim.
+
+    Args:
+        response_text: The LLM response, possibly containing fabricated quotes.
+        context: The retrieved context string the LLM was given. Quoted
+            content must appear (modulo whitespace/punctuation/case) somewhere
+            in here to count as supported.
+        min_quote_chars: Minimum quote length (chars of inner content) before
+            a quote is checked. Short quotes are common short labels and
+            rarely indicate fabrication.
+
+    Returns:
+        Tuple of (possibly_modified_text, stripped_quotes) where
+        stripped_quotes lists the unsupported quote bodies that were
+        unquoted. ``stripped_quotes`` is empty when the response was not
+        modified.
+    """
+    if not response_text or not context:
+        return response_text, []
+
+    normalized_context = _normalize_for_quote_match(context)
+    if not normalized_context:
+        return response_text, []
+
+    stripped: list[str] = []
+    modified = response_text
+
+    # Iterate in reverse over matches so span indices remain valid as we
+    # rewrite. Use finditer once and apply edits as (start, end, replacement)
+    # tuples processed back-to-front.
+    edits: list[tuple[int, int, str]] = []
+    for match in _QUOTED_STRING_RE.finditer(response_text):
+        inner = match.group(1).strip()
+        if len(inner) < min_quote_chars:
+            continue
+        normalized_quote = _normalize_for_quote_match(inner)
+        if not normalized_quote:
+            continue
+        if normalized_quote in normalized_context:
+            continue
+        # Quote body not found in context — strip the surrounding quote marks.
+        edits.append((match.start(), match.end(), inner))
+        stripped.append(inner)
+
+    if not edits:
+        return response_text, []
+
+    # Apply edits in reverse order so earlier spans stay aligned.
+    for start, end, replacement in reversed(edits):
+        modified = modified[:start] + replacement + modified[end:]
+
+    logger.info(
+        '[quote_validation] Stripped %d unsupported quote%s from response',
+        len(stripped),
+        '' if len(stripped) == 1 else 's',
+    )
+    for q in stripped:
+        logger.debug('[quote_validation] Unsupported quote: %r', q[:120])
+
+    return modified, stripped
+
+
+_ACRONYM_RE = re.compile(r'\b[A-Z]{2,5}\b')
+
+
+def validate_and_strip_unsupported_acronyms(
+    response_text: str,
+    context: str,
+    *,
+    min_acronym_chars: int = 2,
+    max_acronym_chars: int = 5,
+) -> tuple[str, list[str]]:
+    """Remove acronyms from ``response_text`` that do not appear in ``context``.
+
+    Targets the "invented acronym" failure mode (e.g., the generator coining
+    "NBO" from "Insulin Campus Frankfurt" or similar). An acronym is any
+    standalone uppercase token of 2-5 letters bordered by word boundaries.
+    Detection is case-sensitive on the acronym itself (acronyms are
+    conventionally uppercase), but the context is checked both case-sensitive
+    and case-insensitive so legitimately-cased mentions count.
+
+    Stripping policy: when an unsupported acronym is found, the acronym token
+    plus any immediately-adjacent parenthetical wrapper is removed and
+    surrounding whitespace is collapsed. Sentences are left grammatical
+    because parenthetical acronym mentions are the dominant generator
+    pattern ("Insulin Campus Frankfurt (NBO)" -> "Insulin Campus Frankfurt").
+    Non-parenthetical bare acronyms are stripped to a single space; the
+    surrounding sentence may read awkwardly but no false claim survives.
+
+    The function is intentionally narrow: only ALL-CAPS tokens 2-5 chars
+    long. Proper nouns and mixed-case names are not flagged — those carry
+    too high a false-positive rate (e.g. compound names where part of the
+    compound is present in context).
+
+    Returns:
+        Tuple of (possibly_modified_text, stripped_acronyms). The list
+        contains each distinct unsupported acronym (deduplicated).
+    """
+    if not response_text or not context:
+        return response_text, []
+
+    context_lower = context.lower()
+
+    seen: set[str] = set()
+    unsupported: list[str] = []
+    for match in _ACRONYM_RE.finditer(response_text):
+        token = match.group(0)
+        if not (min_acronym_chars <= len(token) <= max_acronym_chars):
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        # Case-sensitive check first (preserves the strict acronym match);
+        # fall back to case-insensitive so "Fda" or "fda" in context still
+        # supports "FDA" in the response.
+        if token in context or token.lower() in context_lower:
+            continue
+        unsupported.append(token)
+
+    if not unsupported:
+        return response_text, []
+
+    modified = response_text
+    for token in unsupported:
+        # 1. Strip parenthetical mentions like " (NBO)" or "(NBO)" — both
+        #    forms appear in generator output.
+        modified = re.sub(
+            r'\s*\(\s*' + re.escape(token) + r'\s*\)',
+            '',
+            modified,
+        )
+        # 2. Strip bare standalone occurrences. Replace with a single space
+        #    and collapse any runs of whitespace afterwards.
+        modified = re.sub(
+            r'\b' + re.escape(token) + r'\b',
+            '',
+            modified,
+        )
+    # Collapse double-spaces and ensure single spaces before punctuation.
+    modified = re.sub(r'[ \t]{2,}', ' ', modified)
+    modified = re.sub(r'\s+([,.;:!?\)])', r'\1', modified)
+
+    logger.info(
+        '[acronym_validation] Stripped %d unsupported acronym%s from response: %s',
+        len(unsupported),
+        '' if len(unsupported) == 1 else 's',
+        ', '.join(unsupported),
+    )
+
+    return modified, unsupported

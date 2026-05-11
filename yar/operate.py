@@ -97,6 +97,8 @@ from yar.utils import (
     update_chunk_cache_list,
     use_llm_func_with_cache,
     validate_and_fix_citations,
+    validate_and_strip_unsupported_acronyms,
+    validate_and_strip_unsupported_quotes,
 )
 
 # use the .env that is inside the current folder
@@ -5216,6 +5218,47 @@ async def kg_query(
             if was_fixed:
                 logger.info(f'[kg_query] Auto-corrected citations for: {query[:50]}...')
 
+        # Build the validation context used by the post-pass quote and
+        # acronym validators. The chunk text alone is not enough — document
+        # titles like "Fitusiran PMG Green Light Presentation" live in the
+        # reference list's file_path, and acronyms the user mentions in
+        # their query are by definition intentional. Combining all three
+        # (rendered context + query + reference file_paths) gives the
+        # validators the same surface the LLM was implicitly working from.
+        validation_ctx = '\n'.join(
+            [
+                context_result.context or '',
+                query or '',
+                *(str(ref.get('file_path', '')) for ref in available_refs),
+            ]
+        )
+
+        # Strip fabricated verbatim quotes. The generator occasionally writes
+        # quoted strings ("...") that look like document quotations but do not
+        # appear in the validation context. Dropping the quote marks turns
+        # the claim into paraphrase rather than a false verbatim assertion.
+        response, stripped_quotes = validate_and_strip_unsupported_quotes(response, validation_ctx)
+        if stripped_quotes:
+            logger.info(
+                '[kg_query] Stripped %d unsupported quote(s) for: %s...',
+                len(stripped_quotes),
+                query[:50],
+            )
+
+        # Strip fabricated acronyms. The generator occasionally coins
+        # acronyms not present in any retrieved chunk, title, or query
+        # (e.g. inventing "NBO" while the context mentions "Insulin Campus
+        # Frankfurt"). Removes parenthetical mentions cleanly and bare
+        # occurrences with whitespace tidy-up.
+        response, stripped_acronyms = validate_and_strip_unsupported_acronyms(response, validation_ctx)
+        if stripped_acronyms:
+            logger.info(
+                '[kg_query] Stripped %d unsupported acronym(s) %s for: %s...',
+                len(stripped_acronyms),
+                stripped_acronyms,
+                query[:50],
+            )
+
         response = _normalize_query_shaped_response(
             query=query,
             response=response,
@@ -8491,6 +8534,32 @@ async def naive_query(
             response, was_fixed = validate_and_fix_citations(response, available_refs)
             if was_fixed:
                 logger.info(f'[naive_query] Auto-corrected citations for: {query[:50]}...')
+
+        # Build the enriched validation context — see kg_query for rationale.
+        validation_ctx = '\n'.join(
+            [
+                context_content or '',
+                query or '',
+                *(str(ref.get('file_path', '')) for ref in available_refs),
+            ]
+        )
+
+        response, stripped_quotes = validate_and_strip_unsupported_quotes(response, validation_ctx)
+        if stripped_quotes:
+            logger.info(
+                '[naive_query] Stripped %d unsupported quote(s) for: %s...',
+                len(stripped_quotes),
+                query[:50],
+            )
+
+        response, stripped_acronyms = validate_and_strip_unsupported_acronyms(response, validation_ctx)
+        if stripped_acronyms:
+            logger.info(
+                '[naive_query] Stripped %d unsupported acronym(s) %s for: %s...',
+                len(stripped_acronyms),
+                stripped_acronyms,
+                query[:50],
+            )
 
         response = _normalize_query_shaped_response(
             query=query,

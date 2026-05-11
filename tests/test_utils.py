@@ -1248,3 +1248,321 @@ def test_process_chunks_unified_disables_mmr_when_lambda_one(monkeypatch) -> Non
         'duplicate-b',
         'distinct',
     ]
+
+
+class TestValidateAndStripUnsupportedQuotes:
+    """Tests for validate_and_strip_unsupported_quotes.
+
+    Defends the post-LLM safety net that catches fabricated quoted strings
+    in generator responses. The function is a no-op on clean answers and only
+    intervenes when a double-quoted span cannot be found verbatim
+    (case/whitespace/punctuation-insensitive) in the retrieved context.
+    """
+
+    @staticmethod
+    def _call(response: str, context: str, **kwargs):
+        return utils_module.validate_and_strip_unsupported_quotes(response, context, **kwargs)
+
+    def test_noop_when_no_quotes(self):
+        response = 'The compound was tested at site A in 2023. The protocol was revised.'
+        context = 'Some retrieved context here.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_noop_when_quote_present_in_context(self):
+        response = 'The document states "the assay was qualified for release".'
+        context = 'Section 32S43: the assay was qualified for release in May 2024.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_strips_fabricated_quote(self):
+        response = (
+            'The Fitusiran document states: '
+            '"Post-execution control. Document the change vs CM only after real '
+            'implementation (describe the minor deviations if any)." '
+            'This indicates documentation occurs after the fact.'
+        )
+        context = (
+            'The Fitusiran presentation discusses PPQ batch 50mg PFS, mock audits, '
+            'and joint quality reviews with CMO partners.'
+        )
+        modified, stripped = self._call(response, context)
+        assert '"' not in modified.replace('Fitusiran', '_')  # no quote chars left in answer body
+        assert len(stripped) == 1
+        assert 'Post-execution control' in stripped[0]
+        # The paraphrased content should still be present (we strip marks, not text).
+        assert 'Post-execution control' in modified
+
+    def test_strips_only_unsupported_when_mixed(self):
+        response = (
+            'Section A says "the assay was qualified for release". '
+            'Section B says "this fabricated phrase was never written".'
+        )
+        context = 'The assay was qualified for release in 2024.'
+        modified, stripped = self._call(response, context)
+        assert len(stripped) == 1
+        assert 'fabricated phrase' in stripped[0]
+        # The supported quote keeps its quotation marks.
+        assert '"the assay was qualified for release"' in modified
+        # The fabricated quote loses them.
+        assert '"this fabricated phrase was never written"' not in modified
+        assert 'this fabricated phrase was never written' in modified
+
+    def test_normalization_handles_case_and_whitespace(self):
+        response = 'The note reads "Quality   Review accepted   by GQA".'
+        context = 'CAPA outcome: quality review accepted by gqa on 2024-03-15.'
+        modified, stripped = self._call(response, context)
+        assert modified == response  # quote was supported, just differently formatted
+        assert stripped == []
+
+    def test_normalization_handles_punctuation(self):
+        response = 'It states "FDA requested HPV L1 testing for every DS lot".'
+        context = 'Per IR#1, the FDA requested HPV L1 testing for every DS lot.'
+        modified, stripped = self._call(response, context)
+        # Normalization drops all punctuation; same word order = verbatim match.
+        assert modified == response
+        assert stripped == []
+
+    def test_word_order_change_is_fabrication(self):
+        # Same words as context, but reordered. A "quote" with rearranged
+        # word order is not verbatim — the model is claiming exactness that
+        # is not there. The validator correctly strips it.
+        response = 'It states "FDA per IR#1 requested HPV L1 testing".'
+        context = 'Per IR#1, the FDA requested HPV L1 testing for every DS lot.'
+        modified, stripped = self._call(response, context)
+        assert len(stripped) == 1
+        assert '"' not in modified.split('It states ')[1].split('.')[0]
+
+    def test_curly_quotes_supported(self):
+        # Some LLMs emit smart quotes \u201c \u201d instead of straight ".
+        response = 'The doc reads \u201cthis is a fabricated curly-quoted line that should be stripped\u201d.'
+        context = 'Completely unrelated content here.'
+        modified, stripped = self._call(response, context)
+        assert len(stripped) == 1
+        assert '\u201c' not in modified
+        assert '\u201d' not in modified
+
+    def test_short_quotes_ignored(self):
+        # Below min_quote_chars (12) — should not flag, even if absent from context.
+        response = 'The team called it "weird" but moved on.'
+        context = 'Nothing related here.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_empty_inputs_safe(self):
+        assert self._call('', 'ctx') == ('', [])
+        assert self._call('resp', '') == ('resp', [])
+        assert self._call('', '') == ('', [])
+
+    def test_single_quotes_not_flagged(self):
+        # Single quotes are intentionally excluded to avoid contraction false positives.
+        response = "The team's plan didn't include 'this fabricated phrase that is long enough'."
+        context = 'Completely unrelated content here.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_idempotent(self):
+        response = 'Fabricated: "this string is not in the context at all anywhere".'
+        context = 'Completely unrelated.'
+        once, stripped_once = self._call(response, context)
+        twice, stripped_twice = self._call(once, context)
+        assert twice == once
+        assert stripped_once and not stripped_twice  # second pass is a no-op
+
+    def test_preserves_text_outside_quotes(self):
+        response = 'Before quote. "Fabricated quote not in any chunk text". After quote.'
+        context = 'Unrelated.'
+        modified, _ = self._call(response, context)
+        assert modified.startswith('Before quote. ')
+        assert modified.endswith(' After quote.')
+
+
+class TestValidateAndStripUnsupportedAcronyms:
+    """Tests for validate_and_strip_unsupported_acronyms.
+
+    Targets the "invented acronym" failure mode where the generator coins
+    short uppercase tokens (2-5 chars) that do not appear in any retrieved
+    chunk. Validator is conservative — flags only ALL-CAPS standalone
+    tokens, accepts case-insensitive context matches so "FDA" answer with
+    "fda" context is fine.
+    """
+
+    @staticmethod
+    def _call(response: str, context: str, **kwargs):
+        return utils_module.validate_and_strip_unsupported_acronyms(response, context, **kwargs)
+
+    def test_noop_when_no_acronyms(self):
+        response = 'The compound was tested at site A in two thousand twenty three.'
+        context = 'Unrelated retrieved content here.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_noop_when_acronym_present_in_context(self):
+        response = 'The FDA approved the assay qualification.'
+        context = 'FDA non-hold comments referenced in section 32S43.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_strips_invented_acronym_parenthetical(self):
+        # Mirror of the original "NBO" failure: model coined an acronym
+        # alongside a real entity, in parentheses.
+        response = 'For Insulin Campus Frankfurt (NBO) the open CAPAs are tracked separately.'
+        context = 'For Insulin Campus Frankfurt the open CAPAs are tracked alongside the ICF audit results.'
+        modified, stripped = self._call(response, context)
+        assert stripped == ['NBO']
+        assert '(NBO)' not in modified
+        assert 'NBO' not in modified
+        # The legitimate entity name is preserved.
+        assert 'Insulin Campus Frankfurt' in modified
+
+    def test_strips_bare_acronym(self):
+        # Bare standalone occurrence (not parenthetical).
+        response = 'The findings showed NBO was responsible for the delay.'
+        context = 'The findings discussed Insulin Campus Frankfurt and ICF specifically.'
+        modified, stripped = self._call(response, context)
+        assert stripped == ['NBO']
+        assert 'NBO' not in modified
+        # Whitespace tidied so we don't leave double spaces.
+        assert '  ' not in modified
+
+    def test_case_insensitive_context_match(self):
+        # Response uses "FDA" (uppercase), context uses "fda" (lowercase).
+        # Both forms should count as supported.
+        response = 'The FDA reviewed the IR.'
+        context = 'The fda has multiple ir submissions on file.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_dedupes_repeated_invented_acronym(self):
+        # Same fake acronym appearing multiple times → reported once.
+        response = 'XYZ said this, XYZ said that, and XYZ confirmed it.'
+        context = 'Some unrelated content.'
+        modified, stripped = self._call(response, context)
+        assert stripped == ['XYZ']  # de-duplicated
+        assert 'XYZ' not in modified
+
+    def test_strips_only_unsupported_when_mixed(self):
+        response = 'Both the FDA and NBO weighed in on the matter.'
+        context = 'The FDA published its decision in March 2024.'
+        modified, stripped = self._call(response, context)
+        assert stripped == ['NBO']
+        assert 'FDA' in modified
+        assert 'NBO' not in modified
+
+    def test_size_bounds_respected(self):
+        # Single-letter tokens never match \b[A-Z]{2,5}\b — verified safely.
+        # 6+ letter "acronyms" (e.g. NIOSHA) also not flagged (out of bounds).
+        response = 'I said NIOSHA is responsible. The CDC also agreed.'
+        context = 'NIOSH and the CDC published the guidance.'
+        # NIOSHA (6 chars) skipped; CDC (3) found in context → both safe.
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_empty_inputs_safe(self):
+        assert self._call('', 'ctx') == ('', [])
+        assert self._call('resp', '') == ('resp', [])
+        assert self._call('', '') == ('', [])
+
+    def test_idempotent(self):
+        response = 'The NBO is mentioned here.'
+        context = 'Unrelated.'
+        once, stripped_once = self._call(response, context)
+        twice, stripped_twice = self._call(once, context)
+        assert twice == once
+        assert stripped_once == ['NBO']
+        assert stripped_twice == []
+
+    def test_punctuation_normalized_after_strip(self):
+        # After stripping bare acronym at end-of-sentence, no orphan
+        # whitespace should remain before the period.
+        response = 'The site responsible was NBO.'
+        context = 'Unrelated.'
+        modified, _ = self._call(response, context)
+        assert modified == 'The site responsible was.'
+
+    def test_lowercase_words_never_flagged(self):
+        # Validator only matches uppercase tokens; lowercase words like
+        # "the" or "and" are not acronyms regardless of context match.
+        response = 'the alphabet has many sequences like xyz embedded in it.'
+        context = 'unrelated content with no overlap'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_preserves_text_outside_acronym(self):
+        # Mirror of the quote-validator parity test: text on either side of
+        # the stripped token must remain intact, including punctuation joints.
+        response = 'Before the call, XYZ confirmed the result. After the call, all clear.'
+        context = 'No acronyms here at all.'
+        modified, stripped = self._call(response, context)
+        assert stripped == ['XYZ']
+        assert modified.startswith('Before the call,')
+        assert modified.endswith('After the call, all clear.')
+        assert 'XYZ' not in modified
+
+    def test_substring_match_in_context_treated_as_support(self):
+        # DESIGN NOTE: the validator uses a plain substring check
+        # (`token.lower() in context.lower()`), not word-boundary matching.
+        # That means an acronym like "API" is considered "supported" when the
+        # letters "api" appear inside any word in the context — e.g. "rapid".
+        # This is intentional (avoids false positives on plurals like "PCRs"
+        # and inflected forms) but surprising. This test pins the behavior so
+        # a future refactor to word-boundary matching is a deliberate choice,
+        # not an accident.
+        response = 'The API was reviewed.'
+        context = 'A rapid review of the submission was performed.'  # contains 'api' inside 'rapid'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_mixed_case_tokens_never_flagged(self):
+        # Regex is \b[A-Z]{2,5}\b — strictly all-caps. Title-case "Nbo" and
+        # mixed-case "Fda" must not be matched even when absent from context.
+        # Distinct from test_lowercase_words_never_flagged which covers fully
+        # lowercase input.
+        response = 'The Nbo and Fda were both mentioned, plus AbCd somewhere.'
+        context = 'Unrelated content with zero overlap.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
+
+    def test_respects_custom_size_bounds_kwargs(self):
+        # Tightening min to 3 should let a 2-char fabricated acronym slip
+        # through; loosening max to 6 should catch a 6-char fabricated one.
+        # Pins the kwargs as a real public knob rather than dead parameters.
+        response_with_2char = 'The XY committee deliberated.'
+        response_with_6char = 'The XYZABC committee deliberated.'
+        context = 'Unrelated.'
+        # Default bounds (2-5): 2-char XY is flagged.
+        _, default_2 = self._call(response_with_2char, context)
+        assert default_2 == ['XY']
+        # min_acronym_chars=3 raises the floor; 2-char XY is now ignored.
+        _, raised_min = self._call(response_with_2char, context, min_acronym_chars=3)
+        assert raised_min == []
+        # Default bounds (2-5): 6-char XYZABC is NOT flagged (above max — regex won't match either way).
+        _, default_6 = self._call(response_with_6char, context)
+        assert default_6 == []
+        # max_acronym_chars=6 raises the ceiling; XYZABC is now flagged.
+        # NOTE: regex \b[A-Z]{2,5}\b is hard-coded so even with max=6 the
+        # token won't match — pins the regex/kwarg coupling as a known limit.
+        _, raised_max = self._call(response_with_6char, context, max_acronym_chars=6)
+        assert raised_max == []  # documents the regex hard-cap
+
+    def test_acronym_with_internal_dots_not_matched(self):
+        # "F.D.A." has no run of 2+ consecutive uppercase letters; each letter
+        # is bordered by periods. Regex \b[A-Z]{2,5}\b cannot match. Pins the
+        # behavior so a future regex change must explicitly decide to cover
+        # dotted-acronym form.
+        response = 'The F.D.A. and the U.S. agencies coordinated.'
+        context = 'Coordination between agencies was documented.'
+        modified, stripped = self._call(response, context)
+        assert modified == response
+        assert stripped == []
