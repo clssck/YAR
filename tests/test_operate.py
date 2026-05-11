@@ -468,6 +468,323 @@ async def test_merge_edges_stores_internal_relation_evidence_without_schema_drif
 
 @pytest.mark.offline
 @pytest.mark.asyncio
+async def test_merge_edges_logs_high_weight_unsupported_diagnostic(caplog):
+    source = 'Diagnostic Source'
+    target = 'Diagnostic Target'
+    description = 'Diagnostic Source supports Diagnostic Target.'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': 'chunk-existing',
+                'description': f'{node_id} description',
+                'entity_type': 'concept',
+                'file_path': 'diagnostic.md',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            return None
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    async def merge_relations(relations):
+        await _merge_edges_then_upsert(
+            source,
+            target,
+            relations,
+            FakeGraphStorage(),
+            {
+                'source_ids_limit_method': 'KEEP',
+                'max_source_ids_per_relation': 10,
+                'max_source_ids_per_entity': 10,
+                'max_file_paths': 10,
+            },
+        )
+
+    caplog.set_level('INFO', logger='yar')
+    yar_logger.addHandler(caplog.handler)
+    try:
+        unsupported_relations = [
+            _relation_fact(
+                source,
+                target,
+                description=description,
+                keywords='supports',
+                chunk_id=f'chunk-unsupported-{index}',
+                file_path='diagnostic.md',
+            )
+            for index in range(3)
+        ]
+
+        await merge_relations(unsupported_relations)
+
+        assert any(
+            'High-weight unsupported edge: Diagnostic Source --supports--> Diagnostic Target '
+            '(weight=3.0, sources=3) — no extractive evidence spans' in record.getMessage()
+            for record in caplog.records
+        )
+
+        caplog.clear()
+        supported_relations = [
+            relation.with_evidence_spans(['Diagnostic Source supports Diagnostic Target.'])
+            for relation in unsupported_relations
+        ]
+
+        await merge_relations(supported_relations)
+
+        assert not any('High-weight unsupported edge:' in record.getMessage() for record in caplog.records)
+    finally:
+        yar_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.offline
+def test_extract_relation_evidence_spans_falls_back_to_endpoint_cooccurrence():
+    relation = _relation_fact(
+        'CSTD Request',
+        'HD Drug',
+        description='HD Drug classifies the CSTD Request.',
+        keywords='classifies',
+        chunk_id='chunk-evidence-fallback',
+    )
+    content = 'Background only. HD Drug classifies the CSTD Request for hazardous handling decisions.'
+
+    with patch('yar.operate._extract_supporting_evidence_spans', return_value=[]):
+        spans = _extract_relation_evidence_spans(content, relation)
+
+    assert spans == ['HD Drug classifies the CSTD Request for hazardous handling decisions.']
+
+
+@pytest.mark.offline
+def test_extract_relation_evidence_spans_returns_empty_when_endpoints_absent():
+    relation = _relation_fact(
+        'CSTD Request',
+        'HD Drug',
+        description='HD Drug classifies the CSTD Request.',
+        keywords='classifies',
+        chunk_id='chunk-evidence-absent',
+    )
+    content = 'Unrelated handling guidance mentions neither endpoint nor predicate evidence.'
+
+    with patch('yar.operate._extract_supporting_evidence_spans', return_value=[]):
+        spans = _extract_relation_evidence_spans(content, relation)
+
+    assert spans == []
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_recovers_evidence_for_high_weight_unsupported_edge():
+    source = 'CSTD Request'
+    target = 'HD Drug'
+    chunk_ids = ['chunk-recover-1', 'chunk-recover-2']
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': chunk_ids[0],
+                'description': f'{node_id} description',
+                'entity_type': 'concept',
+                'file_path': 'source.md',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            return None
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeTextChunksStorage:
+        async def get_by_ids(self, keys):
+            return [
+                {'content': 'Background context without direct evidence.'},
+                {
+                    'content': (
+                        'HD Drug classifies the CSTD Request when pharmacy manuals evaluate '
+                        'closed-system handling requirements.'
+                    )
+                },
+            ]
+
+    graph = FakeGraphStorage()
+    _edge_data, _ent_vdb, rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [
+            _relation_fact(
+                source,
+                target,
+                description='HD Drug classifies the CSTD Request.',
+                keywords='classifies',
+                chunk_id=chunk_id,
+                file_path='source.md',
+            )
+            for chunk_id in chunk_ids
+        ],
+        graph,
+        {
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+        },
+        text_chunks_storage=FakeTextChunksStorage(),
+    )
+
+    rel_payload = next(iter(rel_vdb.values()))
+    assert 'evidence_spans: HD Drug classifies the CSTD Request' in rel_payload['content']
+    assert 'evidence_spans' not in graph.upserted_edges[0][2]
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_recovers_evidence_for_low_weight_edge_before_vector_upsert():
+    source = 'Launch Checklist'
+    target = 'Site Readiness'
+    chunk_id = 'chunk-low-weight-recover'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': chunk_id,
+                'description': f'{node_id} description',
+                'entity_type': 'concept',
+                'file_path': 'source.md',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            return None
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    class FakeTextChunksStorage:
+        async def get_by_ids(self, keys):
+            return [{'content': 'Launch Checklist tracks Site Readiness owners and target dates.'}]
+
+    _edge_data, _ent_vdb, rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+        source,
+        target,
+        [
+            _relation_fact(
+                source,
+                target,
+                description='Launch Checklist tracks Site Readiness.',
+                keywords='tracks',
+                chunk_id=chunk_id,
+                file_path='source.md',
+            )
+        ],
+        FakeGraphStorage(),
+        {
+            'source_ids_limit_method': 'KEEP',
+            'max_source_ids_per_relation': 10,
+            'max_source_ids_per_entity': 10,
+            'max_file_paths': 10,
+        },
+        text_chunks_storage=FakeTextChunksStorage(),
+    )
+
+    rel_payload = next(iter(rel_vdb.values()))
+    assert 'evidence_spans: Launch Checklist tracks Site Readiness owners and target dates.' in rel_payload['content']
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_merge_edges_applies_relation_review_when_enabled():
+    source = 'HD Drug'
+    target = 'CSTD Request'
+    evidence_span = 'HD Drug classifies the CSTD Request in the pharmacy manual.'
+
+    class FakeGraphStorage:
+        def __init__(self):
+            self.upserted_edges = []
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return False
+
+        async def get_node(self, node_id):
+            return {
+                'entity_id': node_id,
+                'source_id': 'chunk-review',
+                'description': f'{node_id} description',
+                'entity_type': 'concept',
+                'file_path': 'source.md',
+            }
+
+        async def upsert_node(self, node_id, node_data):
+            return None
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.upserted_edges.append((source_node_id, target_node_id, edge_data))
+
+    review_result = RelationReviewResult(
+        src=source,
+        tgt=target,
+        original_keywords=('classifies', 'evaluates necessity of'),
+        canonical_keywords=('classifies',),
+        primary='classifies',
+        reasoning='Compound predicate reduced to the stated classification action.',
+        confidence=0.9,
+    )
+
+    with patch(
+        'yar.operate.llm_review_relation_predicates_batch', new=AsyncMock(return_value=[review_result])
+    ) as review:
+        edge_data, _ent_vdb, rel_vdb, _rel_delete_ids = await _merge_edges_then_upsert(
+            source,
+            target,
+            [
+                _relation_fact(
+                    source,
+                    target,
+                    description='HD Drug classifies the CSTD Request.',
+                    keywords='classifies, evaluates necessity of',
+                    chunk_id='chunk-review',
+                    file_path='source.md',
+                ).with_evidence_spans([evidence_span])
+            ],
+            FakeGraphStorage(),
+            {
+                'source_ids_limit_method': 'KEEP',
+                'max_source_ids_per_relation': 10,
+                'max_source_ids_per_entity': 10,
+                'max_file_paths': 10,
+                'llm_model_func': AsyncMock(return_value='[]'),
+                'relation_resolution_config': {'enabled': True, 'confidence_threshold': 0.6},
+            },
+        )
+
+    review.assert_awaited_once()
+    rel_payload = next(iter(rel_vdb.values()))
+    assert edge_data['keywords'] == 'classifies'
+    assert rel_payload['keywords'] == 'classifies'
+    assert f'evidence_spans: {evidence_span}' in rel_payload['content']
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
 async def test_attach_relation_evidence_from_storage_adds_prompt_only_spans():
     source = 'CSTD strategy'
     target = 'Overdosing mitigation'

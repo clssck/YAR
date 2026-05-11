@@ -4446,7 +4446,136 @@ def _extract_relation_evidence_spans(content: str, relation_fact: RelationFact, 
         facet_terms=list(relation_fact.predicate.keywords),
         max_spans=max_spans,
     )
-    return [span[:500].rstrip() for span in _unique_nonempty_strings(raw_spans)]
+    spans = [span[:500].rstrip() for span in _unique_nonempty_strings(raw_spans)]
+    if spans:
+        return spans
+    return _fallback_relation_evidence_spans(content, relation_fact, max_spans)
+
+
+async def _recover_relation_evidence_from_source_chunks(
+    relation_summary: RelationSummary,
+    source_ids: list[str],
+    text_chunks_storage: BaseKVStorage | None,
+    *,
+    max_spans: int = 3,
+) -> tuple[str, ...]:
+    if text_chunks_storage is None or not source_ids:
+        return ()
+
+    chunk_ids = [chunk_id for chunk_id in dict.fromkeys(source_ids) if chunk_id]
+    if not chunk_ids:
+        return ()
+
+    try:
+        get_by_ids = getattr(text_chunks_storage, 'get_by_ids', None)
+        if callable(get_by_ids):
+            chunk_records = await get_by_ids(chunk_ids)
+        else:
+            get_by_id = getattr(text_chunks_storage, 'get_by_id', None)
+            if not callable(get_by_id):
+                return ()
+            chunk_records = [await get_by_id(chunk_id) for chunk_id in chunk_ids]
+    except Exception as exc:
+        logger.debug(
+            'Could not recover relation evidence from source chunks for `%s`~`%s`: %s',
+            relation_summary.key.src,
+            relation_summary.key.tgt,
+            exc,
+        )
+        return ()
+
+    records_iterable = chunk_records.values() if isinstance(chunk_records, dict) else chunk_records or []
+    relation_fact = RelationFact(
+        key=relation_summary.key,
+        predicate=relation_summary.predicate,
+        evidence_text=relation_summary.description,
+        weight=relation_summary.weight,
+        source_id=relation_summary.source_id,
+        file_path=relation_summary.file_path,
+        timestamp=relation_summary.created_at,
+        semantics=relation_summary.semantics,
+    )
+    recovered_spans: list[str] = []
+    for chunk_record in records_iterable:
+        if not isinstance(chunk_record, dict):
+            continue
+        chunk_content = str(chunk_record.get('content') or '')
+        if not chunk_content:
+            continue
+        recovered_spans.extend(_extract_relation_evidence_spans(chunk_content, relation_fact, max_spans=max_spans))
+        if len(_unique_nonempty_strings(recovered_spans)) >= max_spans:
+            break
+
+    return tuple(_unique_nonempty_strings(recovered_spans)[:max_spans])
+
+
+def _resolve_relation_resolution_config(global_config: GlobalConfig) -> RelationResolutionConfig:
+    config_value = global_config.get('relation_resolution_config')
+    if isinstance(config_value, RelationResolutionConfig):
+        return config_value
+    if isinstance(config_value, dict):
+        allowed_fields = RelationResolutionConfig.__dataclass_fields__
+        kwargs = {key: value for key, value in config_value.items() if key in allowed_fields}
+        try:
+            return RelationResolutionConfig(**kwargs)
+        except (TypeError, ValueError) as exc:
+            logger.warning('Invalid relation_resolution_config; using defaults: %s', exc)
+    return DEFAULT_RELATION_RESOLUTION_CONFIG
+
+
+async def _review_relation_summary_predicate(
+    relation_summary: RelationSummary,
+    global_config: GlobalConfig,
+) -> RelationSummary:
+    config = _resolve_relation_resolution_config(global_config)
+    if not config.enabled or len(relation_summary.predicate.keywords) < config.min_keywords_for_review:
+        return relation_summary
+
+    llm_func = global_config.get('llm_model_func')
+    if not callable(llm_func):
+        return relation_summary
+
+    try:
+        results = await llm_review_relation_predicates_batch(
+            [
+                {
+                    'src': relation_summary.key.src,
+                    'tgt': relation_summary.key.tgt,
+                    'candidate_keywords': list(relation_summary.predicate.keywords),
+                    'evidence_spans': list(relation_summary.evidence_spans),
+                }
+            ],
+            llm_func=llm_func,
+            config=config,
+        )
+    except Exception as exc:
+        logger.warning(
+            'Relation predicate review failed for `%s`~`%s`: %s',
+            relation_summary.key.src,
+            relation_summary.key.tgt,
+            exc,
+        )
+        return relation_summary
+
+    if not results:
+        return relation_summary
+
+    review = results[0]
+    if review.confidence < config.confidence_threshold or not review.canonical_keywords:
+        return relation_summary
+
+    reviewed_predicate = RelationPredicate.from_raw(
+        review.canonical_keywords,
+        max_keywords=config.max_predicates_per_pair,
+    )
+    if not reviewed_predicate.keywords:
+        return relation_summary
+
+    return replace(
+        relation_summary,
+        predicate=reviewed_predicate,
+        semantics=RelationSemantics.from_text(reviewed_predicate.text, relation_summary.description),
+    )
 
 
 def _relation_evidence_by_chunk(relations: list[RelationFact]) -> dict[str, list[str]]:

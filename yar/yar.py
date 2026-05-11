@@ -92,6 +92,7 @@ from yar.operate import (
     rebuild_knowledge_from_chunks,
 )
 from yar.prompt import PROMPTS
+from yar.relation_resolution import RelationResolutionConfig
 from yar.type_defs import GlobalConfig, KnowledgeGraph, resolve_entity_extract_max_async
 from yar.utils import (
     EmbeddingFunc,
@@ -277,6 +278,9 @@ class YAR:
     """Configuration for entity resolution (deduplication).
     Now enabled by default. Set to None to disable.
     Resolves entities like 'FDA' → 'US Food and Drug Administration'."""
+
+    relation_resolution_config: RelationResolutionConfig = field(default_factory=RelationResolutionConfig)
+    """Configuration for LLM relation predicate review. Enabled by default."""
 
     # Orphan connection
     # ---
