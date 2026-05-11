@@ -112,7 +112,7 @@ async def _load_relation_vdb_records(
     for pair, ids in ids_by_pair.items():
         for relation_id in ids:
             record = records_by_id.get(relation_id)
-            if isinstance(record, dict):
+            if isinstance(record, dict) and record:
                 records_by_pair[pair] = record
                 break
     return records_by_pair

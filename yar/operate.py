@@ -1021,6 +1021,32 @@ _EXPLICIT_RISK_RELATION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
 )
 
+_BYLINE_NAME_WORD_PATTERN = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’.-]*"
+_BYLINE_PERSON_NAME_PATTERN = rf'{_BYLINE_NAME_WORD_PATTERN}(?:[ \t]+{_BYLINE_NAME_WORD_PATTERN}){{0,4}}'
+_BYLINE_PERSON_LIST_PATTERN = (
+    rf'{_BYLINE_PERSON_NAME_PATTERN}(?:[ \t]*(?:,|&|(?i:\band\b))[ \t]*{_BYLINE_PERSON_NAME_PATTERN})*'
+)
+_BYLINE_GROUP_PATTERN = r'(?P<group>[A-ZÀ-ÖØ-Þ0-9][^\n.;]{1,120}?)(?=$|[\n.;])'
+_BYLINE_CONTRIBUTOR_NAME_SPLIT_RE = re.compile(r'\s*(?:,|&|\band\b)\s*', re.IGNORECASE)
+_BYLINE_CONTRIBUTOR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        rf'(?P<names>{_BYLINE_PERSON_LIST_PATTERN})\s*[-–—]\s*(?i:on behalf of)\s+'
+        rf'(?i:(?:the\s+)?)\s*{_BYLINE_GROUP_PATTERN}'
+    ),
+    re.compile(
+        rf'(?P<names>{_BYLINE_PERSON_LIST_PATTERN})\s*[-–—]\s*(?i:for)\s+'
+        rf'(?i:(?:the\s+)?)\s*{_BYLINE_GROUP_PATTERN}'
+    ),
+    re.compile(
+        rf'(?i:represented by)\s+(?P<names>{_BYLINE_PERSON_LIST_PATTERN})\s+'
+        rf'(?i:(?:of|on behalf of))\s+(?i:(?:the\s+)?)\s*{_BYLINE_GROUP_PATTERN}'
+    ),
+    re.compile(
+        rf'(?i:for)\s+(?i:(?:the\s+)?)\s*{_BYLINE_GROUP_PATTERN}\s*[:\-–—]\s*'
+        rf'(?P<names>{_BYLINE_PERSON_LIST_PATTERN})'
+    ),
+)
+
 
 def _normalize_explicit_risk_entity_name(raw_value: str) -> str:
     value = re.sub(r'\s+', ' ', raw_value).strip(' "\'`*_')
@@ -1046,6 +1072,146 @@ def _split_explicit_risk_targets(raw_targets: str) -> list[str]:
             continue
         targets.append(target)
     return list(dict.fromkeys(targets))
+
+
+def _is_sane_explicit_byline_name(name: str) -> bool:
+    if len(name) < 3 or len(name) > DEFAULT_ENTITY_NAME_MAX_LENGTH:
+        return False
+    if name.casefold() in _QUERY_RELEVANCE_STOPWORDS:
+        return False
+    alpha_tokens = re.findall(r'[^\W\d_]+', name)
+    if not alpha_tokens:
+        return False
+    return any(len(token) >= 3 and token.casefold() not in _QUERY_RELEVANCE_STOPWORDS for token in alpha_tokens)
+
+
+def _is_sane_explicit_byline_group(name: str) -> bool:
+    if len(name) < 3 or len(name) > DEFAULT_ENTITY_NAME_MAX_LENGTH:
+        return False
+    if name.casefold() in _QUERY_RELEVANCE_STOPWORDS:
+        return False
+    return any(char.isalpha() for char in name)
+
+
+def _resolve_explicit_byline_group_name(raw_group: str, source_content: str, match_start: int) -> str:
+    group_name = _normalize_explicit_risk_entity_name(raw_group)
+    if group_name.casefold() not in {'wg', 'working group'}:
+        return group_name
+
+    preceding_lines = source_content[:match_start].splitlines()[-8:]
+    for line in reversed(preceding_lines):
+        candidate_text = re.sub(r'\s+', ' ', line).strip(' #*-\t\r\n')
+        if not candidate_text:
+            continue
+        candidate_name = _normalize_explicit_risk_entity_name(candidate_text)
+        if candidate_name.casefold() == group_name.casefold():
+            continue
+        if re.search(r'\b(?:WG|Working Group)\b$', candidate_name) and _is_sane_explicit_byline_group(candidate_name):
+            return candidate_name
+
+    return group_name
+
+
+def _split_explicit_byline_contributor_names(raw_names: str) -> list[str]:
+    name_text = re.sub(r'\([^)]*\)', '', raw_names)
+    name_text = re.sub(r'\s+', ' ', name_text).strip(' "\'`*_:')
+    names: list[str] = []
+    for candidate in _BYLINE_CONTRIBUTOR_NAME_SPLIT_RE.split(name_text):
+        if not candidate:
+            continue
+        name = _normalize_explicit_risk_entity_name(candidate)
+        if not _is_sane_explicit_byline_name(name):
+            return []
+        names.append(name)
+    return list(dict.fromkeys(names))
+
+
+def _supplement_explicit_byline_contributor_relations_from_source(
+    maybe_nodes: defaultdict[str, list[EntityFact]],
+    maybe_edges: defaultdict[RelationKey, list[RelationFact]],
+    chunk_key: str,
+    timestamp: int,
+    file_path: str,
+    source_content: str,
+    entity_types: list[str] | None,
+) -> None:
+    if not source_content:
+        return
+
+    for pattern in _BYLINE_CONTRIBUTOR_PATTERNS:
+        for match in pattern.finditer(source_content):
+            contributor_names = _split_explicit_byline_contributor_names(match.group('names'))
+            if not contributor_names:
+                continue
+
+            group_name = _resolve_explicit_byline_group_name(
+                match.group('group'),
+                source_content,
+                match.start(),
+            )
+            if not _is_sane_explicit_byline_group(group_name):
+                continue
+
+            evidence_span = match.group(0).strip(' -*\t\r\n')
+            group_fact = EntityFact.from_record(
+                [
+                    'entity',
+                    group_name,
+                    'group',
+                    f'{group_name} is explicitly named as the represented group in a byline or contributor statement.',
+                ],
+                chunk_key,
+                timestamp,
+                file_path,
+                entity_types=entity_types,
+            )
+            if group_fact is not None:
+                maybe_nodes[group_fact.name].append(group_fact)
+
+            for contributor_name in contributor_names:
+                contributor_fact = EntityFact.from_record(
+                    [
+                        'entity',
+                        contributor_name,
+                        'person',
+                        f'{contributor_name} is explicitly named as a contributor in a byline statement.',
+                    ],
+                    chunk_key,
+                    timestamp,
+                    file_path,
+                    entity_types=entity_types,
+                )
+                if contributor_fact is not None:
+                    maybe_nodes[contributor_fact.name].append(contributor_fact)
+
+                relation_fact = RelationFact.from_record(
+                    [
+                        'relation',
+                        contributor_name,
+                        group_name,
+                        'represents',
+                        f'{contributor_name} represents {group_name} in an explicit byline or contributor statement.',
+                    ],
+                    chunk_key,
+                    timestamp,
+                    file_path,
+                    evidence_spans=(evidence_span,),
+                )
+                if relation_fact is None:
+                    continue
+                relation_key = RelationKey(contributor_name, group_name)
+                inverse_relation_key = RelationKey(group_name, contributor_name)
+                inverse_relations = [
+                    existing.with_key(relation_key) for existing in maybe_edges.pop(inverse_relation_key, [])
+                ]
+                if not any(
+                    existing.predicate.text == relation_fact.predicate.text for existing in maybe_edges[relation_key]
+                ):
+                    maybe_edges[relation_key].append(relation_fact)
+                existing_predicates = {existing.predicate.text for existing in maybe_edges[relation_key]}
+                maybe_edges[relation_key].extend(
+                    existing for existing in inverse_relations if existing.predicate.text not in existing_predicates
+                )
 
 
 def _supplement_explicit_risk_relations_from_source(
@@ -1590,6 +1756,16 @@ async def _process_extraction_result(
             maybe_edges[relation_key].append(relationship_data.with_key(relation_key))
 
     _supplement_explicit_risk_relations_from_source(
+        maybe_nodes,
+        maybe_edges,
+        chunk_key,
+        timestamp,
+        file_path,
+        source_content,
+        entity_types,
+    )
+
+    _supplement_explicit_byline_contributor_relations_from_source(
         maybe_nodes,
         maybe_edges,
         chunk_key,
@@ -4429,6 +4605,55 @@ def _unique_nonempty_strings(values: Any) -> list[str]:
     if isinstance(values, str):
         values = [values]
     return list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+
+
+def _normalized_evidence_text(value: str) -> str:
+    normalized = normalize_unicode_for_entity_matching(_clean_evidence_text(value))
+    return str(normalized or '').casefold()
+
+
+def _relation_evidence_sentence_candidates(content: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for raw_candidate in re.split(r'(?<=[.!?])\s+|\n+', str(content)):
+        candidate = _clean_evidence_text(raw_candidate)
+        if len(candidate) < 12:
+            continue
+        normalized = _normalized_evidence_text(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        candidates.append(candidate)
+    return candidates
+
+
+def _fallback_relation_evidence_spans(content: str, relation_fact: RelationFact, max_spans: int) -> list[str]:
+    candidates = _relation_evidence_sentence_candidates(content)
+    if not candidates:
+        return []
+
+    normalized_src = _normalized_evidence_text(relation_fact.key.src)
+    normalized_tgt = _normalized_evidence_text(relation_fact.key.tgt)
+    keywords = []
+    for keyword in relation_fact.predicate.keywords:
+        normalized_keyword = _normalized_evidence_text(keyword)
+        if normalized_keyword:
+            keywords.append(normalized_keyword)
+
+    endpoint_matches: list[str] = []
+    keyword_matches: list[str] = []
+    for candidate in candidates:
+        normalized_candidate = _normalized_evidence_text(candidate)
+        has_src = bool(normalized_src and normalized_src in normalized_candidate)
+        has_tgt = bool(normalized_tgt and normalized_tgt in normalized_candidate)
+        if has_src and has_tgt:
+            endpoint_matches.append(candidate)
+            continue
+        if (has_src or has_tgt) and any(keyword in normalized_candidate for keyword in keywords):
+            keyword_matches.append(candidate)
+
+    selected = endpoint_matches or keyword_matches
+    return [span[:500].rstrip() for span in _unique_nonempty_strings(selected)[:max_spans]]
 
 
 def _extract_relation_evidence_spans(content: str, relation_fact: RelationFact, max_spans: int = 3) -> list[str]:

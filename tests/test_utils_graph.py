@@ -8,9 +8,104 @@ This module tests:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+
 from yar.base import DeletionResult
 from yar.constants import GRAPH_FIELD_SEP
-from yar.utils_graph import _merge_attributes
+from yar.utils_graph import _merge_attributes, acreate_relation
+
+
+class _AsyncNoopLock:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_acreate_relation_uses_canonical_projection_shape():
+    class FakeGraphStorage:
+        def __init__(self):
+            self.nodes = {'Z Source', 'A Target'}
+            self.edges = {}
+
+        async def has_node(self, node_id):
+            return node_id in self.nodes
+
+        async def has_edge(self, source_node_id, target_node_id):
+            return frozenset((source_node_id, target_node_id)) in self.edges
+
+        async def upsert_edge(self, source_node_id, target_node_id, edge_data):
+            self.edges[frozenset((source_node_id, target_node_id))] = edge_data
+
+        async def get_edge(self, source_node_id, target_node_id):
+            return self.edges.get(frozenset((source_node_id, target_node_id)))
+
+        async def index_done_callback(self):
+            return None
+
+    class FakeVectorStorage:
+        def __init__(self):
+            self.global_config = {}
+            self.records = {}
+
+        async def upsert(self, data):
+            self.records.update(data)
+
+        async def get_by_id(self, record_id):
+            return self.records.get(record_id)
+
+        async def index_done_callback(self):
+            return None
+
+    class FakeRelationChunksStorage:
+        def __init__(self):
+            self.records = {}
+
+        async def upsert(self, data):
+            self.records.update(data)
+
+        async def index_done_callback(self):
+            return None
+
+    graph = FakeGraphStorage()
+    relationships_vdb = FakeVectorStorage()
+    relation_chunks = FakeRelationChunksStorage()
+
+    with patch('yar.utils_graph.get_storage_keyed_lock', return_value=_AsyncNoopLock()):
+        result = await acreate_relation(
+            graph,
+            FakeVectorStorage(),
+            relationships_vdb,
+            'Z Source',
+            'A Target',
+            {
+                'description': 'Z Source tracks A Target owners.',
+                'keywords': 'tracks, organizes',
+                'source_id': 'chunk-manual',
+                'file_path': 'manual.md',
+            },
+            relation_chunks,
+        )
+
+    edge_data = result['graph_data']
+    assert set(edge_data) == {'weight', 'description', 'keywords', 'source_id', 'file_path', 'created_at', 'truncate'}
+    assert edge_data['keywords'] == 'tracks, organizes'
+    assert 'search_hints: tracks organizes source target owners' in result['vector_data']['content']
+    assert set(result['vector_data']) == {
+        'src_id',
+        'tgt_id',
+        'source_id',
+        'content',
+        'keywords',
+        'description',
+        'weight',
+        'file_path',
+    }
+    assert relation_chunks.records['A Target<SEP>Z Source']['chunk_ids'] == ['chunk-manual']
 
 
 class TestMergeAttributes:
@@ -460,4 +555,3 @@ class TestMergeAttributesEdgeCases:
 
         assert '日本語' in result['description']
         assert 'Émojis' in result['description']
-

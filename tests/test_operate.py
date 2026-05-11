@@ -226,6 +226,51 @@ async def test_process_extraction_result_supplements_explicit_risk_relations_fro
 
 @pytest.mark.offline
 @pytest.mark.asyncio
+async def test_supplement_byline_contributors_emits_represents_relations_from_dash_form():
+    byline = 'Vasco Filipe and Céline Thierens – on behalf of the WG'
+    source_content = f'# CSTD Strategy WG\n{byline}'
+    raw_result = f'relation<|#|>CSTD Strategy WG<|#|>Vasco Filipe<|#|>on behalf of<|#|>{byline}<|COMPLETE|>'
+
+    extraction = await _process_extraction_result(
+        raw_result,
+        'chunk-byline',
+        456,
+        'strategy.pptx',
+        source_content=source_content,
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    vasco_relations = extraction.edges[RelationKey('Vasco Filipe', 'CSTD Strategy WG')]
+    celine_relations = extraction.edges[RelationKey('Céline Thierens', 'CSTD Strategy WG')]
+    assert RelationKey('CSTD Strategy WG', 'Vasco Filipe') not in extraction.edges
+    assert [relation.keywords for relation in vasco_relations] == ['represents', 'on behalf of']
+    assert [relation.keywords for relation in celine_relations] == ['represents']
+    for relation in [*vasco_relations, *celine_relations]:
+        assert byline in relation.evidence_spans
+
+    assert 'Vasco Filipe' in extraction.nodes
+    assert 'Céline Thierens' in extraction.nodes
+    assert 'CSTD Strategy WG' in extraction.nodes
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_supplement_byline_contributors_skips_when_names_invalid():
+    extraction = await _process_extraction_result(
+        '<|COMPLETE|>',
+        'chunk-invalid-byline',
+        456,
+        'strategy.pptx',
+        source_content=('Al – on behalf of the CSTD Strategy WG\nThe – on behalf of the CSTD Strategy WG'),
+        entity_types=list(DEFAULT_ENTITY_TYPES),
+    )
+
+    assert extraction.edges == {}
+    assert extraction.nodes == {}
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
 async def test_rebuild_from_extraction_result_uses_truncated_source_content_for_relation_evidence():
     class SimpleTokenizer:
         def encode(self, text):

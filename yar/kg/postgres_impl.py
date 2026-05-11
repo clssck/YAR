@@ -3938,7 +3938,6 @@ class PGVectorStorage(BaseVectorStorage):
         query: str,
         top_k: int,
         query_embedding: list[float] | None = None,
-        original_query_embedding: list[float] | None = None,
         bm25_weight: float = 0.3,
         language: str = 'english',
         phrase_terms: list[str] | None = None,
@@ -3998,43 +3997,28 @@ class PGVectorStorage(BaseVectorStorage):
             )
             return results if results else []
 
-        original_vector_results: list[dict[str, Any]] = []
-        if original_query_embedding is None:
-            vector_results, bm25_results = await asyncio.gather(
-                self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
-                run_bm25(),
-            )
-        else:
-            vector_results, original_vector_results, bm25_results = await asyncio.gather(
-                self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
-                self.query(query, top_k=vector_fetch_k, query_embedding=original_query_embedding),
-                run_bm25(),
-            )
+        vector_results, bm25_results = await asyncio.gather(
+            self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
+            run_bm25(),
+        )
 
         # Mark source type for debugging
         for r in vector_results:
             r['source_type'] = 'vector'
-        for r in original_vector_results:
-            r['source_type'] = 'vector_original'
         for r in bm25_results:
             r['source_type'] = 'bm25'
 
         # 3. Combine using Reciprocal Rank Fusion
-        result_lists: list[list[dict[str, Any]]] = [vector_results]
-        if original_query_embedding is not None:
-            result_lists.append(original_vector_results)
-        result_lists.append(bm25_results)
         fused_results = reciprocal_rank_fusion(
-            result_lists,
+            [vector_results, bm25_results],
             id_key='id',
             k=RRF_K,  # Configurable via YAR_RRF_K env var
         )
 
-        source_counts = f'{len(vector_results)} vector'
-        if original_query_embedding is not None:
-            source_counts += f' + {len(original_vector_results)} vector_original'
-        source_counts += f' + {len(bm25_results)} BM25'
-        logger.debug(f'[{self.workspace}] Hybrid search: {source_counts} → {len(fused_results[:top_k])} fused')
+        logger.debug(
+            f'[{self.workspace}] Hybrid search: {len(vector_results)} vector + {len(bm25_results)} BM25 '
+            f'→ {len(fused_results[:top_k])} fused'
+        )
 
         return fused_results[:top_k]
 

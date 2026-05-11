@@ -85,6 +85,10 @@ _RELATION_KEYWORD_CANONICAL_MAP = {
     'collaborated with': 'collaborates with',
     'collaborates with': 'collaborates with',
     'collaborating with': 'collaborates with',
+    'partner with': 'partnered with',
+    'partnered with': 'partnered with',
+    'partnering with': 'partnered with',
+    'partners with': 'partnered with',
     'develop': 'develops',
     'developed': 'develops',
     'developing': 'develops',
@@ -194,6 +198,101 @@ _RELATION_SEARCH_HINT_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
         ('requires', 'must align', 'must be contacted', 'contacted for'),
         'requirement required contact approval workflow',
     ),
+    (
+        ('member of', 'is a member of', 'belongs to', 'participates in'),
+        'team membership working group participant member of role',
+    ),
+    (
+        ('manufactured by', 'manufactures', 'produced by', 'produces'),
+        'vendor supplier manufacturer manufactured produces production',
+    ),
+    (
+        ('treats', 'treatment for', 'indicated for', 'targets'),
+        'treatment indication therapy targets disease patient',
+    ),
+    (
+        ('develops', 'developed', 'developed in collaboration with'),
+        'development program drug pipeline develops candidate',
+    ),
+    (
+        ('applicable to', 'applies to', 'scope of', 'covers'),
+        'scope applicable applies coverage applicability target population',
+    ),
+    (
+        ('supports', 'supported by', 'supported_by', 'enables', 'supports use of'),
+        'support supports enables backing rationale',
+    ),
+    (
+        ('tested', 'tested in', 'verified', 'evaluated'),
+        'testing tested verification evaluation study qualified',
+    ),
+    (
+        (
+            'approves',
+            'approved',
+            'approved by',
+            'approval from',
+            'cleared by',
+            'cleared under',
+            'regulated as',
+            'must comply with',
+            'consulted for',
+        ),
+        'regulatory approval clearance compliance authority consultation approved',
+    ),
+    (
+        ('classified as', 'categorized as', 'category', 'type of', 'part of', 'among'),
+        'classification category taxonomy type class part of grouping',
+    ),
+    (
+        ('focuses on', 'focused on', 'addresses', 'addressed by', 'describes', 'defines', 'references'),
+        'topic focus scope describes defines addresses references subject',
+    ),
+    (
+        (
+            'negotiated',
+            'agreement',
+            'contract',
+            'license',
+            'licensed to',
+            'rights to',
+            'royalties',
+            'restructured alliance',
+        ),
+        'business agreement contract license rights commercial negotiation alliance',
+    ),
+    (
+        ('tests', 'tested', 'released batch from', 'release', 'validation', 'qualified', 'non-gmp studies'),
+        'testing batch release validation qualification study evidence verified',
+    ),
+    (
+        ('communicates with', 'communication', 'sends memo to', 'reports within', 'coordinates', 'managed by'),
+        'communication coordination reporting memo project management workflow',
+    ),
+    (
+        ('authored', 'prepared by', 'published by', 'drafted', 'presentation', 'handbook'),
+        'document author prepared published drafted presentation handbook source',
+    ),
+    (
+        ('based in', 'located in', 'site', 'facility', 'country', 'market'),
+        'location site facility geography country market region',
+    ),
+    (
+        ('reviews', 'reviewed by', 'under review', 'audit', 'audited'),
+        'review audit examination oversight peer review',
+    ),
+    (
+        ('assesses', 'assessed by', 'assessment of', 'appraisal'),
+        'assessment evaluation audit review appraisal',
+    ),
+    (
+        ('involves', 'involved in', 'interaction with', 'component of'),
+        'involvement coordination interaction component relationship',
+    ),
+    (
+        ('depends_on', 'depends on', 'dependent on', 'prerequisite for'),
+        'dependency prerequisite required-by depends upon',
+    ),
 )
 _PREDICATE_ALIASES: dict[str, str] = {
     'applies': 'uses',
@@ -202,6 +301,10 @@ _PREDICATE_ALIASES: dict[str, str] = {
     'supportedby': 'supported_by',
     'dependson': 'depends_on',
 }
+
+_CANONICAL_PREDICATE_VALUES: frozenset[str] = frozenset(_RELATION_KEYWORD_CANONICAL_MAP.values()) | frozenset(
+    _PREDICATE_ALIASES.values()
+)
 
 _DIRECTIONAL_RELATION_KEYWORD_SWAP_MAP = {
     'represented by': 'represents',
@@ -271,20 +374,58 @@ def _canonicalize_relation_keyword(keyword: str) -> str:
     return _PREDICATE_ALIASES.get(_predicate_alias_key(canonical), canonical)
 
 
+_COMPOUND_RELATION_CONNECTORS = (' and ', ' then ')
+
+
+def _clean_relation_keyword_surface(keyword: str) -> str:
+    return re.sub(r'\s+', ' ', keyword).strip(' \t\r\n,.;').replace('\\,', ',').lower()
+
+
+def _split_unescaped_commas(keyword: str) -> list[str]:
+    return list(re.split(r'(?<!\\),', keyword))
+
+
+def _canonicalize_relation_keyword_part(keyword: str) -> str:
+    return _canonicalize_relation_keyword(_clean_relation_keyword_surface(keyword))
+
+
+def _expand_canonical_relation_keyword(keyword: str) -> tuple[str, ...]:
+    canonical = _canonicalize_relation_keyword_part(keyword)
+    raw_parts = _split_unescaped_commas(canonical) if ',' in canonical else [canonical]
+    expanded: list[str] = []
+
+    for raw_part in raw_parts:
+        part = _canonicalize_relation_keyword_part(raw_part)
+        if not part:
+            continue
+
+        connector_match = next((connector for connector in _COMPOUND_RELATION_CONNECTORS if connector in part), None)
+        if connector_match is None:
+            expanded.append(part)
+            continue
+
+        first_part, second_part = part.split(connector_match, 1)
+        first_canonical = _canonicalize_relation_keyword_part(first_part)
+        if first_canonical:
+            expanded.append(first_canonical)
+        second_canonical = _canonicalize_relation_keyword_part(second_part)
+        if second_canonical in _CANONICAL_PREDICATE_VALUES:
+            expanded.append(second_canonical)
+
+    return tuple(expanded)
+
+
 def _raw_relation_keyword_terms(raw_keywords: str | Iterable[str]) -> tuple[str, ...]:
     raw_values = [raw_keywords] if isinstance(raw_keywords, str) else raw_keywords
     normalized_keywords: list[str] = []
     seen_keywords: set[str] = set()
 
     for raw_value in raw_values:
-        cleaned_value = sanitize_and_normalize_extracted_text(str(raw_value), remove_inner_quotes=True)
-        cleaned_value = cleaned_value.replace('，', ',')
-        for raw_keyword in cleaned_value.split(','):
-            keyword = re.sub(r'\s+', ' ', raw_keyword).strip(' \t\r\n,.;').lower()
-            if not keyword or keyword in seen_keywords:
-                continue
-            normalized_keywords.append(keyword)
-            seen_keywords.add(keyword)
+        keyword = _clean_relation_keyword_surface(str(raw_value).replace('，', ','))
+        if not keyword or keyword in seen_keywords:
+            continue
+        normalized_keywords.append(keyword)
+        seen_keywords.add(keyword)
 
     return tuple(normalized_keywords)
 
@@ -298,13 +439,13 @@ def normalize_relation_keyword_terms(
     seen_keywords: set[str] = set()
 
     for keyword in _raw_relation_keyword_terms(raw_keywords):
-        keyword = _canonicalize_relation_keyword(keyword)
-        if keyword in seen_keywords:
-            continue
-        normalized_keywords.append(keyword)
-        seen_keywords.add(keyword)
-        if max_keywords > 0 and len(normalized_keywords) >= max_keywords:
-            return tuple(normalized_keywords)
+        for canonical_keyword in _expand_canonical_relation_keyword(keyword):
+            if not canonical_keyword or canonical_keyword in seen_keywords:
+                continue
+            normalized_keywords.append(canonical_keyword)
+            seen_keywords.add(canonical_keyword)
+            if max_keywords > 0 and len(normalized_keywords) >= max_keywords:
+                return tuple(normalized_keywords)
 
     return tuple(normalized_keywords)
 
@@ -351,6 +492,34 @@ def relation_semantic_search_hints(keywords: str, description: str) -> str:
         if any(_contains_phrase(normalized, trigger) for trigger in triggers):
             add_hint(hint)
     return '; '.join(hints)
+
+
+_RELATION_HINT_STOPWORDS = frozenset(
+    {
+        'and',
+        'for',
+        'from',
+        'into',
+        'onto',
+        'the',
+        'to',
+        'with',
+    }
+)
+
+
+def relation_generic_search_hints(source: str, target: str, keywords: str, description: str) -> str:
+    raw_terms = [keywords, source, target, description]
+    hints: list[str] = []
+    for raw_term in raw_terms:
+        normalized = re.sub(r'[^a-z0-9]+', ' ', str(raw_term).casefold())
+        for token in normalized.split():
+            if len(token) <= 2 or token in _RELATION_HINT_STOPWORDS or token in hints:
+                continue
+            hints.append(token)
+            if len(hints) >= 24:
+                return ' '.join(hints)
+    return ' '.join(hints)
 
 
 class RelationPolarity(str, Enum):
@@ -476,6 +645,22 @@ class RelationPredicate:
     def text(self) -> str:
         return ', '.join(self.keywords)
 
+    @property
+    def primary(self) -> str:
+        if not self.keywords:
+            return ''
+
+        first_keyword = self.keywords[0]
+        if first_keyword in _CANONICAL_PREDICATE_VALUES:
+            return first_keyword
+
+        prefix_predicates = sorted(_CANONICAL_PREDICATE_VALUES, key=len, reverse=True)
+        for predicate in prefix_predicates:
+            if first_keyword.startswith(f'{predicate} '):
+                return predicate
+
+        return _clean_relation_keyword_surface(_split_unescaped_commas(first_keyword)[0])
+
 
 @dataclass(frozen=True)
 class RelationFact:
@@ -581,10 +766,10 @@ def build_relation_vector_content(summary: RelationSummary) -> str:
             f'{summary.keywords}\t{summary.key.src}',
             summary.key.tgt,
             summary.description,
-            f'relation: {summary.key.src} --{summary.keywords}--> {summary.key.tgt}',
+            f'relation: {summary.key.src} --{summary.predicate.primary}--> {summary.key.tgt}',
             f'source_entity: {summary.key.src}',
             f'target_entity: {summary.key.tgt}',
-            f'predicate: {summary.keywords}',
+            f'predicate: {summary.predicate.primary}',
         ]
     )
     semantic_lines: list[str] = []
@@ -598,6 +783,13 @@ def build_relation_vector_content(summary: RelationSummary) -> str:
         facets = ', '.join(facet.value for facet in sorted(summary.semantics.facets, key=lambda item: item.value))
         semantic_lines.append(f'facets: {facets}')
     semantic_hints = relation_semantic_search_hints(summary.keywords, summary.description)
+    if not semantic_hints:
+        semantic_hints = relation_generic_search_hints(
+            summary.key.src,
+            summary.key.tgt,
+            summary.keywords,
+            summary.description,
+        )
     if semantic_hints:
         semantic_lines.append(f'search_hints: {semantic_hints}')
     if semantic_lines:

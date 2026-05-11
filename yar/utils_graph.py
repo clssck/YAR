@@ -6,6 +6,13 @@ from typing import Any, cast
 
 from .base import BaseGraphStorage, BaseKVStorage, BaseVectorStorage, DeletionResult, StorageNameSpace
 from .constants import GRAPH_FIELD_SEP
+from .graph_model import (
+    RelationKey,
+    RelationPredicate,
+    RelationSemantics,
+    RelationSummary,
+    build_relation_storage_projection,
+)
 from .kg.shared_storage import get_storage_keyed_lock
 from .utils import compute_mdhash_id, logger, make_relation_chunk_key
 
@@ -46,12 +53,7 @@ async def _persist_graph_updates(
 
     # Persist all storage instances in parallel
     if storages:
-        await asyncio.gather(
-            *[
-                cast(StorageNameSpace, storage_inst).index_done_callback()
-                for storage_inst in storages
-            ]
-        )
+        await asyncio.gather(*[cast(StorageNameSpace, storage_inst).index_done_callback() for storage_inst in storages])
 
 
 async def adelete_by_entity(
@@ -943,48 +945,33 @@ async def acreate_relation(
             if existing_edge:
                 raise ValueError(f"Relation from '{source_entity}' to '{target_entity}' already exists")
 
-            # Prepare edge data with defaults if missing
-            edge_data = {
-                'description': relation_data.get('description', ''),
-                'keywords': relation_data.get('keywords', ''),
-                'source_id': relation_data.get('source_id', 'manual_creation'),
-                'weight': float(relation_data.get('weight', 1.0)),
-                'file_path': relation_data.get('file_path', 'manual_creation'),
-                'created_at': int(time.time()),
-            }
+            description = str(relation_data.get('description', '') or '')
+            predicate = RelationPredicate.from_raw(relation_data.get('keywords', ''))
+            source_id = str(relation_data.get('source_id', 'manual_creation') or 'manual_creation')
+            file_path = str(relation_data.get('file_path', 'manual_creation') or 'manual_creation')
+            weight = float(relation_data.get('weight', 1.0))
+            created_at = int(time.time())
+            summary = RelationSummary(
+                key=RelationKey(source_entity, target_entity),
+                predicate=predicate,
+                description=description,
+                weight=weight,
+                source_id=source_id,
+                file_path=file_path,
+                created_at=created_at,
+                truncate=str(relation_data.get('truncate', '') or ''),
+                semantics=RelationSemantics.from_text(predicate.text, description),
+            )
+            projection = build_relation_storage_projection(summary)
 
             # Add relation to knowledge graph
-            await chunk_entity_relation_graph.upsert_edge(source_entity, target_entity, edge_data)
+            await chunk_entity_relation_graph.upsert_edge(
+                source_entity,
+                target_entity,
+                projection.graph_edge_data,
+            )
 
-            # Normalize entity order for undirected relation vector (ensures consistent key generation)
-            if source_entity > target_entity:
-                source_entity, target_entity = target_entity, source_entity
-
-            # Prepare content for embedding
-            description = edge_data.get('description', '')
-            keywords = edge_data.get('keywords', '')
-            source_id = edge_data.get('source_id', '')
-            weight = edge_data.get('weight', 1.0)
-
-            # Create content for embedding
-            content = f'{keywords}\t{source_entity}\n{target_entity}\n{description}'
-
-            # Calculate relation ID
-            relation_id = compute_mdhash_id(source_entity + target_entity, prefix='rel-')
-
-            # Prepare data for vector database update
-            relation_data_for_vdb = {
-                relation_id: {
-                    'content': content,
-                    'src_id': source_entity,
-                    'tgt_id': target_entity,
-                    'source_id': source_id,
-                    'description': description,
-                    'keywords': keywords,
-                    'weight': weight,
-                    'file_path': relation_data.get('file_path', 'manual_creation'),
-                }
-            }
+            relation_data_for_vdb = projection.relation_vdb_payload
 
             # Update vector database
             await relationships_vdb.upsert(relation_data_for_vdb)
@@ -995,7 +982,7 @@ async def acreate_relation(
                 normalized_src, normalized_tgt = sorted([source_entity, target_entity])
                 storage_key = make_relation_chunk_key(normalized_src, normalized_tgt)
 
-                source_id = str(edge_data.get('source_id', ''))
+                source_id = str(projection.graph_edge_data.get('source_id', ''))
                 chunk_ids = [cid for cid in source_id.split(GRAPH_FIELD_SEP) if cid]
 
                 if chunk_ids:
@@ -1019,11 +1006,12 @@ async def acreate_relation(
             )
 
             logger.info(f'Relation Create: `{source_entity}`~`{target_entity}` successfully created')
+            info_src, info_tgt = summary.key.storage_pair
             return await get_relation_info(
                 chunk_entity_relation_graph,
                 relationships_vdb,
-                source_entity,
-                target_entity,
+                info_src,
+                info_tgt,
                 include_vector_data=True,
             )
         except Exception as e:
@@ -1223,9 +1211,7 @@ async def _merge_entities_impl(
     logger.info(f'Entity Merge: updating {len(relation_updates)} relations')
 
     async def _update_relation(rel_data: dict) -> None:
-        await chunk_entity_relation_graph.upsert_edge(
-            rel_data['graph_src'], rel_data['graph_tgt'], rel_data['data']
-        )
+        await chunk_entity_relation_graph.upsert_edge(rel_data['graph_src'], rel_data['graph_tgt'], rel_data['data'])
         logger.info(f'Entity Merge: updating relation `{rel_data["graph_src"]}`~`{rel_data["graph_tgt"]}`')
 
     await asyncio.gather(*[_update_relation(rd) for rd in relation_updates.values()])
@@ -1440,9 +1426,7 @@ async def amerge_entities(
             )
 
             # Always store audit trail entries for debugging/tracking
-            await _store_merge_audit_entries(
-                entities_vdb, source_entities, target_entity, workspace
-            )
+            await _store_merge_audit_entries(entities_vdb, source_entities, target_entity, workspace)
 
             return result
         except Exception as e:
