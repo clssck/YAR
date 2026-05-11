@@ -13,6 +13,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from yar.tracing import get_active_trace_manager, noop_trace_manager
+
 from .utils import TiktokenTokenizer, logger
 
 # use the .env that is inside the current folder
@@ -178,28 +180,59 @@ def create_rerank_func(
 
     # Create the rerank function closure
     async def rerank_func(query: str, documents: list[str], top_n: int | None = None, **kwargs):
-        if request_format == 'deepinfra':
-            return await deepinfra_rerank(
-                query=query,
-                documents=documents,
-                top_n=top_n,
-                api_key=api_key,
-                model=model,
-                base_url=base_url,
-            )
-        else:
-            return await generic_rerank_api(
-                query=query,
-                documents=documents,
-                model=model,
-                base_url=base_url,
-                api_key=api_key,
-                top_n=top_n,
-                request_format=request_format,
-                response_format=response_format,
-                enable_chunking=enable_chunking,
-                max_tokens_per_doc=max_tokens_per_doc,
-            )
+        manager = get_active_trace_manager() or noop_trace_manager(default_project='yar-app')
+        capture_contexts = manager.config.capture_contexts
+        capture_prompts = manager.config.capture_prompts
+        input_docs = [{'id': str(i), 'content': doc} for i, doc in enumerate(documents)] if capture_contexts else None
+        with manager.start_reranker_span(
+            f'rerank.{binding}',
+            model=model,
+            query=query if capture_prompts else None,
+            top_k=top_n,
+            input_documents=input_docs,
+            attributes={
+                'reranker.input_count': len(documents),
+                'reranker.binding': binding,
+                'reranker.request_format': request_format,
+            },
+        ) as span:
+            if request_format == 'deepinfra':
+                results = await deepinfra_rerank(
+                    query=query,
+                    documents=documents,
+                    top_n=top_n,
+                    api_key=api_key,
+                    model=model,
+                    base_url=base_url,
+                )
+            else:
+                results = await generic_rerank_api(
+                    query=query,
+                    documents=documents,
+                    model=model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    top_n=top_n,
+                    request_format=request_format,
+                    response_format=response_format,
+                    enable_chunking=enable_chunking,
+                    max_tokens_per_doc=max_tokens_per_doc,
+                )
+            output_docs = []
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                idx = item.get('index')
+                doc_payload: dict[str, Any] = {
+                    'id': str(idx) if idx is not None else None,
+                    'score': item.get('relevance_score'),
+                }
+                if capture_contexts and isinstance(idx, int) and 0 <= idx < len(documents):
+                    doc_payload['content'] = documents[idx]
+                output_docs.append(doc_payload)
+            span.set_reranker(output_documents=output_docs)
+            span.set_attribute('reranker.output_count', len(output_docs))
+            return results
 
     return rerank_func
 
@@ -236,37 +269,9 @@ def chunk_documents_for_rerank(
             f'Clamping to {overlap_tokens} to prevent infinite loop.'
         )
 
-    try:
-        tokenizer = TiktokenTokenizer(model_name=tokenizer_model)
-    except Exception as e:
-        logger.warning(f'Failed to initialize tokenizer: {e}. Using character-based approximation.')
-        # Fallback: approximate 1 token ≈ 4 characters
-        max_chars = max_tokens * 4
-        overlap_chars = overlap_tokens * 4
+    tokenizer = TiktokenTokenizer(model_name=tokenizer_model)
 
-        chunked_docs = []
-        doc_indices = []
-
-        for idx, doc in enumerate(documents):
-            if len(doc) <= max_chars:
-                chunked_docs.append(doc)
-                doc_indices.append(idx)
-            else:
-                # Split into overlapping chunks
-                start = 0
-                while start < len(doc):
-                    end = min(start + max_chars, len(doc))
-                    chunk = doc[start:end]
-                    chunked_docs.append(chunk)
-                    doc_indices.append(idx)
-
-                    if end >= len(doc):
-                        break
-                    start = end - overlap_chars
-
-        return chunked_docs, doc_indices
-
-    # Use tokenizer for accurate chunking
+    # Use tokenizer for exact chunking.
     chunked_docs = []
     doc_indices = []
 

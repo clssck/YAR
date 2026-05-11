@@ -241,6 +241,12 @@ set_env "WORKSPACE" "${WORKSPACE:-default}"
 # Logging
 set_env "LOG_LEVEL" "${LOG_LEVEL:-INFO}"
 
+# Observability - Phoenix/OpenTelemetry is enabled by default for troubleshooting.
+# Prompt/context text stays redacted unless capture env vars are explicitly set.
+set_env "YAR_TRACE_ENABLED" "${YAR_TRACE_ENABLED:-true}"
+set_env "YAR_TRACE_PROJECT" "${YAR_TRACE_PROJECT:-yar-app}"
+set_env "PHOENIX_COLLECTOR_ENDPOINT" "${PHOENIX_COLLECTOR_ENDPOINT:-http://${GATEWAY_IP}:6006/v1/traces}"
+
 set_env "LITELLM_MASTER_KEY" "${LITELLM_MASTER_KEY:-sk-litellm-master-key}"
 
 if [ "$PROFILE" = "dev" ]; then
@@ -338,13 +344,32 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Step 7.5: Python dependencies (api + observability so OTEL tracing is on)
+# ══════════════════════════════════════════════════════════════════════════════
+
+if command -v uv &> /dev/null; then
+    echo ""
+    echo -e "${YELLOW}Installing Python dependencies (api + observability)...${NC}"
+    if uv sync --extra api --extra observability --extra dev --extra test --quiet; then
+        echo -e "${GREEN}* Python deps synced; Phoenix/OpenTelemetry available${NC}"
+    else
+        echo -e "${RED}x uv sync failed - tracing will be disabled until resolved${NC}"
+    fi
+else
+    echo ""
+    echo -e "${YELLOW}i uv not found - skipping Python dep install${NC}"
+    echo -e "  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo -e "  Then run: uv sync --extra api --extra observability --extra dev --extra test"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Step 8: Summary
 # ══════════════════════════════════════════════════════════════════════════════
 
 echo ""
 echo -e "${GREEN}Profile:${NC} $PROFILE  ${GREEN}Gateway:${NC} $GATEWAY_IP"
 
-SERVICES_LIST="postgres, rustfs, litellm"
+SERVICES_LIST="postgres, rustfs, litellm, phoenix"
 echo -e "${GREEN}Services:${NC} $SERVICES_LIST"
 echo ""
 
@@ -361,9 +386,9 @@ echo ""
 # Step 9: Build and start Docker containers
 # ══════════════════════════════════════════════════════════════════════════════
 
-COMPOSE_PROFILE_FLAG=""
+COMPOSE_PROFILE_FLAG="--profile observability"
 if [ "$PROFILE" = "work" ]; then
-    COMPOSE_PROFILE_FLAG="--profile work"
+    COMPOSE_PROFILE_FLAG="--profile work --profile observability"
 fi
 
 echo -e "${YELLOW}[Step 1/3] Building Docker images...${NC}"

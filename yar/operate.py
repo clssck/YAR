@@ -66,11 +66,20 @@ from yar.graph_model import (
 )
 from yar.kg.shared_storage import check_pipeline_cancellation, get_storage_keyed_lock, update_pipeline_status
 from yar.prompt import PROMPTS
+from yar.relation_resolution import (
+    DEFAULT_CONFIG as DEFAULT_RELATION_RESOLUTION_CONFIG,
+)
+from yar.relation_resolution import (
+    RelationResolutionConfig,
+    llm_review_relation_predicates_batch,
+)
 from yar.retrieval import expand_query_aliases, resolve_entity_filter
+from yar.tracing import mark_query_cache_hit
 from yar.type_defs import GlobalConfig, resolve_entity_extract_max_async
 from yar.utils import (
     CacheData,
     Tokenizer,
+    _is_generic_duplicate_file_path,
     analyze_query_intent,
     apply_source_ids_limit,
     compute_args_hash,
@@ -5074,6 +5083,7 @@ async def kg_query(
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
         logger.info(' == LLM cache == Query cache hit, using cached response as query result')
+        mark_query_cache_hit()
         response = cached_response
     else:
         response = cast(
@@ -5254,6 +5264,7 @@ async def extract_keywords_only(
         cached_response, _ = cached_result  # Extract content, ignore timestamp
         try:
             keywords_data = json_repair.loads(cached_response)
+            mark_query_cache_hit()
             if isinstance(keywords_data, dict):
                 return keywords_data.get('high_level_keywords', []), keywords_data.get('low_level_keywords', [])
         except (json.JSONDecodeError, KeyError, AttributeError):
@@ -8191,6 +8202,7 @@ async def naive_query(
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
         logger.info(' == LLM cache == Query cache hit, using cached response as query result')
+        mark_query_cache_hit()
         response = cached_response
     else:
         response = cast(

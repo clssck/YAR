@@ -46,14 +46,14 @@ RUN apt-get update \
 # Resolve dependencies first so the layer is cacheable across source changes.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra api --no-install-project --no-editable
+    uv sync --frozen --no-dev --extra api --extra observability --no-install-project --no-editable
 
 # Now bring in source and built frontend assets, then install the project itself.
 COPY yar/ ./yar/
 COPY --from=frontend-builder /app/yar/api/webui ./yar/api/webui
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra api --no-editable \
+    uv sync --frozen --no-dev --extra api --extra observability --no-editable \
     && /app/.venv/bin/python -m ensurepip --upgrade
 
 # Pre-fetch the tiktoken cache (exit 2 means "no cacheable tokenizers", treat as success).

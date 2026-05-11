@@ -122,6 +122,32 @@ services:
     mem_limit: 1g
     restart: unless-stopped
 
+  # ══════════════════════════════════════════════════════════════════════════════
+  # Phoenix - OpenTelemetry trace UI backed by PostgreSQL
+  # setup.sh/start.sh start this by default via the observability profile
+  # ══════════════════════════════════════════════════════════════════════════════
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: yar-phoenix
+    profiles:
+      - observability
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://yar:${POSTGRES_PASSWORD:-yar_pass}@postgres:5432/yar
+      PHOENIX_SQL_DATABASE_SCHEMA: phoenix
+      PHOENIX_PORT: 6006
+      PHOENIX_GRPC_PORT: 4317
+      PHOENIX_TELEMETRY_ENABLED: ${PHOENIX_TELEMETRY_ENABLED:-false}
+    ports:
+      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:6006:6006'
+      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:4317:4317'
+    networks:
+      - yar-network
+    mem_limit: 1g
+    restart: unless-stopped
+
 # All persistent data lives on the host filesystem under ${YAR_DATA_DIR:-./data}
 # so it survives Docker daemon resets and is easy to back up. See setup.sh which
 # creates the directories with the correct permissions on first run.

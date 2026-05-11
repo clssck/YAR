@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import csv
 import html
 import importlib
@@ -735,6 +736,7 @@ def priority_limit_async_func_call(
                                 task_id,
                                 args,
                                 kwargs,
+                                caller_context,
                             ) = await asyncio.wait_for(queue.get(), timeout=1.0)
                         except asyncio.TimeoutError:
                             continue
@@ -757,14 +759,18 @@ def priority_limit_async_func_call(
                             continue
 
                         try:
-                            # Execute function with timeout protection
+                            # Execute function in the caller's contextvars copy so OTel
+                            # parent span (and any other context) match the request that
+                            # enqueued this work — workers themselves were spawned long
+                            # before this request and carry stale context.
+                            sub_task = asyncio.create_task(
+                                cast(Coroutine[Any, Any, Any], func(*args, **kwargs)),
+                                context=caller_context,
+                            )
                             if max_execution_timeout is not None:
-                                result = await asyncio.wait_for(
-                                    cast(Awaitable[Any], func(*args, **kwargs)),
-                                    timeout=max_execution_timeout,
-                                )
+                                result = await asyncio.wait_for(sub_task, timeout=max_execution_timeout)
                             else:
-                                result = await cast(Awaitable[Any], func(*args, **kwargs))
+                                result = await sub_task
 
                             # Set result if future is still valid
                             if not task_state.future.done():
@@ -996,15 +1002,19 @@ def priority_limit_async_func_call(
                     current_count = counter
                     counter += 1
 
+                # Capture caller's contextvars (OTel parent span, YAR chain accumulator,
+                # session/user attributes, etc.) so the worker can run ``func`` in the
+                # caller's context instead of the worker's stale spawn-time context.
+                caller_context = contextvars.copy_context()
                 # Queue the task with timeout handling
                 try:
                     if _queue_timeout is not None:
                         await asyncio.wait_for(
-                            queue.put((_priority, current_count, task_id, args, kwargs)),
+                            queue.put((_priority, current_count, task_id, args, kwargs, caller_context)),
                             timeout=_queue_timeout,
                         )
                     else:
-                        await queue.put((_priority, current_count, task_id, args, kwargs))
+                        await queue.put((_priority, current_count, task_id, args, kwargs, caller_context))
                 except asyncio.TimeoutError as e:
                     raise QueueFullError(f'{queue_name}: Queue full, timeout after {_queue_timeout} seconds') from e
                 except Exception as e:

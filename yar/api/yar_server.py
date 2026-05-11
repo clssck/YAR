@@ -66,6 +66,7 @@ from yar.kg.shared_storage import (
     get_namespace_data,
 )
 from yar.storage.s3_client import S3Client, S3Config
+from yar.tracing import TraceManager, configure_tracing, instrument_fastapi_app
 from yar.type_defs import GPTKeywordExtractionFormat
 from yar.utils import EmbeddingFunc, get_env_value, logger, set_verbose_debug
 
@@ -234,6 +235,7 @@ def create_app(args):
     # Setup logging
     logger.setLevel(args.log_level)
     set_verbose_debug(args.verbose)
+    tracing = configure_tracing(default_project='yar-app', enabled_by_default=True)
 
     # Create configuration cache (this will output configuration logs)
     config_cache = LLMConfigCache(args)
@@ -335,6 +337,8 @@ def create_app(args):
                 # In Gunicorn mode with preload_app=True, cleanup is handled by on_exit hooks
                 logger.debug('Gunicorn Mode: postpone shared storage finalization to master process')
 
+            tracing.shutdown()
+
     # Initialize FastAPI
     base_description = 'Providing API for YAR core and Web UI'
     swagger_description = (
@@ -364,6 +368,7 @@ def create_app(args):
     }
 
     app = FastAPI(**cast(dict[str, Any], app_kwargs))
+    instrument_fastapi_app(app, tracing)
 
     # Add custom validation error handler for /query/data endpoint
     @app.exception_handler(RequestValidationError)
@@ -422,7 +427,7 @@ def create_app(args):
     # Create working directory if it doesn't exist
     Path(args.working_dir).mkdir(parents=True, exist_ok=True)
 
-    def create_optimized_openai_llm_func(config_cache: LLMConfigCache, args, llm_timeout: int):
+    def create_optimized_openai_llm_func(config_cache: LLMConfigCache, args, llm_timeout: int, tracing: TraceManager):
         """Create optimized OpenAI LLM function with pre-processed configuration"""
 
         async def optimized_openai_alike_model_complete(
@@ -444,15 +449,99 @@ def create_app(args):
             if config_cache.openai_llm_options:
                 kwargs.update(config_cache.openai_llm_options)
 
-            return await openai_complete_if_cache(
-                args.llm_model,
-                prompt,
+            # OpenAI gpt-5 / o1 series reject ``max_tokens`` and require
+            # ``max_completion_tokens``. Other models accept either, but
+            # sending both is rejected too. Collapse to a single canonical
+            # key, picking the smallest cap so the most restrictive caller
+            # wins (binding-wide cap vs. per-call response budget).
+            if 'max_completion_tokens' in kwargs and 'max_tokens' in kwargs:
+                caps = [
+                    cap
+                    for cap in (kwargs.get('max_completion_tokens'), kwargs.get('max_tokens'))
+                    if isinstance(cap, int) and cap > 0
+                ]
+                if caps:
+                    kwargs['max_completion_tokens'] = min(caps)
+                kwargs.pop('max_tokens', None)
+
+            invocation_parameters = {
+                k: v
+                for k, v in kwargs.items()
+                if k not in {'hashing_kv', 'token_tracker'}
+                and not k.startswith('_')
+                and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }
+            extra_attrs: dict[str, Any] = {
+                'llm.keyword_extraction': bool(keyword_extraction),
+                'input.prompt_length': len(str(prompt or '')),
+                'input.system_prompt_length': len(str(system_prompt or '')),
+                'llm.history_message_count': len(history_messages),
+            }
+
+            # Capture token usage via a per-call tracker that doesn't leak across requests.
+            class _CallTokenTracker:
+                __slots__ = ('counts',)
+
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.counts: dict[str, int] = {}
+
+                def add_usage(self, usage: dict[str, int]) -> None:
+                    if not usage:
+                        return
+                    for key in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
+                        value = usage.get(key)
+                        if isinstance(value, (int, float)) and value:
+                            self.counts[key] = self.counts.get(key, 0) + int(value)
+
+            existing_tracker = kwargs.get('token_tracker')
+            call_tracker = _CallTokenTracker()
+            if existing_tracker is None:
+                kwargs['token_tracker'] = call_tracker
+                call_tracker_owned = True
+            else:
+                call_tracker_owned = False
+
+            with tracing.start_llm_span(
+                'llm.openai.complete',
+                model=args.llm_model,
+                provider=args.llm_binding,
+                system='openai',
+                prompt=prompt,
                 system_prompt=system_prompt,
                 history_messages=history_messages,
-                base_url=args.llm_binding_host,
-                api_key=args.llm_binding_api_key,
-                **kwargs,
-            )
+                invocation_parameters=invocation_parameters,
+                attributes=extra_attrs,
+            ) as span:
+                try:
+                    result = await openai_complete_if_cache(
+                        args.llm_model,
+                        prompt,
+                        system_prompt=system_prompt,
+                        history_messages=history_messages,
+                        base_url=args.llm_binding_host,
+                        api_key=args.llm_binding_api_key,
+                        **kwargs,
+                    )
+                    if call_tracker_owned and call_tracker.counts:
+                        span.set_llm_token_counts(
+                            prompt=call_tracker.counts.get('prompt_tokens'),
+                            completion=call_tracker.counts.get('completion_tokens'),
+                            total=call_tracker.counts.get('total_tokens'),
+                        )
+                    if isinstance(result, str):
+                        span.set_attribute('output.answer_length', len(result))
+                        span.set_attribute('output.streaming', False)
+                        if tracing.config.capture_prompts:
+                            span.set_output_value(result, mime='text/plain')
+                            span.set_llm_output_messages([{'role': 'assistant', 'content': result}])
+                    else:
+                        span.set_attribute('output.streaming', True)
+                    return result
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_status_error(str(exc))
+                    raise
 
         return optimized_openai_alike_model_complete
 
@@ -477,7 +566,7 @@ def create_app(args):
         )
 
     def create_optimized_embedding_function(
-        config_cache: LLMConfigCache, binding, model, host, api_key, args
+        config_cache: LLMConfigCache, binding, model, host, api_key, args, tracing: TraceManager
     ) -> EmbeddingFunc:
         """
         Create optimized embedding function and return an EmbeddingFunc instance
@@ -542,7 +631,34 @@ def create_app(args):
             }
             if model:
                 kwargs['model'] = model
-            return await actual_func(**kwargs)
+
+            text_values = list(texts) if isinstance(texts, list) else [texts]
+            extra_attrs: dict[str, Any] = {
+                'embedding.input_count': len(text_values),
+                'embedding.input_total_chars': sum(len(str(text or '')) for text in text_values),
+            }
+
+            with tracing.start_embedding_span(
+                'embedding.openai.embed',
+                model=model or '',
+                provider=binding,
+                texts=text_values,
+                attributes=extra_attrs,
+            ) as span:
+                try:
+                    result = await actual_func(**kwargs)
+                    shape = getattr(result, 'shape', None)
+                    if shape:
+                        span.set_attribute('embedding.output_shape', str(tuple(shape)))
+                        if len(shape) >= 1:
+                            span.set_attribute('embedding.output_count', int(shape[0]))
+                    elif isinstance(result, list):
+                        span.set_attribute('embedding.output_count', len(result))
+                    return result
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_status_error(str(exc))
+                    raise
 
         # Step 4: Wrap in EmbeddingFunc and return
         embedding_func_instance = EmbeddingFunc(
@@ -574,6 +690,7 @@ def create_app(args):
         host=args.embedding_binding_host,
         api_key=args.embedding_binding_api_key,
         args=args,
+        tracing=tracing,
     )
 
     # Get embedding_send_dim from centralized configuration
@@ -622,16 +739,13 @@ def create_app(args):
 
     # Initialize RAG with unified configuration
     try:
-        # Create chunking function with configured preset (default: semantic)
-        # Config already validates and normalizes the preset value
-        chunking_preset = getattr(args, 'chunking_preset', 'semantic')
-        chunking_func = create_chunker(preset=chunking_preset)
-        logger.info(f'Using chunking preset: {chunking_preset}')
+        chunking_func = create_chunker()
+        logger.info('Using semantic chunking')
 
         rag = YAR(
             working_dir=args.working_dir,
             workspace=args.workspace,
-            llm_model_func=create_optimized_openai_llm_func(config_cache, args, llm_timeout),
+            llm_model_func=create_optimized_openai_llm_func(config_cache, args, llm_timeout, tracing),
             llm_model_name=args.llm_model,
             llm_model_max_async=args.max_async,
             entity_extract_max_async=args.entity_extract_max_async,
@@ -674,7 +788,7 @@ def create_app(args):
             s3_client,  # Enable S3 integration for document uploads
         )
     )
-    app.include_router(create_query_routes(rag, api_key, args.top_k, s3_client))
+    app.include_router(create_query_routes(rag, api_key, args.top_k, s3_client, tracing=tracing))
     app.include_router(create_graph_routes(rag, api_key))
     app.include_router(create_alias_routes(rag, api_key))
     logger.info('Entity alias routes registered at /aliases')

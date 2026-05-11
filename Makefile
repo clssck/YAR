@@ -49,7 +49,7 @@ dev:
 
 # Install dependencies
 install:
-	uv sync --extra api --extra test --extra lint
+	uv sync --extra api --extra test --extra lint --extra observability
 
 # Update lockfile
 lock:

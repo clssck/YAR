@@ -114,6 +114,12 @@ export S3_SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY:-rustfsadmin}"
 export S3_BUCKET_NAME="${S3_BUCKET_NAME:-yar}"
 export S3_REGION="${S3_REGION:-us-east-1}"
 
+# Observability - enabled by default for troubleshooting all API interactions.
+# Text previews remain redacted unless YAR_TRACE_CAPTURE_PROMPTS/CONTEXTS are set.
+export YAR_TRACE_ENABLED="${YAR_TRACE_ENABLED:-true}"
+export YAR_TRACE_PROJECT="${YAR_TRACE_PROJECT:-yar-app}"
+export PHOENIX_COLLECTOR_ENDPOINT="${PHOENIX_COLLECTOR_ENDPOINT:-http://${SERVICE_HOST}:6006/v1/traces}"
+
 # Data directories
 export WORKING_DIR="${WORKING_DIR:-./data/rag_storage}"
 export INPUT_DIR="${INPUT_DIR:-./data/inputs}"
@@ -122,6 +128,21 @@ mkdir -p "$WORKING_DIR" "$INPUT_DIR"
 write_litellm_config() {
     ./scripts/generate_litellm_config.sh "$PROFILE"
     echo -e "  ${GREEN}LiteLLM config refreshed${NC}"
+}
+
+ensure_phoenix() {
+    case "$YAR_TRACE_ENABLED" in
+        0|false|False|FALSE|no|No|NO|off|Off|OFF)
+            echo -e "  ${YELLOW}Phoenix tracing disabled by YAR_TRACE_ENABLED=${YAR_TRACE_ENABLED}${NC}"
+            return
+            ;;
+    esac
+
+    if ! docker compose ps --format "{{.Service}}" 2>/dev/null | grep -q "^phoenix$"; then
+        echo -e "  ${BLUE}Starting Phoenix observability service...${NC}"
+        docker compose --profile observability up -d phoenix >/dev/null
+    fi
+    echo -e "  Phoenix: ${GREEN}${PHOENIX_COLLECTOR_ENDPOINT}${NC}"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -184,16 +205,19 @@ else
     export PORT="${PORT:-9622}"
 
     echo -e "  LLM: ${GREEN}$LLM_MODEL${NC}  Embed: ${GREEN}$EMBEDDING_MODEL${NC}  via LiteLLM @ ${SERVICE_HOST}:4000"
+    echo -e "  Vision: ${GREEN}${VISION_PAGES_PER_CALL}${NC} pages/call x ${GREEN}${VISION_CONCURRENCY}${NC} concurrent requests"
 fi
+
+ensure_phoenix
 
 echo ""
 echo -e "  ${YELLOW}Starting server on http://localhost:$PORT${NC}"
 echo -e "  ${BLUE}Press Ctrl+C to stop${NC}"
 echo ""
 
-# Sync dependencies (api + extras needed for PostgreSQL/S3)
+# Sync dependencies (api + observability for always-on OTEL tracing)
 echo -e "  ${BLUE}Installing dependencies...${NC}"
-uv sync --extra api --quiet
+uv sync --extra api --extra observability --extra dev --extra test --quiet
 
 # Build web UI if bun is available
 if command -v bun &>/dev/null; then

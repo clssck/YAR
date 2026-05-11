@@ -4,16 +4,24 @@ This module contains all query-related routes for the YAR API.
 
 import asyncio
 import json
+import os
 import re
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
 from yar.api.utils_api import get_combined_auth_dependency
 from yar.base import QueryParam
 from yar.constants import DEFAULT_TOP_K
 from yar.storage.s3_client import S3Client
+from yar.tracing import (
+    TraceManager,
+    noop_trace_manager,
+    query_cache_hit_was_set,
+    reset_query_cache_hit,
+    trace_sequence_preview,
+)
 from yar.utils import logger, requests_inline_citations
 
 router = APIRouter(tags=['query'])
@@ -199,6 +207,446 @@ def get_query_failure_message(result: Any) -> str | None:
         return message.strip()
 
     return 'Query processing failed'
+
+
+def _route_trace_manager(tracing: TraceManager | None) -> TraceManager:
+    if isinstance(tracing, TraceManager):
+        return tracing
+    return noop_trace_manager(default_project='yar-app')
+
+
+def _trace_preview(tracing: TraceManager, value: Any) -> str:
+    previews = trace_sequence_preview(
+        [value],
+        max_items=1,
+        max_chars=tracing.config.context_preview_chars,
+    )
+    return previews[0] if previews else ''
+
+
+def _trace_query_request_attrs(endpoint: str, request: 'QueryRequest', tracing: TraceManager) -> dict[str, Any]:
+    attrs: dict[str, Any] = {
+        'yar.endpoint': endpoint,
+        'rag.query_mode': request.mode,
+        'rag.include_references': bool(request.include_references),
+        'rag.include_chunk_content': bool(request.include_chunk_content),
+        'input.query_length': len(request.query),
+        'input.user_prompt_length': len(request.user_prompt or ''),
+    }
+    if tracing.config.capture_prompts:
+        attrs['input.query'] = _trace_preview(tracing, request.query)
+        if request.user_prompt:
+            attrs['input.user_prompt'] = _trace_preview(tracing, request.user_prompt)
+    return attrs
+
+
+_QUERY_LENGTH_BUCKETS = (
+    (32, 'len:xs'),
+    (128, 'len:s'),
+    (512, 'len:m'),
+    (2048, 'len:l'),
+)
+
+
+def _bucket_query_length(length: int) -> str:
+    for limit, label in _QUERY_LENGTH_BUCKETS:
+        if length <= limit:
+            return label
+    return 'len:xl'
+
+
+def _request_tags(endpoint: str, request: 'QueryRequest', streaming: bool) -> list[str]:
+    """Build categorical tags for a query span — used by Phoenix's tag filter."""
+    short_endpoint = endpoint.lstrip('/').replace('/', '_') or 'query'
+    tags = [
+        f'endpoint:{short_endpoint}',
+        f'mode:{request.mode}',
+        f'streaming:{str(bool(streaming)).lower()}',
+        f'references:{str(bool(request.include_references)).lower()}',
+        f'chunks:{str(bool(request.include_chunk_content)).lower()}',
+        f'citation_mode:{request.citation_mode or "none"}',
+        _bucket_query_length(len(request.query)),
+    ]
+    if request.user_prompt:
+        tags.append('user_prompt:true')
+    return tags
+
+
+def _result_tags(result: Any) -> list[str]:
+    """Build categorical tags from a query result (status, references, mode)."""
+    if not isinstance(result, dict):
+        return ['status:invalid_response']
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    metadata = result.get('metadata') if isinstance(result.get('metadata'), dict) else {}
+    references = data.get('references') if isinstance(data.get('references'), list) else []
+    chunks = data.get('chunks') if isinstance(data.get('chunks'), list) else []
+    status = str(result.get('status', 'unknown'))
+    tags = [f'status:{status}']
+    if references:
+        tags.append(f'refs:{min(len(references), 99)}')
+    else:
+        tags.append('refs:0')
+    if not chunks:
+        tags.append('empty:chunks')
+    effective_mode = metadata.get('effective_query_mode') or metadata.get('query_mode')
+    if effective_mode:
+        tags.append(f'effective_mode:{effective_mode}')
+    failure_reason = metadata.get('failure_reason')
+    if failure_reason:
+        tags.append(f'failure:{failure_reason}')
+    return tags
+
+
+def _classify_exception(exc: BaseException) -> str:
+    """Map an exception class/message to a categorical error tag."""
+    name = type(exc).__name__.casefold()
+    text = str(exc).casefold()
+    if 'timeout' in name or 'timeout' in text:
+        return 'timeout'
+    if 'ratelimit' in name or 'rate limit' in text or 'rate_limit' in text or '429' in text:
+        return 'rate_limit'
+    if 'apiconnection' in name or 'connection' in text:
+        return 'connection'
+    if 'auth' in name or 'permission' in name or '401' in text or '403' in text:
+        return 'auth'
+    if 'validation' in name or 'pydantic' in name:
+        return 'validation'
+    if 'cancelled' in name or 'asyncio.cancelled' in text:
+        return 'cancelled'
+    if 'invalid' in name and 'response' in name:
+        return 'invalid_response'
+    if isinstance(exc, HTTPException):
+        return f'http_{getattr(exc, "status_code", "unknown")}'
+    return 'internal'
+
+
+def _emit_synthetic_retriever_span(
+    *,
+    tracing: TraceManager,
+    query: str,
+    request: 'QueryRequest',
+    result: Any,
+) -> None:
+    """Emit a RETRIEVER child span carrying the retrieved documents.
+
+    The span has near-zero duration (it does not wrap the actual retrieval
+    call which is buried inside ``aquery_llm``), but it gives Phoenix's
+    retrieval-specific UI the structure it needs to render document scores,
+    per-document content, and downstream retrieval eval metrics.
+    """
+    documents = _retrieval_documents_from_result(result, tracing)
+    metadata = result.get('metadata') if isinstance(result, dict) and isinstance(result.get('metadata'), dict) else {}
+    effective_mode = metadata.get('effective_query_mode') or metadata.get('query_mode') or request.mode
+    with tracing.start_retriever_span(
+        'retrieval.documents',
+        query=query,
+        top_k=getattr(request, 'top_k', None),
+        mode=str(effective_mode),
+        attributes={
+            'retrieval.requested_mode': request.mode,
+            'retrieval.document_count': len(documents),
+        },
+    ) as retr_span:
+        retr_span.set_retrieval_documents(documents)
+
+
+_LATENCY_BUCKETS = (
+    (250.0, 'latency:fast'),
+    (1000.0, 'latency:normal'),
+    (3000.0, 'latency:slow'),
+    (10000.0, 'latency:very_slow'),
+)
+
+
+def _latency_bucket(elapsed_ms: float) -> str:
+    for limit, label in _LATENCY_BUCKETS:
+        if elapsed_ms <= limit:
+            return label
+    return 'latency:extreme'
+
+
+def _slow_query_threshold_ms() -> float:
+    raw = os.getenv('YAR_TRACE_SLOW_QUERY_MS', '5000')
+    try:
+        value = float(raw)
+    except ValueError:
+        return 5000.0
+    return max(0.0, value)
+
+
+def _retrieval_fingerprint(result: Any) -> str | None:
+    """Compute a stable fingerprint of the retrieved document set.
+
+    Hashes the ordered list of ``(document_title, content_index)`` tuples (or
+    ``reference_id`` when titles are missing). Two queries that hit the same
+    documents in the same order get identical fingerprints — useful for
+    spotting retrieval drift, deduplicating eval examples, or filtering
+    Phoenix to "queries that returned the same docs".
+    """
+    if not isinstance(result, dict):
+        return None
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    references = data.get('references') if isinstance(data.get('references'), list) else None
+    if not references:
+        return None
+    import hashlib
+
+    parts: list[str] = []
+    for ref in references:
+        if not isinstance(ref, dict):
+            continue
+        title = str(
+            ref.get('document_title') or ref.get('file_path') or ref.get('s3_key') or ref.get('reference_id') or ''
+        )
+        idx = str(ref.get('content_index') if ref.get('content_index') is not None else '')
+        parts.append(f'{title}#{idx}')
+    if not parts:
+        return None
+    digest = hashlib.sha1('|'.join(parts).encode('utf-8'), usedforsecurity=False).hexdigest()
+    return digest[:16]
+
+
+_INLINE_CITATION_NUMBER_PATTERN = re.compile(r'\[(\d+(?:\s*,\s*\d+)*)\]')
+
+
+def _extract_cited_reference_ids(response_text: str) -> set[int]:
+    """Return the set of ``[N]`` reference ids cited in the response prose."""
+    cited: set[int] = set()
+    if not response_text:
+        return cited
+    for match in _INLINE_CITATION_NUMBER_PATTERN.finditer(response_text):
+        for piece in match.group(1).split(','):
+            piece = piece.strip()
+            if piece.isdigit():
+                cited.add(int(piece))
+    return cited
+
+
+def _retrieval_precision_bucket(precision: float) -> str:
+    if precision >= 0.75:
+        return 'precision:high'
+    if precision >= 0.4:
+        return 'precision:mid'
+    if precision > 0.0:
+        return 'precision:low'
+    return 'precision:zero'
+
+
+def _emit_citation_metrics(
+    *,
+    trace_span: Any,
+    response_text: str,
+    raw_response_text: str | None = None,
+    result: Any,
+) -> list[str]:
+    """Compute citation / retrieval-precision attributes and return extra tags.
+
+    ``response_text`` is the rendered output the caller will see (post-strip).
+    ``raw_response_text`` is the LLM's actual text before any inline-citation
+    stripping; when provided, we surface ``citations.stripped`` so the trace
+    distinguishes "the LLM never cited" from "we stripped citations on output".
+    """
+    if not isinstance(result, dict):
+        return []
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    references = data.get('references') if isinstance(data.get('references'), list) else []
+    available_ids: set[int] = set()
+    for ref in references or []:
+        if not isinstance(ref, dict):
+            continue
+        rid = ref.get('reference_id')
+        if isinstance(rid, int):
+            available_ids.add(rid)
+        elif isinstance(rid, str) and rid.isdigit():
+            available_ids.add(int(rid))
+    if not available_ids:
+        return []
+    cited = _extract_cited_reference_ids(response_text) & available_ids
+    unused = available_ids - cited
+    precision = len(cited) / len(available_ids) if available_ids else 0.0
+    coverage = (len(cited) / len(available_ids)) if available_ids else 0.0
+    attrs: dict[str, Any] = {
+        'retrieval.cited_count': len(cited),
+        'retrieval.cited_ids': sorted(str(i) for i in cited),
+        'retrieval.unused_count': len(unused),
+        'retrieval.unused_ids': sorted(str(i) for i in unused),
+        'retrieval.precision': round(precision, 3),
+        # Coverage = fraction of provided references the rendered answer
+        # actually used. Same number as ``precision`` when no stripping
+        # happened; below it when we stripped citations on output. A
+        # consistently low coverage points at a citation-noncompliant LLM
+        # or an over-eager strip policy and is the single attribute we
+        # plan to alert on in dashboards.
+        'citations.coverage': round(coverage, 3),
+    }
+    extra_tags: list[str] = []
+    if raw_response_text is not None and raw_response_text != response_text:
+        cited_raw = _extract_cited_reference_ids(raw_response_text) & available_ids
+        attrs['retrieval.cited_count_raw'] = len(cited_raw)
+        attrs['retrieval.cited_ids_raw'] = sorted(str(i) for i in cited_raw)
+        if len(cited_raw) > len(cited):
+            attrs['citations.stripped'] = True
+            extra_tags.append('citations:stripped')
+    trace_span.set_attributes(attrs)
+    return [f'cited:{len(cited)}', _retrieval_precision_bucket(precision), *extra_tags]
+
+
+def _attach_prompt_template(trace_span: Any, request: 'QueryRequest') -> None:
+    """Attach prompt-template attribution to the chain span.
+
+    Lets Phoenix group queries by template name + version (which response
+    template + which variables drove the answer). The actual template body
+    is fetched lazily so the import never costs anything when tracing is off.
+    """
+    template_name = 'naive_rag_response' if request.mode == 'naive' else 'rag_response'
+    variables: dict[str, Any] = {
+        'query_mode': request.mode,
+        'response_type': request.response_type,
+    }
+    if request.user_prompt:
+        variables['user_prompt'] = request.user_prompt
+    try:
+        from yar.prompt import PROMPTS
+
+        template_body = PROMPTS.get(template_name) if isinstance(PROMPTS, dict) else None
+    except Exception:
+        template_body = None
+    trace_span.set_llm_prompt_template(
+        template=template_body or template_name,
+        variables=variables,
+        version=template_name,
+    )
+    trace_span.set_attribute('llm.prompt_template.name', template_name)
+
+
+def _trace_rag_result_attrs(result: Any, tracing: TraceManager) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {'rag.status': 'invalid_response', 'rag.response_type': type(result).__name__}
+
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    metadata = result.get('metadata') if isinstance(result.get('metadata'), dict) else {}
+    references: list[Any] = data.get('references', [])
+    chunks: list[Any] = data.get('chunks', [])
+    entities: list[Any] = data.get('entities', [])
+    relationships: list[Any] = data.get('relationships', [])
+    if not isinstance(references, list):
+        references = []
+    if not isinstance(chunks, list):
+        chunks = []
+    if not isinstance(entities, list):
+        entities = []
+    if not isinstance(relationships, list):
+        relationships = []
+
+    source_files: list[str] = []
+    reference_ids: list[str] = []
+    for reference in references[: tracing.config.max_items]:
+        if not isinstance(reference, dict):
+            continue
+        file_path = reference.get('file_path') or reference.get('document_title') or reference.get('s3_key')
+        if file_path:
+            source_files.append(str(file_path))
+        reference_id = reference.get('reference_id')
+        if reference_id:
+            reference_ids.append(str(reference_id))
+
+    attrs: dict[str, Any] = {
+        'rag.status': str(result.get('status', 'unknown')),
+        'rag.message_length': len(str(result.get('message', ''))),
+        'rag.reference_count': len(references),
+        'rag.chunk_count': len(chunks),
+        'rag.entity_count': len(entities),
+        'rag.relationship_count': len(relationships),
+        'rag.source_files': source_files,
+        'rag.reference_ids': reference_ids,
+    }
+    query_mode = metadata.get('effective_query_mode') or metadata.get('query_mode')
+    if query_mode:
+        attrs['rag.effective_query_mode'] = str(query_mode)
+    if tracing.config.capture_contexts:
+        attrs['rag.context_previews'] = trace_sequence_preview(
+            [chunk.get('content', '') for chunk in chunks if isinstance(chunk, dict)],
+            max_items=tracing.config.max_items,
+            max_chars=tracing.config.context_preview_chars,
+        )
+        # KG entities and relationships with descriptions, flattened so each
+        # attribute is independently queryable in Phoenix and the eval pipeline
+        # can read them without parsing the synthesis prompt.
+        for idx, entity in enumerate(entities[: tracing.config.max_items]):
+            if not isinstance(entity, dict):
+                continue
+            name = entity.get('entity_name') or entity.get('entity')
+            description = entity.get('description', '')
+            entity_type = entity.get('entity_type', '')
+            if name:
+                attrs[f'kg.entities.{idx}.name'] = str(name)
+            if entity_type:
+                attrs[f'kg.entities.{idx}.type'] = str(entity_type)
+            if description:
+                attrs[f'kg.entities.{idx}.description'] = _trace_preview(tracing, str(description))
+        for idx, relation in enumerate(relationships[: tracing.config.max_items]):
+            if not isinstance(relation, dict):
+                continue
+            src = relation.get('src_id') or relation.get('entity1')
+            tgt = relation.get('tgt_id') or relation.get('entity2')
+            description = relation.get('description', '')
+            keywords = relation.get('keywords') or relation.get('predicate') or ''
+            if src:
+                attrs[f'kg.relationships.{idx}.src'] = str(src)
+            if tgt:
+                attrs[f'kg.relationships.{idx}.tgt'] = str(tgt)
+            if keywords:
+                attrs[f'kg.relationships.{idx}.predicate'] = str(keywords)
+            if description:
+                attrs[f'kg.relationships.{idx}.description'] = _trace_preview(tracing, str(description))
+    return attrs
+
+
+def _retrieval_documents_from_result(result: Any, tracing: TraceManager) -> list[dict[str, Any]]:
+    """Build OpenInference retrieval-document payloads from a YAR query result."""
+    if not isinstance(result, dict):
+        return []
+    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+    chunks_by_id: dict[str, dict[str, Any]] = {}
+    for chunk in data.get('chunks', []) or []:
+        if isinstance(chunk, dict):
+            ref_id = chunk.get('reference_id')
+            if ref_id is not None:
+                chunks_by_id[str(ref_id)] = chunk
+    documents: list[dict[str, Any]] = []
+    references = data.get('references', []) or []
+    if not isinstance(references, list):
+        return []
+    for reference in references[: tracing.config.max_items]:
+        if not isinstance(reference, dict):
+            continue
+        ref_id = reference.get('reference_id')
+        chunk = chunks_by_id.get(str(ref_id), {}) if ref_id is not None else {}
+        content = chunk.get('content') or reference.get('content') or reference.get('excerpt') or ''
+        score = chunk.get('score') or reference.get('score')
+        metadata = {
+            'document_title': reference.get('document_title'),
+            'file_path': reference.get('file_path'),
+            's3_key': reference.get('s3_key'),
+            'content_index': reference.get('content_index'),
+        }
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        documents.append(
+            {
+                'id': str(ref_id) if ref_id is not None else None,
+                'content': content if tracing.config.capture_contexts else '',
+                'score': score,
+                'metadata': metadata,
+            }
+        )
+    return documents
+
+
+def _trace_response_attrs(response_content: str, tracing: TraceManager) -> dict[str, Any]:
+    attrs: dict[str, Any] = {'output.answer_length': len(response_content)}
+    if tracing.config.capture_prompts:
+        attrs['output.answer'] = _trace_preview(tracing, response_content)
+    return attrs
 
 
 async def filter_reasoning_stream(response_stream):
@@ -592,6 +1040,7 @@ def create_query_routes(
     api_key: str | None = None,
     top_k: int = DEFAULT_TOP_K,
     s3_client: S3Client | None = None,
+    tracing: TraceManager | None = None,
 ):
     """Create query routes with optional S3 client for presigned URL generation in citations.
 
@@ -605,6 +1054,7 @@ def create_query_routes(
     # when multiple app instances are created (tests, multi-tenant deployments).
     router = APIRouter(tags=['query'])
     combined_auth = get_combined_auth_dependency(api_key)
+    tracing_manager = _route_trace_manager(tracing)
 
     @router.post(
         '/query',
@@ -796,48 +1246,121 @@ def create_query_routes(
                 - 400: Invalid input parameters (e.g., query too short)
                 - 500: Internal processing error (e.g., LLM service unavailable)
         """
-        try:
-            param = request.to_query_params(False)  # Ensure stream=False for non-streaming endpoint
-            # Force stream=False for /query endpoint regardless of include_references setting
-            param.stream = False
+        trace_attrs = _trace_query_request_attrs('/query', request, tracing_manager)
+        input_value = request.query if tracing_manager.config.capture_prompts else None
+        with tracing_manager.start_chain_span(
+            'app.query',
+            input_value=input_value,
+            attributes={**trace_attrs, 'tag.tags': _request_tags('/query', request, streaming=False)},
+        ) as trace_span:
+            _attach_prompt_template(trace_span, request)
+            if trace_span.trace_id:
+                http_response.headers['x-yar-trace-id'] = trace_span.trace_id
+                if trace_span.span_id:
+                    http_response.headers['x-yar-span-id'] = trace_span.span_id
+            try:
+                param = request.to_query_params(False)  # Ensure stream=False for non-streaming endpoint
+                # Force stream=False for /query endpoint regardless of include_references setting
+                param.stream = False
 
-            # Unified approach: always use aquery_llm for both cases
-            result = await rag.aquery_llm(request.query, param=param)
-            failure_message = get_query_failure_message(result)
-            if failure_message:
-                raise HTTPException(status_code=500, detail=failure_message)
-
-            # Extract LLM response and references from unified result
-            llm_response = result.get('llm_response', {})
-            data = result.get('data', {})
-            chunks = list(data.get('chunks', []))
-            references = await _attach_presigned_urls(
-                _attach_chunk_content(
-                    list(data.get('references', [])),
-                    chunks,
-                    include_chunk_content=bool(request.include_references and request.include_chunk_content),
-                ),
-                s3_client if request.include_references else None,
-            )
-
-            response_content = _normalize_query_response_text(
-                llm_response.get('content', ''),
-                keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
-            )
-
-            # Return response with or without references based on request
-            if request.include_references:
-                return QueryResponse(
-                    response=response_content,
-                    references=[ReferenceItem.model_validate(ref) for ref in references],
+                # Unified approach: always use aquery_llm for both cases
+                reset_query_cache_hit()
+                _aquery_started = asyncio.get_event_loop().time()
+                try:
+                    result = await rag.aquery_llm(request.query, param=param)
+                finally:
+                    trace_span.set_attribute('llm.cache_hit', bool(query_cache_hit_was_set()))
+                trace_span.set_attribute(
+                    'phase.aquery_llm_ms',
+                    round((asyncio.get_event_loop().time() - _aquery_started) * 1000, 3),
                 )
-            else:
-                return QueryResponse(response=response_content, references=None)
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f'Error processing query: {e!s}', exc_info=True)
-            raise HTTPException(status_code=500, detail='Internal server error') from e
+                trace_span.set_attributes(_trace_rag_result_attrs(result, tracing_manager))
+                trace_span.set_retrieval_documents(_retrieval_documents_from_result(result, tracing_manager))
+                _fingerprint = _retrieval_fingerprint(result)
+                if _fingerprint:
+                    trace_span.set_attribute('retrieval.fingerprint', _fingerprint)
+                _emit_synthetic_retriever_span(
+                    tracing=tracing_manager, query=request.query, request=request, result=result
+                )
+                # Tags will be finalized after citation metrics so the result and
+                # retrieval-precision dimensions are captured together.
+                failure_message = get_query_failure_message(result)
+                if failure_message:
+                    trace_span.set_status_error(failure_message)
+                    trace_span.set_attribute('error.message', failure_message)
+                    raise HTTPException(status_code=500, detail=failure_message)
+
+                # Extract LLM response and references from unified result
+                llm_response = result.get('llm_response', {})
+                data = result.get('data', {})
+                chunks = list(data.get('chunks', []))
+                references = await _attach_presigned_urls(
+                    _attach_chunk_content(
+                        list(data.get('references', [])),
+                        chunks,
+                        include_chunk_content=bool(request.include_references and request.include_chunk_content),
+                    ),
+                    s3_client if request.include_references else None,
+                )
+
+                raw_response_text = llm_response.get('content', '') or ''
+                response_content = _normalize_query_response_text(
+                    raw_response_text,
+                    keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
+                )
+                trace_span.set_attributes(_trace_response_attrs(response_content, tracing_manager))
+                if tracing_manager.config.capture_prompts:
+                    trace_span.set_output_value(response_content)
+                    trace_span.set_llm_output_messages([{'role': 'assistant', 'content': response_content}])
+                citation_tags = _emit_citation_metrics(
+                    trace_span=trace_span,
+                    response_text=response_content,
+                    raw_response_text=raw_response_text,
+                    result=result,
+                )
+                _query_elapsed_ms = (asyncio.get_event_loop().time() - _aquery_started) * 1000
+                _latency_tags = [_latency_bucket(_query_elapsed_ms)]
+                if _query_elapsed_ms > _slow_query_threshold_ms():
+                    _latency_tags.append('slow:true')
+                _final_tags = (
+                    _request_tags('/query', request, streaming=False)
+                    + _result_tags(result)
+                    + citation_tags
+                    + _latency_tags
+                )
+                if query_cache_hit_was_set():
+                    _final_tags.append('cached:true')
+                trace_span.set_tags(_final_tags)
+                tracing_manager.record_query_metrics(
+                    endpoint='/query',
+                    mode=request.mode,
+                    status='success' if not get_query_failure_message(result) else 'failure',
+                    duration_ms=_query_elapsed_ms,
+                    cached=query_cache_hit_was_set(),
+                )
+
+                # Return response with or without references based on request
+                if request.include_references:
+                    return QueryResponse(
+                        response=response_content,
+                        references=[ReferenceItem.model_validate(ref) for ref in references],
+                    )
+                else:
+                    return QueryResponse(response=response_content, references=None)
+            except HTTPException:
+                raise
+            except Exception as e:
+                trace_span.record_exception(e)
+                trace_span.set_status_error(str(e))
+                trace_span.set_tags(
+                    [
+                        *_request_tags('/query', request, streaming=False),
+                        'status:failure',
+                        f'error:{_classify_exception(e)}',
+                    ]
+                )
+                logger.error(f'Error processing query: {e!s}', exc_info=True)
+                raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/query/stream',
@@ -1026,116 +1549,269 @@ def create_query_routes(
             This endpoint is ideal for applications requiring flexible response delivery.
             Use streaming mode for real-time interfaces and non-streaming for batch processing.
         """
-        try:
-            # Use the stream parameter from the request, defaulting to True if not specified
-            stream_mode = request.stream if request.stream is not None else True
-            param = request.to_query_params(stream_mode)
+        trace_attrs = _trace_query_request_attrs('/query/stream', request, tracing_manager)
+        input_value = request.query if tracing_manager.config.capture_prompts else None
+        with tracing_manager.start_chain_span(
+            'app.query_stream',
+            input_value=input_value,
+            attributes={
+                **trace_attrs,
+                'tag.tags': _request_tags(
+                    '/query/stream',
+                    request,
+                    streaming=request.stream is not False,
+                ),
+            },
+        ) as trace_span:
+            _attach_prompt_template(trace_span, request)
+            try:
+                # Use the stream parameter from the request, defaulting to True if not specified
+                stream_mode = request.stream if request.stream is not None else True
+                trace_span.set_attribute('rag.stream', bool(stream_mode))
+                param = request.to_query_params(stream_mode)
 
-            from fastapi.responses import StreamingResponse
+                from fastapi.responses import StreamingResponse
 
-            # Unified approach: always use aquery_llm for all cases
-            result = await rag.aquery_llm(request.query, param=param)
-            failure_message = get_query_failure_message(result)
-            if failure_message and not stream_mode:
-                raise HTTPException(status_code=500, detail=failure_message)
+                # Unified approach: always use aquery_llm for all cases
+                reset_query_cache_hit()
+                _aquery_started = asyncio.get_event_loop().time()
+                try:
+                    result = await rag.aquery_llm(request.query, param=param)
+                finally:
+                    trace_span.set_attribute('llm.cache_hit', bool(query_cache_hit_was_set()))
+                trace_span.set_attribute(
+                    'phase.aquery_llm_ms',
+                    round((asyncio.get_event_loop().time() - _aquery_started) * 1000, 3),
+                )
+                trace_span.set_attributes(_trace_rag_result_attrs(result, tracing_manager))
+                trace_span.set_retrieval_documents(_retrieval_documents_from_result(result, tracing_manager))
+                _fingerprint = _retrieval_fingerprint(result)
+                if _fingerprint:
+                    trace_span.set_attribute('retrieval.fingerprint', _fingerprint)
+                _emit_synthetic_retriever_span(
+                    tracing=tracing_manager, query=request.query, request=request, result=result
+                )
+                # Tags are finalized after the optional citation pass below.
+                citation_tags: list[str] = []
+                failure_message = get_query_failure_message(result)
+                if failure_message and not stream_mode:
+                    trace_span.set_status_error(failure_message)
+                    trace_span.set_attribute('error.message', failure_message)
+                    raise HTTPException(status_code=500, detail=failure_message)
 
-            async def stream_generator():
-                # Extract references and LLM response from unified result
-                result_payload = result if isinstance(result, dict) else {}
-                references: list[dict[str, Any]] = list(result_payload.get('data', {}).get('references', []))
-                chunks: list[dict[str, Any]] = list(result_payload.get('data', {}).get('chunks', []))
-                llm_response: dict[str, Any] = result_payload.get('llm_response', {}) or {}
-                if failure_message:
-                    yield f'{json.dumps({"error": failure_message})}\n'
-                    return
-
-                references = await _attach_presigned_urls(
-                    _attach_chunk_content(
-                        references,
-                        chunks,
-                        include_chunk_content=bool(request.include_references and request.include_chunk_content),
-                    ),
-                    s3_client if request.include_references else None,
+                if isinstance(result, dict):
+                    llm_response_for_trace = result.get('llm_response') or {}
+                    if isinstance(llm_response_for_trace, dict) and not llm_response_for_trace.get('is_streaming'):
+                        raw_response_text_stream = llm_response_for_trace.get('content', '') or ''
+                        response_content_for_trace = _normalize_query_response_text(
+                            raw_response_text_stream,
+                            keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
+                        )
+                        trace_span.set_attributes(_trace_response_attrs(response_content_for_trace, tracing_manager))
+                        if tracing_manager.config.capture_prompts:
+                            trace_span.set_output_value(response_content_for_trace)
+                            trace_span.set_llm_output_messages(
+                                [{'role': 'assistant', 'content': response_content_for_trace}]
+                            )
+                        citation_tags = _emit_citation_metrics(
+                            trace_span=trace_span,
+                            response_text=response_content_for_trace,
+                            raw_response_text=raw_response_text_stream,
+                            result=result,
+                        )
+                _query_elapsed_ms = (asyncio.get_event_loop().time() - _aquery_started) * 1000
+                _latency_tags = [_latency_bucket(_query_elapsed_ms)]
+                if _query_elapsed_ms > _slow_query_threshold_ms():
+                    _latency_tags.append('slow:true')
+                _final_tags = (
+                    _request_tags('/query/stream', request, streaming=stream_mode)
+                    + _result_tags(result)
+                    + citation_tags
+                    + _latency_tags
+                )
+                if query_cache_hit_was_set():
+                    _final_tags.append('cached:true')
+                trace_span.set_tags(_final_tags)
+                tracing_manager.record_query_metrics(
+                    endpoint='/query/stream',
+                    mode=request.mode,
+                    status='success' if not get_query_failure_message(result) else 'failure',
+                    duration_ms=_query_elapsed_ms,
+                    cached=query_cache_hit_was_set(),
                 )
 
-                citation_mode = request.citation_mode or 'none'
-                should_extract_citations = citation_mode in ['inline', 'footnotes']
+                async def stream_generator():
+                    # Extract references and LLM response from unified result
+                    result_payload = result if isinstance(result, dict) else {}
+                    references: list[dict[str, Any]] = list(result_payload.get('data', {}).get('references', []))
+                    chunks: list[dict[str, Any]] = list(result_payload.get('data', {}).get('chunks', []))
+                    llm_response: dict[str, Any] = result_payload.get('llm_response', {}) or {}
+                    if failure_message:
+                        yield f'{json.dumps({"error": failure_message})}\n'
+                        return
 
-                if llm_response.get('is_streaming'):
-                    # Streaming mode: send references first, then stream response chunks
-                    if request.include_references:
-                        yield f'{json.dumps({"references": references})}\n'
-
-                    response_stream = llm_response.get('response_iterator')
-                    collected_response: list[str] | None = [] if should_extract_citations else None
-                    if response_stream:
-                        try:
-                            # Filter <think>...</think> blocks in real-time
-                            async for chunk in filter_reasoning_stream(response_stream):
-                                if chunk:  # Only send non-empty content
-                                    yield f'{json.dumps({"response": chunk})}\n'
-                                    if collected_response is not None:
-                                        collected_response.append(chunk)
-                        except Exception as e:
-                            logger.error(f'Streaming error: {e!s}')
-                            yield f'{json.dumps({"error": "Stream processing error"})}\n'
-                            return
-
-                    # After streaming completes, extract citations if enabled
-                    if collected_response:
-                        full_response = strip_reasoning_tags(''.join(collected_response))
-                        async for line in _extract_and_stream_citations(
-                            full_response,
-                            chunks,
+                    references = await _attach_presigned_urls(
+                        _attach_chunk_content(
                             references,
-                            rag,
-                            request.citation_threshold or 0.7,
-                            citation_mode,
-                            s3_client,
-                        ):
-                            yield line
-                else:
-                    # Non-streaming mode: send complete response in one message
-                    response_content = _normalize_query_response_text(
-                        llm_response.get('content', ''),
-                        keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
+                            chunks,
+                            include_chunk_content=bool(request.include_references and request.include_chunk_content),
+                        ),
+                        s3_client if request.include_references else None,
                     )
 
-                    # Create complete response object
-                    complete_response: dict[str, Any] = {'response': response_content}
-                    if request.include_references:
-                        complete_response['references'] = references
+                    citation_mode = request.citation_mode or 'none'
+                    should_extract_citations = citation_mode in ['inline', 'footnotes']
 
-                    yield f'{json.dumps(complete_response)}\n'
+                    if llm_response.get('is_streaming'):
+                        # Streaming mode: send references first, then stream response chunks
+                        if request.include_references:
+                            yield f'{json.dumps({"references": references})}\n'
 
-                    # Extract citations for non-streaming mode too
-                    if should_extract_citations and response_content:
-                        async for line in _extract_and_stream_citations(
-                            response_content,
-                            chunks,
-                            references,
-                            rag,
-                            request.citation_threshold or 0.7,
-                            citation_mode,
-                            s3_client,
-                        ):
-                            yield line
+                        response_stream = llm_response.get('response_iterator')
+                        collected_response: list[str] | None = [] if should_extract_citations else None
+                        if response_stream:
+                            try:
+                                # Filter <think>...</think> blocks in real-time
+                                async for chunk in filter_reasoning_stream(response_stream):
+                                    if chunk:  # Only send non-empty content
+                                        yield f'{json.dumps({"response": chunk})}\n'
+                                        if collected_response is not None:
+                                            collected_response.append(chunk)
+                            except Exception as e:
+                                logger.error(f'Streaming error: {e!s}')
+                                yield f'{json.dumps({"error": "Stream processing error"})}\n'
+                                return
 
-            return StreamingResponse(
-                stream_generator(),
-                media_type='application/x-ndjson',
-                headers={
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive',
-                    'Content-Type': 'application/x-ndjson',
-                    'X-Accel-Buffering': 'no',  # Ensure proper handling of streaming response when proxied by Nginx
-                },
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f'Error processing streaming query: {e!s}', exc_info=True)
-            raise HTTPException(status_code=500, detail='Internal server error') from e
+                        # After streaming completes, extract citations if enabled
+                        if collected_response:
+                            full_response = strip_reasoning_tags(''.join(collected_response))
+                            async for line in _extract_and_stream_citations(
+                                full_response,
+                                chunks,
+                                references,
+                                rag,
+                                request.citation_threshold or 0.7,
+                                citation_mode,
+                                s3_client,
+                            ):
+                                yield line
+                    else:
+                        # Non-streaming mode: send complete response in one message
+                        response_content = _normalize_query_response_text(
+                            llm_response.get('content', ''),
+                            keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
+                        )
+
+                        # Create complete response object
+                        complete_response: dict[str, Any] = {'response': response_content}
+                        if request.include_references:
+                            complete_response['references'] = references
+
+                        yield f'{json.dumps(complete_response)}\n'
+
+                        # Extract citations for non-streaming mode too
+                        if should_extract_citations and response_content:
+                            async for line in _extract_and_stream_citations(
+                                response_content,
+                                chunks,
+                                references,
+                                rag,
+                                request.citation_threshold or 0.7,
+                                citation_mode,
+                                s3_client,
+                            ):
+                                yield line
+
+                # Wrap the generator so we record first-token latency. The
+                # streaming span is opened as a child of the chain (require_parent
+                # is satisfied while we're still inside the chain context) and is
+                # held open across the stream by the wrapper's finally block.
+                streaming_span = None
+                streaming_started = asyncio.get_event_loop().time()
+                if isinstance(result, dict) and (result.get('llm_response') or {}).get('is_streaming'):
+                    streaming_span = tracing_manager.start_llm_span(
+                        'llm.stream',
+                        model='streaming',
+                        provider='yar',
+                        attributes={'streaming.is_streaming': True},
+                    )
+                    streaming_span.__enter__()
+
+                async def traced_stream():
+                    first_token_recorded = False
+                    inner = stream_generator()
+                    chunk_count = 0
+                    total_bytes = 0
+                    last_chunk_at = streaming_started
+                    inter_chunk_intervals: list[float] = []
+                    try:
+                        async for chunk in inner:
+                            now = asyncio.get_event_loop().time()
+                            chunk_count += 1
+                            total_bytes += len(chunk) if isinstance(chunk, (str, bytes)) else 0
+                            if not first_token_recorded:
+                                first_token_ms = round((now - streaming_started) * 1000, 3)
+                                if streaming_span is not None:
+                                    streaming_span.set_attribute('streaming.first_token_ms', first_token_ms)
+                                # NOTE: cannot mirror onto ``trace_span`` here — the chain
+                                # ``with`` block has already exited by the time Starlette
+                                # iterates this generator. Dashboards must read
+                                # ``streaming.first_token_ms`` from the child ``llm.stream``
+                                # span (which lives long enough for late attribute writes).
+                                first_token_recorded = True
+                            else:
+                                inter_chunk_intervals.append((now - last_chunk_at) * 1000)
+                            last_chunk_at = now
+                            yield chunk
+                    finally:
+                        if streaming_span is not None:
+                            elapsed_ms = round((asyncio.get_event_loop().time() - streaming_started) * 1000, 3)
+                            if not first_token_recorded:
+                                streaming_span.set_attribute('streaming.first_token_ms', -1)
+                            streaming_span.set_attributes(
+                                {
+                                    'streaming.total_ms': elapsed_ms,
+                                    'streaming.chunk_count': chunk_count,
+                                    'streaming.total_bytes': total_bytes,
+                                    'streaming.bytes_per_second': (
+                                        round(total_bytes * 1000 / elapsed_ms, 3) if elapsed_ms > 0 else 0
+                                    ),
+                                    'streaming.avg_chunk_bytes': (
+                                        round(total_bytes / chunk_count, 3) if chunk_count > 0 else 0
+                                    ),
+                                    'streaming.avg_inter_chunk_ms': (
+                                        round(sum(inter_chunk_intervals) / len(inter_chunk_intervals), 3)
+                                        if inter_chunk_intervals
+                                        else 0
+                                    ),
+                                }
+                            )
+                            streaming_span.__exit__(None, None, None)
+
+                return StreamingResponse(
+                    traced_stream(),
+                    media_type='application/x-ndjson',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Content-Type': 'application/x-ndjson',
+                        'X-Accel-Buffering': 'no',  # Ensure proper handling when proxied by Nginx
+                    },
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                trace_span.record_exception(e)
+                trace_span.set_status_error(str(e))
+                trace_span.set_tags(
+                    [
+                        *_request_tags('/query/stream', request, streaming=True),
+                        'status:failure',
+                        f'error:{_classify_exception(e)}',
+                    ]
+                )
+                logger.error(f'Error processing streaming query: {e!s}', exc_info=True)
+                raise HTTPException(status_code=500, detail='Internal server error') from e
 
     @router.post(
         '/query/data',
@@ -1522,22 +2198,83 @@ def create_query_routes(
             This endpoint always includes references regardless of the include_references parameter,
             as structured data analysis typically requires source attribution.
         """
-        try:
-            param = request.to_query_params(False)  # No streaming for data endpoint
-            response = await rag.aquery_data(request.query, param=param)
+        trace_attrs = _trace_query_request_attrs('/query/data', request, tracing_manager)
+        input_value = request.query if tracing_manager.config.capture_prompts else None
+        with tracing_manager.start_chain_span(
+            'app.query_data',
+            input_value=input_value,
+            attributes={
+                **trace_attrs,
+                'tag.tags': _request_tags('/query/data', request, streaming=False),
+            },
+        ) as trace_span:
+            _attach_prompt_template(trace_span, request)
+            if trace_span.trace_id:
+                http_response.headers['x-yar-trace-id'] = trace_span.trace_id
+                if trace_span.span_id:
+                    http_response.headers['x-yar-span-id'] = trace_span.span_id
+            try:
+                param = request.to_query_params(False)  # No streaming for data endpoint
+                reset_query_cache_hit()
+                _aquery_started = asyncio.get_event_loop().time()
+                try:
+                    response = await rag.aquery_data(request.query, param=param)
+                finally:
+                    trace_span.set_attribute('llm.cache_hit', bool(query_cache_hit_was_set()))
+                trace_span.set_attribute(
+                    'phase.aquery_data_ms',
+                    round((asyncio.get_event_loop().time() - _aquery_started) * 1000, 3),
+                )
+                trace_span.set_attributes(_trace_rag_result_attrs(response, tracing_manager))
+                trace_span.set_retrieval_documents(_retrieval_documents_from_result(response, tracing_manager))
+                _fingerprint = _retrieval_fingerprint(response)
+                if _fingerprint:
+                    trace_span.set_attribute('retrieval.fingerprint', _fingerprint)
+                _emit_synthetic_retriever_span(
+                    tracing=tracing_manager, query=request.query, request=request, result=response
+                )
+                _query_elapsed_ms = (asyncio.get_event_loop().time() - _aquery_started) * 1000
+                _latency_tags = [_latency_bucket(_query_elapsed_ms)]
+                if _query_elapsed_ms > _slow_query_threshold_ms():
+                    _latency_tags.append('slow:true')
+                _final_tags = (
+                    _request_tags('/query/data', request, streaming=False) + _result_tags(response) + _latency_tags
+                )
+                if query_cache_hit_was_set():
+                    _final_tags.append('cached:true')
+                trace_span.set_tags(_final_tags)
+                tracing_manager.record_query_metrics(
+                    endpoint='/query/data',
+                    mode=request.mode,
+                    status='success' if not get_query_failure_message(response) else 'failure',
+                    duration_ms=_query_elapsed_ms,
+                    cached=query_cache_hit_was_set(),
+                )
 
-            if not isinstance(response, dict):
-                raise HTTPException(status_code=500, detail='Invalid response type')
+                if not isinstance(response, dict):
+                    trace_span.set_status_error('Invalid response type')
+                    raise HTTPException(status_code=500, detail='Invalid response type')
 
-            failure_message = get_query_failure_message(response)
-            if failure_message:
-                raise HTTPException(status_code=500, detail=failure_message)
+                failure_message = get_query_failure_message(response)
+                if failure_message:
+                    trace_span.set_status_error(failure_message)
+                    trace_span.set_attribute('error.message', failure_message)
+                    raise HTTPException(status_code=500, detail=failure_message)
 
-            return QueryDataResponse(**response)
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f'Error processing data query: {e!s}', exc_info=True)
-            raise HTTPException(status_code=500, detail='Internal server error') from e
+                return QueryDataResponse(**response)
+            except HTTPException:
+                raise
+            except Exception as e:
+                trace_span.record_exception(e)
+                trace_span.set_status_error(str(e))
+                trace_span.set_tags(
+                    [
+                        *_request_tags('/query/data', request, streaming=False),
+                        'status:failure',
+                        f'error:{_classify_exception(e)}',
+                    ]
+                )
+                logger.error(f'Error processing data query: {e!s}', exc_info=True)
+                raise HTTPException(status_code=500, detail='Internal server error') from e
 
     return router

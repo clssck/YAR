@@ -22,6 +22,8 @@ from tenacity import (
 )
 
 from yar.api import __api_version__
+from yar.tracing import record_llm_finish_reason as _record_llm_finish_reason
+from yar.tracing import record_retry_event as _record_retry_event
 from yar.type_defs import GPTKeywordExtractionFormat
 from yar.utils import (
     VERBOSE_DEBUG,
@@ -223,10 +225,17 @@ async def detect_embedding_dim(
         embedding = response.data[0].embedding
         dim = len(embedding)
 
-
         _EMBEDDING_DIM_CACHE[cache_key] = dim
         logger.info(f'Auto-detected embedding dimension: {model} -> {dim}D')
         return dim
+
+
+_before_sleep_log = before_sleep_log(cast(Any, logger), logging.WARNING)
+
+
+def _yar_before_sleep(retry_state: Any) -> None:
+    _before_sleep_log(retry_state)
+    _record_retry_event(retry_state)
 
 
 @retry(
@@ -238,7 +247,7 @@ async def detect_embedding_dim(
         | retry_if_exception_type(APITimeoutError)
         | retry_if_exception_type(InvalidResponseError)
     ),
-    before_sleep=before_sleep_log(cast(Any, logger), logging.WARNING),
+    before_sleep=_yar_before_sleep,
 )
 async def openai_complete_if_cache(
     model: str,
@@ -352,7 +361,11 @@ async def openai_complete_if_cache(
     logger.debug('===== Entering func of LLM =====')
     logger.debug(f'Model: {model}   Base URL: {base_url}')
     # Scrub sensitive keys from client_configs before logging
-    _safe_configs = {k: ('***' if k in ('api_key', 'api_secret', 'token') else v) for k, v in client_configs.items()} if client_configs else {}
+    _safe_configs = (
+        {k: ('***' if k in ('api_key', 'api_secret', 'token') else v) for k, v in client_configs.items()}
+        if client_configs
+        else {}
+    )
     logger.debug(f'Client Configs: {_safe_configs}')
     logger.debug(f'Additional kwargs: {kwargs}')
     logger.debug(f'Num of history messages: {len(history_messages)}')
@@ -569,6 +582,7 @@ async def openai_complete_if_cache(
                 raise InvalidResponseError('Invalid response from OpenAI API')
 
             message = response.choices[0].message
+            _record_llm_finish_reason(getattr(response.choices[0], 'finish_reason', None))
 
             # Handle parsed responses (structured output via response_format)
             # When using beta.chat.completions.parse(), the response is in message.parsed
@@ -732,7 +746,9 @@ async def nvidia_openai_complete(
     return result
 
 
-@wrap_embedding_func_with_attrs(max_token_size=8192, model_name='text-embedding-3-small')  # embedding_dim from EMBEDDING_DIM env
+@wrap_embedding_func_with_attrs(
+    max_token_size=8192, model_name='text-embedding-3-small'
+)  # embedding_dim from EMBEDDING_DIM env
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -846,9 +862,7 @@ async def openai_embed(
                 model=api_model, input=texts, dimensions=embedding_dim
             )
         else:
-            response = await openai_async_client.embeddings.create(
-                model=api_model, input=texts
-            )
+            response = await openai_async_client.embeddings.create(model=api_model, input=texts)
 
         if token_tracker and hasattr(response, 'usage'):
             token_counts = {

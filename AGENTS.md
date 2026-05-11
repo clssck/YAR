@@ -10,7 +10,7 @@ YAR is an advanced Retrieval-Augmented Generation (RAG) framework designed to en
 
 ## Build, Test, and Development Commands
 - `python -m venv .venv && source .venv/bin/activate`: set up the Python runtime.
-- `pip install -e .` / `pip install -e .[api]`: install the package and API extras in editable mode.
+- `uv sync --extra api --extra observability` (or `pip install -e .[api,observability]`): install the package, API extras, and Phoenix/OTEL tracing deps. Tracing is on by default and silently no-ops when `[observability]` is missing.
 - `yar-server` or `uvicorn yar.api.yar_server:app --reload`: start the API locally; ensure `.env` is present.
 - `python -m pytest tests` (offline markers apply by default) or `python -m pytest tests --run-integration` / `python test_graph_storage.py`: run the full suite, opt into integration coverage, or target an individual script.
 - `ruff check .`: lint Python sources before committing.

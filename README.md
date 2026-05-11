@@ -54,7 +54,7 @@ git clone https://github.com/clssck/YAR.git
 cd YAR
 
 # Install with uv (recommended)
-uv sync --extra api
+uv sync --extra api --extra observability
 source .venv/bin/activate
 
 # Configure environment
@@ -145,7 +145,7 @@ S3_BUCKET_NAME=yar-documents
 
 ```bash
 # Install dev dependencies
-uv sync --extra test
+uv sync --extra test --extra observability
 
 # Run tests
 pytest tests/
