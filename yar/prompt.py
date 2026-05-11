@@ -715,7 +715,7 @@ Extract two keyword types from user query:
 1. **high_level_keywords** (2-4): broad themes:
    - intent (e.g. "comparison", "relationship", "overview", "how does", "what is")
    - domain (e.g. "AI technology", "business strategy", "healthcare", "finance")
-   - information type (e.g. "partnership details", "product features", "history", "impact")
+   - information type (e.g. "partnership details", "product features", "history", "background", "chronology", "timeline", "impact")
 
 2. **low_level_keywords** (1-4): specific entities EXPLICIT in query:
    - Companies/orgs: "OpenAI", "Microsoft", "FDA", "Tesla"
@@ -839,6 +839,28 @@ Output:
 {
   "high_level_keywords": ["device strategy", "manufacturing process", "drug transfer"],
   "low_level_keywords": ["CSTD", "closed system drug transfer device", "Bio"]
+}
+
+""",
+    """Example 10 (Dates/milestones/timeline query):
+
+Query: "What are the dates or milestones mentioned during the project freeze period?"
+
+Output:
+{
+  "high_level_keywords": ["history", "background", "chronology", "timeline"],
+  "low_level_keywords": ["project freeze"]
+}
+
+""",
+    """Example 11 (Temporal/when query):
+
+Query: "When did the FDA approve Sarclisa and what were the subsequent submission events?"
+
+Output:
+{
+  "high_level_keywords": ["history", "regulatory timeline", "approval chronology"],
+  "low_level_keywords": ["FDA", "Sarclisa", "approval", "submission"]
 }
 
 """,
