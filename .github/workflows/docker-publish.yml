@@ -13,8 +13,6 @@ env:
 
 jobs:
   build:
-    # ARM64 disabled until kreuzberg publishes linux/arm64 wheels
-    # (kreuzberg 4.x sdist is missing crates/kreuzberg-tesseract)
     runs-on: ubuntu-latest
     steps:
       - name: Free disk space

@@ -61,8 +61,6 @@ RUN mkdir -p /app/data/tiktoken \
     && (uv run yar-download-cache --cache-dir /app/data/tiktoken; status=$?; \
         if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then exit "$status"; fi)
 
-# Symlink pdfium where Kreuzberg expects it.
-RUN uv run python -c "from yar.document.kreuzberg_adapter import _setup_pdfium_for_kreuzberg; _setup_pdfium_for_kreuzberg()"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Final stage

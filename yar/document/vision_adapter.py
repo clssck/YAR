@@ -271,9 +271,11 @@ async def extract_document_with_vision(
     api_key: str | None = None,
     pdf_password: str | None = None,
     chunk_token_size: int | None = None,
+    extraction_cache: dict[str, Any] | None = None,
+    tokenizer: Any | None = None,
 ) -> VisionExtractionResult:
     """Extract document text by sending page images to an OpenAI-compatible vision model."""
-    from yar.document.semantic_chunker import chunk_markdown
+    from yar.document.semantic_chunker import chunk_markdown, count_tokens
 
     is_pdf_document = _is_pdf_document(filename=filename, mime_type=mime_type)
     is_office_document = _is_office_document(filename=filename, mime_type=mime_type)
@@ -341,20 +343,22 @@ async def extract_document_with_vision(
         )
 
     # Run page-aware semantic chunking on the extracted markdown.
-    # The resulting pre_chunks bypass Kreuzberg's generic chunker in the pipeline.
+    # The resulting pre_chunks bypass the generic pipeline chunker.
     # Use the configured chunk_token_size when provided so vision-extracted content matches the
     # rest of the corpus. Without it the chunker falls back to its 500-token join_threshold (1000-
     # token max), regardless of what the global pipeline expects.
-    chunk_kwargs: dict[str, int] = {}
+    join_threshold = 500
     if chunk_token_size and chunk_token_size > 0:
-        chunk_kwargs['join_threshold'] = max(chunk_token_size // 2, 100)
-    chunks = chunk_markdown(content, **chunk_kwargs)
+        join_threshold = max(chunk_token_size // 2, 100)
+    chunks = chunk_markdown(content, join_threshold=join_threshold, tokenizer=tokenizer)
     pre_chunks: list[dict[str, Any]] | None = None
     if chunks:
-        pre_chunks = [
-            {
-                'tokens': math.ceil(len(_content_with_context(chunk)) / 4),
-                'content': _content_with_context(chunk),
+        pre_chunks = []
+        for chunk in chunks:
+            chunk_content = _content_with_context(chunk)
+            pre_chunk = {
+                'tokens': count_tokens(chunk_content, tokenizer=tokenizer),
+                'content': chunk_content,
                 'chunk_order_index': chunk.chunk_index,
                 'page_number': chunk.page_number,
                 'heading_context': chunk.heading_context,
@@ -1114,6 +1118,47 @@ def _get_pdf_page_count(pdf_path: Path, pdf_password: str | None = None) -> int:
 
     page_count = int(match.group(1))
     return page_count if page_count > 0 else 0
+
+
+def _extract_native_pdf_page_texts(pdf_bytes: bytes, *, pdf_password: str | None = None) -> dict[int, str]:
+    """Extract embedded PDF text per page without OCR for source-backed fallback."""
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return {}
+
+    try:
+        document = pdfium.PdfDocument(pdf_bytes, password=pdf_password)
+    except Exception as exc:
+        logger.debug('Native PDF text fallback could not open document: %s', exc)
+        return {}
+
+    page_texts: dict[int, str] = {}
+    try:
+        for page_index in range(len(document)):
+            page = None
+            text_page = None
+            try:
+                page = document[page_index]
+                text_page = page.get_textpage()
+                text = re.sub(r'\n{3,}', '\n\n', text_page.get_text_range().strip())
+            except Exception as exc:
+                logger.debug('Native PDF text fallback failed for page %d: %s', page_index + 1, exc)
+                continue
+            finally:
+                close_text = getattr(text_page, 'close', None)
+                if callable(close_text):
+                    close_text()
+                close_page = getattr(page, 'close', None)
+                if callable(close_page):
+                    close_page()
+            if _has_usable_content(text):
+                page_texts[page_index + 1] = text
+    finally:
+        close_document = getattr(document, 'close', None)
+        if callable(close_document):
+            close_document()
+    return page_texts
 
 
 def _render_pdf_page_range(

@@ -50,7 +50,6 @@ log/
 # Tool caches
 .gradio/
 .history/
-.kreuzberg/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/

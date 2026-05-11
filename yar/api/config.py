@@ -267,17 +267,15 @@ def parse_args() -> argparse.Namespace:
     args.enable_llm_cache_for_extract = get_env_value('ENABLE_LLM_CACHE_FOR_EXTRACT', True, bool)
     args.enable_llm_cache = get_env_value('ENABLE_LLM_CACHE', True, bool)
 
-    # Set document_loading_engine from env var
-    # Kreuzberg is the default and primary engine (56+ format support, Rust core)
-    args.document_loading_engine = get_env_value('DOCUMENT_LOADING_ENGINE', 'KREUZBERG')
+    # Set legacy document loading engine flag from env var for compatibility
+    args.document_loading_engine = get_env_value('DOCUMENT_LOADING_ENGINE', 'DEFAULT')
 
     # PDF decryption password
     args.pdf_decrypt_password = get_env_value('PDF_DECRYPT_PASSWORD', None)
 
-    # OCR configuration for scanned documents and images
-    # OCR backend is intentionally not configurable at runtime; Kreuzberg default backend is used.
+    # Legacy OCR configuration values retained for environment compatibility
     args.enable_ocr = get_env_value('ENABLE_OCR', True, bool)
-    args.ocr_language = get_env_value('OCR_LANGUAGE', 'eng')  # OCR language code for Kreuzberg default backend
+    args.ocr_language = get_env_value('OCR_LANGUAGE', 'eng')
 
     # Add environment variables that were previously read directly
     args.cors_origins = get_env_value('CORS_ORIGINS', '*')

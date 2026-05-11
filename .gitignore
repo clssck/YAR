@@ -33,7 +33,6 @@ log/
 .ruff_cache/
 .gradio/
 .history/
-.kreuzberg/
 temp/
 
 # Node/Bun dependencies (scripts/)

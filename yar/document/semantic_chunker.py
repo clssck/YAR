@@ -22,6 +22,40 @@ BLANK_LINE_SPLIT_RE = re.compile(r'\n[ \t\r\f\v]*\n+')
 VISIBLE_WORD_SEPARATOR_RE = re.compile(r'[ \t\r\n\f\v]')
 
 
+class TokenizerLike(Protocol):
+    def encode(self, content: str) -> list[int]: ...
+
+    def decode(self, tokens: list[int]) -> str: ...
+
+
+_ACTIVE_TOKENIZER: ContextVar[TokenizerLike | None] = ContextVar('semantic_chunker_tokenizer', default=None)
+_TOKEN_COUNT_CACHE: ContextVar[dict[tuple[int, str], int] | None] = ContextVar(
+    'semantic_chunker_token_count_cache',
+    default=None,
+)
+_TOKEN_COUNT_CACHE_MAX_SIZE = 20_000
+_default_tokenizer_instance: TokenizerLike | None = None
+
+
+def _default_tokenizer() -> TokenizerLike:
+    global _default_tokenizer_instance
+    if _default_tokenizer_instance is None:
+        from yar.utils import TiktokenTokenizer
+
+        _default_tokenizer_instance = TiktokenTokenizer()
+    return _default_tokenizer_instance
+
+
+def _resolve_tokenizer(tokenizer: TokenizerLike | None = None) -> TokenizerLike:
+    return tokenizer or _ACTIVE_TOKENIZER.get() or _default_tokenizer()
+
+
+def _supports_additive_token_bounds() -> bool:
+    from yar.utils import TiktokenTokenizer
+
+    return isinstance(_resolve_tokenizer(), TiktokenTokenizer)
+
+
 @dataclass(slots=True)
 class HeadingNode:
     level: int
@@ -40,13 +74,16 @@ class Section:
 class ChunkData:
     content: str
     page_number: int | None
+    page_start: int | None
+    page_end: int | None
+    page_numbers: tuple[int, ...]
     chunk_index: int
     heading_context: str | None
     heading_hierarchy: list[HeadingNode] | None
 
 
 def _trim(text: str) -> str:
-    return TRIM_RE.sub('', text)
+    return text.strip(TRIM_CHARS)
 
 
 def _trim_end(text: str) -> str:
@@ -57,8 +94,48 @@ def _split_whitespace(text: str) -> list[str]:
     return [part for part in WHITESPACE_SPLIT_RE.split(text) if part]
 
 
-def _estimate_tokens(text: str) -> int:
-    return math.ceil(len(text) / 4)
+def _is_page_marker_only_text(text: str) -> bool:
+    stripped = _trim(text)
+    if not stripped:
+        return False
+    without_markers = PAGE_MARKER_RE.sub('', stripped)
+    return not _trim(without_markers)
+
+
+def _split_trailing_page_marker_lines(lines: list[str]) -> tuple[list[str], list[str]]:
+    index = len(lines)
+    saw_marker = False
+    while index > 0:
+        stripped = _trim(lines[index - 1])
+        if not stripped:
+            index -= 1
+            continue
+        if PAGE_MARKER_RE.fullmatch(stripped):
+            saw_marker = True
+            index -= 1
+            continue
+        break
+    if not saw_marker:
+        return lines, []
+    return lines[:index], lines[index:]
+
+
+def count_tokens(text: str, *, tokenizer: TokenizerLike | None = None) -> int:
+    resolved_tokenizer = _resolve_tokenizer(tokenizer)
+    cache = _TOKEN_COUNT_CACHE.get()
+    if cache is None:
+        return len(resolved_tokenizer.encode(text))
+    cache_key = (id(resolved_tokenizer), text)
+    if cache_key in cache:
+        return cache[cache_key]
+    token_count = len(resolved_tokenizer.encode(text))
+    if len(cache) < _TOKEN_COUNT_CACHE_MAX_SIZE:
+        cache[cache_key] = token_count
+    return token_count
+
+
+def _count_tokens(text: str) -> int:
+    return count_tokens(text)
 
 
 def _parse_into_sections(markdown: str) -> list[Section]:
@@ -125,11 +202,18 @@ def _build_heading_prefix(section: Section) -> str:
 
 def _section_full_text(section: Section) -> str:
     prefix = _build_heading_prefix(section)
+    body = _trim(section.body)
     if not prefix:
-        return section.body
-    if not section.body:
+        return body
+    if not body:
         return prefix
-    return f'{prefix}\n\n{section.body}'
+    return f'{prefix}\n\n{body}'
+
+
+def _section_token_count(section: Section) -> int:
+    if section.token_count is None:
+        section.token_count = _count_tokens(_section_full_text(section))
+    return section.token_count
 
 
 def _same_heading_node(left: HeadingNode, right: HeadingNode) -> bool:
@@ -223,9 +307,16 @@ def _merge_sections(sections: list[Section], join_threshold: int) -> list[Sectio
     return merged
 
 
-def _extract_first_page_number(text: str) -> int | None:
-    match = PAGE_MARKER_RE.search(text)
-    return int(match.group(1)) if match else None
+def _extract_page_numbers(text: str) -> tuple[int, ...]:
+    page_numbers: list[int] = []
+    seen: set[int] = set()
+    for match in PAGE_MARKER_RE.finditer(text):
+        page_number = int(match.group(1))
+        if page_number in seen:
+            continue
+        seen.add(page_number)
+        page_numbers.append(page_number)
+    return tuple(page_numbers)
 
 
 def _format_heading_context(hierarchy: list[HeadingNode] | None) -> str | None:
@@ -300,7 +391,7 @@ def _split_list_block(block: str) -> list[str]:
 
 
 def _split_list_item_block(block: str, max_tokens: int) -> list[str]:
-    if _estimate_tokens(block) <= max_tokens:
+    if _count_tokens(block) <= max_tokens:
         return [_trim(block)]
     first_line, *rest_lines = block.split('\n')
     match = re.match(r'^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$', first_line)
@@ -310,7 +401,7 @@ def _split_list_item_block(block: str, max_tokens: int) -> list[str]:
     remainder = _trim('\n'.join([match.group(2) or '', *rest_lines]))
     if not remainder:
         return [_trim(block)]
-    content_budget = max(1, max_tokens - _estimate_tokens(marker))
+    content_budget = max(1, max_tokens - _count_tokens(marker))
     return [_trim_end(f'{marker}{part}') for part in _split_sentence_block(remainder, content_budget)]
 
 
@@ -322,7 +413,7 @@ def _split_table_block_preserving_header(block: str, max_tokens: int) -> list[st
     trimmed = _trim(block)
     if not trimmed:
         return []
-    if _estimate_tokens(trimmed) <= max_tokens * 2:
+    if _count_tokens(trimmed) <= max_tokens * 2:
         return [trimmed]
 
     rows = _split_table_block(trimmed)
@@ -334,7 +425,7 @@ def _split_table_block_preserving_header(block: str, max_tokens: int) -> list[st
         return [trimmed]
 
     prefix = f'{header}\n{separator}'
-    data_budget = max(1, max_tokens - _estimate_tokens(f'{prefix}\n'))
+    data_budget = max(1, max_tokens - _count_tokens(f'{prefix}\n'))
     data_chunks = _pack_units(data_rows, data_budget, '\n', _split_sentence_block)
     return [f'{prefix}\n{data_chunk}' for data_chunk in data_chunks if _trim(data_chunk)]
 
@@ -444,8 +535,13 @@ def _split_oversized_word(word: str, max_tokens: int) -> list[str]:
     trimmed = _trim(word)
     if not trimmed:
         return []
-    max_chars = max(1, max_tokens * 4)
-    return [trimmed[start : start + max_chars] for start in range(0, len(trimmed), max_chars)]
+    max_tokens = max(1, max_tokens)
+    tokenizer = _resolve_tokenizer()
+
+    token_ids = tokenizer.encode(trimmed)
+    return [
+        _trim(tokenizer.decode(token_ids[start : start + max_tokens])) for start in range(0, len(token_ids), max_tokens)
+    ]
 
 
 def _split_oversized_word_preserving_page_markers(word: str, max_tokens: int) -> list[str]:
@@ -478,23 +574,86 @@ def _join_units(units: list[str], separator: str) -> str:
     return _trim(separator.join(units))
 
 
+def _rebalance_tiny_tail_bulk(
+    previous: list[str],
+    tail: list[str],
+    separator: str,
+    max_tokens: int,
+    min_tail_tokens: int,
+    tail_tokens: int,
+    imbalance: int,
+) -> None:
+    max_move_count = len(previous) - 1
+    estimated_tail_tokens = tail_tokens
+    target_move_count = max_move_count
+    for move_count, unit in enumerate(reversed(previous), start=1):
+        estimated_tail_tokens += _count_tokens(unit)
+        if estimated_tail_tokens >= min_tail_tokens:
+            target_move_count = move_count
+            break
+
+    candidate_move_counts = {
+        count for count in range(target_move_count - 4, target_move_count + 5) if 1 <= count <= max_move_count
+    }
+    candidate_move_counts.update({1, max_move_count})
+
+    best_move_count = 0
+    best_imbalance = imbalance
+    best_tail_tokens = tail_tokens
+    for move_count in sorted(candidate_move_counts):
+        candidate_previous = previous[:-move_count]
+        candidate_tail = [*previous[-move_count:], *tail]
+        candidate_previous_tokens = _count_tokens(_join_units(candidate_previous, separator))
+        candidate_tail_tokens = _count_tokens(_join_units(candidate_tail, separator))
+        candidate_imbalance = abs(candidate_previous_tokens - candidate_tail_tokens)
+        if candidate_previous_tokens > max_tokens or candidate_tail_tokens > max_tokens:
+            continue
+        if candidate_imbalance > best_imbalance:
+            continue
+        if (
+            best_move_count == 0
+            or candidate_tail_tokens >= min_tail_tokens > best_tail_tokens
+            or candidate_imbalance < best_imbalance
+        ):
+            best_move_count = move_count
+            best_imbalance = candidate_imbalance
+            best_tail_tokens = candidate_tail_tokens
+
+    if best_move_count <= 0:
+        return
+    moved = previous[-best_move_count:]
+    del previous[-best_move_count:]
+    tail[:0] = moved
+
+
 def _rebalance_tiny_tail(chunks: list[list[str]], separator: str, max_tokens: int) -> None:
     if len(chunks) < 2:
         return
     min_tail_tokens = max(1, math.floor(max_tokens * 0.35))
     tail = chunks[-1]
     previous = chunks[-2]
-    tail_tokens = _estimate_tokens(_join_units(tail, separator))
+    tail_tokens = _count_tokens(_join_units(tail, separator))
     if tail_tokens >= min_tail_tokens or len(previous) <= 1:
         return
-    previous_tokens = _estimate_tokens(_join_units(previous, separator))
+    previous_tokens = _count_tokens(_join_units(previous, separator))
     imbalance = abs(previous_tokens - tail_tokens)
+    if len(previous) > 24:
+        _rebalance_tiny_tail_bulk(
+            previous,
+            tail,
+            separator,
+            max_tokens,
+            min_tail_tokens,
+            tail_tokens,
+            imbalance,
+        )
+        return
     while len(previous) > 1:
         moved = previous[-1]
         candidate_previous = previous[:-1]
         candidate_tail = [moved, *tail]
-        candidate_previous_tokens = _estimate_tokens(_join_units(candidate_previous, separator))
-        candidate_tail_tokens = _estimate_tokens(_join_units(candidate_tail, separator))
+        candidate_previous_tokens = _count_tokens(_join_units(candidate_previous, separator))
+        candidate_tail_tokens = _count_tokens(_join_units(candidate_tail, separator))
         candidate_imbalance = abs(candidate_previous_tokens - candidate_tail_tokens)
         if (
             candidate_previous_tokens > max_tokens
@@ -519,20 +678,44 @@ def _pack_units(
 ) -> list[str]:
     chunks: list[list[str]] = []
     current: list[str] = []
+    current_text = ''
+    current_token_bound = 0
+    use_additive_bounds = _supports_additive_token_bounds()
     for unit in units:
-        if _estimate_tokens(unit) > max_tokens:
+        unit_tokens = _count_tokens(unit)
+        if unit_tokens > max_tokens:
             if current:
                 chunks.append(current)
                 current = []
+                current_text = ''
+                current_token_bound = 0
             for split_unit in split_oversized_fn(unit, max_tokens):
                 chunks.append([split_unit])
             continue
-        candidate = [*current, unit]
-        if current and _estimate_tokens(_join_units(candidate, separator)) > max_tokens:
+        if not current:
+            current = [unit]
+            current_text = _trim(unit)
+            current_token_bound = unit_tokens
+            continue
+        candidate_text = _trim(f'{current_text}{separator}{unit}')
+        if use_additive_bounds:
+            separator_unit_tokens = _count_tokens(f'{separator}{unit}') if separator else unit_tokens
+            candidate_token_bound = current_token_bound + separator_unit_tokens
+            if candidate_token_bound <= max_tokens:
+                current.append(unit)
+                current_text = candidate_text
+                current_token_bound = candidate_token_bound
+                continue
+        candidate_tokens = _count_tokens(candidate_text)
+        if candidate_tokens > max_tokens:
             chunks.append(current)
             current = [unit]
+            current_text = _trim(unit)
+            current_token_bound = unit_tokens
             continue
-        current = candidate
+        current.append(unit)
+        current_text = candidate_text
+        current_token_bound = candidate_tokens
     if current:
         chunks.append(current)
     _rebalance_tiny_tail(chunks, separator, max_tokens)
@@ -540,7 +723,7 @@ def _pack_units(
 
 
 def _split_paragraph_block(block: str, max_tokens: int) -> list[str]:
-    if _estimate_tokens(block) <= max_tokens:
+    if _count_tokens(block) <= max_tokens:
         return [_trim(block)]
     if _is_table_block(block):
         rows = _split_table_block(block)
@@ -557,7 +740,7 @@ def _split_paragraph_block(block: str, max_tokens: int) -> list[str]:
 
 
 def _split_sentence_block(block: str, max_tokens: int) -> list[str]:
-    if _estimate_tokens(block) <= max_tokens:
+    if _count_tokens(block) <= max_tokens:
         return [_trim(block)]
     sentences = _split_sentences(block)
     if len(sentences) > 1:
@@ -571,11 +754,11 @@ def _split_word_block(block: str, max_tokens: int) -> list[str]:
     if not words:
         return []
     separator = ' ' if _has_visible_word_separator(block) else ''
-    if len(words) == 1 and _estimate_tokens(words[0]) > max_tokens:
+    if len(words) == 1 and _count_tokens(words[0]) > max_tokens:
         return _split_oversized_word_preserving_page_markers(words[0], max_tokens)
 
     def split_oversized_unit(unit: str, unit_max_tokens: int) -> list[str]:
-        if _estimate_tokens(unit) > unit_max_tokens:
+        if _count_tokens(unit) > unit_max_tokens:
             return _split_oversized_word_preserving_page_markers(unit, unit_max_tokens)
         return [unit]
 
@@ -583,12 +766,12 @@ def _split_word_block(block: str, max_tokens: int) -> list[str]:
 
 
 def _split_section(section: Section, max_chunk_tokens: int) -> list[Section]:
-    if _estimate_tokens(_section_full_text(section)) <= max_chunk_tokens:
+    if _section_token_count(section) <= max_chunk_tokens:
         return [section]
     if not _trim(section.body):
         return [section]
     prefix = _build_heading_prefix(section)
-    prefix_tokens = _estimate_tokens(f'{prefix}\n\n') if prefix else 0
+    prefix_tokens = _count_tokens(f'{prefix}\n\n') if prefix else 0
     body_token_budget = max(1, max_chunk_tokens - prefix_tokens)
     paragraphs = _split_paragraphs(section.body)
     if len(paragraphs) > 1:
@@ -682,32 +865,50 @@ def _split_oversized_sections(sections: list[Section], max_chunk_tokens: int) ->
     return split_sections
 
 
-def chunk_markdown(markdown: str, *, join_threshold: int = 500) -> list[ChunkData]:
-    if not markdown or not _trim(markdown):
-        return []
-    max_chunk_tokens = join_threshold * 2
-    sections = _parse_into_sections(markdown)
-    _build_heading_hierarchies(sections)
-    merged = _merge_sections(sections, join_threshold)
-    split_sections = _split_oversized_sections(merged, max_chunk_tokens)
-    chunks: list[ChunkData] = []
-    for index, section in enumerate(split_sections):
-        content = _section_full_text(section)
-        chunks.append(
-            ChunkData(
-                content=content,
-                page_number=_extract_first_page_number(content),
-                chunk_index=index,
-                heading_context=_format_heading_context(section.heading_hierarchy),
-                heading_hierarchy=section.heading_hierarchy,
+def chunk_markdown(
+    markdown: str,
+    *,
+    join_threshold: int = 500,
+    tokenizer: TokenizerLike | None = None,
+) -> list[ChunkData]:
+    tokenizer_token = _ACTIVE_TOKENIZER.set(tokenizer)
+    cache_token = _TOKEN_COUNT_CACHE.set({})
+    try:
+        if not markdown or not _trim(markdown):
+            return []
+        max_chunk_tokens = join_threshold * 2
+        sections = _parse_into_sections(markdown)
+        _build_heading_hierarchies(sections)
+        merged = _merge_sections(sections, join_threshold)
+        split_sections = _split_oversized_sections(merged, max_chunk_tokens)
+        chunks: list[ChunkData] = []
+        for index, section in enumerate(split_sections):
+            content = _section_full_text(section)
+            page_numbers = _extract_page_numbers(content)
+            page_start = page_numbers[0] if page_numbers else None
+            page_end = page_numbers[-1] if page_numbers else None
+            chunks.append(
+                ChunkData(
+                    content=content,
+                    page_number=page_start,
+                    page_start=page_start,
+                    page_end=page_end,
+                    page_numbers=page_numbers,
+                    chunk_index=index,
+                    heading_context=_format_heading_context(section.heading_hierarchy),
+                    heading_hierarchy=section.heading_hierarchy,
+                )
             )
-        )
-    chunks = _strip_repeating_boilerplate_lines(chunks)
-    return chunks
+        chunks = _strip_repeating_boilerplate_lines(chunks)
+        return chunks
+    finally:
+        _TOKEN_COUNT_CACHE.reset(cache_token)
+        _ACTIVE_TOKENIZER.reset(tokenizer_token)
 
 
 __all__ = [
     'ChunkData',
     'HeadingNode',
     'chunk_markdown',
+    'count_tokens',
 ]

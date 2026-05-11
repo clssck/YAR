@@ -1981,7 +1981,7 @@ class TestCreateChunker:
         """Test that unused parameters don't affect behavior."""
         chunker = create_chunker()
 
-        # These params are ignored by Kreuzberg adapter
+        # These params are ignored by the default chunker adapter
         result1 = chunker(None, 'Test', None, False, 100, 1200)
         result2 = chunker(MagicMock(), 'Test', '\n\n', True, 100, 1200)
 

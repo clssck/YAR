@@ -342,15 +342,15 @@ class YAR:
 
     The function can be either synchronous or asynchronous.
 
-    Defaults to Kreuzberg's 'semantic' preset, which preserves meaning boundaries
-    and is optimal for RAG retrieval quality.
+    Defaults to the local semantic chunker, which counts tokens with the configured tokenizer
+    and preserves document structure before applying size fallback.
 
     The function should take the following parameters:
 
-        - `tokenizer`: A Tokenizer instance (unused by Kreuzberg presets).
+        - `tokenizer`: A Tokenizer instance used for exact token counting.
         - `content`: The text to be split into chunks.
-        - `split_by_character`: The character to split on (unused by Kreuzberg presets).
-        - `split_by_character_only`: If True, split only on character (unused by Kreuzberg presets).
+        - `split_by_character`: Compatibility argument ignored by the default chunker.
+        - `split_by_character_only`: Compatibility flag ignored by the default chunker.
         - `chunk_overlap_token_size`: The number of overlapping tokens between consecutive chunks.
         - `chunk_token_size`: The maximum number of tokens per chunk.
 

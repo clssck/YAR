@@ -181,7 +181,7 @@ To maintain compatibility with legacy data, the default workspace for PostgreSQL
 
 ### Multiple workers for Gunicorn + Uvicorn
 
-The YAR Server can operate in the `Gunicorn + Uvicorn` preload mode. Gunicorn's multiple worker (multiprocess) capability prevents document indexing tasks from blocking RAG queries. Document extraction (powered by Kreuzberg) runs in a thread pool to avoid blocking the async event loop.
+The YAR Server can operate in the `Gunicorn + Uvicorn` preload mode. Gunicorn's multiple worker (multiprocess) capability prevents document indexing tasks from blocking RAG queries. Document extraction runs in a thread pool to avoid blocking the async event loop.
 
 Though YAR Server uses one worker to process the document indexing pipeline, with the async task support of Uvicorn, multiple files can be processed in parallel. The bottleneck of document indexing speed mainly lies with the LLM. If your LLM supports high concurrency, you can accelerate document indexing by increasing the concurrency level of the LLM. Below are several environment variables related to concurrent processing, along with their default values:
 

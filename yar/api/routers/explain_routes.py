@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from yar.api.utils_api import get_combined_auth_dependency
 from yar.base import QueryParam
+from yar.document.semantic_chunker import count_tokens
 from yar.metrics import record_query_metric
 from yar.utils import logger
 
@@ -169,8 +170,7 @@ def create_explain_routes(rag, api_key: str | None = None) -> APIRouter:
                     total_content += str(c.get('content', ''))
 
                 if total_content:
-                    # Rough estimate: scale up based on actual counts
-                    sample_tokens = len(total_content) // 4
+                    sample_tokens = count_tokens(total_content)
                     scale = max(entities_count / 10, relations_count / 10, chunks_count / 5, 1)
                     context_tokens = int(sample_tokens * scale)
                     context_preview = total_content[:500] + '...' if len(total_content) > 500 else total_content

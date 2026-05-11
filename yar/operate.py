@@ -297,113 +297,67 @@ def _truncate_entity_identifier(identifier: str, limit: int, chunk_key: str, ide
     return display_value
 
 
+def _find_chunk_offsets(content: str, chunk_content: str, search_from: int) -> tuple[int, int]:
+    search_text = chunk_content.strip()
+    if not search_text:
+        return search_from, search_from
+    found = content.find(search_text, search_from)
+    if found < 0:
+        found = content.find(search_text)
+    if found < 0:
+        found = min(search_from, len(content))
+    return found, found + len(search_text)
+
+
 def chunking_by_semantic(
     content: str,
     max_chars: int = 4800,
     max_overlap: int = 400,
-    preset: str | None = None,
+    *,
+    tokenizer: Tokenizer | None = None,
+    chunk_token_size: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Split content into chunks using Kreuzberg's intelligent chunking.
+    """Split content with the single semantic Markdown chunker.
 
-    Kreuzberg supports multiple chunking strategies via presets:
-    - None (default): Basic chunking with size limits
-    - 'recursive': Split by paragraphs, then sentences, then words
-    - 'semantic': Preserve semantic boundaries for better coherence
-
-    Args:
-        content: The text content to chunk
-        max_chars: Maximum characters per chunk (~1200 tokens at 4 chars/token)
-        max_overlap: Character overlap between chunks (~100 tokens)
-        preset: Chunking preset - None, 'recursive', or 'semantic'
-
-    Returns:
-        List of chunk dicts with keys: tokens, content, chunk_order_index, char_start, char_end
-
-    Raises:
-        ImportError: If kreuzberg is not installed
+    Token counting is exact via the supplied tokenizer or local tiktoken fallback. The
+    max_chars/max_overlap arguments remain for legacy callers; max_chars is treated as
+    the token budget when chunk_token_size is not supplied.
     """
-    try:
-        from kreuzberg import ChunkingConfig, ExtractionConfig, extract_bytes_sync
-    except ImportError:
-        raise ImportError('kreuzberg is not installed. Install with: pip install kreuzberg') from None
+    from yar.document.semantic_chunker import chunk_markdown, count_tokens
 
-    # Build chunking config with optional preset
-    chunking_kwargs: dict[str, Any] = {
-        'max_chars': max_chars,
-        'max_overlap': max_overlap,
-    }
-    if preset:
-        chunking_kwargs['preset'] = preset
-
-    config = ExtractionConfig(chunking=ChunkingConfig(**chunking_kwargs))
-
-    # Kreuzberg expects bytes with MIME type for text
-    result = extract_bytes_sync(
-        content.encode('utf-8'),
-        mime_type='text/plain',
-        config=config,
-    )
-
-    results: list[dict[str, Any]] = []
-    if result.chunks:
-        search_from = 0
-        for index, chunk in enumerate(result.chunks):
-            # Kreuzberg returns chunks as dicts with 'content' key
-            if isinstance(chunk, dict):
-                chunk_content = chunk.get('content', '')
-                metadata = chunk.get('metadata', {})
-                char_start = metadata.get('byte_start', metadata.get('char_start'))
-                char_end = metadata.get('byte_end', metadata.get('char_end'))
-            else:
-                # Kreuzberg >=4.3 returns Chunk objects with offsets in metadata.
-                chunk_content = getattr(chunk, 'content', str(chunk))
-                metadata = getattr(chunk, 'metadata', {}) or {}
-                if not isinstance(metadata, dict):
-                    metadata = {}
-                char_start = metadata.get('byte_start', metadata.get('char_start'))
-                char_end = metadata.get('byte_end', metadata.get('char_end'))
-                if char_start is None:
-                    char_start = getattr(chunk, 'start_char', None)
-                if char_end is None:
-                    char_end = getattr(chunk, 'end_char', None)
-
-            # Estimate offsets if not provided
-            if char_start is None:
-                # Use rolling search start to keep offsets monotonic when chunks overlap.
-                search_str = chunk_content[:50] if len(chunk_content) > 50 else chunk_content
-                found_pos = content.find(search_str, search_from)
-                if found_pos < 0:
-                    found_pos = content.find(search_str)
-                char_start = found_pos if found_pos >= 0 else search_from
-            if char_end is None:
-                char_end = char_start + len(chunk_content)
-
-            search_from = max(search_from, char_start + 1)
-
-            # Estimate token count (~4 chars per token)
-            tokens = len(chunk_content) // 4
-
-            results.append(
-                {
-                    'tokens': tokens,
-                    'content': chunk_content.strip(),
-                    'chunk_order_index': index,
-                    'char_start': max(0, char_start),
-                    'char_end': char_end,
-                }
-            )
-    else:
-        # Fallback: return whole content as single chunk
-        results.append(
+    _ = max_overlap
+    if not content:
+        return [
             {
-                'tokens': len(content) // 4,
-                'content': content.strip(),
+                'tokens': 0,
+                'content': '',
                 'chunk_order_index': 0,
                 'char_start': 0,
-                'char_end': len(content),
+                'char_end': 0,
             }
-        )
+        ]
 
+    max_tokens = max(1, int(chunk_token_size)) if chunk_token_size else max(1, int(max_chars))
+    chunks = chunk_markdown(content, join_threshold=max(max_tokens // 2, 1), tokenizer=tokenizer)
+    results: list[dict[str, Any]] = []
+    search_from = 0
+    for chunk in chunks:
+        chunk_content = chunk.content.strip()
+        char_start, char_end = _find_chunk_offsets(content, chunk_content, search_from)
+        search_from = max(search_from, char_start + 1)
+        chunk_data: dict[str, Any] = {
+            'tokens': count_tokens(chunk_content, tokenizer=tokenizer),
+            'content': chunk_content,
+            'chunk_order_index': chunk.chunk_index,
+            'char_start': char_start,
+            'char_end': char_end,
+        }
+        if chunk.page_start is not None:
+            chunk_data['page_number'] = chunk.page_start
+            chunk_data['page_start'] = chunk.page_start
+            chunk_data['page_end'] = chunk.page_end
+            chunk_data['page_numbers'] = list(chunk.page_numbers)
+        results.append(chunk_data)
     return results
 
 
@@ -413,30 +367,7 @@ def create_chunker(
     [Tokenizer | None, str, str | None, bool, int, int],
     list[dict[str, Any]],
 ]:
-    """Create a semantic chunking function compatible with YAR's chunking_func interface.
-
-    This factory creates a wrapper around Kreuzberg's semantic chunking that matches
-    the expected signature for YAR's chunking_func parameter.
-
-    Args:
-        preset: Kreuzberg chunking preset - 'recursive', 'semantic', or None
-            - None (default): Basic chunking with size limits
-            - 'recursive': Split by paragraphs, then sentences, then words
-            - 'semantic': Preserve semantic boundaries for better coherence
-
-    Returns:
-        A chunking function with signature compatible with YAR.chunking_func
-
-    Example:
-        >>> from yar import YAR
-        >>> from yar.operate import create_chunker
-        >>>
-        >>> # Use semantic chunking with recursive preset
-        >>> rag = YAR(
-        ...     working_dir="./storage",
-        ...     chunking_func=create_chunker(preset='recursive')
-        ... )
-    """
+    """Create the semantic chunking function compatible with YAR's chunking_func interface."""
 
     def semantic_chunking_adapter(
         tokenizer: Tokenizer | None,
@@ -446,22 +377,12 @@ def create_chunker(
         chunk_overlap_token_size: int = 100,
         chunk_token_size: int = 1200,
     ) -> list[dict[str, Any]]:
-        """Adapter that wraps chunking_by_semantic with YAR's expected signature.
-
-        Note: tokenizer, split_by_character, and split_by_character_only are ignored
-        since Kreuzberg handles tokenization and boundary detection internally.
-        """
-        from yar.document.kreuzberg_adapter import tokens_to_chars
-
-        _ = tokenizer, split_by_character, split_by_character_only
-        max_chars = tokens_to_chars(chunk_token_size)
-        max_overlap = tokens_to_chars(chunk_overlap_token_size)
-
+        """Adapter that wraps semantic chunking with YAR's expected signature."""
+        _ = split_by_character, split_by_character_only, chunk_overlap_token_size
         return chunking_by_semantic(
             content=content,
-            max_chars=max_chars,
-            max_overlap=max_overlap,
-            preset=preset,
+            tokenizer=tokenizer,
+            chunk_token_size=chunk_token_size,
         )
 
     return semantic_chunking_adapter

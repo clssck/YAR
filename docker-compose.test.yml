@@ -71,7 +71,6 @@ services:
 
   yar:
     container_name: yar-test
-    platform: linux/amd64  # Force x86_64 - kreuzberg has no arm64 Linux wheel
     build:
       context: .
       dockerfile: Dockerfile

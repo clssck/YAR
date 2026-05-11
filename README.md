@@ -105,7 +105,7 @@ asyncio.run(main())
 | **PostgreSQL Native** | pgvector for embeddings, Apache AGE for graphs |
 | **S3 Storage** | Native S3/R2/MinIO support for documents |
 | **Modern Web UI** | React + TypeScript with graph visualization |
-| **Document Pipeline** | PDF, DOCX, PPTX, Markdown extraction via Kreuzberg |
+| **Document Pipeline** | PDF, DOCX, PPTX, Markdown, and XLSX extraction |
 | **Citation Tracking** | Source attribution in responses |
 | **Multi-Workspace** | Isolated knowledge graphs per workspace |
 
