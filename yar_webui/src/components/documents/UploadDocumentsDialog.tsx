@@ -1,9 +1,9 @@
-import { CheckCircle2, ChevronDown, ChevronRight, UploadIcon, XCircle } from 'lucide-react'
+import { CheckCircle2, UploadIcon, XCircle } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import type { FileRejection } from 'react-dropzone'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { type ChunkingPreset, uploadDocument } from '@/api/yar'
+import { uploadDocument } from '@/api/yar'
 import Button from '@/components/ui/Button'
 import {
   Dialog,
@@ -12,16 +12,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger
+  DialogTrigger,
 } from '@/components/ui/Dialog'
 import FileUploader from '@/components/ui/FileUploader'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/Select'
 import { cn, errorMessage } from '@/lib/utils'
 import { useBackendState } from '@/stores/state'
 
@@ -38,7 +31,7 @@ type UploadPhase = 'idle' | 'uploading' | 'complete'
 export default function UploadDocumentsDialog({
   onDocumentsUploaded,
   open: controlledOpen,
-  onOpenChange
+  onOpenChange,
 }: UploadDocumentsDialogProps) {
   const { t } = useTranslation()
   const [internalOpen, setInternalOpen] = useState(false)
@@ -60,15 +53,13 @@ export default function UploadDocumentsDialog({
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
   const [progresses, setProgresses] = useState<Record<string, number>>({})
   const [fileErrors, setFileErrors] = useState<Record<string, string>>({})
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [chunkingPreset, setChunkingPreset] = useState<ChunkingPreset>('semantic')
 
   // Track upload statistics
   const [uploadStats, setUploadStats] = useState({
     total: 0,
     completed: 0,
     failed: 0,
-    currentFile: ''
+    currentFile: '',
   })
 
   // Calculate overall progress percentage
@@ -85,7 +76,7 @@ export default function UploadDocumentsDialog({
         let errorMsg =
           errors[0]?.message ||
           t('documentPanel.uploadDocuments.fileUploader.fileRejected', {
-            name: file.name
+            name: file.name,
           })
 
         // Simplify error message for unsupported file types
@@ -96,13 +87,13 @@ export default function UploadDocumentsDialog({
         // Set progress to 100% to display error message
         setProgresses((pre) => ({
           ...pre,
-          [file.name]: 100
+          [file.name]: 100,
         }))
 
         // Add error message to fileErrors
         setFileErrors((prev) => ({
           ...prev,
-          [file.name]: errorMsg
+          [file.name]: errorMsg,
         }))
       })
     },
@@ -121,7 +112,7 @@ export default function UploadDocumentsDialog({
         total: filesToUpload.length,
         completed: 0,
         failed: 0,
-        currentFile: ''
+        currentFile: '',
       })
 
       // Only clear errors for files that are being uploaded, keep errors for rejected files
@@ -143,7 +134,7 @@ export default function UploadDocumentsDialog({
         // Create a collator that supports Chinese sorting
         const collator = new Intl.Collator(['zh-CN', 'en'], {
           sensitivity: 'accent', // consider basic characters, accents, and case
-          numeric: true // enable numeric sorting, e.g., "File 10" will be after "File 2"
+          numeric: true, // enable numeric sorting, e.g., "File 10" will be after "File 2"
         })
         const sortedFiles = [...filesToUpload].sort((a, b) => collator.compare(a.name, b.name))
 
@@ -152,26 +143,22 @@ export default function UploadDocumentsDialog({
           // Update current file being uploaded
           setUploadStats((prev) => ({
             ...prev,
-            currentFile: file.name
+            currentFile: file.name,
           }))
 
           try {
             // Initialize upload progress
             setProgresses((pre) => ({
               ...pre,
-              [file.name]: 0
+              [file.name]: 0,
             }))
 
-            const result = await uploadDocument(
-              file,
-              (percentCompleted: number) => {
-                setProgresses((pre) => ({
-                  ...pre,
-                  [file.name]: percentCompleted
-                }))
-              },
-              chunkingPreset
-            )
+            const result = await uploadDocument(file, (percentCompleted: number) => {
+              setProgresses((pre) => ({
+                ...pre,
+                [file.name]: percentCompleted,
+              }))
+            })
 
             if (result.status === 'duplicated') {
               uploadErrors[file.name] = t(
@@ -179,14 +166,14 @@ export default function UploadDocumentsDialog({
               )
               setFileErrors((prev) => ({
                 ...prev,
-                [file.name]: t('documentPanel.uploadDocuments.fileUploader.duplicateFile')
+                [file.name]: t('documentPanel.uploadDocuments.fileUploader.duplicateFile'),
               }))
               failedCount++
             } else if (result.status !== 'success') {
               uploadErrors[file.name] = result.message
               setFileErrors((prev) => ({
                 ...prev,
-                [file.name]: result.message
+                [file.name]: result.message,
               }))
               failedCount++
             } else {
@@ -218,7 +205,7 @@ export default function UploadDocumentsDialog({
               // Set progress to 100% to display error message
               setProgresses((pre) => ({
                 ...pre,
-                [file.name]: 100
+                [file.name]: 100,
               }))
             }
 
@@ -226,7 +213,7 @@ export default function UploadDocumentsDialog({
             uploadErrors[file.name] = errorMsg
             setFileErrors((prev) => ({
               ...prev,
-              [file.name]: errorMsg
+              [file.name]: errorMsg,
             }))
             failedCount++
           }
@@ -235,7 +222,7 @@ export default function UploadDocumentsDialog({
           setUploadStats((prev) => ({
             ...prev,
             completed: completedCount,
-            failed: failedCount
+            failed: failedCount,
           }))
         }
 
@@ -245,11 +232,11 @@ export default function UploadDocumentsDialog({
         // Update toast status
         if (hasErrors) {
           toast.error(t('documentPanel.uploadDocuments.batch.error'), {
-            id: toastId
+            id: toastId,
           })
         } else {
           toast.success(t('documentPanel.uploadDocuments.batch.success'), {
-            id: toastId
+            id: toastId,
           })
         }
 
@@ -259,10 +246,10 @@ export default function UploadDocumentsDialog({
         console.error('Unexpected error during upload:', err)
         toast.error(
           t('documentPanel.uploadDocuments.generalError', {
-            error: errorMessage(err)
+            error: errorMessage(err),
           }),
           {
-            id: toastId
+            id: toastId,
           }
         )
         setUploadPhase('complete')
@@ -270,7 +257,7 @@ export default function UploadDocumentsDialog({
         setIsUploading(false)
       }
     },
-    [t, onDocumentsUploaded, chunkingPreset]
+    [t, onDocumentsUploaded]
   )
 
   // Reset dialog state
@@ -330,7 +317,7 @@ export default function UploadDocumentsDialog({
                   ? t('documentPanel.uploadDocuments.progress.uploading', {
                       current: uploadStats.completed + uploadStats.failed + 1,
                       total: uploadStats.total,
-                      defaultValue: `Uploading ${uploadStats.completed + uploadStats.failed + 1} of ${uploadStats.total}...`
+                      defaultValue: `Uploading ${uploadStats.completed + uploadStats.failed + 1} of ${uploadStats.total}...`,
                     })
                   : t('documentPanel.uploadDocuments.progress.complete', 'Upload complete')}
               </span>
@@ -356,7 +343,7 @@ export default function UploadDocumentsDialog({
                   <CheckCircle2 className="h-4 w-4" />
                   {t('documentPanel.uploadDocuments.progress.succeeded', {
                     count: uploadStats.completed,
-                    defaultValue: `${uploadStats.completed} succeeded`
+                    defaultValue: `${uploadStats.completed} succeeded`,
                   })}
                 </span>
                 {uploadStats.failed > 0 && (
@@ -364,62 +351,10 @@ export default function UploadDocumentsDialog({
                     <XCircle className="h-4 w-4" />
                     {t('documentPanel.uploadDocuments.progress.failed', {
                       count: uploadStats.failed,
-                      defaultValue: `${uploadStats.failed} failed`
+                      defaultValue: `${uploadStats.failed} failed`,
                     })}
                   </span>
                 )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Advanced Options (Collapsible) - hidden during upload/complete */}
-        {uploadPhase === 'idle' && (
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm transition-colors"
-              disabled={isUploading}
-            >
-              {showAdvanced ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-              {t('documentPanel.uploadDocuments.advancedOptions')}
-            </button>
-
-            {showAdvanced && (
-              <div className="bg-muted/50 space-y-3 rounded-md border p-3">
-                <div className="space-y-1.5">
-                  <label htmlFor="chunking-preset" className="text-sm font-medium">
-                    {t('documentPanel.uploadDocuments.chunkingPreset.label')}
-                  </label>
-                  <Select
-                    value={chunkingPreset}
-                    onValueChange={(v) => setChunkingPreset(v as ChunkingPreset)}
-                    disabled={isUploading}
-                  >
-                    <SelectTrigger id="chunking-preset" className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="semantic">
-                        {t('documentPanel.uploadDocuments.chunkingPreset.semantic')}
-                      </SelectItem>
-                      <SelectItem value="recursive">
-                        {t('documentPanel.uploadDocuments.chunkingPreset.recursive')}
-                      </SelectItem>
-                      <SelectItem value="">
-                        {t('documentPanel.uploadDocuments.chunkingPreset.basic')}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-muted-foreground text-xs">
-                    {t('documentPanel.uploadDocuments.chunkingPreset.description')}
-                  </p>
-                </div>
               </div>
             )}
           </div>

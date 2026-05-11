@@ -15,7 +15,7 @@ import {
   RotateCcw,
   Search,
   Shell,
-  XIcon
+  XIcon,
 } from 'lucide-react'
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -24,7 +24,7 @@ import {
   type DocStatus,
   type DocStatusResponse,
   type PaginationInfo,
-  type PropertyValue
+  type PropertyValue,
 } from '@/api/yar'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
@@ -44,7 +44,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
-  TableRow
+  TableRow,
 } from '@/components/ui/Table'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useResponsive } from '@/hooks/useBreakpoint'
@@ -84,7 +84,7 @@ function StatusTimeline({ currentStatus }: StatusTimelineProps) {
     pending: t('documentPanel.documentManager.status.pending', 'Pending'),
     preprocessed: t('documentPanel.documentManager.status.preprocessed', 'Preprocessed'),
     processing: t('documentPanel.documentManager.status.processing', 'Processing'),
-    processed: t('documentPanel.documentManager.status.completed', 'Processed')
+    processed: t('documentPanel.documentManager.status.completed', 'Processed'),
   }
 
   return (
@@ -229,7 +229,7 @@ export default function DocumentManager() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery)
-  const { isMobile, isTablet, isDesktop } = useResponsive()
+  const { isMobile, isTablet } = useResponsive()
 
   const [page, setPage] = useState(1)
   const [sortField, setSortField] = useState<SortField>('updated_at')
@@ -241,7 +241,7 @@ export default function DocumentManager() {
     preprocessed: 1,
     processing: 1,
     pending: 1,
-    failed: 1
+    failed: 1,
   })
 
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
@@ -259,7 +259,7 @@ export default function DocumentManager() {
     sortField,
     sortDirection,
     boostUntil,
-    enabled: currentTab === 'documents' && health
+    enabled: currentTab === 'documents' && health,
   })
 
   const { scan: scanMutation, retry: retryMutation } = usePipelineMutations({ setBoostUntil })
@@ -272,7 +272,7 @@ export default function DocumentManager() {
     total_count: 0,
     total_pages: 0,
     has_next: false,
-    has_prev: false
+    has_prev: false,
   }
   const statusCounts: Record<string, number> =
     documentsQuery.data?.status_counts ?? EMPTY_STATUS_COUNTS
@@ -333,7 +333,7 @@ export default function DocumentManager() {
       preprocessed: 1,
       processing: 1,
       pending: 1,
-      failed: 1
+      failed: 1,
     })
   }
 
@@ -358,7 +358,7 @@ export default function DocumentManager() {
     if (currentPageDocs.length === 0) return null
     return filteredDocs.map((doc) => ({
       ...doc,
-      status: doc.status as DocStatus
+      status: doc.status as DocStatus,
     }))
   }, [filteredDocs, currentPageDocs.length])
 
@@ -389,26 +389,26 @@ export default function DocumentManager() {
     if (!hasCurrentPageSelection) {
       return {
         text: t('documentPanel.selectDocuments.selectCurrentPage', {
-          count: currentPageDocIds.length
+          count: currentPageDocIds.length,
         }),
         action: handleSelectCurrentPage,
-        icon: CheckSquareIcon
+        icon: CheckSquareIcon,
       }
     } else if (isCurrentPageFullySelected) {
       return {
         text: t('documentPanel.selectDocuments.deselectAll', {
-          count: currentPageDocIds.length
+          count: currentPageDocIds.length,
         }),
         action: handleDeselectAll,
-        icon: XIcon
+        icon: XIcon,
       }
     } else {
       return {
         text: t('documentPanel.selectDocuments.selectCurrentPage', {
-          count: currentPageDocIds.length
+          count: currentPageDocIds.length,
         }),
         action: handleSelectCurrentPage,
-        icon: CheckSquareIcon
+        icon: CheckSquareIcon,
       }
     }
   }, [
@@ -417,7 +417,7 @@ export default function DocumentManager() {
     currentPageDocIds.length,
     handleSelectCurrentPage,
     handleDeselectAll,
-    t
+    t,
   ])
 
   const processedCount = getCountValue(statusCounts, 'PROCESSED', 'processed') || 0
@@ -435,7 +435,7 @@ export default function DocumentManager() {
         icon: FileText,
         count: statusCounts.all || 0,
         color: 'text-muted-foreground',
-        activeColor: 'text-foreground'
+        activeColor: 'text-foreground',
       },
       {
         id: 'processed' as StatusFilter,
@@ -443,7 +443,7 @@ export default function DocumentManager() {
         icon: CheckCircle2,
         count: processedCount,
         color: 'text-emerald-500',
-        activeColor: 'text-emerald-600 dark:text-emerald-500'
+        activeColor: 'text-emerald-600 dark:text-emerald-500',
       },
       {
         id: 'preprocessed' as StatusFilter,
@@ -451,7 +451,7 @@ export default function DocumentManager() {
         icon: Brain,
         count: preprocessedCount,
         color: 'text-purple-500',
-        activeColor: 'text-purple-600 dark:text-purple-500'
+        activeColor: 'text-purple-600 dark:text-purple-500',
       },
       {
         id: 'processing' as StatusFilter,
@@ -460,7 +460,7 @@ export default function DocumentManager() {
         count: processingCount,
         color: 'text-blue-500',
         activeColor: 'text-blue-600 dark:text-blue-500',
-        spin: true
+        spin: true,
       },
       {
         id: 'pending' as StatusFilter,
@@ -469,7 +469,7 @@ export default function DocumentManager() {
         count: pendingCount,
         color: 'text-amber-500',
         activeColor: 'text-amber-600 dark:text-amber-500',
-        spin: true
+        spin: true,
       },
       {
         id: 'failed' as StatusFilter,
@@ -477,8 +477,8 @@ export default function DocumentManager() {
         icon: AlertCircle,
         count: failedCount,
         color: 'text-red-500',
-        activeColor: 'text-red-600 dark:text-red-500'
-      }
+        activeColor: 'text-red-600 dark:text-red-500',
+      },
     ],
     [t, statusCounts, processedCount, preprocessedCount, processingCount, pendingCount, failedCount]
   )
@@ -489,7 +489,7 @@ export default function DocumentManager() {
     preprocessed: 0,
     processing: 0,
     pending: 0,
-    failed: 0
+    failed: 0,
   })
 
   // Reference to the card content element
@@ -511,7 +511,7 @@ export default function DocumentManager() {
       preprocessed: getCountValue(statusCounts, 'PREPROCESSED', 'preprocessed') || 0,
       processing: getCountValue(statusCounts, 'PROCESSING', 'processing') || 0,
       pending: getCountValue(statusCounts, 'PENDING', 'pending') || 0,
-      failed: getCountValue(statusCounts, 'FAILED', 'failed') || 0
+      failed: getCountValue(statusCounts, 'FAILED', 'failed') || 0,
     }
 
     const hasStatusCountChange = (
@@ -547,7 +547,7 @@ export default function DocumentManager() {
         preprocessed: 1,
         processing: 1,
         pending: 1,
-        failed: 1
+        failed: 1,
       })
       setPage(1)
     },
@@ -582,7 +582,7 @@ export default function DocumentManager() {
       preprocessed: 1,
       processing: 1,
       pending: 1,
-      failed: 1
+      failed: 1,
     })
     queryClient.invalidateQueries({ queryKey: ['documents'] })
   }, [queryClient])
@@ -651,7 +651,7 @@ export default function DocumentManager() {
                   'Search only matches documents on the current page ({{page}} of {{pages}}). Increase the page size or paginate to see matches across the full list.',
                   {
                     page: pagination.page,
-                    pages: pagination.total_pages
+                    pages: pagination.total_pages,
                   }
                 )}
               </span>
@@ -758,7 +758,7 @@ export default function DocumentManager() {
                     ? t('documentPanel.documentManager.retryingButton', 'Retrying...')
                     : t('documentPanel.documentManager.retryFailedButton', {
                         count: failedCount,
-                        defaultValue: `Retry ${failedCount} Failed`
+                        defaultValue: `Retry ${failedCount} Failed`,
                       })}
                 </Button>
               )}
@@ -938,14 +938,14 @@ export default function DocumentManager() {
                               {doc.content_length != null && (
                                 <span>
                                   {t('documentPanel.documentManager.tokensUnit', {
-                                    count: doc.content_length
+                                    count: doc.content_length,
                                   })}
                                 </span>
                               )}
                               {doc.chunks_count != null && (
                                 <span>
                                   {t('documentPanel.documentManager.chunksUnit', {
-                                    count: doc.chunks_count
+                                    count: doc.chunks_count,
                                   })}
                                 </span>
                               )}
@@ -1002,12 +1002,6 @@ export default function DocumentManager() {
                             <TableHead>
                               {t('documentPanel.documentManager.columns.chunks')}
                             </TableHead>
-                            {/* S3 Key: Hidden on tablet, shown on desktop */}
-                            {isDesktop && (
-                              <TableHead>
-                                {t('documentPanel.documentManager.columns.s3Key')}
-                              </TableHead>
-                            )}
                             <TableHead
                               onClick={() => handleSort('created_at')}
                               className="cursor-pointer select-none hover:bg-gray-200 dark:hover:bg-gray-800"
@@ -1054,7 +1048,7 @@ export default function DocumentManager() {
                               (doc.metadata && Object.keys(doc.metadata).length > 0) ||
                               doc.track_id
                             const isExpanded = expandedErrorIds.has(doc.id)
-                            const columnCount = isDesktop ? 9 : 8
+                            const columnCount = 8
 
                             return (
                               <React.Fragment key={doc.id}>
@@ -1187,28 +1181,6 @@ export default function DocumentManager() {
                                   </TableCell>
                                   <TableCell>{doc.content_length ?? '-'}</TableCell>
                                   <TableCell>{doc.chunks_count ?? '-'}</TableCell>
-                                  {/* S3 Key: Hidden on tablet, shown on desktop */}
-                                  {isDesktop && (
-                                    <TableCell className="max-w-[150px] truncate overflow-visible">
-                                      {doc.s3_key ? (
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div className="text-muted-foreground cursor-help truncate font-mono text-xs">
-                                              {doc.s3_key.split('/').slice(-2).join('/')}
-                                            </div>
-                                          </TooltipTrigger>
-                                          <TooltipContent
-                                            side="top"
-                                            className="max-w-[600px] break-words whitespace-pre-wrap"
-                                          >
-                                            {doc.s3_key}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      ) : (
-                                        <span className="text-muted-foreground">—</span>
-                                      )}
-                                    </TableCell>
-                                  )}
                                   <TableCell className="truncate">
                                     {new Date(doc.created_at).toLocaleString()}
                                   </TableCell>

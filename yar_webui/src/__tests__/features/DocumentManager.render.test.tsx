@@ -1,6 +1,6 @@
 import '../setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 
@@ -140,6 +140,27 @@ describe('DocumentManager Rendering', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     expect(rendered!.getByText('doc-1')).toBeTruthy()
+  })
+
+  test('omits S3 Key column while rendering document summary columns', async () => {
+    let rendered: ReturnType<typeof render>
+    await act(async () => {
+      rendered = renderWithQueryClient(<DocumentManager />)
+    })
+
+    await waitFor(() => {
+      expect(rendered!.getByText('doc-1')).toBeTruthy()
+    })
+
+    const table = rendered!.getByRole('table')
+
+    expect(within(table).queryByRole('columnheader', { name: 'S3 Key' })).toBeNull()
+    for (const columnName of ['ID', 'Summary', 'Status', 'Chunks']) {
+      expect(within(table).getByRole('columnheader', { name: columnName })).toBeTruthy()
+    }
+    expect(within(table).getByText('Example document')).toBeTruthy()
+    expect(within(table).getByText('Processed')).toBeTruthy()
+    expect(within(table).getAllByText('1').length).toBeGreaterThan(0)
   })
 
   test('refetches page 1 when the active sort direction changes', async () => {
