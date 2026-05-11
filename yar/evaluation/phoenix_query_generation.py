@@ -113,6 +113,27 @@ CRITICAL constraints on the question:
   not from either alone (otherwise it isn't a comparison).
 * Anchor on concrete entities (drug names, projects, sites, processes,
   authors) rather than meta-document labels.
+* Do NOT invent product-class, modality, technology, or methodology
+  labels for the documents that are not stated in the passages
+  themselves. If the passage describes an AAV gene therapy, do not
+  re-label it as "mRNA gene therapy"; if the passage describes a
+  peptide drug, do not re-label it as "small-molecule peptide"; if a
+  passage describes a partnership-conflict-management session, do not
+  re-label it as "regulatory response strategy". Use only labels that
+  appear verbatim or near-verbatim in the passage you are labeling.
+* The comparison axis you ask about (the thing the two docs are
+  compared on) MUST be a topic that BOTH passages explicitly cover.
+  Do not ask "How do A and B differ in their X?" when only passage A
+  covers X; that produces a malformed comparison the downstream RAG
+  system cannot answer. Before writing the question, check that each
+  axis you intend to ask about has at least one supporting sentence in
+  BOTH passages.
+* If the two passages share no common dimension that supports a
+  meaningful comparison (e.g. one is about partner-conflict
+  governance, the other is about FDA CMC dossier interactions —
+  topically disjoint), abandon this pair: output the literal token
+  ``SKIP`` instead of JSON. The pipeline retries with a different
+  pair.
 
 Output strict JSON with these keys: ``query`` (string),
 ``expected_axes`` (list of strings — the comparison axes the answer should
@@ -490,9 +511,20 @@ def _gen_comparison(
     )
     try:
         response = _llm_call(config, prompt=prompt)
-        parsed = _parse_json_lenient(response)
     except Exception as exc:
         logger.warning('comparison generation failed: %s', exc)
+        return None
+    if response.strip().upper().startswith('SKIP'):
+        logger.info(
+            'comparison generator skipped pair (topically disjoint): %s vs %s',
+            doc_a.title[:40],
+            doc_b.title[:40],
+        )
+        return None
+    try:
+        parsed = _parse_json_lenient(response)
+    except Exception as exc:
+        logger.warning('comparison JSON parse failed: %s', exc)
         return None
     if not isinstance(parsed, dict):
         return None
