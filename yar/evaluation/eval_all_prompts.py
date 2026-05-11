@@ -7,7 +7,6 @@ Evaluates ALL prompts in yar/prompt.py with appropriate metrics for each type:
 - Entity Extraction: Precision/Recall/F1 on entities and relations
 - Keywords Extraction: Keyword quality metrics
 - Summary prompts: Semantic similarity (BERTScore)
-- HyDE prompt: Retrieval improvement metrics
 
 Usage:
     # Evaluate all prompts
@@ -62,7 +61,6 @@ class PromptType(str, Enum):
     ENTITY_EXTRACTION = 'entity_extraction'
     KEYWORDS_EXTRACTION = 'keywords'
     SUMMARY = 'summary'
-    HYDE = 'hyde'
 
 
 @dataclass
@@ -100,8 +98,6 @@ class PromptScore:
             return self.metrics.get('keyword_f1', 0.0)
         elif self.prompt_type == PromptType.SUMMARY:
             return self.metrics.get('semantic_similarity', 0.0)
-        elif self.prompt_type == PromptType.HYDE:
-            return self.metrics.get('retrieval_improvement', 0.0)
         return 0.0
 
 
@@ -1161,7 +1157,7 @@ async def main():
         '--prompt-type',
         '-t',
         type=str,
-        choices=['rag', 'naive_rag', 'entity', 'keywords', 'summary', 'hyde'],
+        choices=['rag', 'naive_rag', 'entity', 'keywords', 'summary'],
         action='append',
         help='Specific prompt type(s) to evaluate',
     )
@@ -1189,7 +1185,6 @@ async def main():
             'entity': PromptType.ENTITY_EXTRACTION,
             'keywords': PromptType.KEYWORDS_EXTRACTION,
             'summary': PromptType.SUMMARY,
-            'hyde': PromptType.HYDE,
         }
         prompt_types = [type_map[t] for t in args.prompt_type]
     else:

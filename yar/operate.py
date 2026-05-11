@@ -5064,7 +5064,6 @@ async def kg_query(
         response_max_tokens,
         query_param.enable_rerank,
         query_param.enable_bm25_fusion,
-        query_param.enable_hyde,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
@@ -5102,7 +5101,6 @@ async def kg_query(
                 'user_prompt': query_param.user_prompt or '',
                 'enable_rerank': query_param.enable_rerank,
                 'enable_bm25_fusion': query_param.enable_bm25_fusion,
-                'enable_hyde': query_param.enable_hyde,
             }
             await save_to_cache(
                 hashing_kv,
@@ -5367,7 +5365,6 @@ async def _get_vector_context(
         chunks_vdb: Vector database containing document chunks
         query_param: Query parameters including chunk_top_k and ids
         query_embedding: Optional pre-computed query embedding to avoid redundant embedding calls
-        original_query_embedding: Optional original query embedding for dual-query HyDE fallback in hybrid search
 
     Returns:
         List of text chunks with metadata and preserved retrieval scores
@@ -5469,163 +5466,6 @@ async def _get_vector_context(
         return []
 
 
-async def _generate_hyde_answer(
-    query: str,
-    *,
-    use_model_func: Callable[..., Awaitable[str]] | None,
-    llm_timeout: float,
-    context: str = '',
-) -> str | None:
-    """Generate a hypothetical answer for HyDE retrieval.
-
-    Returns the stripped hypothetical answer when it is long enough to be useful
-    (>= 10 chars), else None. All failure modes (missing LLM, timeout, exception,
-    too-short answer) collapse to None so callers can fall back to the original
-    query without branching on error type.
-    """
-    if not query or not use_model_func:
-        return None
-    label = f'HyDE ({context})' if context else 'HyDE'
-    try:
-        hyde_prompt = PROMPTS['hyde_prompt'].format(query=query)
-        response = cast(str, await asyncio.wait_for(use_model_func(hyde_prompt), timeout=llm_timeout))
-        normalized = response.strip() if isinstance(response, str) else ''
-        if len(normalized) >= 10:
-            logger.debug(f'{label}: Using hypothetical answer ({len(normalized)} chars)')
-            return normalized
-        logger.warning(f'{label}: Generated answer too short, using original query')
-    except asyncio.TimeoutError:
-        logger.warning(f'{label}: Timed out after {llm_timeout}s, falling back to original query')
-    except Exception as e:
-        logger.warning(f'{label}: Failed: {e}, using original query')
-    return None
-
-
-async def decompose_query_for_hyde(
-    query: str,
-    *,
-    use_model_func: Callable[..., Awaitable[str]] | None,
-    llm_timeout: float,
-    max_subquestions: int = 3,
-) -> list[str]:
-    """Split the query into 1-3 atomic sub-questions when it covers multiple facets.
-
-    Returns a list of sub-questions. The original query is the first/only entry when the query is
-    atomic (single facet) or when the LLM call fails. Callers can compare ``len(result) > 1`` to
-    detect actual decomposition.
-
-    Cheap heuristic short-circuit before the LLM call: queries shorter than ~5 tokens or that
-    contain neither "and" nor a comparison verb are not decomposed.
-    """
-    if not query or not use_model_func:
-        return [query] if query else []
-
-    normalized = query.strip()
-    if not normalized:
-        return []
-
-    # Heuristic gate: skip the LLM call when the query has no obvious multi-facet markers.
-    lowered = normalized.lower()
-    has_multi_facet_marker = any(
-        marker in lowered
-        for marker in (' and ', ' vs ', ' versus ', ' compare ', ' difference between ', ' as well as ')
-    )
-    if not has_multi_facet_marker:
-        return [normalized]
-    # Also skip extremely short queries ("X and Y?" rarely benefits from decomposition).
-    if len(normalized.split()) < 5:
-        return [normalized]
-
-    try:
-        prompt = PROMPTS['decompose_query_for_hyde'].format(query=normalized)
-        response = cast(str, await asyncio.wait_for(use_model_func(prompt), timeout=llm_timeout))
-    except asyncio.TimeoutError:
-        logger.warning(f'Query decompose: timed out after {llm_timeout}s, using original query')
-        return [normalized]
-    except Exception as e:
-        logger.warning(f'Query decompose: failed: {e}, using original query')
-        return [normalized]
-
-    response = remove_think_tags(response)
-    try:
-        parsed = json_repair.loads(response)
-    except (json.JSONDecodeError, ValueError):
-        logger.debug('Query decompose: could not parse JSON from response, using original query')
-        return [normalized]
-
-    if not isinstance(parsed, list) or not parsed:
-        return [normalized]
-
-    sub_questions: list[str] = []
-    seen: set[str] = set()
-    for item in parsed[:max_subquestions]:
-        if not isinstance(item, str):
-            continue
-        cleaned = item.strip()
-        if not cleaned or cleaned.casefold() in seen:
-            continue
-        seen.add(cleaned.casefold())
-        sub_questions.append(cleaned)
-
-    if not sub_questions:
-        return [normalized]
-    if len(sub_questions) > 1:
-        logger.info(f'Query decompose: {normalized!r} -> {sub_questions!r}')
-    return sub_questions
-
-
-async def _generate_multi_facet_hyde(
-    query: str,
-    *,
-    use_model_func: Callable[..., Awaitable[str]] | None,
-    llm_timeout: float,
-    context: str = '',
-) -> str | None:
-    """Run HyDE per sub-question and concatenate the hypothetical answers.
-
-    For atomic queries this is exactly equivalent to ``_generate_hyde_answer`` (one call). For
-    multi-facet queries each sub-question contributes its own facet-specific passage, so the
-    embedded HyDE text covers every facet and the resulting query embedding does not bias retrieval
-    toward whichever facet the LLM picked first.
-
-    Returns ``None`` on total failure (no sub-question produced a usable answer) so the caller can
-    fall back to the original-query embedding.
-    """
-    sub_questions = await decompose_query_for_hyde(
-        query,
-        use_model_func=use_model_func,
-        llm_timeout=llm_timeout,
-    )
-    if not sub_questions:
-        return None
-    if len(sub_questions) == 1:
-        return await _generate_hyde_answer(
-            sub_questions[0],
-            use_model_func=use_model_func,
-            llm_timeout=llm_timeout,
-            context=context,
-        )
-
-    facet_answers = await asyncio.gather(
-        *[
-            _generate_hyde_answer(
-                sub_q,
-                use_model_func=use_model_func,
-                llm_timeout=llm_timeout,
-                context=f'{context}/sub{i + 1}' if context else f'sub{i + 1}',
-            )
-            for i, sub_q in enumerate(sub_questions)
-        ],
-        return_exceptions=False,
-    )
-    valid = [answer for answer in facet_answers if answer]
-    if not valid:
-        return None
-    combined = '\n\n'.join(valid)
-    logger.debug(f'Multi-facet HyDE: combined {len(valid)}/{len(sub_questions)} sub-answers ({len(combined)} chars)')
-    return combined
-
-
 async def _perform_kg_search(
     query: str,
     ll_keywords: str,
@@ -5657,44 +5497,25 @@ async def _perform_kg_search(
     # Pre-compute query embedding once for all vector operations
     kg_chunk_pick_method = text_chunks_db.global_config.get('kg_chunk_pick_method', DEFAULT_KG_CHUNK_PICK_METHOD)
     query_embedding = None
-    original_query_embedding = None
-    embedding_query_text = query  # Text to embed (query or hypothetical answer for HyDE)
     ll_search_terms = _split_keyword_terms(ll_keywords)
     normalized_query = query.strip()
     should_reuse_entity_embedding = bool(
         normalized_query
         and ll_search_terms
         and len(ll_search_terms) == 1
-        and (query_param.enable_hyde or ll_search_terms[0].casefold() == normalized_query.casefold())
+        and ll_search_terms[0].casefold() == normalized_query.casefold()
     )
-
-    # HyDE: Generate hypothetical answer if enabled
-    if query and query_param.enable_hyde:
-        hyde_use_model_func = cast(
-            Callable[..., Awaitable[str]],
-            query_param.model_func or text_chunks_db.global_config.get('llm_model_func'),
-        )
-        hyde_answer = await _generate_multi_facet_hyde(
-            query,
-            use_model_func=hyde_use_model_func,
-            llm_timeout=float(text_chunks_db.global_config.get('llm_timeout', 60)),
-        )
-        if hyde_answer:
-            embedding_query_text = hyde_answer
 
     if query and (kg_chunk_pick_method == 'VECTOR' or chunks_vdb or should_reuse_entity_embedding):
         actual_embedding_func = text_chunks_db.embedding_func
         if actual_embedding_func:
             try:
-                query_embedding = await actual_embedding_func([embedding_query_text])
-                query_embedding = query_embedding[0]  # Extract first embedding from batch result
-                if embedding_query_text != query and (chunks_vdb is not None or should_reuse_entity_embedding):
-                    original_query_embedding = (await actual_embedding_func([query]))[0]
+                query_embedding = await actual_embedding_func([query])
+                query_embedding = query_embedding[0]
                 logger.debug('Pre-computed query embedding for all vector operations')
             except Exception as e:
                 logger.warning(f'Failed to pre-compute query embedding: {e}')
                 query_embedding = None
-                original_query_embedding = None
 
     # Handle local and global modes
     if query_param.mode == 'local' and len(ll_keywords) > 0:
@@ -7326,16 +7147,12 @@ async def _query_entity_candidates(
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
-    original_query_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """Query entity candidates for a single term.
 
-    When both ``query_embedding`` (HyDE / hypothetical answer) and ``original_query_embedding``
-    (raw user query) are supplied, both vector searches are run in parallel and fused with
-    the trigram fallback via Reciprocal Rank Fusion. This mirrors the chunk-vector dual-fallback
-    so HyDE drift does not silently lose entity recall.
-
-    Falls back to hybrid trigram search and finally a plain vector query if RRF inputs are unavailable.
+    Combines vector similarity search with trigram-based hybrid search via
+    Reciprocal Rank Fusion. Falls back to plain vector query when hybrid
+    search is unavailable.
     """
     from yar.utils import reciprocal_rank_fusion
 
@@ -7359,14 +7176,12 @@ async def _query_entity_candidates(
             logger.debug(f'Hybrid entity search failed for "{term}": {e}')
             return []
 
-    has_hyde = query_embedding is not None and original_query_embedding is not None
-    if has_hyde:
-        hyde_results, original_results, hybrid_results = await asyncio.gather(
+    if query_embedding is not None and callable(hybrid_search):
+        vector_results, hybrid_results = await asyncio.gather(
             _vector_query(query_embedding),
-            _vector_query(original_query_embedding),
             _hybrid_query(),
         )
-        result_lists = [lst for lst in (hyde_results, original_results, hybrid_results) if lst]
+        result_lists = [lst for lst in (vector_results, hybrid_results) if lst]
         if not result_lists:
             return []
         if len(result_lists) == 1:
@@ -8210,28 +8025,11 @@ async def naive_query(
         logger.error('Tokenizer not found in global configuration.')
         return QueryResult(content=PROMPTS['fail_response'])
 
-    # HyDE: Generate hypothetical answer and compute embedding if enabled
-    query_embedding = None
-    if query_param.enable_hyde:
-        hyde_answer = await _generate_multi_facet_hyde(
-            query,
-            use_model_func=use_model_func,
-            llm_timeout=float(global_config.get('llm_timeout', 60)),
-            context='naive',
-        )
-        if hyde_answer:
-            embedding_func = getattr(chunks_vdb, 'embedding_func', None)
-            if embedding_func:
-                query_embedding = (await embedding_func([hyde_answer]))[0]
-            else:
-                logger.warning('HyDE: No embedding function available on chunks_vdb')
-
     keyword_phrase_terms = _derive_phrase_terms_for_chunk_search(query, query_param.ll_keywords)
     chunks = await _get_vector_context(
         query,
         chunks_vdb,
         query_param,
-        query_embedding,
         phrase_terms=keyword_phrase_terms,
     )
     if (chunks is None or len(chunks) == 0) and _clear_auto_entity_filter(
@@ -8383,7 +8181,6 @@ async def naive_query(
         response_max_tokens,
         query_param.enable_rerank,
         query_param.enable_bm25_fusion,
-        query_param.enable_hyde,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
@@ -8419,7 +8216,6 @@ async def naive_query(
                 'user_prompt': query_param.user_prompt or '',
                 'enable_rerank': query_param.enable_rerank,
                 'enable_bm25_fusion': query_param.enable_bm25_fusion,
-                'enable_hyde': query_param.enable_hyde,
             }
             await save_to_cache(
                 hashing_kv,

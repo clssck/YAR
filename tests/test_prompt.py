@@ -464,19 +464,6 @@ class TestOrphanConnectionPrompt:
         assert 'participation' in prompt
 
 
-class TestHyDEPrompt:
-    """Tests for HyDE (Hypothetical Document Embedding) prompt."""
-
-    def test_hyde_prompt_exists(self):
-        """Test HyDE prompt exists."""
-        assert 'hyde_prompt' in PROMPTS
-
-    def test_hyde_prompt_placeholder(self):
-        """Test HyDE prompt has query placeholder."""
-        prompt = PROMPTS['hyde_prompt']
-        assert '{query}' in prompt
-
-
 class TestEntityReviewPrompts:
     """Tests for entity review prompts."""
 

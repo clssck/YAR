@@ -462,7 +462,6 @@ class TestEdgeCases:
             max_total_tokens=32000,
             hl_keywords=['high', 'level'],
             ll_keywords=['low', 'level'],
-            enable_hyde=True,
             enable_bm25_fusion=True,
             bm25_weight=0.4,
             entity_filter='Fitusiran',
@@ -471,7 +470,6 @@ class TestEdgeCases:
         assert param.response_type == 'Bullet Points'
         assert param.top_k == 50
         assert param.max_total_tokens == 32000
-        assert param.enable_hyde is True
         assert param.enable_bm25_fusion is True
         assert param.bm25_weight == 0.4
         assert param.entity_filter == 'Fitusiran'
@@ -510,7 +508,6 @@ class TestYARQueryMethods:
             model_func=AsyncMock(return_value='custom model'),
             user_prompt='Be precise',
             enable_rerank=True,
-            enable_hyde=True,
             enable_bm25_fusion=True,
             bm25_weight=0.55,
             entity_filter='Fitusiran',
@@ -532,7 +529,6 @@ class TestYARQueryMethods:
         assert cloned_param.only_need_context is True
         assert cloned_param.only_need_prompt is False
         assert cloned_param.stream is False
-        assert cloned_param.enable_hyde is True
         assert cloned_param.enable_bm25_fusion is True
         assert cloned_param.bm25_weight == 0.55
         assert cloned_param.entity_filter == 'Fitusiran'

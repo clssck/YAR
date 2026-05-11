@@ -238,7 +238,6 @@ class TestQueryRequestModel:
             query='test query',
             mode='local',
             top_k=5,
-            enable_hyde=True,
             enable_bm25_fusion=True,
             bm25_weight=0.65,
             entity_filter='Fitusiran',
@@ -247,7 +246,6 @@ class TestQueryRequestModel:
         assert param.mode == 'local'
         assert param.top_k == 5
         assert param.stream is False
-        assert param.enable_hyde is True
         assert param.enable_bm25_fusion is True
         assert param.bm25_weight == 0.65
         assert param.entity_filter == 'Fitusiran'

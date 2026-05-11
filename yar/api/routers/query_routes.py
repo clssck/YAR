@@ -337,11 +337,6 @@ class QueryRequest(BaseModel):
         description='Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is False.',
     )
 
-    enable_hyde: bool | None = Field(
-        default=None,
-        description='Enable HyDE (Hypothetical Document Embedding). When enabled, generates a hypothetical answer and uses its embedding for retrieval. Can improve results for questions with semantic gap between query and answer.',
-    )
-
     enable_bm25_fusion: bool | None = Field(
         default=None,
         description='Enable BM25 fusion: combines vector similarity with BM25 full-text search using Reciprocal Rank Fusion (RRF). Helps with multi-constraint queries where exact keyword matches matter (e.g., drug names, dates, acronyms).',

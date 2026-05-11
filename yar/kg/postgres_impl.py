@@ -3955,7 +3955,7 @@ class PGVectorStorage(BaseVectorStorage):
             query: Search query string
             top_k: Number of final results to return
             query_embedding: Optional pre-computed query embedding
-            original_query_embedding: Optional original query embedding for dual-query HyDE fallback
+
             bm25_weight: Weight for BM25 results (0.0-1.0). Higher = more BM25 influence.
                         Note: RRF naturally handles ranking, this affects how many BM25
                         results to retrieve (more weight = retrieve more BM25 results).
