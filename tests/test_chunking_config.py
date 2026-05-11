@@ -1,16 +1,8 @@
-"""Tests for chunking configuration and preset handling.
+"""Tests for semantic-only chunking configuration."""
 
-This module tests:
-- CHUNKING_PRESET validation in config.py
-- create_chunker factory function in operate.py
-- Chunking metadata storage in document processing
-- API endpoint integration with chunking_preset parameter
-- Error handling and edge cases
-"""
+from __future__ import annotations
 
-import os
-from typing import cast
-from unittest.mock import patch
+import inspect
 
 import pytest
 

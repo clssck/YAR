@@ -329,7 +329,7 @@ class TestQueryEndpoint:
                     {'reference_id': '2', 'file_path': '/docs/alpha.pdf'},
                     {'reference_id': '5', 'file_path': '/docs/beta.pdf'},
                 ]
-            }
+            },
         }
 
         response = await client.post('/query', json={'query': 'Test query', 'include_references': True})
@@ -349,7 +349,7 @@ class TestQueryEndpoint:
                     {'reference_id': '2', 'file_path': '/docs/alpha.pdf'},
                     {'reference_id': '5', 'file_path': '/docs/beta.pdf'},
                 ]
-            }
+            },
         }
 
         response = await client.post(
@@ -375,7 +375,7 @@ class TestQueryEndpoint:
                     {'reference_id': '2', 'file_path': '/docs/solar.pdf'},
                     {'reference_id': '5', 'file_path': '/docs/hydro.pdf'},
                 ]
-            }
+            },
         }
 
         response = await client.post(
@@ -658,7 +658,10 @@ class TestQueryStreamEndpoint:
         }
 
         async def fake_extract(*args, **kwargs):
-            yield json.dumps({'citations_metadata': {'markers': [], 'sources': [], 'footnotes': [], 'uncited_count': 0}}) + '\n'
+            yield (
+                json.dumps({'citations_metadata': {'markers': [], 'sources': [], 'footnotes': [], 'uncited_count': 0}})
+                + '\n'
+            )
 
         monkeypatch.setattr('yar.api.routers.query_routes._extract_and_stream_citations', fake_extract)
 
@@ -703,6 +706,7 @@ class TestQueryStreamEndpoint:
             {'error': 'Stream processing error'},
         ]
         assert not any('citations_metadata' in line for line in lines)
+
     @pytest.mark.asyncio
     async def test_non_stream_mode_strips_inline_reference_ids_by_default(self, client, mock_rag):
         """Non-stream NDJSON mode should keep references separate from prose by default."""

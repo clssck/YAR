@@ -247,64 +247,64 @@ class TestSemanticChunker:
 
 @pytest.mark.offline
 class TestVisionBatchHelpers:
-	def test_split_batch_response_with_full_markers(self):
-		raw = (
-			'<!-- PAGE 1 -->\n\n# First\n\nAlpha\n\n'
-			f'<!-- PAGE 2 -->\n\n{NO_TEXT_DETECTED_SENTINEL}\n\n'
-			'<!-- PAGE 3 -->\n\nGamma'
-		)
+    def test_split_batch_response_with_full_markers(self):
+        raw = (
+            '<!-- PAGE 1 -->\n\n# First\n\nAlpha\n\n'
+            f'<!-- PAGE 2 -->\n\n{NO_TEXT_DETECTED_SENTINEL}\n\n'
+            '<!-- PAGE 3 -->\n\nGamma'
+        )
 
-		results, marker_mode = split_batch_response(raw, [1, 2, 3])
+        results, marker_mode = split_batch_response(raw, [1, 2, 3])
 
-		assert marker_mode == 'full'
-		assert [(result.page_number, result.content) for result in results] == [
-			(1, '# First\n\nAlpha'),
-			(2, ''),
-			(3, 'Gamma'),
-		]
+        assert marker_mode == 'full'
+        assert [(result.page_number, result.content) for result in results] == [
+            (1, '# First\n\nAlpha'),
+            (2, ''),
+            (3, 'Gamma'),
+        ]
 
-	def test_split_batch_response_without_markers_assigns_content_to_first_page(self):
-		multi_page_results, multi_page_mode = split_batch_response('Raw text only', [1, 2, 3])
-		single_page_results, single_page_mode = split_batch_response('Raw text only', [7])
+    def test_split_batch_response_without_markers_assigns_content_to_first_page(self):
+        multi_page_results, multi_page_mode = split_batch_response('Raw text only', [1, 2, 3])
+        single_page_results, single_page_mode = split_batch_response('Raw text only', [7])
 
-		assert multi_page_mode == 'none'
-		assert [(result.page_number, result.content) for result in multi_page_results] == [
-			(1, 'Raw text only'),
-			(2, ''),
-			(3, ''),
-		]
-		assert [(result.page_number, result.content) for result in single_page_results] == [(7, 'Raw text only')]
-		assert single_page_mode in {'none', 'full'}
+        assert multi_page_mode == 'none'
+        assert [(result.page_number, result.content) for result in multi_page_results] == [
+            (1, 'Raw text only'),
+            (2, ''),
+            (3, ''),
+        ]
+        assert [(result.page_number, result.content) for result in single_page_results] == [(7, 'Raw text only')]
+        assert single_page_mode in {'none', 'full'}
 
-	def test_split_batch_response_with_partial_markers_reports_partial_mode(self):
-		raw = '<!-- PAGE 1 -->\n\nOne\n\n<!-- PAGE 3 -->\n\nThree'
+    def test_split_batch_response_with_partial_markers_reports_partial_mode(self):
+        raw = '<!-- PAGE 1 -->\n\nOne\n\n<!-- PAGE 3 -->\n\nThree'
 
-		results, marker_mode = split_batch_response(raw, [1, 2, 3])
+        results, marker_mode = split_batch_response(raw, [1, 2, 3])
 
-		assert marker_mode == 'partial'
-		assert [(result.page_number, result.content) for result in results] == [
-			(1, 'One'),
-			(2, ''),
-			(3, 'Three'),
-		]
+        assert marker_mode == 'partial'
+        assert [(result.page_number, result.content) for result in results] == [
+            (1, 'One'),
+            (2, ''),
+            (3, 'Three'),
+        ]
 
-	@pytest.mark.parametrize(
-		('expected_page_count', 'marker_mode', 'finish_reason', 'expected'),
-		[
-			(3, 'full', 'length', True),
-			(3, 'full', 'stop', False),
-			(3, 'partial', 'stop', True),
-			(1, 'none', 'length', False),
-		],
-	)
-	def test_should_split_batch_matches_finish_reason_and_marker_quality(
-		self,
-		expected_page_count: int,
-		marker_mode: str,
-		finish_reason: str,
-		expected: bool,
-	):
-		assert should_split_batch(expected_page_count, marker_mode, finish_reason) is expected
+    @pytest.mark.parametrize(
+        ('expected_page_count', 'marker_mode', 'finish_reason', 'expected'),
+        [
+            (3, 'full', 'length', True),
+            (3, 'full', 'stop', False),
+            (3, 'partial', 'stop', True),
+            (1, 'none', 'length', False),
+        ],
+    )
+    def test_should_split_batch_matches_finish_reason_and_marker_quality(
+        self,
+        expected_page_count: int,
+        marker_mode: str,
+        finish_reason: str,
+        expected: bool,
+    ):
+        assert should_split_batch(expected_page_count, marker_mode, finish_reason) is expected
 
 
 class TestChunkMarkdownBoilerplate:

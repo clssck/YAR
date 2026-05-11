@@ -3,7 +3,9 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Protocol
 
 HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
 PAGE_MARKER_RE = re.compile(r'<!--\s*PAGE\s+(\d+)\s*-->')
@@ -15,8 +17,7 @@ LIST_ITEM_RE = re.compile(r'^\s*(?:[-*+]\s+|\d+[.)]\s+)')
 TABLE_ROW_RE = re.compile(r'^\s*\|.*\|\s*$')
 TABLE_SEPARATOR_RE = re.compile(r'^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$')
 PAGE_MARKER_SEPARATOR_RE = re.compile(r'[\s\x00-\x1f\x7f]')
-TRIM_RE = re.compile(r'^[ \t\r\n\f\v]+|[ \t\r\n\f\v]+$')
-TRIM_END_RE = re.compile(r'[ \t\r\n\f\v]+$')
+TRIM_CHARS = ' \t\r\n\f\v'
 WHITESPACE_SPLIT_RE = re.compile(r'[ \t\r\n\f\v]+')
 BLANK_LINE_SPLIT_RE = re.compile(r'\n[ \t\r\f\v]*\n+')
 VISIBLE_WORD_SEPARATOR_RE = re.compile(r'[ \t\r\n\f\v]')
@@ -68,6 +69,7 @@ class Section:
     heading: str
     body: str
     heading_hierarchy: list[HeadingNode] | None = None
+    token_count: int | None = None
 
 
 @dataclass(slots=True)
@@ -87,7 +89,7 @@ def _trim(text: str) -> str:
 
 
 def _trim_end(text: str) -> str:
-    return TRIM_END_RE.sub('', text)
+    return text.rstrip(TRIM_CHARS)
 
 
 def _split_whitespace(text: str) -> list[str]:
@@ -153,13 +155,22 @@ def _parse_into_sections(markdown: str) -> list[Section]:
     for line in lines:
         match = HEADING_RE.match(line)
         if match:
-            flush_body()
             if current is not None:
+                body_lines, next_section_preamble = _split_trailing_page_marker_lines(body_lines)
+                flush_body()
                 sections.append(current)
+                current = Section(level=len(match.group(1)), heading=match.group(2), body='')
+                body_lines = ['\n'.join(next_section_preamble)] if next_section_preamble else []
             elif body_lines:
-                sections.append(Section(level=0, heading='', body='\n'.join(body_lines)))
-                body_lines = []
-            current = Section(level=len(match.group(1)), heading=match.group(2), body='')
+                preamble = '\n'.join(body_lines)
+                current = Section(level=len(match.group(1)), heading=match.group(2), body='')
+                if _is_page_marker_only_text(preamble):
+                    body_lines = [preamble]
+                else:
+                    sections.append(Section(level=0, heading='', body=preamble))
+                    body_lines = []
+            else:
+                current = Section(level=len(match.group(1)), heading=match.group(2), body='')
         else:
             body_lines.append(line)
 
@@ -220,32 +231,43 @@ def _same_heading_node(left: HeadingNode, right: HeadingNode) -> bool:
     return left.level == right.level and left.text == right.text
 
 
-def _has_same_parent_hierarchy(left: list[HeadingNode], right: list[HeadingNode]) -> bool:
+def _has_same_heading_hierarchy(left: list[HeadingNode], right: list[HeadingNode]) -> bool:
     if len(left) != len(right):
         return False
-    return all(_same_heading_node(node, right[index]) for index, node in enumerate(left[:-1]))
+    return all(_same_heading_node(node, right[index]) for index, node in enumerate(left))
+
+
+def _is_child_section(parent: Section, child: Section) -> bool:
+    parent_hierarchy = parent.heading_hierarchy
+    child_hierarchy = child.heading_hierarchy
+    if parent_hierarchy is None or child_hierarchy is None:
+        return False
+    if len(child_hierarchy) <= len(parent_hierarchy):
+        return False
+    return all(_same_heading_node(node, child_hierarchy[index]) for index, node in enumerate(parent_hierarchy))
 
 
 def _has_compatible_branch(pred: Section, section: Section) -> bool:
     if pred.level == 0:
-        return section.level in {0, 1}
+        return section.level == 0
     if pred.heading_hierarchy is None or section.heading_hierarchy is None:
         return False
-    if pred.level != section.level:
-        return False
-    return _has_same_parent_hierarchy(pred.heading_hierarchy, section.heading_hierarchy)
+    return _has_same_heading_hierarchy(pred.heading_hierarchy, section.heading_hierarchy)
 
 
 def _can_merge(pred: Section, section: Section, join_threshold: int) -> bool:
     if not _has_compatible_branch(pred, section):
         return False
-    combined_tokens = _estimate_tokens(_section_full_text(pred)) + _estimate_tokens(_section_full_text(section))
+    combined_tokens = _section_token_count(pred) + _section_token_count(section)
     return combined_tokens < join_threshold
 
 
 def _merge_into(pred: Section, section: Section) -> None:
-    append_text = f'{"#" * section.level} {section.heading}\n\n{section.body}'
-    pred.body = f'{pred.body}\n\n{append_text}' if pred.body else append_text
+    heading = f'{"#" * section.level} {section.heading}'
+    body = _trim(section.body)
+    append_text = f'{heading}\n\n{body}' if body else heading
+    pred.body = f'{_trim(pred.body)}\n\n{append_text}' if pred.body else append_text
+    pred.token_count = None
 
 
 def _merge_at_level(sections: list[Section], level: int, join_threshold: int) -> list[Section]:
@@ -266,23 +288,27 @@ _TINY_SECTION_THRESHOLD = 100
 
 
 def _absorb_tiny_sections(sections: list[Section], join_threshold: int) -> list[Section]:
-    """Merge sections smaller than *_TINY_SECTION_THRESHOLD* tokens into their predecessor.
+    """Merge tiny child sections into a substantial immediate parent.
 
-    The level-based merge only merges siblings at the same heading depth.
+    The level-based merge only merges sections with the exact same heading path.
     This pass catches short child sections (e.g. a 3-line ``### IMPACTS``
-    under a ``## Topic 5``) that would otherwise become isolated chunks
-    with no semantic link to the surrounding context.
+    under a substantial ``## Topic 5``) that would otherwise become isolated
+    chunks with too little surrounding context.
 
-    Only absorbs into a predecessor that already carries meaningful content,
-    preventing cascading absorption of uniformly tiny sections.
+    Distinct top-level or sibling headings are never absorbed into each other:
+    a chunk's heading metadata must describe the structure it contains.
     """
     if not sections:
         return sections
     result: list[Section] = [sections[0]]
     for section in sections[1:]:
-        tokens = _estimate_tokens(_section_full_text(section))
-        pred_tokens = _estimate_tokens(_section_full_text(result[-1]))
-        if tokens < _TINY_SECTION_THRESHOLD and pred_tokens >= _TINY_SECTION_THRESHOLD:
+        tokens = _section_token_count(section)
+        pred_tokens = _section_token_count(result[-1])
+        if (
+            _is_child_section(result[-1], section)
+            and tokens < _TINY_SECTION_THRESHOLD
+            and pred_tokens >= _TINY_SECTION_THRESHOLD
+        ):
             combined = pred_tokens + tokens
             if combined < join_threshold:
                 _merge_into(result[-1], section)
@@ -299,10 +325,10 @@ def _merge_sections(sections: list[Section], join_threshold: int) -> list[Sectio
     merged = sections
     for level in range(max_level, 0, -1):
         merged = _merge_at_level(merged, level, join_threshold)
-    # Absorb tiny child sections into their predecessor regardless of level.
-    # Without this, a short "### IMPACTS:" section (level 3) remains isolated
-    # from its parent "## Topic 5" section (level 2) and lacks the semantic
-    # context that embeddings need for retrieval.
+    # Absorb tiny child sections into substantial parents without crossing into
+    # sibling or top-level branches. This preserves heading metadata truthfulness:
+    # if a chunk has one heading_context, its content should stay under that
+    # heading path or direct descendants.
     merged = _absorb_tiny_sections(merged, join_threshold)
     return merged
 
@@ -855,7 +881,6 @@ def _strip_repeating_boilerplate_lines(
     if not stripped_any:
         return chunks
     return cleaned
-
 
 
 def _split_oversized_sections(sections: list[Section], max_chunk_tokens: int) -> list[Section]:

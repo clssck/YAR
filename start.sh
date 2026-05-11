@@ -198,6 +198,10 @@ else
     export MAX_ASYNC="${MAX_ASYNC:-96}"
     export MAX_PARALLEL_INSERT="${MAX_PARALLEL_INSERT:-10}"
 
+    # Vision extraction: protect the work VPS provider under batch upload load.
+    export VISION_PAGES_PER_CALL="${VISION_PAGES_PER_CALL:-4}"
+    export VISION_CONCURRENCY="${VISION_CONCURRENCY:-2}"
+
     # Reverse proxy support (set ROOT_PATH for proxied environments)
     export ROOT_PATH="${ROOT_PATH:-}"
 

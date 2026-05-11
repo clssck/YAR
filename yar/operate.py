@@ -7,7 +7,7 @@ import re
 import time
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from functools import partial
 from html import unescape
@@ -92,6 +92,7 @@ from yar.utils import (
     logger,
     make_relation_chunk_key,
     merge_source_ids,
+    normalize_unicode_for_entity_matching,
     pack_user_ass_to_openai_messages,
     pick_by_vector_similarity,
     pick_by_weighted_polling,
@@ -173,6 +174,13 @@ def _apply_auto_entity_filter(query: str, query_param: QueryParam) -> str | None
     if query_param.entity_filter is not None:
         return None
     if os.getenv('ENABLE_AUTO_ENTITY_FILTER', 'true').lower() == 'false':
+        return None
+    if _is_comparison_query(query):
+        # Comparison queries reference at least two distinct topics by name
+        # ("compare X with Y"). Auto-locking entity_filter to whichever name
+        # the alias table matches first collapses retrieval to one side and
+        # the model can no longer see the other. Skip auto-filter for these.
+        logger.info('Skipping auto entity_filter for comparison-intent query')
         return None
     resolved_entity_filter = resolve_entity_filter(query)
     if resolved_entity_filter is None:
@@ -370,9 +378,7 @@ def chunking_by_semantic(
     return results
 
 
-def create_chunker(
-    preset: str | None = None,
-) -> Callable[
+def create_chunker() -> Callable[
     [Tokenizer | None, str, str | None, bool, int, int],
     list[dict[str, Any]],
 ]:
@@ -2572,6 +2578,7 @@ async def _merge_edges_then_upsert(
     added_entities: list | None = None,  # New parameter to track entities added during edge processing
     relation_chunks_storage: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
+    text_chunks_storage: BaseKVStorage | None = None,
 ):
     if src_id == tgt_id:
         return None, {}, {}, []
@@ -2943,6 +2950,25 @@ async def _merge_edges_then_upsert(
             _unique_nonempty_strings([span for relation in edges_data for span in relation.evidence_spans])
         ),
     )
+    if not relation_summary.evidence_spans:
+        recovered_spans = await _recover_relation_evidence_from_source_chunks(
+            relation_summary,
+            source_ids,
+            text_chunks_storage,
+        )
+        if recovered_spans:
+            relation_summary = replace(relation_summary, evidence_spans=recovered_spans)
+
+    if relation_summary.weight >= 2.0 and not relation_summary.evidence_spans:
+        logger.info(
+            'High-weight unsupported edge: %s --%s--> %s (weight=%.1f, sources=%d) — no extractive evidence spans',
+            relation_summary.key.src,
+            relation_summary.predicate.primary,
+            relation_summary.key.tgt,
+            relation_summary.weight,
+            len(source_ids),
+        )
+    relation_summary = await _review_relation_summary_predicate(relation_summary, global_config)
     relation_projection = build_relation_storage_projection(relation_summary)
     await knowledge_graph_inst.upsert_edge(
         src_id,
@@ -3207,6 +3233,7 @@ async def merge_nodes_and_edges(
     llm_response_cache: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     relation_chunks_storage: BaseKVStorage | None = None,
+    text_chunks_storage: BaseKVStorage | None = None,
     current_file_number: int = 0,
     total_files: int = 0,
     file_path: str = 'unknown_source',
@@ -3395,6 +3422,7 @@ async def merge_nodes_and_edges(
                         added_entities,
                         relation_chunks_storage,
                         entity_chunks_storage,
+                        text_chunks_storage,
                     )
 
                     if edge_data is None:
@@ -5711,12 +5739,95 @@ async def extract_keywords_only(
     return hl_keywords, ll_keywords
 
 
+_COMPARISON_QUERY_RE = re.compile(
+    r'\b(?:compare|comparison|differ(?:ence|s|ent)?|versus|vs\.?|contrast|'
+    r'as well as|alongside|between\s+\S+\s+and|how does\s+\S+(?:\s+\S+){0,4}\s+(?:compare|differ))\b',
+    re.IGNORECASE,
+)
+
+
+def _is_comparison_query(query: str) -> bool:
+    """Detect cross-document comparison intent from a free-text query.
+
+    Used to trigger multi-document chunk diversification — when a single
+    file_path dominates first-pass retrieval, comparison queries fail because
+    only one side of the comparison is in context. Mirror of the patterns in
+    ``analyze_query_intent`` ``comparison_patterns`` so detection is
+    consistent with the mode router.
+    """
+    if not query:
+        return False
+    return bool(_COMPARISON_QUERY_RE.search(query))
+
+
+def _diversify_chunks_across_docs(
+    chunks: list[dict[str, Any]],
+    *,
+    target_top_k: int,
+    min_unique_docs: int = 2,
+) -> list[dict[str, Any]]:
+    """Re-rank ``chunks`` so the top ``target_top_k`` spans multiple file_paths.
+
+    Only re-ranks when the natural top-K is dominated by a single file_path
+    AND the broader candidate pool actually contains other file_paths to
+    promote. Otherwise returns ``chunks`` unchanged so single-doc queries
+    aren't penalized.
+
+    The re-rank is round-robin by file_path: walk through the candidate pool,
+    take the next-best chunk from each unique file_path, repeat until we
+    fill ``target_top_k``. Within a file_path the original retrieval order
+    is preserved.
+    """
+    if not chunks or target_top_k <= 0:
+        return chunks
+    head = chunks[:target_top_k]
+    unique_in_head = {chunk.get('file_path', 'unknown_source') for chunk in head}
+    if len(unique_in_head) >= min_unique_docs:
+        return chunks
+    unique_in_pool = {chunk.get('file_path', 'unknown_source') for chunk in chunks}
+    if len(unique_in_pool) < min_unique_docs:
+        return chunks
+
+    # Group by file_path preserving original order.
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for chunk in chunks:
+        groups.setdefault(chunk.get('file_path', 'unknown_source'), []).append(chunk)
+
+    reranked: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
+    while len(reranked) < target_top_k:
+        any_added = False
+        for file_path in list(groups.keys()):
+            bucket = groups.get(file_path) or []
+            while bucket:
+                next_chunk = bucket.pop(0)
+                cid = str(next_chunk.get('chunk_id') or id(next_chunk))
+                if cid in seen_chunk_ids:
+                    continue
+                seen_chunk_ids.add(cid)
+                reranked.append(next_chunk)
+                any_added = True
+                break
+            if len(reranked) >= target_top_k:
+                break
+        if not any_added:
+            break
+
+    # Append any leftovers so callers that look beyond top-K aren't surprised.
+    for chunk in chunks:
+        cid = str(chunk.get('chunk_id') or id(chunk))
+        if cid in seen_chunk_ids:
+            continue
+        reranked.append(chunk)
+        seen_chunk_ids.add(cid)
+    return reranked
+
+
 async def _get_vector_context(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
-    original_query_embedding: list[float] | None = None,
     phrase_terms: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
@@ -5758,6 +5869,12 @@ async def _get_vector_context(
         # has room to surface chunks the first-stage vector score buried. Without rerank
         # the extra candidates would just be truncated by chunk_top_k later, so skip.
         multiplier = max(query_param.retrieval_multiplier, 1) if query_param.enable_rerank else 1
+        # Comparison queries need a wider candidate pool so the diversifier
+        # can actually find chunks from the OTHER side. Without oversampling
+        # the top-K is dominated by one doc's chunks and there's nothing to
+        # promote.
+        if _is_comparison_query(query):
+            multiplier = max(multiplier, 4)
         search_top_k = base_top_k * multiplier
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
 
@@ -5769,7 +5886,6 @@ async def _get_vector_context(
                     query,
                     top_k=search_top_k,
                     query_embedding=query_embedding,
-                    original_query_embedding=original_query_embedding,
                     bm25_weight=query_param.bm25_weight,
                     phrase_terms=phrase_terms,
                 )
@@ -5817,6 +5933,23 @@ async def _get_vector_context(
             if not valid_chunks:
                 logger.warning(f"Chunk entity filter '{query_param.entity_filter}' removed all results")
                 return []
+
+        # Cross-document diversification: when the query has comparison
+        # intent ("compare X with Y", "differences between A and B") and
+        # first-pass retrieval is dominated by a single file_path, re-rank
+        # so the top-K spans both sides. Otherwise comparison queries return
+        # only one side of the corpus and the synthesizer has nothing to
+        # compare. ``_diversify_chunks_across_docs`` is a no-op when the
+        # candidate pool is single-doc anyway.
+        if _is_comparison_query(query):
+            diversified = _diversify_chunks_across_docs(valid_chunks, target_top_k=base_top_k)
+            if diversified is not valid_chunks:
+                logger.info(
+                    'Comparison query: diversified chunks across docs '
+                    f'({len({c.get("file_path") for c in valid_chunks[:base_top_k]})} -> '
+                    f'{len({c.get("file_path") for c in diversified[:base_top_k]})} unique file_paths in top-{base_top_k})'
+                )
+                valid_chunks = diversified
 
         search_type = 'bm25_fusion' if query_param.enable_bm25_fusion else 'vector'
         oversample_note = f' oversample:{multiplier}x' if multiplier > 1 else ''
@@ -5890,7 +6023,6 @@ async def _perform_kg_search(
             entities_vdb,
             query_param,
             query_embedding=query_embedding if should_reuse_entity_embedding else None,
-            original_query_embedding=original_query_embedding if should_reuse_entity_embedding else None,
             original_query=query,
         )
 
@@ -5916,7 +6048,6 @@ async def _perform_kg_search(
                     entities_vdb,
                     query_param,
                     query_embedding=query_embedding if should_reuse_entity_embedding else None,
-                    original_query_embedding=original_query_embedding if should_reuse_entity_embedding else None,
                     original_query=query,
                 ),
                 _get_edge_data(
@@ -5936,7 +6067,6 @@ async def _perform_kg_search(
                     entities_vdb,
                     query_param,
                     query_embedding=query_embedding if should_reuse_entity_embedding else None,
-                    original_query_embedding=original_query_embedding if should_reuse_entity_embedding else None,
                     original_query=query,
                 )
             if len(hl_keywords) > 0:
@@ -5956,7 +6086,6 @@ async def _perform_kg_search(
                 chunks_vdb,
                 query_param,
                 query_embedding,
-                original_query_embedding,
                 phrase_terms=[term for term in ll_search_terms if ' ' in term] or None,
             )
             # Track vector chunks with source metadata
@@ -7341,15 +7470,26 @@ def _visible_reference_group_key(chunk: dict[str, Any]) -> str:
 
 
 def _preferred_visible_file_path(chunks: list[dict[str, Any]]) -> str:
+    """Return a display path that identifies the actual source document when possible."""
+    generic_file_path = ''
     for chunk in chunks:
         file_path = str(chunk.get('file_path') or '').strip()
-        if file_path and file_path != 'unknown_source' and not file_path.startswith('s3://'):
+        if not file_path or file_path == 'unknown_source' or file_path.startswith('s3://'):
+            continue
+        if not _is_generic_duplicate_file_path(file_path):
             return file_path
+        generic_file_path = generic_file_path or file_path
+
+    for chunk in chunks:
+        s3_key = str(chunk.get('s3_key') or '').strip()
+        if s3_key:
+            return s3_key
+
     for chunk in chunks:
         file_path = str(chunk.get('file_path') or '').strip()
         if file_path and file_path != 'unknown_source':
             return file_path
-    return 'unknown_source'
+    return generic_file_path or 'unknown_source'
 
 
 def _prepare_visible_reference_payload(
@@ -7572,7 +7712,6 @@ async def _get_node_data(
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
     query_embedding: list[float] | None = None,
-    original_query_embedding: list[float] | None = None,
     original_query: str | None = None,
 ):
     logger.info(f'Query nodes: {query} (top_k:{query_param.top_k}, cosine:{entities_vdb.cosine_better_than_threshold})')
@@ -7596,7 +7735,6 @@ async def _get_node_data(
                     entities_vdb,
                     query_param,
                     query_embedding=query_embedding,
-                    original_query_embedding=original_query_embedding,
                 )
                 for term in search_terms
             ]
@@ -7634,7 +7772,6 @@ async def _get_node_data(
             entities_vdb,
             query_param,
             query_embedding=query_embedding,
-            original_query_embedding=original_query_embedding,
         )
         for result in full_query_results:
             entity_name = result.get('entity_name')
@@ -8406,7 +8543,6 @@ async def naive_query(
             query,
             chunks_vdb,
             query_param,
-            query_embedding,
             phrase_terms=keyword_phrase_terms,
         )
 

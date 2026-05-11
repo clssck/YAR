@@ -249,19 +249,6 @@ def parse_args() -> argparse.Namespace:
     # Inject chunk configuration
     args.chunk_size = get_env_value('CHUNK_SIZE', 1200, int)
     args.chunk_overlap_size = get_env_value('CHUNK_OVERLAP_SIZE', 100, int)
-    # Chunking preset: 'semantic' (default), 'recursive', or empty/None (basic)
-    chunking_preset_value = get_env_value('CHUNKING_PRESET', 'semantic')
-    # Normalize and validate preset
-    if chunking_preset_value:
-        chunking_preset_value = chunking_preset_value.strip().lower()
-        if chunking_preset_value in ('none', ''):
-            chunking_preset_value = None
-        elif chunking_preset_value not in ('semantic', 'recursive'):
-            raise ValueError(
-                f"Invalid CHUNKING_PRESET '{chunking_preset_value}'. "
-                "Allowed values: 'semantic', 'recursive', 'none', or empty string."
-            )
-    args.chunking_preset = chunking_preset_value
 
     # Inject LLM cache configuration
     args.enable_llm_cache_for_extract = get_env_value('ENABLE_LLM_CACHE_FOR_EXTRACT', True, bool)
@@ -415,6 +402,15 @@ class _GlobalArgsProxy:
         if not _initialized:
             initialize_config()
         setattr(_global_args, name, value)
+
+    @property
+    def __dict__(self):  # type: ignore[override]
+        # Expose the underlying namespace's attributes so callers using
+        # ``vars(global_args)`` (e.g. binding_options.options_dict) see the
+        # parsed args instead of the proxy's empty ``__dict__``.
+        if not _initialized:
+            initialize_config()
+        return getattr(_global_args, '__dict__', {})
 
     def __repr__(self):
         if not _initialized:

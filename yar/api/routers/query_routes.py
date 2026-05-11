@@ -1181,7 +1181,7 @@ def create_query_routes(
             },
         },
     )
-    async def query_text(request: QueryRequest):
+    async def query_text(request: QueryRequest, http_response: Response):
         """
         Comprehensive RAG query endpoint with non-streaming response. Parameter "stream" is ignored.
 
@@ -2095,7 +2095,7 @@ def create_query_routes(
             },
         },
     )
-    async def query_data(request: QueryRequest):
+    async def query_data(request: QueryRequest, http_response: Response):
         """
         Advanced data retrieval endpoint for structured RAG analysis.
 

@@ -129,10 +129,25 @@ load_dotenv(dotenv_path='.env', override=False)
 
 
 def _resolve_effective_query_mode(query: str, requested_mode: str) -> str:
-    """Route mix queries to a more suitable retrieval mode when the intent is clear."""
+    """Route queries to the retrieval mode that fits their shape.
+
+    Two passes:
+
+    1. Comparison/cross-document queries always run in ``mix`` regardless of
+       what the caller requested. ``global`` mode fans out from one entity
+       neighbourhood and silently misses the other side of the comparison;
+       ``local`` only sees a single keyword's chunks. Mix is the only mode
+       that surfaces both sides of "compare X and Y" / "differences between"
+       style questions, so we override caller intent here.
+    2. When the caller asks for ``mix``, the intent classifier may downroute
+       to ``naive`` / ``local`` / ``global`` / ``hybrid`` for shapes that
+       benefit from a narrower path (single-fact lookup, enumeration, etc.).
+    """
+    intent_profile = analyze_query_intent(query)
+    if intent_profile.get('kind') == 'comparison':
+        return 'mix'
     if requested_mode != 'mix':
         return requested_mode
-    intent_profile = analyze_query_intent(query)
     recommended_mode = str(intent_profile.get('recommended_mode', 'mix'))
     return recommended_mode if recommended_mode in {'local', 'global', 'hybrid', 'naive'} else requested_mode
 
@@ -340,7 +355,7 @@ class YAR:
             int,
         ],
         list[dict[str, Any]] | Awaitable[list[dict[str, Any]]],
-    ] = field(default_factory=lambda: create_chunker(preset='semantic'))
+    ] = field(default_factory=lambda: create_chunker())
     """
     Custom chunking function for splitting text into chunks before processing.
 
@@ -364,10 +379,8 @@ class YAR:
         - `content` (str): The text content of the chunk.
         - `chunk_order_index` (int): Zero-based index indicating the chunk's order in the document.
 
-    Available presets:
-        - `create_chunker(preset='semantic')`: Preserves semantic/meaning boundaries (default)
-        - `create_chunker(preset='recursive')`: Splits by paragraphs → sentences → words
-        - `create_chunker(preset=None)`: Basic size-based chunking
+    Built-in chunking:
+        - `create_chunker()`: semantic chunking (default and only supported mode).
     """
 
     # Embedding
@@ -1210,7 +1223,7 @@ class YAR:
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated with "enqueue" prefix
-            metadata: optional metadata dict to store with documents (e.g., chunking_preset)
+            metadata: optional metadata dict to store with documents
 
         Returns:
             str: tracking ID for monitoring processing status
@@ -1288,7 +1301,7 @@ class YAR:
                 'updated_at': datetime.now(timezone.utc).isoformat(),
                 'file_path': content_data['file_path'],  # Store file path in document status
                 'track_id': track_id,  # Store track_id in document status
-                'metadata': metadata or {},  # Store metadata (e.g., chunking_preset)
+                'metadata': metadata or {},  # Store metadata
             }
             for id_, content_data in contents.items()
         }
@@ -1361,7 +1374,7 @@ class YAR:
                 doc_id: {
                     'content': contents[doc_id]['content'],
                     'file_path': contents[doc_id]['file_path'],
-                    'meta': metadata,  # Store document metadata (chunking_preset, etc.)
+                    'meta': metadata,  # Store document metadata
                 }
                 for doc_id in new_docs
             }
@@ -1719,7 +1732,6 @@ class YAR:
                     entity_relation_task: asyncio.Task[Any] | None = None
                     chunk_results: list[Any] = []
                     chunks: dict[str, Any] = {}
-                    doc_chunking_preset: str | None = None
                     effective_chunk_size = self.chunk_token_size
                     effective_overlap = self.chunk_overlap_token_size
                     pre_chunks: list[dict[str, Any]] | None = None
@@ -1769,17 +1781,13 @@ class YAR:
                                 raise ValueError('Tokenizer is not initialized')
 
                             doc_metadata = getattr(status_doc, 'metadata', {}) or {}
-                            doc_chunking_preset = doc_metadata.get('chunking_preset')
                             pre_chunks = doc_metadata.get('pre_chunks')
 
                             if pre_chunks:
                                 logger.info(f'Using {len(pre_chunks)} pre-computed chunks from one-pass extraction')
                                 chunking_result = pre_chunks
                             else:
-                                if doc_chunking_preset is not None:
-                                    chunking_func = create_chunker(preset=doc_chunking_preset)
-                                else:
-                                    chunking_func = self.chunking_func
+                                chunking_func = self.chunking_func
 
                                 chunking_result = chunking_func(
                                     self.tokenizer,
@@ -1852,7 +1860,6 @@ class YAR:
                                             'track_id': status_doc.track_id,
                                             'metadata': {
                                                 'processing_start_time': processing_start_time,
-                                                'chunking_preset': doc_chunking_preset or 'semantic',
                                                 'chunk_token_size': effective_chunk_size,
                                                 'chunk_overlap_token_size': effective_overlap,
                                                 'one_pass_chunking': bool(pre_chunks),
@@ -1934,7 +1941,6 @@ class YAR:
                                         'metadata': {
                                             'processing_start_time': processing_start_time,
                                             'processing_end_time': processing_end_time,
-                                            'chunking_preset': doc_chunking_preset or 'semantic',
                                             'chunk_token_size': effective_chunk_size,
                                             'chunk_overlap_token_size': effective_overlap,
                                         },
@@ -1965,6 +1971,7 @@ class YAR:
                                     llm_response_cache=self.llm_response_cache,
                                     entity_chunks_storage=self.entity_chunks,
                                     relation_chunks_storage=self.relation_chunks,
+                                    text_chunks_storage=self.text_chunks,
                                     current_file_number=current_file_number,
                                     total_files=total_files,
                                     file_path=file_path,
@@ -1988,7 +1995,6 @@ class YAR:
                                             'metadata': {
                                                 'processing_start_time': processing_start_time,
                                                 'processing_end_time': processing_end_time,
-                                                'chunking_preset': doc_chunking_preset or 'semantic',
                                                 'chunk_token_size': effective_chunk_size,
                                                 'chunk_overlap_token_size': effective_overlap,
                                                 'one_pass_chunking': bool(pre_chunks),
@@ -2053,7 +2059,6 @@ class YAR:
                                             'metadata': {
                                                 'processing_start_time': processing_start_time,
                                                 'processing_end_time': processing_end_time,
-                                                'chunking_preset': doc_chunking_preset or 'semantic',
                                                 'chunk_token_size': effective_chunk_size,
                                                 'chunk_overlap_token_size': effective_overlap,
                                             },
@@ -3725,6 +3730,7 @@ class YAR:
             source_entity,
             target_entity,
             relation_data,
+            self.relation_chunks,
         )
 
     @sync_wrapper()

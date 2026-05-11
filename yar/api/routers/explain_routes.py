@@ -160,7 +160,7 @@ def create_explain_routes(rag, api_key: str | None = None) -> APIRouter:
                 chunks_count = len(chunks)
                 success = result.get('status') != 'failure'
 
-                # Estimate context tokens from all retrieved content
+                # Count sampled context tokens exactly, then scale by retrieved counts.
                 total_content = ''
                 for e in entities[:10]:  # Sample first 10
                     total_content += str(e.get('description', ''))

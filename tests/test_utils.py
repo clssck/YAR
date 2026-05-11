@@ -96,6 +96,34 @@ def test_convert_to_user_format_prefers_context_content_and_preserves_raw_chunk(
     assert chunk['raw_content'] == 'Raw chunk text'
     assert chunk['evidence_spans'] == ['Raw chunk text']
     assert chunk['chunk_id'] == 'chunk-1'
+    assert 'page_start' not in chunk
+
+
+def test_convert_to_user_format_preserves_page_range_metadata() -> None:
+    result = convert_to_user_format(
+        [],
+        [],
+        [
+            {
+                'reference_id': '1',
+                'content': 'Chunk with page range',
+                'file_path': 'source.md',
+                'chunk_id': 'chunk-1',
+                'page_number': 2,
+                'page_start': 2,
+                'page_end': 4,
+                'page_numbers': [2, 3, 4],
+            }
+        ],
+        [{'reference_id': '1', 'file_path': 'source.md'}],
+        'naive',
+    )
+
+    chunk = result['data']['chunks'][0]
+    assert chunk['page_number'] == 2
+    assert chunk['page_start'] == 2
+    assert chunk['page_end'] == 4
+    assert chunk['page_numbers'] == [2, 3, 4]
 
 
 class TestHashFunctions:

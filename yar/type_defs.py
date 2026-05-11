@@ -83,6 +83,7 @@ class GlobalConfig(TypedDict, total=False):
     force_llm_summary_on_merge: int
     llm_model_max_async: int
     entity_extract_max_async: int
+    relation_resolution_config: Any
     max_source_ids_per_entity: int
     max_source_ids_per_relation: int
     source_ids_limit_method: str

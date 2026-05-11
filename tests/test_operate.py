@@ -1114,6 +1114,87 @@ def test_relation_predicate_aliases_collapse_synonymous_surfaces():
 
 
 @pytest.mark.offline
+def test_predicate_splits_compound_keyword_into_canonical_first():
+    predicate = RelationPredicate.from_raw('classifies, evaluates necessity of', max_keywords=10)
+
+    assert predicate.keywords == ('classifies', 'evaluates necessity of')
+    assert predicate.primary == 'classifies'
+
+
+@pytest.mark.offline
+def test_predicate_drops_unknown_secondary_clause():
+    predicate = RelationPredicate.from_raw('requires and ambiguous follow-up clause', max_keywords=10)
+
+    assert predicate.keywords == ('requires',)
+
+
+@pytest.mark.offline
+def test_predicate_primary_never_contains_comma():
+    predicate = RelationPredicate(('opaque first, opaque second',))
+
+    assert predicate.primary == 'opaque first'
+
+
+@pytest.mark.offline
+def test_relation_vector_content_uses_primary_predicate_for_surface_form():
+    predicate = RelationPredicate.from_raw('partnered with, collaborates with, required extra cmc team effort')
+    summary = RelationSummary(
+        key=RelationKey('SRC', 'TGT'),
+        predicate=predicate,
+        description='SRC partnered with TGT and required extra CMC team effort.',
+        weight=2.0,
+        source_id='chunk-primary-predicate',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text(
+            predicate.text,
+            'SRC partnered with TGT and required extra CMC team effort.',
+        ),
+    )
+
+    projection = build_relation_storage_projection(summary)
+    payload = next(iter(projection.relation_vdb_payload.values()))
+
+    assert projection.graph_edge_data['keywords'] == 'partnered with, collaborates with, required extra cmc team effort'
+    assert payload['keywords'] == 'partnered with, collaborates with, required extra cmc team effort'
+    assert payload['content'].splitlines()[:3] == [
+        'partnered with, collaborates with, required extra cmc team effort\tSRC',
+        'TGT',
+        'SRC partnered with TGT and required extra CMC team effort.',
+    ]
+    assert 'relation: SRC --partnered with--> TGT' in payload['content']
+    assert 'predicate: partnered with' in payload['content']
+
+
+@pytest.mark.offline
+def test_relation_vector_content_uses_canonical_prefix_for_primary_predicate():
+    predicate = RelationPredicate.from_raw(
+        'requires updates to avoid systematic amendment, allows flexibility language for'
+    )
+    summary = RelationSummary(
+        key=RelationKey('IMPD/IND', 'CSTD'),
+        predicate=predicate,
+        description='IMPD/IND requires updates to avoid systematic amendment.',
+        weight=2.0,
+        source_id='chunk-primary-prefix',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text(
+            predicate.text,
+            'IMPD/IND requires updates to avoid systematic amendment.',
+        ),
+    )
+
+    payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
+
+    assert payload['keywords'] == 'requires updates to avoid systematic amendment, allows flexibility language for'
+    assert 'relation: IMPD/IND --requires--> CSTD' in payload['content']
+    assert 'predicate: requires' in payload['content']
+
+
+@pytest.mark.offline
 def test_relation_predicate_aliases_do_not_merge_antonyms():
     predicate = RelationPredicate.from_raw(['supports', 'blocks', 'enables', 'prevents'], max_keywords=10)
 
@@ -1193,6 +1274,137 @@ def test_relation_vector_content_adds_predicate_specific_search_hints():
         in represented_payload['content']
     )
     assert 'collaboration partnership alliance joint transition relationship' in collaboration_payload['content']
+
+
+@pytest.mark.offline
+def test_relation_vector_content_emits_generic_search_hints_when_no_rule_matches():
+    summary = RelationSummary(
+        key=RelationKey('Milestone Ledger', 'Action Register'),
+        predicate=RelationPredicate.from_raw('tracks'),
+        description='Milestone ledger tracks action register owners and dates.',
+        weight=1.0,
+        source_id='chunk-generic-hint',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text('tracks', 'Milestone ledger tracks action register owners and dates.'),
+    )
+
+    payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
+
+    assert 'search_hints: tracks milestone ledger action register owners dates' in payload['content']
+
+
+@pytest.mark.offline
+def test_relation_vector_content_emits_member_of_hint():
+    summary = RelationSummary(
+        key=RelationKey('Vasco Filipe', 'CSTD Strategy WG'),
+        predicate=RelationPredicate.from_raw('member of'),
+        description='Vasco Filipe is a member of the CSTD Strategy WG.',
+        weight=1.0,
+        source_id='chunk-member',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text('member of', 'Vasco Filipe is a member of the CSTD Strategy WG.'),
+    )
+
+    payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
+
+    assert 'search_hints: team membership working group participant member of role' in payload['content']
+
+
+@pytest.mark.offline
+def test_relation_vector_content_emits_manufactured_by_hint():
+    summary = RelationSummary(
+        key=RelationKey('Fitusiran', 'Sanofi MSAT Goa'),
+        predicate=RelationPredicate.from_raw('manufactured by'),
+        description='Fitusiran is manufactured by Sanofi MSAT Goa.',
+        weight=1.0,
+        source_id='chunk-manufacturing',
+        file_path='source.md',
+        created_at=123,
+        truncate='',
+        semantics=RelationSemantics.from_text('manufactured by', 'Fitusiran is manufactured by Sanofi MSAT Goa.'),
+    )
+
+    payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
+
+    assert 'search_hints: vendor supplier manufacturer manufactured produces production' in payload['content']
+
+
+@pytest.mark.offline
+def test_relation_vector_content_emits_domain_specific_hint_clusters():
+    cases = [
+        (
+            'approved by',
+            'Arisure was approved by the U.S. Food and Drug Administration.',
+            'regulatory approval clearance compliance authority consultation approved',
+        ),
+        (
+            'classified as',
+            'Antineoplastic Drug is classified as HD.',
+            'classification category taxonomy type class part of grouping',
+        ),
+        (
+            'holds commercial rights to, obtained commercial rights to',
+            'Sanofi MSAT Goa holds commercial rights to Fitusiran.',
+            'business agreement contract license rights commercial negotiation alliance',
+        ),
+        (
+            'sends memo to',
+            'CSU sends memo to Trial Operation.',
+            'communication coordination reporting memo project management workflow',
+        ),
+        (
+            'authored',
+            'Julia Marinina authored the Fitusiran lessons learned presentation.',
+            'document author prepared published drafted presentation handbook source',
+        ),
+        (
+            'based in',
+            'Sanofi MSAT Goa is based in Goa.',
+            'location site facility geography country market region',
+        ),
+        (
+            'supported by',
+            'Target receives support.',
+            'support supports enables backing rationale',
+        ),
+        (
+            'depends on',
+            'Source depends on Target.',
+            'dependency prerequisite required-by depends upon',
+        ),
+        (
+            'reviews',
+            'Source reviews Target.',
+            'review audit examination oversight peer review',
+        ),
+        (
+            'assesses',
+            'Source assesses Target.',
+            'assessment evaluation audit review appraisal',
+        ),
+    ]
+
+    for predicate_text, description, expected_hint in cases:
+        predicate = RelationPredicate.from_raw(predicate_text)
+        summary = RelationSummary(
+            key=RelationKey('Source', 'Target'),
+            predicate=predicate,
+            description=description,
+            weight=1.0,
+            source_id='chunk-domain-hint',
+            file_path='source.md',
+            created_at=123,
+            truncate='',
+            semantics=RelationSemantics.from_text(predicate.text, description),
+        )
+
+        payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
+
+        assert expected_hint in payload['content']
 
 
 @pytest.mark.offline
@@ -2206,26 +2418,10 @@ class TestChunkingBySemantic:
             assert 'char_start' in chunk
             assert 'char_end' in chunk
 
-    def test_chunking_with_preset_semantic(self):
-        """Test chunking with semantic preset."""
+    def test_chunking_semantic_text(self):
+        """Test semantic chunking directly."""
         content = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.'
-        result = chunking_by_semantic(content, preset='semantic')
-
-        assert isinstance(result, list)
-        assert len(result) >= 1
-
-    def test_chunking_with_preset_recursive(self):
-        """Test chunking with recursive preset."""
-        content = 'Line one.\nLine two.\nLine three.'
-        result = chunking_by_semantic(content, preset='recursive')
-
-        assert isinstance(result, list)
-        assert len(result) >= 1
-
-    def test_chunking_with_preset_none(self):
-        """Test chunking with no preset."""
-        content = 'Simple text content for testing.'
-        result = chunking_by_semantic(content, preset=None)
+        result = chunking_by_semantic(content)
 
         assert isinstance(result, list)
         assert len(result) >= 1
@@ -2238,15 +2434,26 @@ class TestChunkingBySemantic:
         indices = [chunk['chunk_order_index'] for chunk in result]
         assert indices == list(range(len(result)))
 
-    def test_chunk_tokens_estimation(self):
-        """Test token count estimation (~4 chars per token)."""
-        content = 'word ' * 100  # 500 characters
-        result = chunking_by_semantic(content, max_chars=200, max_overlap=50)
+    def test_chunk_tokens_are_exact_tiktoken_counts(self):
+        """Test token counts are exact tokenizer counts."""
+        tokenizer = TiktokenTokenizer()
+        content = '😀' * 10 + ' word ' * 100
+        result = chunking_by_semantic(content, max_chars=200, max_overlap=50, tokenizer=tokenizer)
 
         for chunk in result:
-            # Token count should be roughly content_len / 4
-            estimated_tokens = len(chunk['content']) // 4
-            assert abs(chunk['tokens'] - estimated_tokens) < 10
+            assert chunk['tokens'] == len(tokenizer.encode(chunk['content']))
+
+    def test_chunking_preserves_page_range_metadata(self):
+        """Test page marker ranges are exposed on chunks."""
+        content = '# Report\n\n<!-- PAGE 2 -->\n\nAlpha\n\n<!-- PAGE 3 -->\n\nBeta'
+
+        result = chunking_by_semantic(content, max_chars=500)
+
+        assert len(result) == 1
+        assert result[0]['page_number'] == 2
+        assert result[0]['page_start'] == 2
+        assert result[0]['page_end'] == 3
+        assert result[0]['page_numbers'] == [2, 3]
 
     def test_char_offsets_valid(self):
         """Test that character offsets are valid."""
@@ -2294,23 +2501,16 @@ class TestCreateChunker:
         chunker = create_chunker()
         assert callable(chunker)
 
-    def test_preset_semantic(self):
-        """Test semantic preset."""
-        chunker = create_chunker(preset='semantic')
+    def test_semantic_adapter_chunks_text(self):
+        """Test semantic chunker adapter."""
+        chunker = create_chunker()
         result = chunker(None, 'Test content', None, False, 100, 1200)
 
         assert isinstance(result, list)
 
-    def test_preset_recursive(self):
-        """Test recursive preset."""
-        chunker = create_chunker(preset='recursive')
-        result = chunker(None, 'Test content', None, False, 100, 1200)
-
-        assert isinstance(result, list)
-
-    def test_preset_none(self):
-        """Test None preset."""
-        chunker = create_chunker(preset=None)
+    def test_default_factory_chunks_text(self):
+        """Test default factory chunks text."""
+        chunker = create_chunker()
         result = chunker(None, 'Test content', None, False, 100, 1200)
 
         assert isinstance(result, list)
@@ -3686,11 +3886,11 @@ class TestOperateHelpers:
     """Tests for helper functions in operate module."""
 
     def test_create_chunker_returns_same_signature(self):
-        """Test that all presets return functions with same signature."""
+        """Test that semantic chunker compatibility entry points share a signature."""
         chunkers = [
-            create_chunker(preset=None),
-            create_chunker(preset='semantic'),
-            create_chunker(preset='recursive'),
+            create_chunker(),
+            create_chunker(),
+            create_chunker(),
         ]
 
         content = 'Test content'
@@ -5513,8 +5713,8 @@ class TestResponseQualityControls:
     @pytest.mark.asyncio
     @pytest.mark.asyncio
     @pytest.mark.asyncio
-    async def test_process_chunks_unified_limits_binary_questions_to_one_passage_per_document(self):
-        """Binary questions should keep the best passage per document for vector-only and hybrid chunk sets."""
+    async def test_process_chunks_unified_keeps_support_passages_for_binary_questions(self):
+        """Binary questions should keep enough same-document evidence to support a yes/no answer."""
         tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
         query_param = QueryParam(mode='mix', chunk_top_k=8, enable_rerank=False)
         chunks = [
@@ -5550,7 +5750,82 @@ class TestResponseQualityControls:
                 chunk_token_limit=10_000,
             )
 
-            assert [chunk['chunk_id'] for chunk in processed] == ['alpha-1', 'beta-1', 'gamma-1']
+            assert [chunk['chunk_id'] for chunk in processed] == [
+                'alpha-1',
+                'alpha-2',
+                'beta-1',
+                'beta-2',
+                'gamma-1',
+            ]
+
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_groups_generic_processed_files_by_s3_key(self):
+        """Generic processed.md file paths should not collapse distinct S3 documents into one cap bucket."""
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=6, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Document A answer passage',
+                'file_path': 'processed.md',
+                's3_key': 'default/doc-a/processed.md',
+                'chunk_id': 'a-1',
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'Document A supporting passage',
+                'file_path': 'processed.md',
+                's3_key': 'default/doc-a/processed.md',
+                'chunk_id': 'a-2',
+                'retrieval_score': 0.90,
+            },
+            {
+                'content': 'Document B answer passage',
+                'file_path': 'processed.md',
+                's3_key': 'default/doc-b/processed.md',
+                'chunk_id': 'b-1',
+                'retrieval_score': 0.85,
+            },
+            {
+                'content': 'Document B supporting passage',
+                'file_path': 'processed.md',
+                's3_key': 'default/doc-b/processed.md',
+                'chunk_id': 'b-2',
+                'retrieval_score': 0.80,
+            },
+        ]
+
+        processed = await process_chunks_unified(
+            query='Does the processed report support the recommendation?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='hybrid',
+            chunk_token_limit=10_000,
+        )
+
+        assert _chunk_document_key(chunks[0]) == 'default/doc-a/processed.md'
+        assert [chunk['chunk_id'] for chunk in processed] == ['a-1', 'a-2', 'b-1', 'b-2']
+
+    def test_prepare_visible_reference_payload_prefers_s3_key_for_generic_processed_file_path(self):
+        """Reference display should expose a distinguishing source when file_path is only processed.md."""
+        chunks = [
+            {
+                'content': 'Document A answer passage',
+                'file_path': 'processed.md',
+                's3_key': 'default/doc-a/processed.md',
+                'chunk_id': 'a-1',
+            }
+        ]
+
+        references, visible_chunks = _prepare_visible_reference_payload(
+            chunks,
+            [],
+            'Does the processed report support the recommendation?',
+            include_reference_ids=True,
+        )
+
+        assert visible_chunks[0]['file_path'] == 'default/doc-a/processed.md'
+        assert references[0]['file_path'] == 'default/doc-a/processed.md'
 
     @pytest.mark.asyncio
     async def test_process_chunks_unified_prioritizes_exact_low_level_phrase_matches(self):

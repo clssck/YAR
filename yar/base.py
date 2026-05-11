@@ -58,7 +58,8 @@ class TextChunkSchema(TypedDict, total=False):
     """Schema for text chunks with optional position metadata.
 
     Required fields: tokens, content, full_doc_id, chunk_order_index
-    Optional fields: file_path, s3_key, char_start, char_end
+    Optional fields: file_path, s3_key, char_start, char_end,
+    page_number, page_start, page_end, page_numbers
     """
 
     tokens: int
@@ -70,6 +71,10 @@ class TextChunkSchema(TypedDict, total=False):
     s3_key: str | None
     char_start: int | None  # Character offset start in source document
     char_end: int | None  # Character offset end in source document
+    page_number: int | None  # First page marker contained in this chunk
+    page_start: int | None  # Inclusive first page marker contained in this chunk
+    page_end: int | None  # Inclusive last page marker contained in this chunk
+    page_numbers: list[int]  # Ordered unique page markers contained in this chunk
 
 
 T = TypeVar('T')
@@ -128,7 +133,6 @@ class QueryParam:
 
     ll_keywords: list[str] = field(default_factory=list)
     """List of low-level keywords to refine retrieval focus."""
-
 
     model_func: Callable[..., Awaitable[Any]] | None = None
     """Optional override for the LLM model function to use for this specific query.

@@ -18,7 +18,7 @@ import traceback
 import unicodedata
 import uuid
 import weakref
-from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Coroutine, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
@@ -3284,6 +3284,18 @@ def analyze_query_intent(query: str) -> dict[str, Any]:
     return profile
 
 
+_GENERIC_DOCUMENT_BASENAME_RE = re.compile(r'^(?:processed|test_doc[0-9]*)(?:\.[a-z0-9]+)?$')
+
+
+def _is_generic_duplicate_file_path(value: Any) -> bool:
+    """Return True for placeholder names that do not identify a source document."""
+    candidate = str(value or '').strip()
+    if not candidate or candidate == 'unknown_source':
+        return True
+    basename = candidate.rstrip('/').rsplit('/', 1)[-1].casefold()
+    return bool(_GENERIC_DOCUMENT_BASENAME_RE.fullmatch(basename))
+
+
 def _classify_intent_kind(query: str) -> dict[str, Any]:
     """Inner kind/limit classifier; see ``analyze_query_intent`` for the public surface."""
     normalized_query = ' '.join((query or '').casefold().split())
@@ -3316,7 +3328,6 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
     )
     enumeration_patterns = (
         r'\b(?:what|which)\s+(?:are|were)\s+(?:the\s+)?(?:\d+\s+)?(?:categories|types|steps|phases|reasons|risks|issues|drivers|benefits|consequences|impacts|outcomes)\b',
-        r'\b(?:what|which)\s+(?:are|were)\s+the\b',
         r'\bhow many\b',
         r'\b(?:list|lists|enumerate|enumeration)\b',
         r'\b(?:lessons learned|recommendations|actions)\b',
@@ -3371,6 +3382,13 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
         r'\bsubmission\b.*\bfull detail\b.*\b(?:included|covering)\b',
         r'\bsteps? of rea\w+\b.*\bsubmission\b',
     )
+    source_reference_patterns = (
+        r'\baccording to\b',
+        r'\bbased on (?:the )?.{0,120}\b(?:presentation|report|document|deck|slide|dossier|file)\b',
+        r'\b(?:in|from) (?:the )?.{0,120}\b(?:presentation|report|document|deck|slide|dossier|file)\b',
+        r'\b(?:presentation|report|document|deck|slide|dossier|file)\b',
+        r'\b\w+\.(?:pdf|pptx?|docx?|md|txt)\b',
+    )
 
     is_enumeration = any(re.search(pattern, normalized_query) for pattern in enumeration_patterns)
     is_comparison = any(re.search(pattern, normalized_query) for pattern in comparison_patterns)
@@ -3382,6 +3400,7 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
     is_culture_domain = any(re.search(pattern, normalized_query) for pattern in culture_domain_patterns)
     is_material_lookup = any(re.search(pattern, normalized_query) for pattern in material_lookup_patterns)
     is_document_completeness = any(re.search(pattern, normalized_query) for pattern in document_completeness_patterns)
+    is_source_reference = any(re.search(pattern, normalized_query) for pattern in source_reference_patterns)
     is_choice = (
         ' or ' in normalized_query
         and not is_binary
@@ -3446,12 +3465,21 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'allow_single_document_expansion': True,
             'recommended_mode': 'hybrid',
         }
+    if is_source_reference:
+        return {
+            'kind': 'source_reference',
+            'recommended_chunk_limit': 6,
+            'per_document_limit': 3,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'hybrid',
+        }
+
     if is_binary and not is_comparison:
         return {
             'kind': 'binary',
-            'recommended_chunk_limit': 3,
-            'per_document_limit': 1,
-            'allow_single_document_expansion': False,
+            'recommended_chunk_limit': 5,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
             'recommended_mode': 'hybrid',
         }
     if is_enumeration:
@@ -3497,11 +3525,17 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
 
 def _chunk_document_key(chunk: dict[str, Any]) -> str:
     """Return the best available document-level key for chunk grouping."""
-    for field_name in ('file_path', 's3_key', 'document_title', 'title', 'chunk_id'):
+    s3_key = str(chunk.get('s3_key') or '').strip()
+    file_path = str(chunk.get('file_path') or '').strip()
+    if s3_key:
+        return s3_key
+    if file_path and not _is_generic_duplicate_file_path(file_path):
+        return file_path
+    for field_name in ('document_title', 'title', 'chunk_id'):
         candidate = str(chunk.get(field_name) or '').strip()
         if candidate:
             return candidate
-    return ''
+    return file_path if file_path and file_path != 'unknown_source' else ''
 
 
 def _apply_per_document_chunk_focus(
@@ -4218,6 +4252,10 @@ def convert_to_user_format(
             'file_path': chunk.get('file_path', 'unknown_source'),
             'chunk_id': chunk.get('chunk_id', ''),
         }
+        for page_key in ('page_number', 'page_start', 'page_end', 'page_numbers'):
+            page_value = chunk.get(page_key)
+            if page_value is not None and page_value != []:
+                chunk_data[page_key] = page_value
         if chunk.get('context_content') and chunk.get('content') != chunk.get('context_content'):
             chunk_data['raw_content'] = chunk.get('content', '')
         if chunk.get('evidence_spans'):

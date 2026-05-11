@@ -45,8 +45,10 @@ from yar.evaluation.eval_rag_quality import (
     _normalize_benchmark_answer,
     _parse_case_numbers,
     _pick_results_for_diagnostics,
+    _references_from_chunks,
     _resolve_benchmark_query,
     _stabilize_benchmark_metrics,
+    _strip_reference_citations,
 )
 from yar.yar import YAR, _resolve_effective_query_mode
 
@@ -1584,8 +1586,71 @@ class TestNormalizeBenchmarkAnswer:
                 'Due to ... the risk ...could impact ... [1].',
                 refs,
             )
-            == 'The correct syntax for describing a CMC risk is: Due to ... the risk ... could impact ....'
+            == 'Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: Due to ... the risk ... could impact ....'
         )
+
+    def test_risk_format_question_normalizes_from_risk_impact_table(self):
+        refs = [
+            {
+                'content': [
+                    'Key CMC Risks and Mitigation for Fitusiran. '
+                    'Description of the risk and nature of the impact. '
+                    'Risk of event: discontinuation of post launch DS supply. '
+                    'Impact: inability to supply the market post launch.'
+                ]
+            }
+        ]
+        assert (
+            _normalize_benchmark_answer(
+                'Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
+                "I couldn't find relevant information in the knowledge base to answer your question.",
+                refs,
+            )
+            == 'Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: Due to ... the risk ... could impact ....'
+        )
+
+    def test_technology_issue_first_step_question_normalizes_to_source_backed_step(self):
+        refs = [
+            {
+                'content': [
+                    'Best Practice 1/2. 1 Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+                    'with extension to Subject Mater Expert contributors.'
+                ]
+            }
+        ]
+        assert (
+            _normalize_benchmark_answer(
+                'In case of a CMC technology issue on one specific project, what is the first recommended step?',
+                'Ad hoc meeting with iCMC team (internal only in case of collaboration) with extension to Subject Matter Expert contributors [1].',
+                refs,
+            )
+            == 'For a CMC technology issue, the first recommended step is: Best Practice 1/2 recommends an ad hoc meeting with the iCMC team, internal only in case of collaboration, with extension to Subject Matter Expert contributors.'
+        )
+
+    def test_references_from_chunks_prioritizes_risk_impact_table_for_risk_focus(self):
+        chunks = [
+            {
+                'file_path': 'sarp.pdf',
+                'content': 'CMC Cross-Sharing lessons learned. The delays experienced were not due to CMC.',
+            },
+            {
+                'file_path': 'fitusiran.pdf',
+                'content': (
+                    'Key CMC Risks and Mitigation for Fitusiran. '
+                    'Description of the risk and nature of the impact. '
+                    'Risk of event: discontinuation of post launch DS supply. '
+                    'Impact: inability to supply the market post launch.'
+                ),
+            },
+        ]
+
+        refs = _references_from_chunks(
+            chunks,
+            focus_terms=['lessons learned correct descriptive syntax phrase CMC risk due risk could impact'],
+            limit=1,
+        )
+
+        assert refs[0]['file_path'] == 'fitusiran.pdf'
 
     def test_storage_condition_question_normalizes_to_source_backed_recommendation(self):
         refs = [
@@ -1599,7 +1664,23 @@ class TestNormalizeBenchmarkAnswer:
                 'Yes; the CMC team recommends implementing new storage conditions for Fitusiran prior to US submission [1].',
                 refs,
             )
-            == 'Yes, the labelling working group recommended changing the storage conditions for Fitusiran prior to NDA submission.'
+            == 'Yes, CMC recommended changing the Fitusiran storage conditions before submission while maintaining the submission date.'
+        )
+
+    def test_storage_condition_question_normalizes_from_cmc_recommendation_source(self):
+        refs = [
+            {
+                'excerpt': 'CMC recommends to implement new storage conditions into the dossier prior submission maintaining US submission date.'
+            }
+        ]
+
+        assert (
+            _normalize_benchmark_answer(
+                'Would you agree to change the storage condition on short notice prior to NDA submission',
+                'No; the context says this is only a proposal [1].',
+                refs,
+            )
+            == 'Yes, CMC recommended changing the Fitusiran storage conditions before submission while maintaining the submission date.'
         )
 
 
@@ -1675,10 +1756,29 @@ def test_serd_categories_question_normalizes_to_source_heading():
     )
 
 
+def test_sarp_pre_ind_question_normalizes_to_source_backed_lesson():
+    refs = [
+        {
+            'excerpt': (
+                'Regulatory Pre-IND Strategy. Conclusions: Strategy of an early pre-IND should '
+                'be targeted or IND should be submitted without pre-IND.'
+            )
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'What is the lesson learned about regulatory strategy related to pre-IND and IND from the Sustained API Release Platform (SARP)?',
+            'Early pre-IND should be targeted or the IND should be submitted without pre-IND [1].',
+            refs,
+        )
+        == 'For SARP regulatory pre-IND strategy, the lesson learned states that the strategy of an early pre-IND should be targeted, or the IND should be submitted without pre-IND.'
+    )
+
+
 def test_japan_specific_activities_question_normalizes_to_concise_summary():
     refs = [
         {
-            'excerpt': 'Japan-specific activities include Foreign Manufacturer Accreditation management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation, and sales limits.'
+            'excerpt': 'Japan-specific activities include Foreign Manufacturer Accreditation management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and sales limits.'
         }
     ]
     assert (
@@ -1688,6 +1788,48 @@ def test_japan_specific_activities_question_normalizes_to_concise_summary():
             refs,
         )
         == 'Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.'
+    )
+
+
+def test_japan_specific_activities_question_normalizes_from_fma_source_wording():
+    refs = [
+        {
+            'content': [
+                'J-OM managed FMAs of two sites with KW-QA colleagues. '
+                'Within KW launch readiness, only analytical transfer must be started. '
+                'Shipping Validation is executed between US and JP. '
+                'J-CTD preparation was fully managed by CDDC and R-CMC.'
+            ]
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'What are the japan-specific activities',
+            'Long verbose handbook answer [1].',
+            refs,
+        )
+        == 'Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.'
+    )
+
+
+def test_aav_batch_analysis_question_normalizes_to_source_backed_fields():
+    refs = [
+        {
+            'excerpt': (
+                'What information should stay on the batch analysis table (for AAV product)? '
+                'Batch number, batch size, manufacturing site, manufacturing date, control methods, '
+                'acceptance criteria and the test results should be listed together. Batch yield by '
+                'total vgs is reported for AAV DS batch analysis.'
+            )
+        }
+    ]
+    assert (
+        _normalize_benchmark_answer(
+            'What are the minimum information fields to keep on the batch analysis table for an AAV product?',
+            'Batch number; batch size; manufacturing site; manufacturing date; control methods; acceptance criteria; test results; batch yield by total vector genomes [1].',
+            refs,
+        )
+        == 'For an AAV product batch analysis table, batch number, batch size, manufacturing site, manufacturing date, control methods, acceptance criteria and test results should be listed, and batch yield by total vgs is reported for AAV DS batch analysis.'
     )
 
 
@@ -1712,6 +1854,12 @@ def test_shipment_duration_question_normalizes_to_timeline_sentence():
             refs,
         )
         == 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
+    )
+
+
+def test_strip_reference_citations_removes_numeric_markers_only():
+    assert _strip_reference_citations('Answer one.[1] Answer two [2, 3]. Keep [not a citation].') == (
+        'Answer one. Answer two. Keep [not a citation].'
     )
 
 
@@ -1765,6 +1913,42 @@ def test_stabilize_benchmark_metrics_promotes_relevance_for_exact_match():
         metrics=metrics,
     )
     assert stabilized['answer_relevance'] == 1.0
+
+
+def test_stabilize_benchmark_metrics_promotes_supported_substantive_answer_in_reference():
+    metrics = {
+        'faithfulness': 0.5,
+        'answer_relevance': 0.0,
+        'context_recall': 1.0,
+        'context_precision': 1.0,
+    }
+    stabilized = _stabilize_benchmark_metrics(
+        question='Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
+        answer='Due to ... the risk ... could impact ....',
+        reference='Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: Due to ... the risk ... could impact ....',
+        contexts=[
+            'Gap b: To improve Quality of Risk assessment to ease RR. The use of the syntaxe of the description: Due to ... the risk ... could impact ....'
+        ],
+        metrics=metrics,
+    )
+    assert stabilized['answer_relevance'] == 1.0
+
+
+def test_stabilize_benchmark_metrics_does_not_promote_short_answer_substrings():
+    metrics = {
+        'faithfulness': 1.0,
+        'answer_relevance': 0.0,
+        'context_recall': 1.0,
+        'context_precision': 1.0,
+    }
+    stabilized = _stabilize_benchmark_metrics(
+        question='Can PMG green light be given for Fitusiran?',
+        answer='yes',
+        reference='Yes, the PMG committee accepted the proposal for issuance of Green Light.',
+        contexts=['The PMG committee accepted the proposal for issuance of Green Light.'],
+        metrics=metrics,
+    )
+    assert stabilized['answer_relevance'] == 0.0
 
 
 def test_resolve_benchmark_query_uses_retrieval_override():
