@@ -81,6 +81,15 @@ class TestEntityExtractionPrompts:
         assert '{language}' in prompt
         assert '{examples}' in prompt
 
+    def test_entity_extraction_prompt_requires_canonical_keywords_and_grounded_descriptions(self):
+        """Prompt should steer relation keywords and descriptions toward canonical grounded output."""
+        prompt = PROMPTS['entity_extraction_system_prompt']
+
+        assert 'Canonical keyword discipline' in prompt
+        assert 'use the exact keyword form shown as the first `relationship_keywords` term' in prompt
+        assert 'verbatim or near-verbatim phrase from the input text' in prompt
+        assert 'directly supporting the relationship' in prompt
+
     def test_entity_extraction_handles_labeled_role_lists(self):
         """Labeled recipient lists should produce per-recipient relationships, not orphan people."""
         prompt = PROMPTS['entity_extraction_system_prompt']
@@ -314,12 +323,14 @@ class TestRAGResponsePrompts:
         rag_prompt = PROMPTS['rag_response']
         naive_prompt = PROMPTS['naive_rag_response']
 
-        assert 'add an inline citation marker `[n]`' in rag_prompt
-        assert 'add an inline citation marker `[n]`' in naive_prompt
+        # New wording: every factual sentence MUST end with `[n]` citation marker.
+        assert 'Every factual sentence MUST end with `[n]`' in rag_prompt
+        assert 'Every factual sentence MUST end with `[n]`' in naive_prompt
         assert 'When the **Reference Document List** is empty, do not add citations' in rag_prompt
         assert 'When the **Reference Document List** is empty, do not add citations' in naive_prompt
-        assert 'EVERY factual claim MUST have a citation' not in rag_prompt
-        assert 'EVERY factual claim MUST have a citation' not in naive_prompt
+        # Guarantee the example is present so the model has a concrete pattern to copy.
+        assert 'The compound was tested at site A in 2023 [1]' in rag_prompt
+        assert 'The compound was tested at site A in 2023 [1]' in naive_prompt
 
     def test_rag_response_guides_temporal_and_multi_part_answers(self):
         """Answer prompts should explicitly cover temporal and multi-part questions."""
@@ -505,6 +516,18 @@ class TestEntityReviewPrompts:
         """Test entity batch review has entity_candidates placeholder."""
         prompt = PROMPTS['entity_batch_review_prompt']
         assert '{entity_candidates}' in prompt
+
+    def test_relation_predicate_review_prompt_has_required_fields_and_json_contract(self):
+        prompt = PROMPTS['relation_predicate_review']
+
+        assert '{relation_items}' in prompt
+        assert '{allowed_predicates}' in prompt
+        for field in ('src', 'tgt', 'candidate_keywords', 'evidence_spans'):
+            assert field in prompt
+        for field in ('canonical_keywords', 'primary', 'confidence', 'reasoning'):
+            assert field in prompt
+        assert 'Return ONLY a JSON array' in prompt
+        assert 'Do NOT change src or tgt' in prompt
 
 
 class TestPromptFormatting:

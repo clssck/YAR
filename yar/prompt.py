@@ -76,6 +76,7 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
         *   Events: PRIMARY action (won, hosted, occurred in), not every association.
         *   Sports: achievements (won, broke record), not participation alone.
         *   No duplicate relationships with different wording.
+    *   **Canonical keyword discipline:** If a relationship matches a common type below, use the exact keyword form shown as the first `relationship_keywords` term. Add at most two additional specific terms only when the text states distinct semantics. Prefer this canonical backbone over near-synonyms such as "cleared by" vs "approved by" or "partnership" vs "partnered with".
     *   **Common Relationship Types to Look For:**
         *   **Organization-Product:** manufactures, develops, produces, sells, markets
         *   **Organization-Organization:** acquired, partnered with, collaborated with, merged with, invested in
@@ -94,7 +95,7 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
         *   `relationship_keywords`: action-oriented keywords ("manufactures", "treats", "leads", "approved"). Comma-separated. **NEVER use `{tuple_delimiter}` here.**
         *   `source_entity` and `target_entity` MUST exactly match `entity_name` values emitted in this same output. Relationship keywords are not endpoints. A relation with only 4 fields is invalid and MUST NOT be output.
         *   **Malformed 4-field pattern to avoid:** `relation{tuple_delimiter}Source{tuple_delimiter}action_verb{tuple_delimiter}description` means the action verb was incorrectly placed in `target_entity` and the true target is missing. Do NOT output that line. Output a corrected 5-field relation only when the input explicitly names the real target entity.
-        *   `relationship_description`: concise explanation.
+        *   `relationship_description`: concise explanation that includes at least one verbatim or near-verbatim phrase from the input text directly supporting the relationship.
     *   **Relationship Direction (CRITICAL):**
         *   source_entity PERFORMS action ON target_entity.
         *   "Sam Altman leads OpenAI" → source=Sam Altman, target=OpenAI, keyword=leads
@@ -128,6 +129,34 @@ Knowledge Graph Specialist. Extract entities + relationships from input text.
     *   Proper nouns (e.g., personal names, place names, organization names) should be retained in their original language if a proper, widely accepted translation is not available or would cause ambiguity.
 
 8.  **Completion Signal:** Output the literal string `{completion_delimiter}` only after all entities and relationships, following all criteria, have been completely extracted and outputted.
+
+9.  **Type Guidance:** when assigning `entity_type`, follow these per-type definitions consistently across the extraction (this prevents the same concept being labeled with different types in different chunks, which blocks downstream entity merging):
+    *   **Person:** named individuals.
+    *   **Organization:** companies, sites, facilities, business units, labs, institutions, regulatory authorities.
+    *   **Location:** city, region, country, state, or other place name.
+    *   **Event:** named sessions, reviews, audits, meetings, project events, milestones (e.g., "Risk Review CIR 15 March 2017", "FDA Type C Meeting").
+    *   **Document:** named documents, templates, reports, plans, charts, pages, links, resource pages (e.g., "CAPA Plan", "IND Dossier", "SharePoint Resource Page").
+    *   **Product:** named drug products, components, materials, intermediates when treated as items (e.g., "Fitusiran", "Drug Product 50mg PFP").
+    *   **Technology:** tools, platforms, IT solutions, software systems, equipment when clearly technical systems.
+    *   **Method:** procedures, methods, testing methods, analytical methods (e.g., "ddPCR Vector Genome Titer Assay", "HPLC Method").
+    *   **Data:** concrete data items when explicitly named (e.g., "Stability Data Set 2024-Q1").
+    *   **Artifact:** specific named non-document, non-product items such as indexes, supports, devices, materials, or structured objects (e.g., "Primary Stability Batch 256131").
+    *   **Concept:** named abstract but specific operational concepts only when they are clearly named in the text. Use sparingly; do NOT use Concept for generic phrases.
+
+10. **Relationship Verb Discipline:** prefer concise predicates from this canonical list when the text supports them (use the closest match; do not invent new generic verbs):
+    *   accepted, approved, conducts, responsible for, located in, headquartered in, supplies, produces, uses, tests, manages, integrates, releases, packages, provides resource, is subject matter expert for, outlines, addresses, targets, converts to, derived from, formulated as, handles, performs, mitigates risk to, poses risk to, impacts.
+
+11. **Recommended Extraction Patterns:**
+    *   **Review/audit tables:** treat the named site/facility as Organization; the named review/audit title as Event; CAPA plans, templates, indexes, pages, and links as Document. Link the organization/site to the CAPA plan with `outlined`, `accepted`, `responsible for`, or `addresses`.
+    *   **Supply chain mappings:** treat the named drug or program as Product; intermediate strands, supports, devices, and testing materials as Product or Artifact depending on how the chunk presents them; suppliers/manufacturers/release sites/test labs/service providers as Organization. Treat cities/countries only when attached to relations like `located in` or `headquartered in`. Avoid inventing facilities not explicitly stated.
+    *   **Resource / contact pages:** treat named people as Person; the business unit or named session as Organization or Event depending on wording; SharePoint links, project charter templates, and resource pages as Document. Link people as `is subject matter expert for` the session/review; link documents as `provides resource` for the session/review.
+    *   **Subcontracting:** when text describes subcontracted activities, represent the subcontracting provider AND the specific activity/item explicitly named.
+
+12. **Quality Constraints:**
+    *   Do not over-generate entities. Each entity must earn its place via at least one explicit relation.
+    *   Do not create entities for generic phrases like "link", "resource", "testing", "release", "manufacturing", "supply chain", "quality system", "project charter", unless they are explicitly named document titles or specific named items in the chunk.
+    *   Avoid duplicate or near-duplicate entities; choose ONE canonical form for the same named thing across the chunk.
+    *   If uncertain whether something is an entity, omit rather than invent.
 
 ---Examples---
 {examples}
@@ -465,60 +494,77 @@ PROMPTS['fail_response'] = """I couldn't find relevant information in the knowle
 
 PROMPTS['rag_response'] = """---Role---
 
-Expert RAG assistant. Answer using ONLY the **Context**.
+Expert RAG assistant. Answer the user question using ONLY the retrieved Context.
 
 ---Goal---
 
-Direct, well-structured answer; integrate Knowledge Graph + Document Chunks from **Context**.
+Direct, well-structured answer integrating Knowledge Graph entities/relationships and Document Chunks from the Context.
 
 ---Instructions---
 
-1. Answer Strategy:
-  - START with direct answer. No "Based on the context..." preamble.
-  - Knowledge Graph entities/relationships: primary source for entity facts, attributes, connections.
-  - Document Chunks: evidence, quotes, supporting detail.
-  - If a chunk includes `evidence_spans`, treat those spans as the first-pass support for the answer and verify each claim against them before using broader chunk text.
-  - Synthesize both into coherent response.
-  - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
-  - Multi-part questions: address each part explicitly, not a single blend.
-  - "What is X" / single-fact: state fact in first sentence, then context.
-  - For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
-  - Lessons, recommendations, conclusions: quote the exact statement, not surrounding discussion.
-  - Templates, formulas, syntax patterns (e.g. "Due to X, the risk Y could impact Z"): quote verbatim.
+You are given a user question plus a "retrieved context" block. The retrieved context is a structured block containing (a) knowledge-graph entities/relationships, (b) document chunks, and (c) a reference list mapping citation indexes to source documents.
 
-2. Content Priority:
-  - FIRST: answer core question with supported facts.
-  - SECOND: minimum supporting detail for clarity.
-  - THIRD: partial-support questions: answer the supported part, note unsupported gaps.
-  - List/count/enumeration questions: include all supported items, not first few.
-  - List/count/enumeration questions: start by restating the requested subject using the user's wording.
-  - If context contains a numbered list matching the request, preserve source numbering and include each listed item explicitly.
-  - Consequence/impact/result questions: enumerate every supported item before any narrative summary.
-  - List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
-  - Multi-part questions: address each one briefly rather than stopping after the first relevant point.
-  - Category/list questions: prioritize major supported items; drop tangential, weak, speculative associations unless user requests exhaustive detail.
-  - Say "insufficient information" only when context has nothing relevant.
+Follow these instructions precisely:
 
-3. Grounding:
-  - Core facts MUST come from context. Knowledge connects supported facts only.
-  - Use only context portions relevant to query; ignore unrelated portions in mixed retrieval.
-  - No invented claims, examples, causes, consequences, recommendations.
-  - Conflicting/mixed-topic context: ignore unrelated portions, do not blend.
-  - Preserve numbers, dates, percentages, measurements exactly. No rounding, paraphrasing, generalizing.
+1) Output policy (strict grounding)
+- Answer ONLY using facts that appear in the retrieved context (knowledge-graph relationships and/or document chunks).
+- START with the direct answer. No "Based on the context..." preamble.
+- Knowledge Graph entities/relationships: primary source for entity facts, attributes, connections.
+- Document Chunks: evidence, quotes, supporting detail. If a chunk includes `evidence_spans`, treat those spans as the first-pass support for the answer and verify each claim against them before using broader chunk text.
+- Knowledge-graph relationships alone do not stand as answers; they may provide indirect support when corroborated by document chunks. Cite the chunk that contains the supporting evidence, not the relationship itself.
+- Never use world knowledge or training knowledge. Every factual claim must be supportable by the retrieved context.
+- No speculation: avoid hedging phrases such as "may imply", "could suggest", "likely", "appears to". Either a claim is directly supported by the context or it is dropped.
+- Conflicting/mixed-topic context: ignore unrelated portions, do not blend.
+- Preserve numbers, dates, percentages, measurements exactly as written. Do not invent a specific number when the context uses a vague qualifier ("more than one", "multiple", "several") — quote the qualifier verbatim instead. Distinguish quantities from identifiers: a string that looks like a number but is part of a section/batch/lot/code label is not a count.
 
-4. Formatting & Language:
-  - CRITICAL: respond in user's query language. English query -> English answer, even if sources mix languages.
-  - Format as {response_type}.
-  - Markdown only when it materially improves clarity.
-  - `Single Paragraph`: exactly one concise paragraph; no headings, no bullets.
-  - `Bullet Points`: bullets only, compact.
-  - `Multiple Paragraphs`: compact, no boilerplate.
+2) Citations and References (MANDATORY when Reference Document List is non-empty)
+- Every factual sentence MUST end with `[n]` where `n` is the `reference_id` from the **Reference Document List** that backs it. Sentences without a citation marker will be treated as unsupported and rejected.
+- Multiple references on one sentence: combine as `[1][2]` or `[1, 2]`, not separate sentences.
+- Use only `reference_id` values from the provided list. No invented IDs. No raw field names like `reference_id` itself; the bracket marker is the only citation form.
+- Example: "The compound was tested at site A in 2023 [1]. The protocol was revised after the audit findings [1, 2]."
+- When the **Reference Document List** is empty, do not add citations or a `### References` section.
 
-5. Citations and References:
-  - When the **Reference Document List** is non-empty, add an inline citation marker `[n]` (`n` = `reference_id`) after each factual claim its chunk's `reference_id` supports.
-  - Use only `reference_id` values from the provided list. No invented IDs.
-  - No raw field names, JSON keys, or internal ids like `reference_id` itself; the `[n]` marker is sufficient.
-  - When the **Reference Document List** is empty, do not add citations or a `### References` section.
+3) Handling missing information
+- Refusal pattern (use this when the retrieved context does not actually answer the question):
+  - First sentence: name what the context covers (the topic / dimension that IS described).
+  - Second sentence: name what the question asked but the context does not cover (the topic / dimension that is NOT described).
+  - Third sentence (optional): explicit "Insufficient information for <missing aspect>".
+- Do not append speculative half-sentences after the refusal. Do not pivot to training-data knowledge for the missing aspect even when the question phrasing implies a "well-known" answer.
+- Do not "partially answer" with unsupported additions; you may restate what is available in the context and note what is missing.
+- Hard rules to prevent training-data leakage on common bait questions (NOT examples to memorize — class-level constraints):
+  - Molecular target / pathway / receptor / binding partner / enzyme questions: never name the target unless that exact name appears in the retrieved context as the target of the queried entity. Public knowledge of targets does NOT count as grounding.
+  - Mechanism-of-action / mode-of-action / detection-principle / chemistry-of-the-process questions: never describe the underlying chemistry, biology, or instrumentation principles unless they are described in the retrieved context. The fact that an assay or process is mentioned (or that it passed/failed) is NOT a description of how it works.
+  - Formal regulatory designations / classifications (e.g. orphan, breakthrough, fast-track, accelerated approval, equivalent designations from any agency): never assert one unless the exact designation appears in the retrieved context applied to the queried entity. Meeting types and submission types are NOT classifications.
+  - When asked for any of the above and the context does not contain it, return the refusal pattern above. Do not partially fill from world knowledge.
+
+4) Style/verbosity
+- CRITICAL: respond in user's query language. English query -> English answer, even if sources mix languages.
+- Format as {response_type}.
+- Markdown only when it materially improves clarity.
+- `Single Paragraph`: exactly one concise paragraph; no headings, no bullets.
+- `Bullet Points`: bullets only, compact.
+- `Multiple Paragraphs`: compact, no boilerplate.
+- Do not include extra background unless it is directly supported by the context.
+
+5) Task-type inference and answer construction
+- "What is X" / single-fact: state fact in first sentence, then context.
+- For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
+- Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
+- Multi-part questions: address each part explicitly, not a single blend; address each one briefly rather than stopping after the first relevant point.
+- Comparison questions ("compare X with Y", "differences between A and B"): structure the answer as two attributed sides drawn from their respective source chunks. Use phrases that trace back to the chunk you're attributing to; if a sub-claim cannot be traced to its named source, drop it. **If only one side of the comparison is in the retrieved context, present that side and add a single sentence noting the other side wasn't retrieved — do not refuse the entire answer.** Source fidelity: when the query names specific documents, only attribute content under that name when the supporting chunk's reference_id maps to that document — never relabel content from one source as belonging to another.
+- List/count/enumeration questions: include all supported items, not first few; start by restating the requested subject using the user's wording. If context contains a numbered list matching the request, preserve source numbering and include each listed item explicitly. Include only items the context explicitly identifies as members of the requested category. List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
+- Consequence/impact/result questions: enumerate every supported item before any narrative summary.
+- Factual lookup grounded in a specific table/section:
+  - Identify the exact entity / step / section name referenced by the question.
+  - Extract the corresponding value or statement exactly as written (including inequalities like "≥", units, scientific notation).
+  - Provide the value as the direct answer, with a citation to the chunk/table where it appears.
+- Lessons, recommendations, conclusions: quote the exact statement, not surrounding discussion.
+- Templates, formulas, syntax patterns: quote verbatim.
+
+6) Safety against hallucination
+- If context evidence contradicts or is absent, do not guess.
+- If you cannot find exact support for the requested statement, return the refusal pattern from section 3.
+- Say "insufficient information" only when context has nothing relevant; partial-context comparisons or list questions should follow the section 5 rules instead.
 
 {user_prompt}
 ---Context---
@@ -529,53 +575,75 @@ Direct, well-structured answer; integrate Knowledge Graph + Document Chunks from
 
 PROMPTS['naive_rag_response'] = """---Role---
 
-Expert RAG assistant. Answer using ONLY the **Context**.
+Expert RAG assistant. Answer the user question using ONLY the retrieved Context.
 
 ---Goal---
 
-Direct, well-structured answer; synthesize Document Chunks from **Context**.
+Direct, well-structured answer synthesizing Document Chunks from the Context.
 
 ---Instructions---
 
-1. Answer Strategy:
-  - START with direct answer. No "Based on the context..." preamble.
-  - Extract relevant facts from chunks; synthesize into coherent response.
-  - If a chunk includes `evidence_spans`, treat those spans as the first-pass support for the answer and verify each claim against them before using broader chunk text.
-  - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
-  - "What is X" / single-fact: state fact in first sentence, then context.
-  - For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
-  - Lessons, recommendations, conclusions: quote the exact statement, not surrounding discussion.
+You are given a user question plus a "retrieved context" block. The retrieved context contains (a) document chunks and (b) a reference list mapping citation indexes to source documents.
 
-2. Content Priority:
-  - FIRST: answer core question with supported facts.
-  - SECOND: minimum supporting detail for clarity.
-  - THIRD: partial-support questions: answer the supported part, note unsupported gaps.
-  - List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
-  - List/count/enumeration questions: start by restating the requested subject using the user's wording.
-  - If context contains a numbered list matching the request, preserve source numbering and include each listed item explicitly.
-  - Multi-part questions: address each one briefly rather than stopping after the first relevant point.
-  - Category/list questions: prioritize major supported items; drop tangential, weak, speculative associations unless user requests exhaustive detail.
-  - Say "insufficient information" only when context has nothing relevant.
+Follow these instructions precisely:
 
-3. Grounding:
-  - Core facts MUST come from context. Knowledge connects supported facts only.
-  - Use only context portions relevant to query; ignore unrelated portions in mixed retrieval.
-  - No invented claims, examples, causes, consequences, recommendations.
-  - Conflicting/mixed-topic context: ignore unrelated portions, do not blend.
+1) Output policy (strict grounding)
+- Answer ONLY using facts that appear in the retrieved context (document chunks).
+- START with the direct answer. No "Based on the context..." preamble.
+- If a chunk includes `evidence_spans`, treat those spans as the first-pass support for the answer and verify each claim against them before using broader chunk text.
+- Never use world knowledge or training knowledge. Every factual claim must be supportable by the retrieved context.
+- No speculation: avoid hedging phrases such as "may imply", "could suggest", "likely", "appears to". Either a claim is directly supported by the context or it is dropped.
+- Conflicting/mixed-topic context: ignore unrelated portions, do not blend.
+- Preserve numbers, dates, percentages, measurements exactly as written. Do not invent a specific number when the context uses a vague qualifier ("more than one", "multiple", "several") — quote the qualifier verbatim instead. Distinguish quantities from identifiers: a string that looks like a number but is part of a section/batch/lot/code label is not a count.
 
-4. Formatting & Language:
-  - CRITICAL: respond in user's query language. English query -> English answer, even if sources mix languages.
-  - Format as {response_type}.
-  - Markdown only when it materially improves clarity.
-  - `Single Paragraph`: exactly one concise paragraph; no headings, no bullets.
-  - `Bullet Points`: bullets only, compact.
-  - `Multiple Paragraphs`: compact, no boilerplate.
+2) Citations and References (MANDATORY when Reference Document List is non-empty)
+- Every factual sentence MUST end with `[n]` where `n` is the `reference_id` from the **Reference Document List** that backs it. Sentences without a citation marker will be treated as unsupported and rejected.
+- Multiple references on one sentence: combine as `[1][2]` or `[1, 2]`, not separate sentences.
+- Use only `reference_id` values from the provided list. No invented IDs. No raw field names like `reference_id` itself; the bracket marker is the only citation form.
+- Example: "The compound was tested at site A in 2023 [1]. The protocol was revised after the audit findings [1, 2]."
+- When the **Reference Document List** is empty, do not add citations or a `### References` section.
 
-5. Citations and References:
-  - When the **Reference Document List** is non-empty, add an inline citation marker `[n]` (`n` = `reference_id`) after each factual claim its chunk's `reference_id` supports.
-  - Use only `reference_id` values from the provided list. No invented IDs.
-  - No raw field names, JSON keys, or internal ids like `reference_id` itself; the `[n]` marker is sufficient.
-  - When the **Reference Document List** is empty, do not add citations or a `### References` section.
+3) Handling missing information
+- Refusal pattern (use this when the retrieved context does not actually answer the question):
+  - First sentence: name what the context covers (the topic / dimension that IS described).
+  - Second sentence: name what the question asked but the context does not cover (the topic / dimension that is NOT described).
+  - Third sentence (optional): explicit "Insufficient information for <missing aspect>".
+- Do not append speculative half-sentences after the refusal. Do not pivot to training-data knowledge for the missing aspect even when the question phrasing implies a "well-known" answer.
+- Do not "partially answer" with unsupported additions; you may restate what is available in the context and note what is missing.
+- Hard rules to prevent training-data leakage on common bait questions (NOT examples to memorize — class-level constraints):
+  - Molecular target / pathway / receptor / binding partner / enzyme questions: never name the target unless that exact name appears in the retrieved context as the target of the queried entity. Public knowledge of targets does NOT count as grounding.
+  - Mechanism-of-action / mode-of-action / detection-principle / chemistry-of-the-process questions: never describe the underlying chemistry, biology, or instrumentation principles unless they are described in the retrieved context. The fact that an assay or process is mentioned (or that it passed/failed) is NOT a description of how it works.
+  - Formal regulatory designations / classifications (e.g. orphan, breakthrough, fast-track, accelerated approval, equivalent designations from any agency): never assert one unless the exact designation appears in the retrieved context applied to the queried entity. Meeting types and submission types are NOT classifications.
+  - When asked for any of the above and the context does not contain it, return the refusal pattern above. Do not partially fill from world knowledge.
+
+4) Style/verbosity
+- CRITICAL: respond in user's query language. English query -> English answer, even if sources mix languages.
+- Format as {response_type}.
+- Markdown only when it materially improves clarity.
+- `Single Paragraph`: exactly one concise paragraph; no headings, no bullets.
+- `Bullet Points`: bullets only, compact.
+- `Multiple Paragraphs`: compact, no boilerplate.
+- Do not include extra background unless it is directly supported by the context.
+
+5) Task-type inference and answer construction
+- "What is X" / single-fact: state fact in first sentence, then context.
+- For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
+- Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
+- Multi-part questions: address each part explicitly, not a single blend; address each one briefly rather than stopping after the first relevant point.
+- Comparison questions ("compare X with Y", "differences between A and B"): structure the answer as two attributed sides drawn from their respective source chunks. Use phrases that trace back to the chunk you're attributing to; if a sub-claim cannot be traced to its named source, drop it. **If only one side of the comparison is in the retrieved context, present that side and add a single sentence noting the other side wasn't retrieved — do not refuse the entire answer.** Source fidelity: when the query names specific documents, only attribute content under that name when the supporting chunk's reference_id maps to that document — never relabel content from one source as belonging to another.
+- List/count/enumeration questions: include all supported items, not first few; start by restating the requested subject using the user's wording. If context contains a numbered list matching the request, preserve source numbering and include each listed item explicitly. Include only items the context explicitly identifies as members of the requested category. List answers in single paragraph: keep each supported item explicit and separate them cleanly with semicolons; no narrative blending.
+- Consequence/impact/result questions: enumerate every supported item before any narrative summary.
+- Factual lookup grounded in a specific table/section:
+  - Identify the exact entity / step / section name referenced by the question.
+  - Extract the corresponding value or statement exactly as written (including inequalities like "≥", units, scientific notation).
+  - Provide the value as the direct answer, with a citation to the chunk/table where it appears.
+- Lessons, recommendations, conclusions: quote the exact statement, not surrounding discussion.
+- Templates, formulas, syntax patterns: quote verbatim.
+
+6) Safety against hallucination
+- If context evidence contradicts or is absent, do not guess.
+- If you cannot find exact support for the requested statement, return the refusal pattern from section 3.
+- Say "insufficient information" only when context has nothing relevant; partial-context comparisons or list questions should follow the section 5 rules instead.
 
 {user_prompt}
 ---Context---
@@ -871,3 +939,42 @@ Return a JSON array. For each new entity:
 }}
 
 Only set matches_existing=true if you are confident they refer to the same real-world entity."""
+
+
+PROMPTS['relation_predicate_review'] = """---Role---
+Relation Predicate Review Specialist. Canonicalize relationship predicate keywords without changing relation endpoints or evidence.
+
+---Input---
+A JSON array named relation_items. Each item has:
+- src: source entity
+- tgt: target entity
+- candidate_keywords: extracted predicate keywords, ordered by current priority
+- evidence_spans: extractive evidence already captured for the relation
+
+relation_items:
+{relation_items}
+
+Allowed canonical predicates and aliases:
+{allowed_predicates}
+
+---Rules---
+1. Do NOT change src or tgt.
+2. Do NOT invent evidence; evidence_spans are context only.
+3. primary MUST be one of candidate_keywords or one of the allowed canonical aliases.
+4. canonical_keywords MUST reuse candidate keywords or allowed canonical aliases only.
+5. Prefer one concise canonical action as primary; keep secondary predicates only when evidence states distinct relation semantics.
+6. Order canonical_keywords most-canonical-first and include primary as the first item.
+7. If unsure, return the original candidate_keywords in the same order with confidence below 0.6.
+
+---Output---
+Return ONLY a JSON array, one object per input item:
+[
+  {{
+    "src": "<unchanged source entity>",
+    "tgt": "<unchanged target entity>",
+    "canonical_keywords": ["<primary>", "<optional secondary>"],
+    "primary": "<first canonical keyword>",
+    "confidence": 0.0,
+    "reasoning": "<brief rationale>"
+  }}
+]"""
