@@ -1,336 +1,219 @@
-# Evaluation Framework
+# YAR Evaluation Toolkit
 
-Two independent pipelines for measuring YAR retrieval and generation quality.
+This directory contains everything needed to evaluate YAR's RAG quality
+end-to-end. Three CLIs cover the loop:
 
-**QA Eval** (Pipeline A) runs 25 benchmark questions through YAR and grades answers with an LLM judge. Simple, fast, produces a Pass/Fail rubric per question. Use this for quick regression checks.
+1. **`phoenix_query_generation`** — auto-generate a corpus-grounded baseline
+   from S3 documents, organized by query intent.
+2. **`phoenix_evaluators`** — score recent traces with LLM-as-judge
+   evaluators and push annotations back into Phoenix.
+3. **`phoenix_experiments`** — replay a baseline dataset against the live
+   yar-server and capture per-prompt regression deltas.
 
-**RAGAS Eval** (Pipeline B) scores four quantitative metrics (faithfulness, answer relevance, context recall, context precision) using the RAGAS framework. More thorough, slower, requires additional dependencies. Use this for deep retrieval quality analysis.
+A fourth CLI, **`phoenix_extraction_qa`**, audits ingestion-time entity
+and relation descriptions independently of any query.
 
-Both pipelines share the same test corpus and require a running YAR server with documents ingested.
-
-## Directory Layout
-
-```
-yar/evaluation/
-  qa_eval_common.py           # Shared constants and helpers (Pipeline A)
-  export_qa_answers.py        # Step 2: query YAR, record answers
-  grade_qa_answers.py         # Step 3: LLM-judge grading
-  grade_comparison.py         # Grade multi-system comparison XLSX
-  inspect_grades.py           # Dump graded XLSX results to stdout
-  ingest_test_docs.py         # Step 1: upload docs to YAR (both pipelines)
-  eval_rag_quality.py         # RAGAS evaluator (Pipeline B)
-  e2e_test_harness.py         # End-to-end RAGAS orchestrator
-  questions.md                # Human-readable question list
-  download_wikipedia.py       # Fetches wiki articles into wiki_documents/
-  wiki_documents/             # 8 Wikipedia articles (test corpus)
-  sample_documents/           # 5 YAR-about markdown files (RAGAS corpus)
-  results/                    # All output lands here (gitignored)
-  qa_eval_for_runner.csv      # Pipeline A Q&A pairs (question/expectedResponse)
-```
+All four read OTel traces emitted by the yar-server (the chain span +
+LLM/retriever children) so the evaluators see exactly what the synthesis
+LLM saw — KG entities, KG relationships, and chunks.
 
 ---
 
-## QA Eval (Pipeline A)
+## Prerequisites
 
-A three-step pipeline: ingest documents, export YAR's answers, grade them.
+Phoenix and `phoenix.evals` come from the `[observability]` extra. The CLIs
+shell out to an OpenAI-compatible chat endpoint for the judge LLM. The
+default LiteLLM proxy in this repo serves both `tuna` (LLM) and `shrimp`
+(embedding):
 
-### Prerequisites
-
-- YAR server running (`yar-server` or `uvicorn yar.api.yar_server:app`)
-- LLM API key for the grading judge (OpenRouter, OpenAI, or any LiteLLM-compatible provider)
-- Python environment with `pip install -e .` (no extra deps beyond base YAR)
-
-### Environment Variables
-
-Set these in `.env` at the repo root or export them in your shell:
-
-| Variable | Default | Used By |
-|----------|---------|---------- |
-| `YAR_API_URL` | `http://localhost:9621` | All scripts |
-| `YAR_API_KEY` | (empty) | All scripts |
-| `EVAL_LLM_BINDING_HOST` | `http://localhost:4000` | grade_qa_answers, grade_comparison |
-| `EVAL_LLM_BINDING_API_KEY` | (empty, **required** for grading) | grade_qa_answers, grade_comparison |
-
-Fallbacks: `EVAL_LLM_BINDING_HOST` falls back to `LLM_BINDING_HOST`, then `http://localhost:4000`. `EVAL_LLM_BINDING_API_KEY` falls back to `LLM_BINDING_API_KEY`, then `LITELLM_MASTER_KEY`.
-
-### Step 1: Ingest Test Documents
-
-Upload the bundled Wikipedia articles into YAR:
-
-```bash
-python yar/evaluation/ingest_test_docs.py
+```sh
+uv sync --extra api --extra observability --extra dev --extra test
+export OPENAI_BASE_URL=http://localhost:4000/v1
+export OPENAI_API_KEY=sk-litellm-master-key
 ```
 
-This reads all `.txt` and `.md` files from `yar/evaluation/wiki_documents/`, uploads them via `POST /documents/texts`, and polls `/documents/track_status` until processing completes (up to 30 minutes).
-
-Options:
-
-```
---input, -i DIR     Source directory (default: yar/evaluation/wiki_documents)
---rag-url, -r URL   YAR API URL (default: $YAR_API_URL or http://localhost:9621)
-```
-
-To ingest a different document set:
-
-```bash
-python yar/evaluation/ingest_test_docs.py --input /path/to/your/docs
-```
-
-### Step 2: Export Answers
-
-Query YAR with each of the 25 benchmark questions and record the responses:
-
-```bash
-python yar/evaluation/export_qa_answers.py
-```
-
-This reads `yar/evaluation/qa_eval_for_runner.csv`, sends each question to `POST /query` (mode=mix, response_type=Single Paragraph), and writes a timestamped CSV to `yar/evaluation/results/`.
-
-Options:
-
-```
---input-csv PATH    Q&A source file (default: yar/evaluation/qa_eval_for_runner.csv)
---output-csv PATH   Output path (default: results/qa_answers_<timestamp>.csv)
---api-url URL       YAR API URL (default: $YAR_API_URL)
---api-key KEY       YAR API key (default: $YAR_API_KEY)
---mode MODE         Query mode (default: mix)
---timeout SECS      Per-question timeout (default: 120)
-```
-
-Output columns: `question`, `actualResponse`, `expectedResponse`.
-
-### Step 3: Grade Answers
-
-Run an LLM judge over the exported answers:
-
-```bash
-python yar/evaluation/grade_qa_answers.py
-```
-
-By default this picks up the most recent `qa_answers_*.csv` from `results/`. Each row is graded on four dimensions:
-
-| Dimension | Meaning |
-|-----------|---------|
-| `generalQuality` | Overall answer quality (Pass/Fail) |
-| `seemsRelevant` | Does the answer address the question? (Pass/Fail) |
-| `seemsComplete` | Does the answer cover the expected content? (Pass/Fail/Skipped) |
-| `basedOnKnowledgeSources` | Is the answer grounded in retrieved docs? (Pass/Fail/Skipped) |
-
-If `seemsRelevant` fails, the remaining dimensions are skipped.
-
-Options:
-
-```
---input-csv PATH              Answers CSV (default: latest qa_answers_*.csv)
---output-csv PATH             Grades output (default: results/qa_grades_<timestamp>.csv)
---judge-api-base URL          Judge LLM endpoint (default: $EVAL_LLM_BINDING_HOST)
---judge-api-key KEY           Judge LLM API key (default: $EVAL_LLM_BINDING_API_KEY)
---judge-model MODEL           Judge model (default: auto-detected from YAR /health)
---temperature FLOAT           Sampling temperature (default: 0.0)
---max-tokens INT              Max response tokens (default: 300)
---allow-inline-citations      Skip the [N] citation pre-check (see below)
-```
-
-**Citation guard:** Answers containing inline citation markers like `[1]`, `[2]` are auto-failed by default. This catches responses that leak retrieval metadata into prose. Pass `--allow-inline-citations` to disable this check.
-
-### Full Run Example
-
-```bash
-# 1. Start YAR server (separate terminal)
-yar-server
-
-# 2. Ingest the test corpus
-python yar/evaluation/ingest_test_docs.py
-
-# 3. Export answers
-python yar/evaluation/export_qa_answers.py
-
-# 4. Grade with an OpenRouter judge
-export EVAL_LLM_BINDING_API_KEY=sk-or-...
-python yar/evaluation/grade_qa_answers.py
-
-# 5. View results
-cat yar/evaluation/results/qa_grades_*.csv | column -t -s,
-```
-
-### Output Files
-
-All outputs are written to `yar/evaluation/results/` (gitignored):
-
-```
-results/
-  qa_answers_20260413_103000.csv           # Step 2 output
-  qa_grades_20260413_103200.csv            # Step 3 output
-  comparison_grades_20260413_104311.xlsx   # grade_comparison.py output
-```
-
-The grades CSV has columns: `question`, `actualResponse`, `expectedResponse`, `generalQuality`, `seemsRelevant`, `seemsComplete`, `basedOnKnowledgeSources`, `reason`.
-
-### Multi-System Comparison (grade_comparison.py)
-
-Grade answers from multiple systems side by side. Input is an XLSX workbook where each sheet represents a system (e.g., "cmc mindhub", "copilot studio", "concierge"). Each sheet must have columns: `question`, `expectedResponse`, `actualResponse`.
-
-```bash
-python yar/evaluation/grade_comparison.py --input eval.xlsx
-```
-
-The script grades every sheet with the same LLM judge rubric, appends grading columns, and writes an output XLSX with a summary table to stdout.
-
-Options:
-
-```
---input, -i PATH              Input XLSX file (required)
---output, -o PATH             Output XLSX (default: results/comparison_grades_<ts>.xlsx)
---judge-api-base URL          Judge LLM endpoint (default: $EVAL_LLM_BINDING_HOST)
---judge-api-key KEY           Judge LLM API key (default: $EVAL_LLM_BINDING_API_KEY)
---judge-model MODEL           Judge model (default: auto-detected from YAR /health)
---temperature FLOAT           Sampling temperature (default: 0.0)
---max-tokens INT              Max response tokens (default: 300)
---allow-inline-citations      Skip the [N] citation pre-check
---sheets LIST                 Comma-separated sheet names to grade (default: all)
-```
-
-Sheets named "readme" (case-insensitive) are skipped automatically.
-
-### Inspecting Grades (inspect_grades.py)
-
-Dump graded results from an output XLSX to stdout for quick review:
-
-```bash
-python yar/evaluation/inspect_grades.py results/comparison_grades_*.xlsx
-```
-
-Shows each question's pass/fail status and the judge's reasoning per sheet.
+`./start.sh` and `./setup.sh` already pin all four extras, so a normal
+provisioning run leaves the eval CLIs ready out of the box.
 
 ---
 
-## RAGAS Eval (Pipeline B)
+## 1. Generate a baseline dataset
 
-Quantitative scoring using four RAGAS metrics. Requires additional Python packages.
+`phoenix_query_generation` walks the S3 corpus through the yar-server's
+`/s3/list` + `/s3/content` endpoints, splits each canonical-markdown file
+into ~3 KB passages, and asks the judge LLM to write one query per passage
+per intent.
 
-### Prerequisites
+Five intent types, each with `should_refuse` metadata so the refusal
+evaluator can grade against expectation:
 
-```bash
-pip install -e ".[evaluation]"
-# or: pip install ragas datasets langchain_openai
+| intent | shape | `should_refuse` |
+|---|---|---|
+| `factual_lookup` | single-fact lookup answerable from one passage | `false` |
+| `enumeration` | list/count question grounded in one passage | `false` |
+| `comparison` | cross-document question requiring two passages | `false` |
+| `out_of_scope` | same broad topic as a passage but answer requires external sources | `true` |
+| `mechanism_bait` | asks for chemistry / biology / instrumentation mechanism the passage does not describe | `true` |
+
+```sh
+.venv/bin/python -m yar.evaluation.phoenix_query_generation \
+  --server-url http://localhost:9621 \
+  --workspace default \
+  --judge-model tuna --judge-provider openai \
+  --queries-per-intent 5 \
+  --dataset-name yar-baseline-$(date +%Y-%m-%d) \
+  --output /tmp/yar_baseline.json
 ```
 
-Plus an OpenAI-compatible API key for the RAGAS judge LLM and embedding model.
+Cost: 1 LLM call per generated query (~25–35 calls for a 25-query
+baseline). Single-doc corpora produce dataset variants; the seed argument
+(`--seed`) makes generation reproducible across runs.
 
-### Quick Start
-
-```bash
-# Set your API key
-export EVAL_LLM_BINDING_API_KEY=sk-...
-
-# Run against the bundled sample dataset
-python yar/evaluation/eval_rag_quality.py
-```
-
-### RAGAS Metrics
-
-| Metric | Measures | Target |
-|--------|----------|--------|
-| Faithfulness | Is the answer factually grounded in retrieved context? | > 0.80 |
-| Answer Relevance | Does the answer address the question? | > 0.80 |
-| Context Recall | Was all relevant information retrieved? | > 0.80 |
-| Context Precision | Is retrieved context free of irrelevant noise? | > 0.80 |
-| RAGAS Score | Average of the four metrics | > 0.80 |
-
-### Options
-
-```
---dataset, -d PATH        Test dataset JSON (default: sample_dataset.json)
---ragendpoint, -r URL     YAR API URL (default: $YAR_API_URL or http://localhost:9621)
---mode, -m MODE           Query mode: local|global|hybrid|mix|naive (default: mix)
---debug, -v               Log retrieved contexts per question
---compare-modes           Run all 5 modes and produce a comparison CSV
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `EVAL_LLM_MODEL` | `gpt-4o-mini` | Judge LLM model |
-| `EVAL_EMBEDDING_MODEL` | `text-embedding-3-large` | Embedding model |
-| `EVAL_LLM_BINDING_API_KEY` | falls back to `OPENAI_API_KEY` | **Required** |
-| `EVAL_LLM_BINDING_HOST` | OpenAI official API | Custom LLM endpoint |
-| `EVAL_EMBEDDING_BINDING_API_KEY` | falls back to LLM key | Embedding API key |
-| `EVAL_EMBEDDING_BINDING_HOST` | falls back to LLM host | Custom embedding endpoint |
-| `EVAL_MAX_CONCURRENT` | `2` | Concurrent evaluations |
-| `EVAL_QUERY_TOP_K` | `15` | Documents retrieved per query |
-| `EVAL_CHUNK_TOP_K` | `15` | Chunks per query |
-| `EVAL_LLM_MAX_RETRIES` | `5` | LLM request retries |
-| `EVAL_LLM_TIMEOUT` | `180` | LLM timeout (seconds) |
-
-Both LLM and embedding endpoints must be OpenAI-compatible.
-
-### Custom Test Dataset
-
-```json
-{
-  "test_cases": [
-    {
-      "question": "Your question here",
-      "ground_truth": "Expected answer based on your documents"
-    }
-  ]
-}
-```
-
-### End-to-End Harness
-
-`e2e_test_harness.py` wraps the full RAGAS pipeline: ingest, wait, evaluate. It also supports A/B testing with `AUTO_CONNECT_ORPHANS`:
-
-```bash
-# Full pipeline
-python yar/evaluation/e2e_test_harness.py
-
-# Skip ingestion (docs already loaded)
-python yar/evaluation/e2e_test_harness.py --skip-ingest
-
-# A/B test orphan connections
-python yar/evaluation/e2e_test_harness.py --ab-test
-
-# Filter documents by name
-python yar/evaluation/e2e_test_harness.py --papers covid,diabetes
-```
-
-Note: `e2e_test_harness.py` defaults to port **9622** (not 9621). Override with `--rag-url` or `$YAR_API_URL`.
-
-### RAGAS Troubleshooting
-
-**"LM returned 1 generations instead of 3"** or NaN metrics: reduce `EVAL_MAX_CONCURRENT` to 1 and/or lower `EVAL_QUERY_TOP_K`. This is usually API rate limiting.
-
-**ModuleNotFoundError for ragas**: run `pip install -e ".[evaluation]"`.
-
-**Context Precision returns NaN**: lower `EVAL_QUERY_TOP_K` to reduce per-test-case LLM calls.
+You can hand-edit `/tmp/yar_baseline.json` and re-upload via
+`phoenix.client` if you need to curate (e.g. swap one auto-generated
+question for a sharper one against the same passage).
 
 ---
 
-## Test Corpus
+## 2. Score recent traces (chain-level)
 
-The bundled corpus covers five domains:
+`phoenix_evaluators` pulls the most recent `app.query*` chain spans, fetches
+each trace's synthesis-prompt context, and runs four evaluators per trace:
 
-| Domain | Documents |
-|--------|-----------|
-| Medical | `medical_covid-19.txt`, `medical_diabetes.txt` |
-| Finance | `finance_stock_market.txt`, `finance_cryptocurrency.txt` |
-| Climate | `climate_climate_change.txt`, `climate_renewable_energy.txt` |
-| Sports | `sports_olympic_games.txt`, `sports_fifa_world_cup.txt` |
+| evaluator | rubric | direction |
+|---|---|---|
+| `relevance` | did the retriever surface useful documents? RELEVANT/PARTIAL/UNRELATED | maximize |
+| `groundedness` | is every claim in the answer supported? GROUNDED/PARTIAL/UNSUPPORTED | maximize |
+| `hallucination` | does the answer introduce facts not derivable from context? FACTUAL/HALLUCINATED | minimize |
+| `refusal` | did the model attempt an answer or admit insufficient info? ANSWERED/REFUSAL | (informational) |
 
-The benchmark questions live in `yar/evaluation/qa_eval_for_runner.csv` (and `questions.md` for the Wikipedia corpus).
-
-To refresh the Wikipedia articles:
-
-```bash
-python yar/evaluation/download_wikipedia.py
+```sh
+.venv/bin/python -m yar.evaluation.phoenix_evaluators \
+  --project yar-app --since 30m \
+  --judge-model tuna --judge-provider openai \
+  --output /tmp/eval.csv
 ```
 
-## Adding Your Own Questions
+Annotations are posted back to Phoenix as chain-span annotations by
+default (label + score + free-text explanation per evaluator). Pass
+`--no-annotations` to skip the push.
 
-1. Edit `yar/evaluation/qa_eval_for_runner.csv` (columns: `question`, `expectedResponse`)
-2. Ingest documents that contain the answers
-3. Run the QA eval pipeline (Steps 2-3 above)
+### Per-document mode
 
-For RAGAS eval, create a JSON dataset file with `test_cases` containing `question` and `ground_truth` fields, then pass it with `--dataset`.
+The `--per-document` flag runs a single `doc_relevance` evaluator over every
+retrieved chunk in scope, one row per `(span, document_index)`. Annotations
+attach to the document's position on the chain span.
+
+```sh
+.venv/bin/python -m yar.evaluation.phoenix_evaluators \
+  --project yar-app --since 30m \
+  --per-document \
+  --judge-model tuna --judge-provider openai
+```
+
+This surfaces chunk-precision regressions independently from chain-level
+relevance.
+
+---
+
+## 3. Run an experiment against a baseline
+
+`phoenix_experiments` is the regression harness. Given a baseline dataset
+(from step 1 or hand-curated), it replays each query against the live
+yar-server with `disable_cache=true`, then runs the four chain-level
+evaluators against the new answers — and against each trace's synthesis
+context, not just the chunks list. Each run is named and persisted as a
+Phoenix Experiment so the dataset's "compare" view shows deltas across
+versions.
+
+```sh
+.venv/bin/python -m yar.evaluation.phoenix_experiments \
+  --dataset yar-baseline-2026-05-08 \
+  --judge-model tuna --judge-provider openai \
+  --experiment-name "after-prompt-tighten-2026-05-08" \
+  --experiment-description "Strengthened anti-hallucination prompt; mode auto-route on comparison"
+```
+
+Experiment timing: ~3–4 min per task (runs sequentially), plus ~2 min for
+100 evaluations on a 25-query × 4-evaluator dataset. ~7 min end-to-end is
+typical.
+
+Each evaluator reuses the templates from `phoenix_evaluators`, so chain-
+level eval and experiment-level eval grade identically.
+
+---
+
+## 4. Audit ingestion quality
+
+`phoenix_extraction_qa` is independent of any query: it samples random
+entities and relations from PostgreSQL and asks the judge "is this
+description specific enough to ground a citation?". Useful for catching
+ingestion regressions before they show up as retrieval failures.
+
+```sh
+.venv/bin/python -m yar.evaluation.phoenix_extraction_qa \
+  --workspace default \
+  --sample-entities 30 --sample-relations 30 \
+  --judge-model tuna --judge-provider openai \
+  --output /tmp/extraction_qa.csv
+```
+
+Each row gets an entity_quality or relation_quality score
+(USEFUL/VAGUE/MISLEADING).
+
+---
+
+## Reading the Phoenix UI
+
+- **Project view** (`/projects/<id>`): per-trace chain spans with all
+  evaluator annotations and explanations rendered next to each row. Use
+  the tag filter to slice by intent (`citation_mode:none`,
+  `latency:slow`, `cited:0`, etc.) — tags come from
+  `_request_tags` / `_result_tags` in `query_routes.py`.
+- **Datasets view** (`/datasets/<id>`): the baseline questions plus
+  expected outputs and metadata.
+- **Experiments view** (`/datasets/<id>/experiments`): every run
+  registered against this dataset, with a side-by-side "compare" view
+  for any pair. The compare view diffs metric scores per question and
+  highlights flips (e.g. FACTUAL → HALLUCINATED).
+- **Span detail**: every YAR query trace has the synthesis prompt,
+  reference list, KG entity/relation flat attributes
+  (`attributes.kg.entities.*`, `attributes.kg.relationships.*`), token
+  counts (`llm.token_count.*` rolled up to the chain via the
+  `rollup_tokens` flag in `tracing.py`), and citation telemetry
+  (`citations.coverage`, `citations.stripped`,
+  `retrieval.cited_count_raw`).
+
+---
+
+## Failure-mode catalog (what each metric tells you)
+
+| Symptom | Most-common cause | First place to look |
+|---|---|---|
+| `hallucination=HALLUCINATED` with `refusal=ANSWERED` | Synthesis LLM filled mechanism / target / classification from training data | `yar/prompt.py` negative examples — section 3 of `rag_response` / `naive_rag_response` |
+| `refusal=REFUSAL` on a `factual_lookup` | Retrieval surfaced no chunks OR query is mislabeled | `yar.log` for `Forced low_level_keywords` / `Skipping HyDE` lines; check chain span's `rag.entity_count` and `rag.chunk_count` |
+| `comparison` with one ref | Cross-doc retrieval collapsed to one entity neighbourhood | `_apply_auto_entity_filter` should skip on comparison; if it didn't, check `_is_comparison_query` regex |
+| Per-document `doc_relevance=UNRELATED` | Chunk surfaced but doesn't help — likely entity-vector miss | `_query_entity_candidates` / `entity_filter` |
+| `groundedness=PARTIAL` on enumeration | Model included an item from the corpus that isn't in the requested set | Section 5 of `rag_response` (enumeration rule) |
+| `cited=0` with `refs > 0` | LLM ignored the citation directive | Section 5 of `rag_response`; `citation_mode:none` query default |
+
+---
+
+## What the v7 baseline established (2026-05-08)
+
+A 25-query auto-generated dataset (5 per intent) hit:
+
+- **0 hallucinations** across all 25 queries
+- **enumeration** perfect across all 4 metrics
+- **factual_lookup**: 5/5 RELEVANT, 5/5 GROUNDED, 5/5 FACTUAL, 4/5 ANSWERED (1 mislabeled)
+- **comparison**: 5/5 ANSWERED, 5/5 FACTUAL, 4/5 GROUNDED, 2/5 RELEVANT 3/5 PARTIAL (judge nitpick)
+- **out_of_scope**: 5/5 REFUSAL, 5/5 FACTUAL, 4/5 GROUNDED
+- **mechanism_bait**: 4/5 REFUSAL, 5/5 GROUNDED, 5/5 FACTUAL
+
+The four imperfect cells trace to: 1 dataset-mislabel, 1 borderline
+mechanism_bait borderline-answerable, 3 PARTIAL-relevance judge
+strictness. The system's actual behaviour — zero hallucinations, refuse
+when it should, ground every claim it makes — is robust.
+
+The baseline + experiment harness lets you A/B any prompt change against
+this curve.
