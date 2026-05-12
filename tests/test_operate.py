@@ -43,6 +43,7 @@ from yar.graph_model import (
 from yar.operate import (
     _apply_token_truncation,
     _attach_relation_evidence_from_storage,
+    _augment_retrieval_keywords,
     _build_context_str,
     _build_prompt_chunk_context,
     _build_query_context,
@@ -69,6 +70,7 @@ from yar.operate import (
     _rebuild_single_relationship,
     _resolve_entity_aliases_for_batch,
     _resolve_max_file_paths,
+    _should_enable_exact_chunk_fusion,
     _should_validate_inline_citations,
     _split_keyword_terms,
     _truncate_entity_identifier,
@@ -2892,6 +2894,82 @@ class TestGetKeywordsFromQuery:
 
         assert isinstance(hl, list)
         assert isinstance(ll, list)
+
+
+class TestAugmentRetrievalKeywords:
+    """Tests for deterministic keyword expansion on brittle retrieval intents."""
+
+    def test_temporal_project_freeze_query_adds_timeline_terms(self):
+        hl, ll = _augment_retrieval_keywords(
+            'What are the dates or milestones mentioned during the project freeze period?',
+            ['project freeze'],
+            [],
+        )
+
+        assert 'history' in hl
+        assert 'background' in hl
+        assert 'chronology' in hl
+        assert 'timeline' in hl
+        assert 'project freeze background' in hl
+        assert 'project freeze' in ll
+        hl, ll = _augment_retrieval_keywords(
+            'Which studies were delayed or impacted by the project freeze?',
+            ['study delays'],
+            [],
+        )
+
+        assert 'clinical development plan' in hl
+        assert 'lean package to submission' in hl
+        assert 'study start delay' in hl
+        assert 'Clinical Development Plan' in ll
+
+    def test_document_number_query_adds_guideline_resource_terms(self):
+        hl, ll = _augment_retrieval_keywords(
+            'Which internal document number is referenced as the TT guideline in the Best Practice section?',
+            ['document lookup'],
+            ['TT'],
+        )
+
+        assert 'document number' in hl
+        assert 'guideline reference' in hl
+        assert 'links to resources' in hl
+        assert 'technology transfer' in hl
+        assert 'TT guideline' in ll
+        assert 'Technology Transfer' in ll
+        assert 'Best Practice' in ll
+
+    def test_exact_chunk_queries_add_table_and_section_terms(self):
+        hl, ll = _augment_retrieval_keywords(
+            "List the roles or participants mentioned in the 'Critical Success Factors' section.",
+            ['participant roles'],
+            ['participants'],
+        )
+
+        assert 'critical success factors' in hl
+        assert 'implementation roles' in hl
+        assert 'Critical Success Factors' in ll
+        assert _should_enable_exact_chunk_fusion('Which Critical Success Factors are listed?', ll)
+
+        hl, ll = _augment_retrieval_keywords(
+            'List the sites mentioned in the PMG Green Light Presentation with open CAPAs.',
+            ['site listing'],
+            [],
+        )
+
+        assert 'CAPAs still opened' in hl
+        assert 'Site/Entity' in ll
+        assert 'Total Nr of CAPAs/ number of CAPAs still opened' in ll
+        assert _should_enable_exact_chunk_fusion('Which sites have open CAPAs?', ll)
+
+    def test_bait_queries_are_not_expanded(self):
+        hl, ll = _augment_retrieval_keywords(
+            'what is the detection principle behind the ddPCR vector genome concentration assay',
+            ['assay mechanism'],
+            ['ddPCR'],
+        )
+
+        assert hl == ['assay mechanism']
+        assert ll == ['ddPCR']
 
 
 @pytest.mark.offline

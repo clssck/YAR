@@ -65,6 +65,11 @@ Read the PASSAGE. Generate ONE specific question whose precise answer is
 stated in this passage and only this passage. Avoid questions that could be
 answered from general knowledge — the question must require reading THIS
 passage to answer.
+The question must be self-contained for retrieval. The downstream RAG system
+receives only the question, not the passage metadata, so include the document
+title or a distinctive title/topic anchor from the passage. Do NOT ask about
+"the passage", "the document", or a generic section such as "Best Practice"
+unless the same question also names the source document/topic precisely.
 
 Output strict JSON with these keys: ``query`` (string), ``expected_answer``
 (string, the actual answer drawn verbatim or near-verbatim from the
@@ -86,6 +91,13 @@ mentioned?") whose answer is a set of items explicitly enumerated in the
 passage. The passage must contain at least 2 items that satisfy the
 question.
 
+
+The question must be self-contained for retrieval. The downstream RAG system
+receives only the question, not the passage metadata, so include the document
+title or a distinctive title/topic anchor from the passage. Do NOT write
+context-dependent questions such as "List the facilitators mentioned in the
+passage"; instead name the session, document, project, or section that makes
+the requested list retrievable.
 Output strict JSON with these keys: ``query`` (string), ``expected_items``
 (list of strings — the items the answer should enumerate). No prose, no
 markdown fences.
@@ -128,6 +140,13 @@ CRITICAL constraints on the question:
   system cannot answer. Before writing the question, check that each
   axis you intend to ask about has at least one supporting sentence in
   BOTH passages.
+* Do not compare presence versus absence. If passage A covers impurity
+  testing, assay validation, or FDA feedback and passage B only covers
+  project-freeze timelines, SKIP. A good comparison needs positive evidence
+  about the same axis in both passages.
+* Do not apply a shared product class or modality label to both passages
+  unless both passages state that label. For example, do not call both items
+  "peptide-based" unless both passages explicitly say peptide.
 * If the two passages share no common dimension that supports a
   meaningful comparison (e.g. one is about partner-conflict
   governance, the other is about FDA CMC dossier interactions —
@@ -455,6 +474,120 @@ def _parse_json_lenient(text: str) -> Any:
         return json.loads(match.group(0))
 
 
+_SELF_CONTAINED_QUERY_INTENTS = frozenset({'factual_lookup', 'enumeration'})
+_TITLE_ANCHOR_STOPWORDS = frozenset(
+    {
+        'and',
+        'best',
+        'document',
+        'documents',
+        'final',
+        'for',
+        'implementation',
+        'learned',
+        'learning',
+        'lesson',
+        'lessons',
+        'outcome',
+        'practice',
+        'project',
+        'session',
+        'the',
+        'version',
+    }
+)
+
+
+def _tokenize_title_anchor_text(text: str) -> set[str]:
+    """Return normalized alphanumeric tokens, splitting simple CamelCase titles."""
+    camel_spaced = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', text)
+    return set(re.findall(r'[a-z0-9]+', camel_spaced.lower()))
+
+
+def _source_anchor_terms(document_title: str) -> set[str]:
+    """Extract source-title terms distinctive enough to make a query retrievable."""
+    return {
+        token
+        for token in _tokenize_title_anchor_text(document_title)
+        if token not in _TITLE_ANCHOR_STOPWORDS and (token.isdigit() or len(token) >= 4)
+    }
+
+
+def _query_mentions_source_anchor(query: str, document_title: str) -> bool:
+    """Check that answer-expected generated queries name the source/topic anchor."""
+    anchor_terms = _source_anchor_terms(document_title)
+    if not anchor_terms:
+        return True
+    return bool(_tokenize_title_anchor_text(query) & anchor_terms)
+
+
+_COMPARISON_AXIS_STOPWORDS = frozenset(
+    {
+        'approach',
+        'approaches',
+        'between',
+        'compare',
+        'compared',
+        'comparison',
+        'considerations',
+        'described',
+        'differ',
+        'different',
+        'impact',
+        'impacts',
+        'requirements',
+        'respective',
+        'scope',
+        'strategy',
+        'strategies',
+    }
+)
+_SHARED_LABEL_TERMS = frozenset({'aav', 'gene therapy', 'peptide', 'protein', 'small molecule'})
+
+
+def _tokenize_comparison_text(text: str) -> set[str]:
+    return set(re.findall(r'[a-z0-9]+', text.lower()))
+
+
+def _comparison_axis_terms(axis: str) -> set[str]:
+    return {
+        token
+        for token in _tokenize_comparison_text(axis)
+        if token not in _COMPARISON_AXIS_STOPWORDS and len(token) >= 4
+    }
+
+
+def _comparison_axes_supported_by_both(
+    expected_axes: Any,
+    passage_a: str,
+    passage_b: str,
+) -> bool:
+    """Reject comparison outputs when no axis has content terms on both sides."""
+    if not isinstance(expected_axes, list) or not expected_axes:
+        return False
+    terms_a = _tokenize_comparison_text(passage_a)
+    terms_b = _tokenize_comparison_text(passage_b)
+    for raw_axis in expected_axes:
+        axis_terms = _comparison_axis_terms(str(raw_axis))
+        if axis_terms and axis_terms.intersection(terms_a) and axis_terms.intersection(terms_b):
+            return True
+    return False
+
+
+def _comparison_uses_supported_shared_labels(query: str, passage_a: str, passage_b: str) -> bool:
+    normalized_a = passage_a.casefold()
+    normalized_b = passage_b.casefold()
+    for label in _SHARED_LABEL_TERMS:
+        shared_label = re.compile(
+            rf'\b(?:respective|both|their\s+respective)\b[^.?!]*\b{re.escape(label)}\b'
+            rf'|\b{re.escape(label)}(?:-based)?\s+(?:drug\s+products|products|projects)\b',
+            re.IGNORECASE,
+        )
+        if shared_label.search(query) and (label not in normalized_a or label not in normalized_b):
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Per-intent generators
 # ---------------------------------------------------------------------------
@@ -481,6 +614,14 @@ def _gen_single_passage_intent(
         return None
     query = str(parsed.get('query') or '').strip()
     if not query:
+        return None
+    if intent in _SELF_CONTAINED_QUERY_INTENTS and not _query_mentions_source_anchor(query, doc.title):
+        logger.info(
+            '%s generation omitted source anchor for %s; skipping query: %s',
+            intent,
+            doc.title,
+            query,
+        )
         return None
     extra = {key: parsed.get(key) for key in extra_meta_keys if key in parsed}
     return {
@@ -529,7 +670,14 @@ def _gen_comparison(
     if not isinstance(parsed, dict):
         return None
     query = str(parsed.get('query') or '').strip()
+    expected_axes = parsed.get('expected_axes') or []
     if not query:
+        return None
+    if not _comparison_uses_supported_shared_labels(query, passage_a, passage_b):
+        logger.info('comparison generator used unsupported shared label; skipping query: %s', query)
+        return None
+    if not _comparison_axes_supported_by_both(expected_axes, passage_a, passage_b):
+        logger.info('comparison generator produced one-sided axes; skipping query: %s', query)
         return None
     return {
         'query': query,
@@ -538,7 +686,7 @@ def _gen_comparison(
         'source_doc_ids': [doc_a.doc_id, doc_b.doc_id],
         'source_file_paths': [doc_a.file_path, doc_b.file_path],
         'document_titles': [doc_a.title, doc_b.title],
-        'expected_axes': parsed.get('expected_axes') or [],
+        'expected_axes': expected_axes,
         'passage_preview_a': passage_a[:300],
         'passage_preview_b': passage_b[:300],
     }
@@ -656,7 +804,7 @@ def _generate_comparison_set(
     target = config.queries_per_intent
     out: list[dict[str, Any]] = []
     attempts = 0
-    max_attempts = target * 3
+    max_attempts = target * 8
     if len(docs) < 2:
         logger.warning('Need at least 2 source documents for comparison queries; have %d', len(docs))
         return out

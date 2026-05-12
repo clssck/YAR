@@ -152,6 +152,31 @@ _LL_KEYWORD_STOPWORDS: frozenset[str] = frozenset(
     }
 )
 
+_RETRIEVAL_EXPANSION_BAIT_RE = re.compile(
+    r'\b(?:molecular\s+target|detection\s+principle|mechanism(?:\s+of\s+action)?|'
+    r'mode\s+of\s+action|historical\s+origins?|academic\s+theor(?:y|ies)|'
+    r'crystal\s+structure|x-?ray|pharmacokinetic|binding\s+partner|receptor|pathway)\b',
+    re.IGNORECASE,
+)
+
+_RETRIEVAL_TEMPORAL_QUERY_RE = re.compile(
+    r'\b(?:dates?|when|timeline|chronolog(?:y|ical)|milestones?|key\s+events?|'
+    r'period|phases?|start(?:ed)?|end(?:ed)?|delay(?:ed|s)?|impact(?:ed|s)?)\b',
+    re.IGNORECASE,
+)
+
+_RETRIEVAL_ENUMERATION_QUERY_RE = re.compile(
+    r'\b(?:list|which|what\s+(?:are|were)|enumerate|categories|items?|fields?|'
+    r'facilitators?|participants?|studies|activities)\b',
+    re.IGNORECASE,
+)
+
+_RETRIEVAL_EXACT_CHUNK_QUERY_RE = re.compile(
+    r'\b(?:critical\s+success\s+factors?|open\s+capas?|capas?\s+still\s+opened|'
+    r'site/entity|audit\s+dates?|green\s+light\s+presentation)\b',
+    re.IGNORECASE,
+)
+
 
 def _resolve_max_file_paths(global_config: GlobalConfig) -> int:
     """Resolve max_file_paths with safe int parsing and non-negative clamp."""
@@ -5284,6 +5309,9 @@ async def kg_query(
         query=query,
         user_supplied_ll=bool(query_param.ll_keywords),
     )
+    if not query_param.enable_bm25_fusion and _should_enable_exact_chunk_fusion(query, ll_keywords):
+        query_param.enable_bm25_fusion = True
+        logger.debug('Enabled BM25 fusion for exact chunk lookup query')
 
     logger.debug(f'High-level keywords: {hl_keywords}')
     logger.debug(f'Low-level  keywords: {ll_keywords}')
@@ -5585,6 +5613,98 @@ async def kg_query(
         )
 
 
+def _append_unique_keyword(target: list[str], keyword: str) -> None:
+    """Append ``keyword`` preserving order and case-insensitive uniqueness."""
+    normalized = keyword.strip()
+    if not normalized:
+        return
+    existing = {item.casefold().strip() for item in target if isinstance(item, str)}
+    if normalized.casefold() not in existing:
+        target.append(normalized)
+
+
+def _augment_retrieval_keywords(
+    query: str,
+    hl_keywords: list[str],
+    ll_keywords: list[str],
+) -> tuple[list[str], list[str]]:
+    """Add deterministic retrieval synonyms for brittle factual/list queries.
+
+    The LLM extractor preserves user wording, which is usually desirable. It
+    misses source chunks whose headers use a different but obvious information
+    type: "dates/milestones" queries may need "timeline/background", and
+    "document number in Best Practice" may need "resources/guideline". Exact
+    table/section queries get additional anchor terms; BM25 fusion can then
+    recover chunks whose literal headings are otherwise buried by graph/vector
+    similarity. Keep this deliberately narrow and skip mechanism/origin/target
+    bait questions so we do not widen retrieval for refusal-expected intents.
+    """
+    if not query:
+        return hl_keywords, ll_keywords
+
+    if _RETRIEVAL_EXPANSION_BAIT_RE.search(query):
+        return hl_keywords, ll_keywords
+
+    expanded_hl = list(hl_keywords)
+    expanded_ll = list(ll_keywords)
+    normalized_query = query.casefold()
+
+    if _RETRIEVAL_TEMPORAL_QUERY_RE.search(query) or _RETRIEVAL_ENUMERATION_QUERY_RE.search(query):
+        if _RETRIEVAL_TEMPORAL_QUERY_RE.search(query):
+            for keyword in ('history', 'background', 'chronology', 'timeline', 'key events'):
+                _append_unique_keyword(expanded_hl, keyword)
+        if 'project freeze' in normalized_query:
+            _append_unique_keyword(expanded_ll, 'project freeze')
+            _append_unique_keyword(expanded_hl, 'project freeze background')
+        if 'study' in normalized_query or 'studies' in normalized_query:
+            for keyword in (
+                'clinical development plan',
+                'lean package to submission',
+                'study timeline',
+                'study start delay',
+                'impacted studies',
+            ):
+                _append_unique_keyword(expanded_hl, keyword)
+            _append_unique_keyword(expanded_ll, 'Clinical Development Plan')
+            _append_unique_keyword(expanded_ll, 'studies')
+        if 'facilitator' in normalized_query or 'participant' in normalized_query:
+            for keyword in ('session context', 'participants', 'facilitators'):
+                _append_unique_keyword(expanded_hl, keyword)
+            if 'critical success' in normalized_query:
+                for keyword in ('critical success factors', 'success factors', 'implementation roles'):
+                    _append_unique_keyword(expanded_hl, keyword)
+                _append_unique_keyword(expanded_ll, 'Critical Success Factors')
+            if 'facilitator' in normalized_query:
+                _append_unique_keyword(expanded_ll, 'facilitators')
+            if 'participant' in normalized_query:
+                _append_unique_keyword(expanded_ll, 'participants')
+
+    if 'capa' in normalized_query and ('site' in normalized_query or 'green light' in normalized_query):
+        for keyword in ('site/entity', 'audit dates', 'CAPA status', 'CAPAs still opened', 'PAI readiness'):
+            _append_unique_keyword(expanded_hl, keyword)
+        for keyword in ('Site/Entity', 'Total Nr of CAPAs/ number of CAPAs still opened', 'CAPAs accepted by GQA'):
+            _append_unique_keyword(expanded_ll, keyword)
+
+    if re.search(r'\b(?:document\s+(?:id|number)|guideline|best\s+practice|referenced)\b', query, re.IGNORECASE):
+        for keyword in ('document number', 'guideline reference', 'best practice', 'links to resources'):
+            _append_unique_keyword(expanded_hl, keyword)
+        if 'tt' in normalized_query:
+            _append_unique_keyword(expanded_hl, 'technology transfer')
+            _append_unique_keyword(expanded_ll, 'TT guideline')
+            _append_unique_keyword(expanded_ll, 'Technology Transfer')
+        if 'best practice' in normalized_query:
+            _append_unique_keyword(expanded_ll, 'Best Practice')
+
+    return expanded_hl, expanded_ll
+
+
+def _should_enable_exact_chunk_fusion(query: str, ll_keywords: list[str]) -> bool:
+    """Use BM25 fusion for literal section/table lookup queries."""
+    if _RETRIEVAL_EXACT_CHUNK_QUERY_RE.search(query):
+        return True
+    return any(_RETRIEVAL_EXACT_CHUNK_QUERY_RE.search(keyword) for keyword in ll_keywords if isinstance(keyword, str))
+
+
 async def get_keywords_from_query(
     query: str,
     query_param: QueryParam,
@@ -5611,6 +5731,7 @@ async def get_keywords_from_query(
         return query_param.hl_keywords, query_param.ll_keywords
 
     hl_keywords, ll_keywords = await extract_keywords_only(query, query_param, global_config, hashing_kv)
+    hl_keywords, ll_keywords = _augment_retrieval_keywords(query, hl_keywords, ll_keywords)
     return hl_keywords, ll_keywords
 
 

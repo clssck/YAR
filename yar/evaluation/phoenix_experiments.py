@@ -120,7 +120,6 @@ def _build_task(config: ExperimentConfig):
         body = {
             'query': query,
             'mode': mode,
-            'top_k': 10,
             'disable_cache': True,
         }
         # Merge any retrieval-knob overrides supplied via CLI (e.g. top_k, chunk_top_k,
