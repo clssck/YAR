@@ -9,6 +9,7 @@ from yar.evaluation.phoenix_query_generation import (
     _comparison_axes_supported_by_both,
     _comparison_pair_has_shared_topic,
     _comparison_uses_supported_shared_labels,
+    _fallback_comparison_example,
     _gen_comparison,
     _gen_single_passage_intent,
     _query_mentions_source_anchor,
@@ -149,6 +150,38 @@ def test_comparison_validation_rejects_one_sided_axes_and_labels() -> None:
         'The first passage discusses meeting cadence only.',
         'The second passage discusses governance structure only.',
     )
+    assert not _comparison_axes_supported_by_both(
+        ['timeline risk', 'compatibility data'],
+        'The timeline risk affected submission planning.',
+        'The project timeline risk affected clinical planning and compatibility data.',
+    )
+
+
+def test_fallback_comparison_uses_shared_concrete_topic() -> None:
+    doc_a = SourceDocument(
+        doc_id='a',
+        title='Comparator sourcing session',
+        file_path='a.pdf',
+        content='',
+    )
+    doc_b = SourceDocument(
+        doc_id='b',
+        title='Comparator stability session',
+        file_path='b.pdf',
+        content='',
+    )
+
+    example = _fallback_comparison_example(
+        doc_a=doc_a,
+        doc_b=doc_b,
+        passage_a='The comparator sourcing plan described blinding risks and stakeholder actions.',
+        passage_b='The comparator stability plan described blinding risks and follow-up decisions.',
+    )
+
+    assert example is not None
+    assert 'Comparator sourcing session' in example['query']
+    assert 'Comparator stability session' in example['query']
+    assert example['expected_axes']
 
 
 def test_comparison_pair_prefilter_requires_concrete_shared_topic() -> None:
@@ -166,7 +199,7 @@ def test_comparison_pair_prefilter_requires_concrete_shared_topic() -> None:
     )
 
 
-def test_comparison_generation_rejects_missing_source_anchor() -> None:
+def test_comparison_generation_falls_back_when_llm_omits_source_anchor() -> None:
     config = GenerationConfig(judge_model='dummy')
     doc_a = SourceDocument('doc-a', 'default/doc-a/a.canonical.md', '16-LLsession-09- outcome Jan 18 2017', '')
     doc_b = SourceDocument(
@@ -193,4 +226,6 @@ def test_comparison_generation_rejects_missing_source_anchor() -> None:
             passage_b='The blinded comparator management approach used risk alignment and sourcing governance.',
         )
 
-    assert example is None
+    assert example is not None
+    assert '16-LLsession-09- outcome Jan 18 2017' in example['query']
+    assert '18-LLsession-02-Devpt and supply of blinded comparator- outcome Oct 18 VF' in example['query']

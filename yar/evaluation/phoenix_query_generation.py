@@ -534,17 +534,21 @@ _COMPARISON_AXIS_STOPWORDS = frozenset(
         'controls',
         'described',
         'development',
+        'data',
         'differ',
         'different',
         'expectations',
         'feedback',
         'impact',
         'impacts',
+        'decision',
+        'decisions',
         'management',
         'manufacturing',
         'plans',
         'planning',
         'practices',
+        'options',
         'quality',
         'requirements',
         'respective',
@@ -558,6 +562,7 @@ _COMPARISON_AXIS_STOPWORDS = frozenset(
         'team',
         'teams',
         'timeline',
+        'topics',
         'timelines',
         'workload',
     }
@@ -566,18 +571,30 @@ _COMPARISON_TOPIC_STOPWORDS = frozenset(
     {
         *_COMPARISON_AXIS_STOPWORDS,
         'about',
+        'after',
+        'also',
+        'around',
         'activity',
         'activities',
         'clinical',
+        'closed',
+        'description',
+        'both',
         'document',
         'documents',
         'final',
         'lesson',
         'lessons',
+        'does',
+        'each',
         'llsession',
         'outcome',
         'passage',
         'passages',
+        'information',
+        'had',
+        'has',
+        'have',
         'phase',
         'process',
         'processes',
@@ -591,13 +608,75 @@ _COMPARISON_TOPIC_STOPWORDS = frozenset(
         'sanofi',
         'session',
         'source',
+        'request',
+        'requested',
+        'sensitive',
+        'should',
+        'share',
+        'shared',
         'sources',
         'study',
         'studies',
+        'reported',
+        'that',
+        'their',
+        'these',
+        'those',
         'submission',
+        'using',
+        'were',
+        'what',
+        'when',
+        'where',
+        'which',
+        'with',
+        'would',
     }
 )
 _SHARED_LABEL_TERMS = frozenset({'aav', 'gene therapy', 'peptide', 'protein', 'small molecule'})
+_COMPARISON_FALLBACK_PREFERRED_TERMS = frozenset(
+    {
+        'agency',
+        'aav',
+        'agreement',
+        'agreements',
+        'alignment',
+        'audit',
+        'batch',
+        'batches',
+        'capa',
+        'comparator',
+        'conflict',
+        'cstd',
+        'device',
+        'devices',
+        'dossier',
+        'fda',
+        'freeze',
+        'efpeglenatide',
+        'governance',
+        'fitusiran',
+        'impurity',
+        'hanmi',
+        'license',
+        'manufacturing',
+        'partner',
+        'pku',
+        'partners',
+        'pooling',
+        'qag',
+        'quality',
+        'risk',
+        'specifications',
+        'stakeholders',
+        'submission',
+        'supply',
+        'testing',
+        'timeline',
+        'transfer',
+    }
+)
+
 _MECHANISM_BAIT_UNSAFE_TARGET_RE = re.compile(
     r'\b(?:technology\s+transfer|icmc|cmc\s+collaboration|leader\s+role|ppq\s+assay|'
     r'process\s+performance\s+qualification|governance|ways?\s+of\s+working)\b',
@@ -646,16 +725,16 @@ def _comparison_axes_supported_by_both(
     passage_a: str,
     passage_b: str,
 ) -> bool:
-    """Reject comparison outputs when no axis has content terms on both sides."""
+    """Reject comparison outputs when any requested axis lacks support on either side."""
     if not isinstance(expected_axes, list) or not expected_axes:
         return False
     terms_a = _tokenize_comparison_text(passage_a)
     terms_b = _tokenize_comparison_text(passage_b)
     for raw_axis in expected_axes:
         axis_terms = _comparison_axis_terms(str(raw_axis))
-        if axis_terms and axis_terms.intersection(terms_a, terms_b):
-            return True
-    return False
+        if not axis_terms or not axis_terms.intersection(terms_a, terms_b):
+            return False
+    return True
 
 
 def _comparison_uses_supported_shared_labels(query: str, passage_a: str, passage_b: str) -> bool:
@@ -670,6 +749,58 @@ def _comparison_uses_supported_shared_labels(query: str, passage_a: str, passage
         if shared_label.search(query) and (label not in normalized_a or label not in normalized_b):
             return False
     return True
+
+
+def _format_comparison_topic(term: str) -> str:
+    if term in {'cmc', 'cstd', 'gmp', 'pku', 'qag'}:
+        return term.upper()
+    return term.replace('_', ' ')
+
+
+def _fallback_side_anchor(document_title: str, passage: str, shared_terms: set[str]) -> str:
+    side_terms = (
+        _comparison_topic_terms(document_title, passage) & _COMPARISON_FALLBACK_PREFERRED_TERMS
+    ) - shared_terms
+    if side_terms:
+        return _format_comparison_topic(max(side_terms, key=lambda term: (len(term), term)))
+    title_terms = _source_anchor_terms(document_title) & _COMPARISON_FALLBACK_PREFERRED_TERMS
+    if title_terms:
+        return _format_comparison_topic(max(title_terms, key=lambda term: (len(term), term)))
+    return ''
+
+
+def _fallback_comparison_example(
+    *,
+    doc_a: SourceDocument,
+    doc_b: SourceDocument,
+    passage_a: str,
+    passage_b: str,
+) -> dict[str, Any] | None:
+    """Build a conservative comparison from a concrete term present in both passages."""
+    shared_terms = _comparison_topic_terms(doc_a.title, passage_a) & _comparison_topic_terms(doc_b.title, passage_b)
+    preferred_terms = shared_terms & _COMPARISON_FALLBACK_PREFERRED_TERMS
+    if not preferred_terms:
+        return None
+    topic = max(preferred_terms, key=lambda term: (len(term), term))
+    topic_label = _format_comparison_topic(topic)
+    anchor_a = _fallback_side_anchor(doc_a.title, passage_a, shared_terms)
+    anchor_b = _fallback_side_anchor(doc_b.title, passage_b, shared_terms)
+    source_hint = f' ({anchor_a})' if anchor_a else ''
+    target_hint = f' ({anchor_b})' if anchor_b else ''
+    return {
+        'query': (
+            f'How do "{doc_a.title}"{source_hint} and "{doc_b.title}"{target_hint} each discuss '
+            f'{topic_label}, and what concrete actions, decisions, or risks does each source describe?'
+        ),
+        'intent': 'comparison',
+        'should_refuse': False,
+        'source_doc_ids': [doc_a.doc_id, doc_b.doc_id],
+        'source_file_paths': [doc_a.file_path, doc_b.file_path],
+        'document_titles': [doc_a.title, doc_b.title],
+        'expected_axes': [topic_label],
+        'passage_preview_a': passage_a[:300],
+        'passage_preview_b': passage_b[:300],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -736,6 +867,7 @@ def _gen_comparison(
     passage_a: str,
     passage_b: str,
 ) -> dict[str, Any] | None:
+    fallback = _fallback_comparison_example(doc_a=doc_a, doc_b=doc_b, passage_a=passage_a, passage_b=passage_b)
     prompt = _COMPARISON_PROMPT.format(
         doc_a_title=doc_a.title,
         passage_a=passage_a,
@@ -746,25 +878,25 @@ def _gen_comparison(
         response = _llm_call(config, prompt=prompt)
     except Exception as exc:
         logger.warning('comparison generation failed: %s', exc)
-        return None
+        return fallback
     if response.strip().upper().startswith('SKIP'):
         logger.info(
             'comparison generator skipped pair (topically disjoint): %s vs %s',
             doc_a.title[:40],
             doc_b.title[:40],
         )
-        return None
+        return fallback
     try:
         parsed = _parse_json_lenient(response)
     except Exception as exc:
         logger.warning('comparison JSON parse failed: %s', exc)
-        return None
+        return fallback
     if not isinstance(parsed, dict):
-        return None
+        return fallback
     query = str(parsed.get('query') or '').strip()
     expected_axes = parsed.get('expected_axes') or []
     if not query:
-        return None
+        return fallback
     if not (_query_mentions_source_anchor(query, doc_a.title) and _query_mentions_source_anchor(query, doc_b.title)):
         logger.info(
             'comparison generation omitted one or both source anchors (%s vs %s); skipping query: %s',
@@ -772,13 +904,13 @@ def _gen_comparison(
             doc_b.title,
             query,
         )
-        return None
+        return fallback
     if not _comparison_uses_supported_shared_labels(query, passage_a, passage_b):
         logger.info('comparison generator used unsupported shared label; skipping query: %s', query)
-        return None
+        return fallback
     if not _comparison_axes_supported_by_both(expected_axes, passage_a, passage_b):
         logger.info('comparison generator produced one-sided axes; skipping query: %s', query)
-        return None
+        return fallback
     return {
         'query': query,
         'intent': 'comparison',
@@ -903,6 +1035,7 @@ def _generate_comparison_set(
 ) -> list[dict[str, Any]]:
     target = config.queries_per_intent
     out: list[dict[str, Any]] = []
+    seen_queries: set[str] = set()
     attempts = 0
     max_attempts = target * 16
     if len(docs) < 2:
@@ -937,6 +1070,10 @@ def _generate_comparison_set(
             passage_b=passage_b,
         )
         if example:
+            query_key = str(example.get('query') or '').casefold()
+            if query_key in seen_queries:
+                continue
+            seen_queries.add(query_key)
             out.append(example)
     if len(out) < target:
         logger.warning('Only generated %d/%d comparison queries', len(out), target)
