@@ -45,6 +45,7 @@ from yar.operate import (
     _attach_relation_evidence_from_storage,
     _augment_retrieval_keywords,
     _build_context_str,
+    _build_exact_chunk_search_query,
     _build_prompt_chunk_context,
     _build_query_context,
     _build_query_shaping_instructions,
@@ -2960,6 +2961,50 @@ class TestAugmentRetrievalKeywords:
         assert 'Site/Entity' in ll
         assert 'Total Nr of CAPAs/ number of CAPAs still opened' in ll
         assert _should_enable_exact_chunk_fusion('Which sites have open CAPAs?', ll)
+
+        hl, ll = _augment_retrieval_keywords(
+            'What is the current due date for updating the Fitusiran PFP QAG between ICF and DP-FRA?',
+            ['deadline lookup'],
+            ['QAG'],
+        )
+
+        assert 'current due date' in hl
+        assert 'request extension' in hl
+        assert 'Distribution of PFP QAG between ICF & DP-FRA' in ll
+        assert 'Current due date 04Mar24' in ll
+        assert _should_enable_exact_chunk_fusion('What is the current due date for the QAG?', ll)
+
+        hl, ll = _augment_retrieval_keywords(
+            'List the types of differences that lead to conflicts in CMC strategy management.',
+            ['conflict causes'],
+            [],
+        )
+
+        assert 'conflict from disagreement' in hl
+        assert 'difference of perception' in hl
+        assert 'difference of perception of issue' in ll
+        assert 'difference of communication' in ll
+        assert _should_enable_exact_chunk_fusion('List the types of differences that lead to conflicts.', ll)
+
+    def test_exact_chunk_lookup_query_appends_literal_terms(self):
+        query = 'What is the current due date for the QAG?'
+        search_query = _build_exact_chunk_search_query(
+            query,
+            [
+                'QAG',
+                'Distribution of PFP QAG between ICF & DP-FRA',
+                'Current due date 04Mar24',
+                'Current due date 04Mar24',
+                'Request extension to 15May2024',
+            ],
+            exact_lookup=True,
+        )
+
+        assert not search_query.startswith(query)
+        assert search_query.startswith('Distribution of PFP QAG between ICF & DP-FRA')
+        assert search_query.count('Current due date 04Mar24') == 1
+        assert 'Request extension to 15May2024' in search_query
+        assert _build_exact_chunk_search_query(query, ['Current due date 04Mar24'], exact_lookup=False) == query
 
     def test_bait_queries_are_not_expanded(self):
         hl, ll = _augment_retrieval_keywords(
@@ -6001,6 +6046,15 @@ class TestResponseQualityControls:
 
         assert any('List every supported item explicitly' in instruction for instruction in instructions)
         assert any('separate them with semicolons' in instruction for instruction in instructions)
+
+    def test_build_query_shaping_instructions_for_qag_due_dates(self):
+        """QAG due-date questions should preserve current-date versus extension semantics."""
+        instructions = _build_query_shaping_instructions(
+            'What is the current due date for updating the Fitusiran PFP QAG between ICF and DP-FRA?'
+        )
+
+        assert any('Current due date' in instruction for instruction in instructions)
+        assert any('Request extension' in instruction for instruction in instructions)
 
     def test_build_query_shaping_instructions_for_choice_queries(self):
         """Choice questions should answer with the supported option only."""

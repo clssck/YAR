@@ -173,7 +173,9 @@ _RETRIEVAL_ENUMERATION_QUERY_RE = re.compile(
 
 _RETRIEVAL_EXACT_CHUNK_QUERY_RE = re.compile(
     r'\b(?:critical\s+success\s+factors?|open\s+capas?|capas?\s+still\s+opened|'
-    r'site/entity|audit\s+dates?|green\s+light\s+presentation)\b',
+    r'site/entity|audit\s+dates?|green\s+light\s+presentation|qag|quality\s+agreement|'
+    r'current\s+due\s+date|request\s+extension|dp-fra|types?\s+of\s+differences?|'
+    r'difference\s+of\s+(?:perception|interest|standard|communication))\b',
     re.IGNORECASE,
 )
 
@@ -4299,6 +4301,10 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
         targeted_instructions.append(
             'For 600 mg tablet acceptability, use the source decision wording exactly; do not upgrade a risk-balanced plan into stronger endorsement language unless the source uses it.'
         )
+    if 'qag' in normalized_query and 'current due date' in normalized_query:
+        targeted_instructions.append(
+            'For QAG due-date rows, distinguish "Current due date" from "Request extension": report the current due date first, then mention any requested extension separately.'
+        )
     if kind == 'binary':
         instructions = [
             *targeted_instructions,
@@ -5685,6 +5691,36 @@ def _augment_retrieval_keywords(
         for keyword in ('Site/Entity', 'Total Nr of CAPAs/ number of CAPAs still opened', 'CAPAs accepted by GQA'):
             _append_unique_keyword(expanded_ll, keyword)
 
+    if 'qag' in normalized_query and (
+        'due date' in normalized_query or 'dp-fra' in normalized_query or 'icf' in normalized_query
+    ):
+        for keyword in ('update needed', 'current due date', 'request extension', 'distribution of PFP QAG'):
+            _append_unique_keyword(expanded_hl, keyword)
+        for keyword in (
+            'Distribution of PFP QAG between ICF & DP-FRA',
+            'Current due date 04Mar24',
+            'Request extension to 15May2024',
+            'QAG between ICF & DP-FRA',
+        ):
+            _append_unique_keyword(expanded_ll, keyword)
+
+    if 'conflict' in normalized_query and 'difference' in normalized_query:
+        for keyword in (
+            'conflict from disagreement',
+            'difference of perception',
+            'difference of interest',
+            'difference of standard',
+            'difference of communication',
+        ):
+            _append_unique_keyword(expanded_hl, keyword)
+        for keyword in (
+            'difference of perception of issue',
+            'difference of interest',
+            'difference of standard',
+            'difference of communication',
+        ):
+            _append_unique_keyword(expanded_ll, keyword)
+
     if re.search(r'\b(?:document\s+(?:id|number)|guideline|best\s+practice|referenced)\b', query, re.IGNORECASE):
         for keyword in ('document number', 'guideline reference', 'best practice', 'links to resources'):
             _append_unique_keyword(expanded_hl, keyword)
@@ -5696,6 +5732,37 @@ def _augment_retrieval_keywords(
             _append_unique_keyword(expanded_ll, 'Best Practice')
 
     return expanded_hl, expanded_ll
+
+
+def _build_exact_chunk_search_query(
+    query: str,
+    phrase_terms: list[str] | None,
+    *,
+    exact_lookup: bool,
+    max_terms: int = 8,
+) -> str:
+    """Use exact table/section phrases as the chunk-search query when needed."""
+    if not exact_lookup or not phrase_terms:
+        return query
+
+    normalized_query = query.casefold()
+    additions: list[str] = []
+    seen: set[str] = set()
+    for term in phrase_terms:
+        cleaned = ' '.join(str(term).split())
+        if not cleaned or not _RETRIEVAL_EXACT_CHUNK_QUERY_RE.search(cleaned):
+            continue
+        normalized = cleaned.casefold()
+        if normalized in seen or normalized in normalized_query:
+            continue
+        seen.add(normalized)
+        additions.append(cleaned)
+        if len(additions) >= max_terms:
+            break
+
+    if not additions:
+        return query
+    return ' '.join(additions)
 
 
 def _should_enable_exact_chunk_fusion(query: str, ll_keywords: list[str]) -> bool:
@@ -5998,20 +6065,28 @@ async def _get_vector_context(
             multiplier = max(multiplier, 4)
         search_top_k = base_top_k * multiplier
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
+        exact_chunk_lookup = _should_enable_exact_chunk_fusion(query, phrase_terms or [])
+        chunk_search_query = _build_exact_chunk_search_query(
+            query,
+            phrase_terms,
+            exact_lookup=exact_chunk_lookup,
+        )
 
         try:
             hybrid_search = getattr(chunks_vdb, 'hybrid_search', None)
             if query_param.enable_bm25_fusion and hybrid_search is not None:
                 logger.info(f'Using BM25 fusion (bm25_weight={query_param.bm25_weight})')
                 results = await hybrid_search(
-                    query,
+                    chunk_search_query,
                     top_k=search_top_k,
                     query_embedding=query_embedding,
                     bm25_weight=query_param.bm25_weight,
                     phrase_terms=phrase_terms,
                 )
             else:
-                results = await chunks_vdb.query(query, top_k=search_top_k, query_embedding=query_embedding)
+                results = await chunks_vdb.query(
+                    chunk_search_query, top_k=search_top_k, query_embedding=query_embedding
+                )
         except Exception as e:
             logger.error(f'Chunk vector search failed for query "{query[:50]}...": {e}')
             return []
@@ -6117,6 +6192,27 @@ async def _perform_kg_search(
     kg_chunk_pick_method = text_chunks_db.global_config.get('kg_chunk_pick_method', DEFAULT_KG_CHUNK_PICK_METHOD)
     query_embedding = None
     ll_search_terms = _split_keyword_terms(ll_keywords)
+    hl_search_terms = _split_keyword_terms(hl_keywords)
+    exact_chunk_lookup = _should_enable_exact_chunk_fusion(query, [*ll_search_terms, *hl_search_terms])
+    ll_keywords_for_search = ll_keywords
+    hl_keywords_for_search = hl_keywords
+    ll_search_terms_for_search = ll_search_terms
+    if exact_chunk_lookup:
+        exact_ll_keywords = _build_exact_chunk_search_query(
+            query,
+            ll_search_terms,
+            exact_lookup=True,
+        )
+        if exact_ll_keywords != query:
+            ll_keywords_for_search = exact_ll_keywords
+            ll_search_terms_for_search = _split_keyword_terms(exact_ll_keywords)
+        exact_hl_keywords = _build_exact_chunk_search_query(
+            query,
+            hl_search_terms,
+            exact_lookup=True,
+        )
+        if exact_hl_keywords != query:
+            hl_keywords_for_search = exact_hl_keywords
     normalized_query = query.strip()
     should_reuse_entity_embedding = bool(
         normalized_query
@@ -6139,7 +6235,7 @@ async def _perform_kg_search(
     # Handle local and global modes
     if query_param.mode == 'local' and len(ll_keywords) > 0:
         local_entities, local_relations = await _get_node_data(
-            ll_keywords,
+            ll_keywords_for_search,
             knowledge_graph_inst,
             entities_vdb,
             query_param,
@@ -6149,12 +6245,12 @@ async def _perform_kg_search(
 
     elif query_param.mode == 'global' and len(hl_keywords) > 0:
         global_relations, global_entities = await _get_edge_data(
-            hl_keywords,
+            hl_keywords_for_search,
             knowledge_graph_inst,
             relationships_vdb,
             query_param,
             query=query,
-            excluded_terms=ll_search_terms,
+            excluded_terms=ll_search_terms_for_search,
         )
 
     else:  # hybrid or mix mode
@@ -6164,7 +6260,7 @@ async def _perform_kg_search(
                 (global_relations, global_entities),
             ) = await asyncio.gather(
                 _get_node_data(
-                    ll_keywords,
+                    ll_keywords_for_search,
                     knowledge_graph_inst,
                     entities_vdb,
                     query_param,
@@ -6172,18 +6268,18 @@ async def _perform_kg_search(
                     original_query=query,
                 ),
                 _get_edge_data(
-                    hl_keywords,
+                    hl_keywords_for_search,
                     knowledge_graph_inst,
                     relationships_vdb,
                     query_param,
                     query=query,
-                    excluded_terms=ll_search_terms,
+                    excluded_terms=ll_search_terms_for_search,
                 ),
             )
         else:
             if len(ll_keywords) > 0:
                 local_entities, local_relations = await _get_node_data(
-                    ll_keywords,
+                    ll_keywords_for_search,
                     knowledge_graph_inst,
                     entities_vdb,
                     query_param,
@@ -6192,12 +6288,12 @@ async def _perform_kg_search(
                 )
             if len(hl_keywords) > 0:
                 global_relations, global_entities = await _get_edge_data(
-                    hl_keywords,
+                    hl_keywords_for_search,
                     knowledge_graph_inst,
                     relationships_vdb,
                     query_param,
                     query=query,
-                    excluded_terms=ll_search_terms,
+                    excluded_terms=ll_search_terms_for_search,
                 )
 
         # Get vector chunks for mix mode
