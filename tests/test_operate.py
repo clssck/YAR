@@ -2986,6 +2986,15 @@ class TestAugmentRetrievalKeywords:
         assert 'difference of communication' in ll
         assert _should_enable_exact_chunk_fusion('List the types of differences that lead to conflicts.', ll)
 
+        hl, ll = _augment_retrieval_keywords(
+            'In 16-LLsession-09, what are the explicit sources of conflict listed under Recognize conflict?',
+            ['conflict sources'],
+            [],
+        )
+
+        assert 'conflict from disagreement' in hl
+        assert 'difference of perception of issue' in ll
+
     def test_exact_chunk_lookup_query_appends_literal_terms(self):
         query = 'What is the current due date for the QAG?'
         search_query = _build_exact_chunk_search_query(
@@ -6140,3 +6149,21 @@ class TestResponseQualityControls:
         )
 
         assert normalized == 'In type C meeting [1].'
+
+    def test_normalize_query_shaped_response_corrects_qag_current_due_date(self):
+        """QAG current-due-date answers should not confuse requested extension with current due date."""
+        normalized = _normalize_query_shaped_response(
+            query='What is the current due date for updating the Fitusiran PFP QAG between ICF and DP-FRA?',
+            response='The current due date is 15May2024.',
+            available_refs=[
+                {
+                    'raw_content': (
+                        '| Update needed | Distribution of PFP QAG between ICF & DP-FRA | '
+                        'Current due date 04Mar24 (initial due date 04Dec23). '
+                        'Request extension to 15May2024 |'
+                    )
+                }
+            ],
+        )
+
+        assert normalized == 'The current due date is 04Mar2024, with a requested extension to 15May2024.'

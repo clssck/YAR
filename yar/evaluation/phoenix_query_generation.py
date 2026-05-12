@@ -529,20 +529,80 @@ _COMPARISON_AXIS_STOPWORDS = frozenset(
         'compare',
         'compared',
         'comparison',
+        'communication',
         'considerations',
+        'controls',
         'described',
+        'development',
         'differ',
         'different',
+        'expectations',
+        'feedback',
         'impact',
         'impacts',
+        'management',
+        'manufacturing',
+        'plans',
+        'planning',
+        'practices',
+        'quality',
         'requirements',
         'respective',
+        'roles',
         'scope',
+        'stakeholder',
+        'stakeholders',
         'strategy',
         'strategies',
+        'systems',
+        'team',
+        'teams',
+        'timeline',
+        'timelines',
+        'workload',
+    }
+)
+_COMPARISON_TOPIC_STOPWORDS = frozenset(
+    {
+        *_COMPARISON_AXIS_STOPWORDS,
+        'about',
+        'activity',
+        'activities',
+        'clinical',
+        'document',
+        'documents',
+        'final',
+        'lesson',
+        'lessons',
+        'llsession',
+        'outcome',
+        'passage',
+        'passages',
+        'phase',
+        'process',
+        'processes',
+        'program',
+        'programs',
+        'project',
+        'projects',
+        'regulatory',
+        'report',
+        'review',
+        'sanofi',
+        'session',
+        'source',
+        'sources',
+        'study',
+        'studies',
+        'submission',
     }
 )
 _SHARED_LABEL_TERMS = frozenset({'aav', 'gene therapy', 'peptide', 'protein', 'small molecule'})
+_MECHANISM_BAIT_UNSAFE_TARGET_RE = re.compile(
+    r'\b(?:technology\s+transfer|icmc|cmc\s+collaboration|leader\s+role|ppq\s+assay|'
+    r'process\s+performance\s+qualification|governance|ways?\s+of\s+working)\b',
+    re.IGNORECASE,
+)
 
 
 def _tokenize_comparison_text(text: str) -> set[str]:
@@ -557,6 +617,30 @@ def _comparison_axis_terms(axis: str) -> set[str]:
     }
 
 
+def _comparison_topic_terms(document_title: str, passage: str) -> set[str]:
+    """Extract specific shared-topic terms for pre-filtering comparison pairs."""
+    terms = _tokenize_comparison_text(f'{document_title} {passage}')
+    return {
+        token
+        for token in terms
+        if token not in _COMPARISON_TOPIC_STOPWORDS
+        and (len(token) >= 4 or token in {'aav', 'cmc', 'cstd', 'gmp', 'pku', 'qag'})
+        and not token.isdigit()
+    }
+
+
+def _comparison_pair_has_shared_topic(
+    doc_a_title: str,
+    passage_a: str,
+    doc_b_title: str,
+    passage_b: str,
+) -> bool:
+    """Reject passage pairs with no concrete shared topic before spending an LLM call."""
+    terms_a = _comparison_topic_terms(doc_a_title, passage_a)
+    terms_b = _comparison_topic_terms(doc_b_title, passage_b)
+    return bool(terms_a & terms_b)
+
+
 def _comparison_axes_supported_by_both(
     expected_axes: Any,
     passage_a: str,
@@ -569,7 +653,7 @@ def _comparison_axes_supported_by_both(
     terms_b = _tokenize_comparison_text(passage_b)
     for raw_axis in expected_axes:
         axis_terms = _comparison_axis_terms(str(raw_axis))
-        if axis_terms and axis_terms.intersection(terms_a) and axis_terms.intersection(terms_b):
+        if axis_terms and axis_terms.intersection(terms_a, terms_b):
             return True
     return False
 
@@ -623,6 +707,14 @@ def _gen_single_passage_intent(
             query,
         )
         return None
+    if intent == 'mechanism_bait':
+        target_text = f'{query} {parsed.get("target_entity") or ""}'
+        if _MECHANISM_BAIT_UNSAFE_TARGET_RE.search(target_text):
+            logger.info(
+                'mechanism-bait generation used an unsafe administrative or answerable target; skipping query: %s',
+                query,
+            )
+            return None
     extra = {key: parsed.get(key) for key in extra_meta_keys if key in parsed}
     return {
         'query': query,
@@ -672,6 +764,14 @@ def _gen_comparison(
     query = str(parsed.get('query') or '').strip()
     expected_axes = parsed.get('expected_axes') or []
     if not query:
+        return None
+    if not (_query_mentions_source_anchor(query, doc_a.title) and _query_mentions_source_anchor(query, doc_b.title)):
+        logger.info(
+            'comparison generation omitted one or both source anchors (%s vs %s); skipping query: %s',
+            doc_a.title,
+            doc_b.title,
+            query,
+        )
         return None
     if not _comparison_uses_supported_shared_labels(query, passage_a, passage_b):
         logger.info('comparison generator used unsupported shared label; skipping query: %s', query)
@@ -804,7 +904,7 @@ def _generate_comparison_set(
     target = config.queries_per_intent
     out: list[dict[str, Any]] = []
     attempts = 0
-    max_attempts = target * 8
+    max_attempts = target * 16
     if len(docs) < 2:
         logger.warning('Need at least 2 source documents for comparison queries; have %d', len(docs))
         return out
@@ -822,6 +922,13 @@ def _generate_comparison_set(
             continue
         passage_a = rng.choice(passages_a)
         passage_b = rng.choice(passages_b)
+        if not _comparison_pair_has_shared_topic(doc_a.title, passage_a, doc_b.title, passage_b):
+            logger.info(
+                'comparison generator skipped pair with no concrete shared topic: %s vs %s',
+                doc_a.title[:40],
+                doc_b.title[:40],
+            )
+            continue
         example = _gen_comparison(
             config,
             doc_a=doc_a,

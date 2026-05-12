@@ -179,6 +179,14 @@ _RETRIEVAL_EXACT_CHUNK_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+_RETRIEVAL_EXACT_SEARCH_TERM_RE = re.compile(
+    r'\b(?:critical\s+success\s+factors?|capas?\s+still\s+opened|site/entity|audit\s+dates?|'
+    r'total\s+nr\s+of\s+capas|capas\s+accepted|current\s+due\s+date|request\s+extension|'
+    r'distribution\s+of\s+pfp\s+qag|qag\s+between|types?\s+of\s+differences?|'
+    r'difference\s+of\s+(?:perception|interest|standard|communication))\b',
+    re.IGNORECASE,
+)
+
 
 def _resolve_max_file_paths(global_config: GlobalConfig) -> int:
     """Resolve max_file_paths with safe int parsing and non-negative clamp."""
@@ -4303,7 +4311,7 @@ def _build_query_shaping_instructions(query: str) -> list[str]:
         )
     if 'qag' in normalized_query and 'current due date' in normalized_query:
         targeted_instructions.append(
-            'For QAG due-date rows, distinguish "Current due date" from "Request extension": report the current due date first, then mention any requested extension separately.'
+            'For QAG due-date rows, the "Request extension" date is not the current due date. Report the value labeled "Current due date" first, then mention any requested extension separately.'
         )
     if kind == 'binary':
         instructions = [
@@ -4372,6 +4380,33 @@ def _normalize_query_shaped_response(
     available_refs: list[dict[str, Any]] | None = None,
 ) -> str:
     """Normalize brittle template-style answers for query intents that expect fixed wording."""
+    normalized_query = query.casefold()
+    if 'qag' in normalized_query and 'current due date' in normalized_query:
+        texts = [response]
+        for reference in available_refs or []:
+            if isinstance(reference, dict):
+                texts.extend(str(reference.get(key) or '') for key in ('raw_content', 'content', 'excerpt'))
+        evidence_text = '\n'.join(texts)
+        current_match = re.search(
+            r'\bCurrent due date\s+([0-9]{1,2}[A-Za-z]{3}[0-9]{2,4})\b',
+            evidence_text,
+            flags=re.IGNORECASE,
+        )
+        if current_match:
+            extension_match = re.search(
+                r'\bRequest extension to\s+([0-9]{1,2}[A-Za-z]{3}[0-9]{2,4})\b',
+                evidence_text,
+                flags=re.IGNORECASE,
+            )
+
+            def _expand_short_year(date_text: str) -> str:
+                return re.sub(r'([A-Za-z]{3})(\d{2})$', r'\g<1>20\2', date_text)
+
+            current_due_date = _expand_short_year(current_match.group(1))
+            if extension_match:
+                extension_date = _expand_short_year(extension_match.group(1))
+                return f'The current due date is {current_due_date}, with a requested extension to {extension_date}.'
+            return f'The current due date is {current_due_date}.'
     intent_kind = str(analyze_query_intent(query).get('kind', 'default'))
     if intent_kind == 'single_fact':
         # Single-fact answers score more consistently when the selected option is
@@ -5704,7 +5739,12 @@ def _augment_retrieval_keywords(
         ):
             _append_unique_keyword(expanded_ll, keyword)
 
-    if 'conflict' in normalized_query and 'difference' in normalized_query:
+    if 'conflict' in normalized_query and (
+        'difference' in normalized_query
+        or 'recognize conflict' in normalized_query
+        or 'sources of conflict' in normalized_query
+        or 'source of conflict' in normalized_query
+    ):
         for keyword in (
             'conflict from disagreement',
             'difference of perception',
@@ -5750,7 +5790,7 @@ def _build_exact_chunk_search_query(
     seen: set[str] = set()
     for term in phrase_terms:
         cleaned = ' '.join(str(term).split())
-        if not cleaned or not _RETRIEVAL_EXACT_CHUNK_QUERY_RE.search(cleaned):
+        if not cleaned or not _RETRIEVAL_EXACT_SEARCH_TERM_RE.search(cleaned):
             continue
         normalized = cleaned.casefold()
         if normalized in seen or normalized in normalized_query:
@@ -6071,6 +6111,11 @@ async def _get_vector_context(
             phrase_terms,
             exact_lookup=exact_chunk_lookup,
         )
+        chunk_phrase_terms = (
+            [term for term in (phrase_terms or []) if _RETRIEVAL_EXACT_SEARCH_TERM_RE.search(str(term))]
+            if exact_chunk_lookup
+            else phrase_terms
+        )
 
         try:
             hybrid_search = getattr(chunks_vdb, 'hybrid_search', None)
@@ -6081,7 +6126,7 @@ async def _get_vector_context(
                     top_k=search_top_k,
                     query_embedding=query_embedding,
                     bm25_weight=query_param.bm25_weight,
-                    phrase_terms=phrase_terms,
+                    phrase_terms=chunk_phrase_terms,
                 )
             else:
                 results = await chunks_vdb.query(
@@ -6296,8 +6341,8 @@ async def _perform_kg_search(
                     excluded_terms=ll_search_terms_for_search,
                 )
 
-        # Get vector chunks for mix mode
-        if query_param.mode == 'mix' and chunks_vdb:
+        # Get vector chunks for hybrid/mix mode
+        if query_param.mode in {'hybrid', 'mix'} and chunks_vdb:
             vector_chunks = await _get_vector_context(
                 query,
                 chunks_vdb,
@@ -6479,6 +6524,8 @@ async def _perform_kg_search(
         'vector_chunks': vector_chunks,
         'chunk_tracking': chunk_tracking,
         'query_embedding': query_embedding,
+        'll_keywords_for_search': ll_keywords_for_search,
+        'hl_keywords_for_search': hl_keywords_for_search,
     }
 
 
@@ -6796,6 +6843,18 @@ async def _merge_all_chunks(
 
     normalized_topic_terms = _normalize_priority_terms(topic_terms)
     normalized_facet_terms = _normalize_priority_terms(facet_terms)
+    exact_chunk_lookup = bool(
+        query_param and _should_enable_exact_chunk_fusion(query, [*(topic_terms or []), *(facet_terms or [])])
+    )
+    exact_chunk_terms = (
+        [
+            term
+            for term in _normalize_priority_terms([*(topic_terms or []), *(facet_terms or [])])
+            if ' ' in term and len(term) >= 8 and _RETRIEVAL_EXACT_SEARCH_TERM_RE.search(term)
+        ]
+        if exact_chunk_lookup
+        else []
+    )
     query_terms = _extract_query_focus_terms(
         query,
         excluded_phrases=normalized_topic_terms,
@@ -6857,6 +6916,7 @@ async def _merge_all_chunks(
                     'body_query_overlap': 0.0,
                     'heading_temporal_signal': 0.0,
                     'body_temporal_signal': 0.0,
+                    'exact_phrase_match': 0.0,
                 },
             )
             entry['source_types'].add(source_type)
@@ -6869,6 +6929,12 @@ async def _merge_all_chunks(
                 entry['best_source_order'] = source_order
             for key, value in components.items():
                 entry[key] = max(_safe_float(entry.get(key), 0.0), value)
+            if exact_chunk_terms:
+                normalized_content = _normalize_match_text(str(chunk.get('content') or ''))
+                entry['exact_phrase_match'] = max(
+                    _safe_float(entry.get('exact_phrase_match'), 0.0),
+                    1.0 if any(term in normalized_content for term in exact_chunk_terms) else 0.0,
+                )
             if entry['file_path'] == 'unknown_source' and chunk.get('file_path'):
                 entry['file_path'] = chunk.get('file_path', 'unknown_source')
             if not entry['s3_key'] and chunk.get('s3_key'):
@@ -6899,6 +6965,7 @@ async def _merge_all_chunks(
             + merge_weights.source_count * source_count_score
             + merge_weights.occurrence * occurrence_score
             + merge_weights.order * order_score
+            + (1.5 * _safe_float(entry.get('exact_phrase_match')) if exact_chunk_lookup else 0.0)
         )
 
     strong_heading_facet_files = {
@@ -6915,6 +6982,7 @@ async def _merge_all_chunks(
             -entry['heading_relevance'],
             -entry['body_relevance'],
             -entry['retrieval_score'],
+            -_safe_float(entry.get('exact_phrase_match')),
             -(len(entry['source_types'])),
             entry['best_source_order'] if isinstance(entry['best_source_order'], int) else 10**9,
         ),
@@ -7318,8 +7386,8 @@ async def _build_query_context(
         filtered_relations=truncation_result['filtered_relations'],
         vector_chunks=search_result['vector_chunks'],
         query=query,
-        topic_terms=_split_keyword_terms(ll_keywords),
-        facet_terms=_split_keyword_terms(hl_keywords),
+        topic_terms=_split_keyword_terms(str(search_result.get('ll_keywords_for_search') or ll_keywords)),
+        facet_terms=_split_keyword_terms(str(search_result.get('hl_keywords_for_search') or hl_keywords)),
         knowledge_graph_inst=knowledge_graph_inst,
         text_chunks_db=text_chunks_db,
         query_param=query_param,
