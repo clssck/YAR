@@ -5639,10 +5639,16 @@ async def kg_query(
                 query[:50],
             )
 
+        normalization_refs = list(available_refs)
+        raw_data_payload = context_result.raw_data.get('data', {})
+        raw_chunks = raw_data_payload.get('chunks', []) if isinstance(raw_data_payload, dict) else []
+        if isinstance(raw_chunks, list):
+            normalization_refs.extend(chunk for chunk in raw_chunks if isinstance(chunk, dict))
+
         response = _normalize_query_shaped_response(
             query=query,
             response=response,
-            available_refs=available_refs,
+            available_refs=normalization_refs,
         )
         return QueryResult(content=response, raw_data=context_result.raw_data)
     else:
