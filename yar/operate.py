@@ -4677,6 +4677,18 @@ def _normalize_query_shaped_response(
             if isinstance(ref, dict)
         )
         normalized_support = _normalize_match_text(support_text)
+    response = re.sub(
+        r'^\s*(?:Based on|According to)\s+(?:the\s+)?(?:retrieved\s+|provided\s+|available\s+)?(?:context|sources?|evidence)\s*,?\s*',
+        '',
+        response,
+        flags=re.IGNORECASE,
+    )
+    response = re.sub(
+        r'^\s*The\s+(?:retrieved\s+|provided\s+|available\s+)?(?:context|sources?|evidence)\s+(?:provides?|shows?|states?|indicates?)\s+(?:that\s+)?',
+        '',
+        response,
+        flags=re.IGNORECASE,
+    )
     if available_refs and _is_best_practice_query(query):
         best_practice_value = _extract_first_labeled_answer_value(
             available_refs,
@@ -4720,6 +4732,12 @@ def _normalize_query_shaped_response(
             response = re.sub(
                 r'\bparticipant representing the ([^.。;]+? availability category)\b',
                 r'participant listed under the \1',
+                response,
+                flags=re.IGNORECASE,
+            )
+            response = re.sub(
+                r'\bparticipated\s+as\s+the\s+["“]?([^".。;”]+)["”]?\s+representative\b',
+                r'was listed as a participant under Availability: \1',
                 response,
                 flags=re.IGNORECASE,
             )
@@ -4794,7 +4812,7 @@ def _normalize_query_shaped_response(
                         if co_sponsors:
                             co_sponsor_text = ' and '.join(co_sponsors)
                             response, replacements = re.subn(
-                                r'\bserved as (?:a\s+)?sponsor\b',
+                                r'\bserved as (?:a\s+)?\**sponsor\**',
                                 f'served as sponsor alongside {co_sponsor_text}',
                                 response,
                                 count=1,
@@ -4802,7 +4820,7 @@ def _normalize_query_shaped_response(
                             )
                             if not replacements:
                                 response, replacements = re.subn(
-                                    r'\bas\s+(?:a\s+)?\**sponsor\**\b',
+                                    r'\bas\s+(?:a\s+)?\**sponsor\**',
                                     f'as sponsor alongside {co_sponsor_text}',
                                     response,
                                     count=1,
@@ -4813,113 +4831,17 @@ def _normalize_query_shaped_response(
                 available_refs,
                 ('Target potential users', 'Target users'),
             )
-            best_practice_value = _extract_first_labeled_answer_value(available_refs, ('Name the Best Practice',))
             objective_sentence_value = objective_value.rstrip('.。') if objective_value else ''
             target_sentence_value = target_value.rstrip('.。') if target_value else ''
-            role_objective_answer = ''
-            if objective_value and target_value and re.search(r'\broles?\b', normalized_query):
-                person_match = re.search(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', query or '')
-                sponsor_match = re.search(
-                    r'(?:^|\n|\*\s*)\**Sponsor:\**\s*(?P<sponsors>[^\n|]+)',
-                    support_text,
-                    flags=re.IGNORECASE,
-                )
-                if person_match and sponsor_match:
-                    person_display = person_match.group(0)
-                    normalized_person = _normalize_match_text(person_display)
-                    sponsors = [
-                        re.sub(r'\s+', ' ', name).strip(' -*`_')
-                        for name in re.split(r'\s*(?:/|&|\band\b|,)\s*', sponsor_match.group('sponsors'))
-                    ]
-                    normalized_sponsors = [_normalize_match_text(name) for name in sponsors if name]
-                    matching_index = next(
-                        (index for index, name in enumerate(normalized_sponsors) if name == normalized_person),
-                        None,
-                    )
-                    if matching_index is not None:
-                        co_sponsors = [
-                            sponsor for index, sponsor in enumerate(sponsors) if index != matching_index and sponsor
-                        ]
-                        role_phrase = 'a significant sponsor role'
-                        if co_sponsors:
-                            role_phrase = f'a significant sponsor role alongside {" and ".join(co_sponsors)}'
-                        event_match = re.search(
-                            r'\bin\s+the\s+(.+?)(?:,\s+and|\s+and\s+how|\?)',
-                            query or '',
-                            flags=re.IGNORECASE,
-                        )
-                        event_phrase = (
-                            re.sub(r'\s+', ' ', event_match.group(1)).strip() if event_match else 'requested event'
-                        )
-                        objective_context = 'the stated objectives'
-                        context_match = re.search(
-                            r'As part of the (?P<context>[^.|\n]*?objectives[^,.\n|]*)',
-                            support_text,
-                            flags=re.IGNORECASE,
-                        )
-                        if context_match:
-                            objective_context = re.sub(
-                                r'\s+',
-                                ' ',
-                                context_match.group('context'),
-                            ).strip()
-                        objective_natural = objective_sentence_value[:1].lower() + objective_sentence_value[1:]
-                        target_natural = re.sub(
-                            r'^Identify\b',
-                            'identifying',
-                            target_sentence_value,
-                            flags=re.IGNORECASE,
-                        )
-                        if best_practice_value:
-                            target_natural = re.sub(
-                                r'\bthis practice\b',
-                                f'the {best_practice_value} practice',
-                                target_natural,
-                                flags=re.IGNORECASE,
-                            )
-                        objective_goal_match = re.search(
-                            r'\bto benefit\s+(?:to\s+)?(?P<beneficiaries>.+)$',
-                            objective_sentence_value,
-                            flags=re.IGNORECASE,
-                        )
-                        if objective_goal_match:
-                            goal_sentence = (
-                                f'The goal was to benefit {objective_goal_match.group("beneficiaries")} '
-                                f'by {target_natural}.'
-                            )
-                        else:
-                            goal_sentence = f'The goal was to {objective_natural} by {target_natural}.'
-                        role_objective_answer = (
-                            f'{person_display} played {role_phrase} in the {event_phrase}. '
-                            f'This involvement was part of the {objective_context}, which aimed to {objective_natural}. '
-                            f'{goal_sentence}'
-                        )
-            if role_objective_answer:
-                response = role_objective_answer
-            else:
-                normalized_response = _normalize_match_text(response)
-                additions: list[str] = []
-                objective_probe = objective_value[:45] if objective_value else ''
-                if objective_value and _normalize_match_text(objective_probe) not in normalized_response:
-                    additions.append(f'Objective: {objective_sentence_value}.')
-                if target_value and _normalize_match_text(target_value[:80]) not in normalized_response:
-                    additions.append(f'Target potential users: {target_sentence_value}.')
-                if additions:
-                    response = f'{response.rstrip()} {" ".join(additions)}'
-
-    if (
-        available_refs
-        and re.search(r'\b(?:definition|guidance|guidelines?|recommend|must|should|requires?)\b', normalized_query)
-        and 'under specified conditions' in response.casefold()
-        and 'dosage form allows' in normalized_support
-        and 'no other containment protects' in normalized_support
-    ):
-        response = re.sub(
-            r'\bunder specified conditions\b',
-            'when the dosage form allows it and no other containment protects healthcare practitioners',
-            response,
-            flags=re.IGNORECASE,
-        )
+            normalized_response = _normalize_match_text(response)
+            additions: list[str] = []
+            objective_probe = objective_value[:45] if objective_value else ''
+            if objective_value and _normalize_match_text(objective_probe) not in normalized_response:
+                additions.append(f'Objective: {objective_sentence_value}.')
+            if target_value and _normalize_match_text(target_value[:80]) not in normalized_response:
+                additions.append(f'Target potential users: {target_sentence_value}.')
+            if additions:
+                response = f'{response.rstrip()} {" ".join(additions)}'
 
     intent_kind = str(analyze_query_intent(query).get('kind', 'default'))
     if intent_kind == 'single_fact':
@@ -6509,9 +6431,9 @@ async def kg_query(
 
         # Strip fabricated acronyms. The generator occasionally coins
         # acronyms not present in any retrieved chunk, title, or query
-        # (e.g. inventing "NBO" while the context mentions "Insulin Campus
-        # Frankfurt"). Removes parenthetical mentions cleanly and bare
-        # occurrences with whitespace tidy-up.
+        # (for example, inventing a facility acronym while the context only
+        # names the facility plainly). Removes parenthetical mentions cleanly
+        # and bare occurrences with whitespace tidy-up.
         response, stripped_acronyms = validate_and_strip_unsupported_acronyms(response, validation_ctx)
         if stripped_acronyms:
             logger.info(
@@ -7926,6 +7848,7 @@ async def _expand_adjacent_document_chunks(
     query: str = '',
     max_extra_chunks: int | None = None,
     neighbor_window: int | None = None,
+    chunk_tracking: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Bounded same-document sibling expansion for split slide/page evidence."""
     if not chunks or text_chunks_db is None:
@@ -8019,7 +7942,7 @@ async def _expand_adjacent_document_chunks(
                 ranked_neighbors.append((distance, neighbor_position, anchor_id, neighbor))
 
         ranked_neighbors.sort(key=lambda item: (item[0], item[1]))
-        for _distance, _position, anchor_id, neighbor in ranked_neighbors:
+        for _distance, position, anchor_id, neighbor in ranked_neighbors:
             if len(added_ids) >= max_extra:
                 break
             neighbor_id = str(neighbor.get('chunk_id') or neighbor.get('id') or '').strip()
@@ -8051,6 +7974,8 @@ async def _expand_adjacent_document_chunks(
                 'body_relevance': 0.0,
                 'merge_score': 0.0,
             }
+            if chunk_tracking is not None:
+                chunk_tracking[neighbor_id] = {'source': 'S', 'frequency': 1, 'order': position + 1}
             additions_by_anchor[anchor_id].append(sibling_chunk)
             added_ids.add(neighbor_id)
 
@@ -8446,6 +8371,7 @@ async def _merge_all_chunks(
         'bm25_fusion': 'C',
         'entity': 'E',
         'relationship': 'R',
+        'sibling': 'S',
     }
 
     aggregated: dict[str, dict[str, Any]] = {}
@@ -8598,6 +8524,12 @@ async def _merge_all_chunks(
     metadata_lookup_query = bool(
         _METADATA_LOOKUP_QUERY_RE.search(query or '') or _ROLE_LOOKUP_QUERY_RE.search(query or '')
     )
+    guidance_definition_lookup = bool(
+        re.search(
+            r'\b(?:definition|define|defined|according to|guidance|guidelines?|recommend(?:s|ed|ation)?)\b',
+            normalized_conflict_query,
+        )
+    )
     if metadata_lookup_query:
         sorted_entries = sorted(
             aggregated.values(),
@@ -8623,15 +8555,23 @@ async def _merge_all_chunks(
             ]
         if precise_focus_terms and any(
             _safe_float(entry.get('metadata_query_match')) > 0.0
-            and _safe_float(entry.get('precise_focus_overlap')) >= 1.0
+            and _safe_float(entry.get('precise_focus_overlap')) > 0.0
             for entry in sorted_entries
         ):
-            sorted_entries = [
-                entry
-                for entry in sorted_entries
-                if _safe_float(entry.get('precise_focus_overlap')) >= 1.0
-                or _safe_float(entry.get('exact_phrase_match')) > 0.0
-            ]
+            if guidance_definition_lookup:
+                sorted_entries = [
+                    entry
+                    for entry in sorted_entries
+                    if _safe_float(entry.get('precise_focus_overlap')) > 0.0
+                    or _safe_float(entry.get('metadata_query_match')) >= 1.5
+                ]
+            else:
+                sorted_entries = [
+                    entry
+                    for entry in sorted_entries
+                    if _safe_float(entry.get('precise_focus_overlap')) >= 1.0
+                    or _safe_float(entry.get('exact_phrase_match')) > 0.0
+                ]
     elif temporal_query and precise_focus_terms:
         sorted_entries = sorted(
             aggregated.values(),
@@ -8818,6 +8758,28 @@ async def _merge_all_chunks(
                         and _has_cross_document_project_context(entry)
                     )
                 ]
+                if allow_cross_document_temporal:
+                    anchored_entries: list[dict[str, Any]] = []
+                    cross_document_entries: list[dict[str, Any]] = []
+                    other_entries: list[dict[str, Any]] = []
+                    cross_document_counts: dict[str, int] = {}
+                    max_cross_document_chunks_per_file = 2
+                    for entry in sorted_entries:
+                        file_path = str(entry.get('file_path') or '')
+                        if file_path in precise_files or _has_precise_temporal_anchor(entry):
+                            anchored_entries.append(entry)
+                            continue
+                        is_cross_document_temporal = _has_cross_document_temporal_context(entry) or (
+                            file_path in cross_document_temporal_files and _has_cross_document_project_context(entry)
+                        )
+                        if is_cross_document_temporal:
+                            count = cross_document_counts.get(file_path, 0)
+                            if count < max_cross_document_chunks_per_file:
+                                cross_document_entries.append(entry)
+                                cross_document_counts[file_path] = count + 1
+                            continue
+                        other_entries.append(entry)
+                    sorted_entries = anchored_entries + cross_document_entries + other_entries
         elif normalized_topic_terms:
             precise_files = {
                 str(entry.get('file_path') or '') for entry in sorted_entries if _has_broad_temporal_topic_anchor(entry)
@@ -8967,7 +8929,11 @@ async def _merge_all_chunks(
         logger.info(f'Score-aware merge dropped {filtered_out} low-priority off-topic chunks')
     sibling_limit = 8 if temporal_query else None
     return await _expand_adjacent_document_chunks(
-        merged_chunks, text_chunks_db, query=query, max_extra_chunks=sibling_limit
+        merged_chunks,
+        text_chunks_db,
+        query=query,
+        max_extra_chunks=sibling_limit,
+        chunk_tracking=chunk_tracking,
     )
 
 

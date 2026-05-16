@@ -5752,6 +5752,14 @@ class TestResponseQualityControls:
                     'source_order': 3,
                 },
                 {
+                    'content': 'Portfolio readiness also tracks launch-supply owners, dependency reviews, and governance checkpoints.',
+                    'file_path': 'portfolio.md',
+                    'chunk_id': 'portfolio-extra',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.64,
+                    'source_order': 4,
+                },
+                {
                     'content': 'Project management playbook: clinical-study timelines require early comparator sourcing and coordination.',
                     'file_path': 'generic-playbook.md',
                     'chunk_id': 'generic-timeline',
@@ -5771,6 +5779,7 @@ class TestResponseQualityControls:
         assert 'portfolio-timeline' in chunk_ids
         assert 'portfolio-collaboration' in chunk_ids
         assert 'generic-timeline' not in chunk_ids
+        assert 'portfolio-extra' not in chunk_ids
 
     @pytest.mark.asyncio
     async def test_merge_all_chunks_prioritizes_metadata_support_for_lookup_queries(self):
@@ -5811,6 +5820,47 @@ class TestResponseQualityControls:
         assert [chunk['chunk_id'] for chunk in merged] == ['definition']
 
     @pytest.mark.asyncio
+    async def test_merge_all_chunks_filters_unfocused_guidance_when_precise_support_exists(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'Connector X definition by Safety Standard: sealed connector.',
+                    'file_path': 'definition.md',
+                    'chunk_id': 'definition',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.70,
+                    'source_order': 2,
+                },
+                {
+                    'content': 'Safety Standard guidance for Connector X: should be used when volatile reagents are handled.',
+                    'file_path': 'guidance.md',
+                    'chunk_id': 'guidance',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.65,
+                    'source_order': 3,
+                },
+                {
+                    'content': 'Unrelated assay guidance recommends validation before license submission.',
+                    'file_path': 'unrelated-guidance.md',
+                    'chunk_id': 'unrelated-guidance',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.99,
+                    'source_order': 1,
+                },
+            ],
+            query='What is the definition of Connector X according to Safety Standard, and what does the guidance recommend?',
+            topic_terms=['Connector X', 'Safety Standard'],
+            facet_terms=['definition', 'guidance recommendation'],
+            query_param=query_param,
+        )
+
+        chunk_ids = [chunk['chunk_id'] for chunk in merged]
+        assert chunk_ids == ['definition', 'guidance']
+
+    @pytest.mark.asyncio
     async def test_merge_all_chunks_adds_bounded_adjacent_document_chunks(self, monkeypatch):
         monkeypatch.setenv('YAR_SIBLING_CHUNK_LIMIT', '2')
         monkeypatch.setenv('YAR_SIBLING_CHUNK_WINDOW', '1')
@@ -5849,6 +5899,7 @@ class TestResponseQualityControls:
             },
         }
         text_chunks_db.get_by_ids = MagicMock(side_effect=lambda ids: [chunk_payloads[chunk_id] for chunk_id in ids])
+        chunk_tracking = {}
 
         merged = await _merge_all_chunks(
             filtered_entities=[],
@@ -5868,10 +5919,13 @@ class TestResponseQualityControls:
             query='What best practice lessons are listed?',
             text_chunks_db=text_chunks_db,
             query_param=query_param,
+            chunk_tracking=chunk_tracking,
         )
 
         assert [chunk['chunk_id'] for chunk in merged] == ['chunk-2', 'chunk-1', 'chunk-3']
         assert [chunk['source_type'] for chunk in merged[1:]] == ['sibling', 'sibling']
+        assert chunk_tracking['chunk-1']['source'] == 'S'
+        assert chunk_tracking['chunk-3']['source'] == 'S'
 
     def test_prioritize_substantive_chunks_demotes_metadata_for_process_queries(self):
         chunks = [
@@ -6174,11 +6228,32 @@ class TestResponseQualityControls:
     def test_normalize_query_shaped_response_keeps_availability_label(self):
         response = _normalize_query_shaped_response(
             query='What roles did Priya Raman play in both sessions?',
-            response='Priya Raman was the participant representing the Insulin availability category.',
-            available_refs=[{'content': 'Availability: Insulin | Participants: Priya Raman'}],
+            response='Priya Raman was the participant representing the Category Alpha availability category.',
+            available_refs=[{'content': 'Availability: Category Alpha | Participants: Priya Raman'}],
         )
 
-        assert response == 'Priya Raman was the participant listed under the Insulin availability category.'
+        assert response == 'Priya Raman was the participant listed under the Category Alpha availability category.'
+
+    def test_normalize_query_shaped_response_rewrites_availability_representative_gloss(self):
+        response = _normalize_query_shaped_response(
+            query='What roles did Priya Raman play in both sessions?',
+            response='In the review session, Priya Raman participated as the "Category Alpha" representative.',
+            available_refs=[{'content': 'Availability: Category Alpha | Participants: Priya Raman'}],
+        )
+
+        assert (
+            response
+            == 'In the review session, Priya Raman was listed as a participant under Availability: Category Alpha.'
+        )
+
+    def test_normalize_query_shaped_response_removes_context_preamble(self):
+        response = _normalize_query_shaped_response(
+            query='What does the guidance recommend for Connector X?',
+            response='The retrieved context provides that Connector X should be inspected before use.',
+            available_refs=[{'content': 'Connector X should be inspected before use.'}],
+        )
+
+        assert response == 'Connector X should be inspected before use.'
 
     def test_normalize_query_shaped_response_adds_objective_rows(self):
         response = _normalize_query_shaped_response(
@@ -6243,12 +6318,13 @@ class TestResponseQualityControls:
             ],
         )
 
-        assert 'played a significant sponsor role alongside Ben Torres' in response
-        assert 'goal was to share recent handoff experience' in response
-        assert 'by identifying teams who can use and/or benefit from this practice' in response
+        assert 'listed as sponsor alongside Ben Torres' in response
+        assert 'Objective: Share recent handoff experience.' in response
+        assert 'Target potential users: Identify teams who can use and/or benefit from this practice.' in response
+        assert 'significant sponsor role' not in response
         assert 'Process Handoff-GEN' not in response
 
-    def test_normalize_query_shaped_response_expands_generic_guidance_conditions(self):
+    def test_normalize_query_shaped_response_preserves_stated_guidance_conditions(self):
         response = _normalize_query_shaped_response(
             query='What guidance recommends transfer valve use?',
             response='Transfer valves must be used when administering volatile reagents under specified conditions.',
@@ -6256,32 +6332,33 @@ class TestResponseQualityControls:
                 {
                     'content': (
                         'Transfer valves must be used when administering volatile reagents '
-                        'when the dosage form allows it and no other containment protects health care practitioner.'
+                        'when a containment assessment supports that use.'
                     )
                 }
             ],
         )
 
-        assert 'under specified conditions' not in response
-        assert 'when the dosage form allows it' in response
+        assert (
+            response == 'Transfer valves must be used when administering volatile reagents under specified conditions.'
+        )
 
     def test_normalize_query_shaped_response_removes_negative_role_label(self):
         response = _normalize_query_shaped_response(
             query='What roles did Priya Raman play?',
-            response='Priya Raman was listed under Insulin with no further role label specified.',
-            available_refs=[{'content': 'Availability: Insulin | Participants: Priya Raman'}],
+            response='Priya Raman was listed under Category Alpha with no further role label specified.',
+            available_refs=[{'content': 'Availability: Category Alpha | Participants: Priya Raman'}],
         )
 
-        assert response == 'Priya Raman was listed under Insulin.'
+        assert response == 'Priya Raman was listed under Category Alpha.'
 
     def test_normalize_query_shaped_response_rewrites_participant_role_label(self):
         response = _normalize_query_shaped_response(
             query='What roles did Priya Raman play?',
-            response='Priya Raman is listed under Availability: Insulin with the role of Participants.',
-            available_refs=[{'content': 'Availability: Insulin | Participants: Priya Raman'}],
+            response='Priya Raman is listed under Availability: Category Alpha with the role of Participants.',
+            available_refs=[{'content': 'Availability: Category Alpha | Participants: Priya Raman'}],
         )
 
-        assert response == 'Priya Raman is listed as a participant under Availability: Insulin.'
+        assert response == 'Priya Raman is listed as a participant under Availability: Category Alpha.'
 
     @pytest.mark.asyncio
     async def test_merge_all_chunks_uses_low_level_terms_for_relation_chunk_selection(self):
