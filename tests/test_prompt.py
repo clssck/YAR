@@ -131,19 +131,19 @@ class TestEntityExtractionPrompts:
         assert 'A relation with only 4 fields is invalid' in prompt
         assert 'Malformed 4-field pattern to avoid' in prompt
         assert 'do NOT leave the issue as a standalone event' in prompt
-        assert 'IA Management TC` reviewed `IDC Pre-reads`' in prompt
+        assert 'Management Teleconference` reviewed `Review Pre-reads`' in prompt
         assert 'omit the relation rather than placing the action verb' in prompt
         assert 'Final self-check' in prompt
-        assert 'GPT F2F Team Meeting` agreed on `EU Submission Postponement`' in prompt
-        assert 'IDC Slides Wording Alignment` followed `GPT F2F Team Meeting`' in prompt
+        assert 'Steering Committee Meeting` agreed on `Submission Delay Decision`' in prompt
+        assert 'Slide Wording Alignment` followed `Steering Committee Meeting`' in prompt
 
-        assert 'entity{tuple_delimiter}SARA CS Information Escalation' in examples
-        assert '[SANOFI Logo]' in examples
-        assert 'entity{tuple_delimiter}EU Submission Postponement' in examples
-        assert 'relation{tuple_delimiter}GPT F2F Team Meeting{tuple_delimiter}EU Submission Postponement' in examples
-        assert 'relation{tuple_delimiter}C.Dette{tuple_delimiter}SARA CS Information Escalation' in examples
-        assert 'relation{tuple_delimiter}IA Management TC{tuple_delimiter}IDC Pre-reads' in examples
-        assert 'relation{tuple_delimiter}IDC Slides Wording Alignment{tuple_delimiter}GPT F2F Team Meeting' in examples
+        assert 'entity{tuple_delimiter}Supplier Quality Escalation' in examples
+        assert '[Company Logo]' in examples
+        assert 'entity{tuple_delimiter}Submission Delay Decision' in examples
+        assert 'relation{tuple_delimiter}Steering Committee Meeting{tuple_delimiter}Submission Delay Decision' in examples
+        assert 'relation{tuple_delimiter}D. Lee{tuple_delimiter}Supplier Quality Escalation' in examples
+        assert 'relation{tuple_delimiter}Management Teleconference{tuple_delimiter}Review Pre-reads' in examples
+        assert 'relation{tuple_delimiter}Slide Wording Alignment{tuple_delimiter}Steering Committee Meeting' in examples
         assert 'relation{tuple_delimiter}Drug Device Combination Product{tuple_delimiter}Clinic Ph3 Stopper' in examples
         assert 'relation{tuple_delimiter}Stopper Design{tuple_delimiter}3 mL Cartridge' in examples
 
@@ -158,9 +158,12 @@ class TestEntityExtractionPrompts:
         assert 'without an explicit risk/impact relation' in prompt
         assert 'entity{tuple_delimiter}Product Quality{tuple_delimiter}concept' in examples
         assert 'entity{tuple_delimiter}Accurate Dosing{tuple_delimiter}concept' in examples
-        assert 'relation{tuple_delimiter}CSTD{tuple_delimiter}Product Quality{tuple_delimiter}poses risk to' in examples
         assert (
-            'relation{tuple_delimiter}CSTD Strategy Recommendations{tuple_delimiter}Accurate Dosing{tuple_delimiter}mitigates risk to'
+            'relation{tuple_delimiter}Closed Transfer Adapter{tuple_delimiter}Product Quality{tuple_delimiter}poses risk to'
+            in examples
+        )
+        assert (
+            'relation{tuple_delimiter}Transfer Adapter Strategy Recommendations{tuple_delimiter}Accurate Dosing{tuple_delimiter}mitigates risk to'
             in examples
         )
 
@@ -331,6 +334,8 @@ class TestRAGResponsePrompts:
         # Guarantee the example is present so the model has a concrete pattern to copy.
         assert 'The compound was tested at site A in 2023 [1]' in rag_prompt
         assert 'The compound was tested at site A in 2023 [1]' in naive_prompt
+        assert 'source document chunk that contains that exact fact' in rag_prompt
+        assert 'source document chunk that contains that exact fact' in naive_prompt
 
     def test_rag_response_guides_temporal_and_multi_part_answers(self):
         """Answer prompts should explicitly cover temporal and multi-part questions."""
@@ -341,6 +346,26 @@ class TestRAGResponsePrompts:
         assert 'cover the starting state, major transitions, and later/current state' in naive_prompt
         assert 'address each one briefly rather than stopping after the first relevant point' in rag_prompt
         assert 'address each one briefly rather than stopping after the first relevant point' in naive_prompt
+        assert 'Every sentence in the answer MUST correspond directly to a contiguous span' in rag_prompt
+        assert 'Every sentence in the answer MUST correspond directly to a contiguous span' in naive_prompt
+        assert 'do not require the source to contain the exact words "why" or "significance"' in rag_prompt
+        assert 'do not require the source to contain the exact words "why" or "significance"' in naive_prompt
+        assert 'parallel list under a heading, bullet, table row' in rag_prompt
+        assert 'parallel list under a heading, bullet, table row' in naive_prompt
+        assert 'Prefer close paraphrase or exact source wording' in rag_prompt
+        assert 'Prefer close paraphrase or exact source wording' in naive_prompt
+        assert 'When structured tables or labeled fields appear in context' in rag_prompt
+        assert 'When structured tables or labeled fields appear in context' in naive_prompt
+        assert 'keep each label bound to its own value' in rag_prompt
+        assert 'keep each label bound to its own value' in naive_prompt
+        assert 'do not guess acronym expansions' in rag_prompt
+        assert 'do not guess acronym expansions' in naive_prompt
+        assert 'one direct framing sentence using the question' in rag_prompt
+        assert 'one direct framing sentence using the question' in naive_prompt
+        assert 'distinguish lesson/failure/problem statements' in rag_prompt
+        assert 'distinguish lesson/failure/problem statements' in naive_prompt
+        assert 'answer only the requested definition' in rag_prompt
+        assert 'answer only the requested definition' in naive_prompt
 
     def test_fail_response_exists(self):
         """Test fail response exists."""
@@ -362,8 +387,16 @@ class TestRAGResponsePrompts:
         assert 'keep each supported item explicit and separate them cleanly with semicolons' in naive_prompt
         assert "start by restating the requested subject using the user's wording" in rag_prompt
         assert "start by restating the requested subject using the user's wording" in naive_prompt
-        assert 'preserve source numbering and include each listed item explicitly' in rag_prompt
-        assert 'preserve source numbering and include each listed item explicitly' in naive_prompt
+        assert 'preserve source numbering/rows when present and include each visible item explicitly' in rag_prompt
+        assert 'preserve source numbering/rows when present and include each visible item explicitly' in naive_prompt
+        assert 'do not refuse because the row is tabular' in rag_prompt
+        assert 'do not refuse because the row is tabular' in naive_prompt
+        assert 'answer process/lesson/action questions from the substantive sections' in rag_prompt
+        assert 'answer process/lesson/action questions from the substantive sections' in naive_prompt
+        assert 'Do not assign a role such as organizer, lead, owner, sponsor, or participant' in rag_prompt
+        assert 'Do not assign a role such as organizer, lead, owner, sponsor, or participant' in naive_prompt
+        assert 'quote the exact supporting phrase or bullet before summarizing it' in rag_prompt
+        assert 'quote the exact supporting phrase or bullet before summarizing it' in naive_prompt
 
 
 class TestQueryContextPrompts:
@@ -505,8 +538,8 @@ class TestEntityReviewPrompts:
         prompt = PROMPTS['entity_review_system_prompt']
 
         assert 'Initial-prefixed names' in prompt
-        assert 'P.Charreau' in prompt
-        assert 'Charreau' in prompt
+        assert 'P. Rivera' in prompt
+        assert 'Rivera' in prompt
 
     def test_entity_batch_review_prompt_exists(self):
         """Test entity batch review prompt exists."""

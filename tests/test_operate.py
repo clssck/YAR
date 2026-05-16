@@ -41,31 +41,42 @@ from yar.graph_model import (
     normalize_relation_keywords,
 )
 from yar.operate import (
+    _apply_auto_entity_filter,
     _apply_token_truncation,
     _attach_relation_evidence_from_storage,
     _augment_retrieval_keywords,
     _build_context_str,
+    _build_entity_lookup_query,
     _build_exact_chunk_search_query,
     _build_prompt_chunk_context,
     _build_query_context,
     _build_query_shaping_instructions,
+    _chunk_phrase_terms_for_search,
+    _chunk_relevance_components,
     _classify_malformed_relation_record,
     _derive_phrase_terms_for_chunk_search,
     _enrich_local_keywords,
     _extract_relation_evidence_spans,
     _extract_supporting_evidence_spans,
     _filter_nodes_to_relation_endpoints,
+    _filter_prompt_relations_for_query,
     _find_most_related_edges_from_entities,
     _find_related_text_unit_from_relations,
     _get_edge_data,
     _get_node_data,
     _get_vector_context,
+    _guidance_chunk_search_query,
     _matches_entity_filter,
     _merge_all_chunks,
     _merge_edges_then_upsert,
+    _metadata_chunk_search_query,
+    _metadata_query_match_score,
     _normalize_query_shaped_response,
+    _normalize_retrieval_query_typos,
     _perform_kg_search,
+    _precise_temporal_chunk_search_query,
     _prepare_visible_reference_payload,
+    _prioritize_substantive_chunks,
     _process_extraction_result,
     _rebuild_from_extraction_result,
     _rebuild_single_relationship,
@@ -74,6 +85,8 @@ from yar.operate import (
     _should_enable_exact_chunk_fusion,
     _should_validate_inline_citations,
     _split_keyword_terms,
+    _temporal_chunk_search_query,
+    _tokenize_relevance_terms,
     _truncate_entity_identifier,
     chunking_by_semantic,
     create_chunker,
@@ -180,12 +193,12 @@ def test_relation_fact_from_record_preserves_direction_and_semantics():
 @pytest.mark.asyncio
 async def test_relation_fact_extracts_table_row_evidence_from_source_content():
     raw_result = (
-        'relation<|#|>CSTD strategy<|#|>Overdosing mitigation<|#|>uses<|#|>'
-        'CSTD strategy uses 20% PFP mock prep to mitigate overdosing.<|COMPLETE|>'
+        'relation<|#|>Adapter strategy<|#|>Dosing error mitigation<|#|>uses<|#|>'
+        'Adapter strategy uses prototype mock prep to mitigate dosing error.<|COMPLETE|>'
     )
     source_content = (
         '<table><tr><th>Risk</th><th>Mitigation</th></tr>'
-        '<tr><td>Overdosing</td><td>CSTD strategy uses 20% PFP mock prep</td></tr></table>'
+        '<tr><td>Dosing error</td><td>Adapter strategy uses prototype mock prep</td></tr></table>'
     )
 
     extraction = await _process_extraction_result(
@@ -195,11 +208,11 @@ async def test_relation_fact_extracts_table_row_evidence_from_source_content():
         'strategy.html',
         source_content=source_content,
     )
-    relation = extraction.edges[RelationKey('CSTD strategy', 'Overdosing mitigation')][0]
+    relation = extraction.edges[RelationKey('Adapter strategy', 'Dosing error mitigation')][0]
 
     assert relation.evidence_spans
     assert relation.evidence_spans[0].startswith('Table row:')
-    assert '20% PFP mock prep' in relation.evidence_spans[0]
+    assert 'prototype mock prep' in relation.evidence_spans[0]
 
 
 @pytest.mark.offline
@@ -210,20 +223,20 @@ async def test_process_extraction_result_supplements_explicit_risk_relations_fro
         'chunk-risk',
         456,
         'strategy.pptx',
-        source_content='* The use of CSTDs can pose risks to product quality and accurate dosing (literature and internal data).',
+        source_content='* The use of transfer adapters can pose risks to product quality and accurate dosing (literature and internal data).',
     )
 
-    product_quality = extraction.edges[RelationKey('CSTD', 'Product Quality')][0]
-    accurate_dosing = extraction.edges[RelationKey('CSTD', 'Accurate Dosing')][0]
+    product_quality = extraction.edges[RelationKey('Transfer Adapters', 'Product Quality')][0]
+    accurate_dosing = extraction.edges[RelationKey('Transfer Adapters', 'Accurate Dosing')][0]
 
-    assert 'CSTD' in extraction.nodes
+    assert 'Transfer Adapters' in extraction.nodes
     assert 'Product Quality' in extraction.nodes
     assert 'Accurate Dosing' in extraction.nodes
     assert product_quality.keywords == 'poses risk to'
     assert accurate_dosing.keywords == 'poses risk to'
     assert RelationFacet.IMPACT in product_quality.semantics.facets
     assert product_quality.evidence_spans == (
-        'The use of CSTDs can pose risks to product quality and accurate dosing (literature and internal data)',
+        'The use of transfer adapters can pose risks to product quality and accurate dosing (literature and internal data)',
     )
 
 
@@ -231,8 +244,8 @@ async def test_process_extraction_result_supplements_explicit_risk_relations_fro
 @pytest.mark.asyncio
 async def test_supplement_byline_contributors_emits_represents_relations_from_dash_form():
     byline = 'Vasco Filipe and Céline Thierens – on behalf of the WG'
-    source_content = f'# CSTD Strategy WG\n{byline}'
-    raw_result = f'relation<|#|>CSTD Strategy WG<|#|>Vasco Filipe<|#|>on behalf of<|#|>{byline}<|COMPLETE|>'
+    source_content = f'# Adapter Strategy WG\n{byline}'
+    raw_result = f'relation<|#|>Adapter Strategy WG<|#|>Vasco Filipe<|#|>on behalf of<|#|>{byline}<|COMPLETE|>'
 
     extraction = await _process_extraction_result(
         raw_result,
@@ -243,9 +256,9 @@ async def test_supplement_byline_contributors_emits_represents_relations_from_da
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
 
-    vasco_relations = extraction.edges[RelationKey('Vasco Filipe', 'CSTD Strategy WG')]
-    celine_relations = extraction.edges[RelationKey('Céline Thierens', 'CSTD Strategy WG')]
-    assert RelationKey('CSTD Strategy WG', 'Vasco Filipe') not in extraction.edges
+    vasco_relations = extraction.edges[RelationKey('Vasco Filipe', 'Adapter Strategy WG')]
+    celine_relations = extraction.edges[RelationKey('Céline Thierens', 'Adapter Strategy WG')]
+    assert RelationKey('Adapter Strategy WG', 'Vasco Filipe') not in extraction.edges
     assert [relation.keywords for relation in vasco_relations] == ['represents', 'on behalf of']
     assert [relation.keywords for relation in celine_relations] == ['represents']
     for relation in [*vasco_relations, *celine_relations]:
@@ -253,7 +266,7 @@ async def test_supplement_byline_contributors_emits_represents_relations_from_da
 
     assert 'Vasco Filipe' in extraction.nodes
     assert 'Céline Thierens' in extraction.nodes
-    assert 'CSTD Strategy WG' in extraction.nodes
+    assert 'Adapter Strategy WG' in extraction.nodes
 
 
 @pytest.mark.offline
@@ -264,7 +277,7 @@ async def test_supplement_byline_contributors_skips_when_names_invalid():
         'chunk-invalid-byline',
         456,
         'strategy.pptx',
-        source_content=('Al – on behalf of the CSTD Strategy WG\nThe – on behalf of the CSTD Strategy WG'),
+        source_content=('Al – on behalf of the Adapter Strategy WG\nThe – on behalf of the Adapter Strategy WG'),
         entity_types=list(DEFAULT_ENTITY_TYPES),
     )
 
@@ -286,12 +299,14 @@ async def test_rebuild_from_extraction_result_uses_truncated_source_content_for_
         async def get_by_id(self, chunk_id):
             return {
                 'file_path': 'strategy.html',
-                'content': ('Unrelated intro line. CSTD strategy uses 20% PFP mock prep to mitigate overdosing.'),
+                'content': (
+                    'Unrelated intro line. Adapter strategy uses prototype mock prep to mitigate dosing error.'
+                ),
             }
 
     raw_result = (
-        'relation<|#|>CSTD strategy<|#|>Overdosing mitigation<|#|>uses<|#|>'
-        'CSTD strategy uses 20% PFP mock prep to mitigate overdosing.<|COMPLETE|>'
+        'relation<|#|>Adapter strategy<|#|>Dosing error mitigation<|#|>uses<|#|>'
+        'Adapter strategy uses prototype mock prep to mitigate dosing error.<|COMPLETE|>'
     )
 
     extraction = await _rebuild_from_extraction_result(
@@ -301,7 +316,7 @@ async def test_rebuild_from_extraction_result_uses_truncated_source_content_for_
         456,
         global_config={'tokenizer': SimpleTokenizer(), 'max_extract_input_tokens': 3},
     )
-    relation = extraction.edges[RelationKey('CSTD strategy', 'Overdosing mitigation')][0]
+    relation = extraction.edges[RelationKey('Adapter strategy', 'Dosing error mitigation')][0]
 
     assert relation.evidence_spans == ()
 
@@ -378,7 +393,7 @@ async def test_merge_edges_preserves_directed_relation_vector_payload():
     source = 'Primary Stability Batch Delay Communication'
     target = 'Kripa Ram'
     chunk_id = 'chunk-1'
-    file_path = '20190227_iCMCNPP_LLcross_Sharing_SARA_lessons learned.pptx'
+    file_path = '20190227_alpha_launch_lessons_learned.pptx'
 
     class FakeGraphStorage:
         def __init__(self):
@@ -441,10 +456,10 @@ async def test_merge_edges_preserves_directed_relation_vector_payload():
 @pytest.mark.offline
 @pytest.mark.asyncio
 async def test_merge_edges_stores_internal_relation_evidence_without_schema_drift():
-    source = 'CSTD strategy'
-    target = 'Overdosing mitigation'
+    source = 'Adapter strategy'
+    target = 'Dosing error mitigation'
     chunk_id = 'chunk-evidence'
-    evidence_span = 'Table row: Risk: Overdosing | Mitigation: CSTD strategy uses 20% PFP mock prep'
+    evidence_span = 'Table row: Risk: Dosing error | Mitigation: Adapter strategy uses prototype mock prep'
 
     class FakeGraphStorage:
         def __init__(self):
@@ -483,7 +498,7 @@ async def test_merge_edges_stores_internal_relation_evidence_without_schema_drif
     relation = _relation_fact(
         source,
         target,
-        description='CSTD strategy uses 20% PFP mock prep to mitigate overdosing.',
+        description='Adapter strategy uses prototype mock prep to mitigate dosing error.',
         keywords='uses',
         chunk_id=chunk_id,
         file_path='strategy.html',
@@ -596,26 +611,26 @@ async def test_merge_edges_logs_high_weight_unsupported_diagnostic(caplog):
 @pytest.mark.offline
 def test_extract_relation_evidence_spans_falls_back_to_endpoint_cooccurrence():
     relation = _relation_fact(
-        'CSTD Request',
-        'HD Drug',
-        description='HD Drug classifies the CSTD Request.',
+        'Safety Request',
+        'Handling Guide',
+        description='Handling Guide classifies the Safety Request.',
         keywords='classifies',
         chunk_id='chunk-evidence-fallback',
     )
-    content = 'Background only. HD Drug classifies the CSTD Request for hazardous handling decisions.'
+    content = 'Background only. Handling Guide classifies the Safety Request for handling decisions.'
 
     with patch('yar.operate._extract_supporting_evidence_spans', return_value=[]):
         spans = _extract_relation_evidence_spans(content, relation)
 
-    assert spans == ['HD Drug classifies the CSTD Request for hazardous handling decisions.']
+    assert spans == ['Handling Guide classifies the Safety Request for handling decisions.']
 
 
 @pytest.mark.offline
 def test_extract_relation_evidence_spans_returns_empty_when_endpoints_absent():
     relation = _relation_fact(
-        'CSTD Request',
-        'HD Drug',
-        description='HD Drug classifies the CSTD Request.',
+        'Safety Request',
+        'Handling Guide',
+        description='Handling Guide classifies the Safety Request.',
         keywords='classifies',
         chunk_id='chunk-evidence-absent',
     )
@@ -630,8 +645,8 @@ def test_extract_relation_evidence_spans_returns_empty_when_endpoints_absent():
 @pytest.mark.offline
 @pytest.mark.asyncio
 async def test_merge_edges_recovers_evidence_for_high_weight_unsupported_edge():
-    source = 'CSTD Request'
-    target = 'HD Drug'
+    source = 'Safety Request'
+    target = 'Handling Guide'
     chunk_ids = ['chunk-recover-1', 'chunk-recover-2']
 
     class FakeGraphStorage:
@@ -662,7 +677,7 @@ async def test_merge_edges_recovers_evidence_for_high_weight_unsupported_edge():
                 {'content': 'Background context without direct evidence.'},
                 {
                     'content': (
-                        'HD Drug classifies the CSTD Request when pharmacy manuals evaluate '
+                        'Handling Guide classifies the Safety Request when operations manuals evaluate '
                         'closed-system handling requirements.'
                     )
                 },
@@ -676,7 +691,7 @@ async def test_merge_edges_recovers_evidence_for_high_weight_unsupported_edge():
             _relation_fact(
                 source,
                 target,
-                description='HD Drug classifies the CSTD Request.',
+                description='Handling Guide classifies the Safety Request.',
                 keywords='classifies',
                 chunk_id=chunk_id,
                 file_path='source.md',
@@ -694,7 +709,7 @@ async def test_merge_edges_recovers_evidence_for_high_weight_unsupported_edge():
     )
 
     rel_payload = next(iter(rel_vdb.values()))
-    assert 'evidence_spans: HD Drug classifies the CSTD Request' in rel_payload['content']
+    assert 'evidence_spans: Handling Guide classifies the Safety Request' in rel_payload['content']
     assert 'evidence_spans' not in graph.upserted_edges[0][2]
 
 
@@ -761,9 +776,9 @@ async def test_merge_edges_recovers_evidence_for_low_weight_edge_before_vector_u
 @pytest.mark.offline
 @pytest.mark.asyncio
 async def test_merge_edges_applies_relation_review_when_enabled():
-    source = 'HD Drug'
-    target = 'CSTD Request'
-    evidence_span = 'HD Drug classifies the CSTD Request in the pharmacy manual.'
+    source = 'Handling Guide'
+    target = 'Safety Request'
+    evidence_span = 'Handling Guide classifies the Safety Request in the operations manual.'
 
     class FakeGraphStorage:
         def __init__(self):
@@ -807,7 +822,7 @@ async def test_merge_edges_applies_relation_review_when_enabled():
                 _relation_fact(
                     source,
                     target,
-                    description='HD Drug classifies the CSTD Request.',
+                    description='Handling Guide classifies the Safety Request.',
                     keywords='classifies, evaluates necessity of',
                     chunk_id='chunk-review',
                     file_path='source.md',
@@ -834,10 +849,10 @@ async def test_merge_edges_applies_relation_review_when_enabled():
 @pytest.mark.offline
 @pytest.mark.asyncio
 async def test_attach_relation_evidence_from_storage_adds_prompt_only_spans():
-    source = 'CSTD strategy'
-    target = 'Overdosing mitigation'
+    source = 'Adapter strategy'
+    target = 'Dosing error mitigation'
     chunk_id = 'chunk-evidence'
-    evidence_span = 'Table row: Risk: Overdosing | Mitigation: CSTD strategy uses 20% PFP mock prep'
+    evidence_span = 'Table row: Risk: Dosing error | Mitigation: Adapter strategy uses prototype mock prep'
     storage_key = GRAPH_FIELD_SEP.join(sorted((source, target)))
 
     class FakeRelationChunks:
@@ -857,7 +872,7 @@ async def test_attach_relation_evidence_from_storage_adds_prompt_only_spans():
         {
             'src_tgt': (source, target),
             'source_id': chunk_id,
-            'description': 'CSTD strategy uses 20% PFP mock prep.',
+            'description': 'Adapter strategy uses prototype mock prep.',
             'keywords': 'uses',
         }
     ]
@@ -871,16 +886,16 @@ async def test_attach_relation_evidence_from_storage_adds_prompt_only_spans():
 @pytest.mark.offline
 @pytest.mark.asyncio
 async def test_attach_relation_evidence_uses_batch_get_by_ids_when_supported():
-    first_source = 'CSTD strategy'
-    first_target = 'Overdosing mitigation'
-    second_source = 'Japan submission task force'
-    second_target = 'J-CTD'
+    first_source = 'Adapter strategy'
+    first_target = 'Dosing error mitigation'
+    second_source = 'Regional submission task force'
+    second_target = 'Submission Package'
     first_chunk = 'chunk-evidence-1'
     second_chunk = 'chunk-evidence-2'
     first_key = GRAPH_FIELD_SEP.join(sorted((first_source, first_target)))
     second_key = GRAPH_FIELD_SEP.join(sorted((second_source, second_target)))
-    first_span = 'CSTD strategy mitigates overdosing through mock preparation.'
-    second_span = 'Japan submission task force prepares the J-CTD package.'
+    first_span = 'Adapter strategy mitigates dosing error through mock preparation.'
+    second_span = 'Regional submission task force prepares the submission package.'
 
     class FakeRelationChunks:
         def __init__(self):
@@ -1140,11 +1155,11 @@ def test_predicate_primary_never_contains_comma():
 
 @pytest.mark.offline
 def test_relation_vector_content_uses_primary_predicate_for_surface_form():
-    predicate = RelationPredicate.from_raw('partnered with, collaborates with, required extra cmc team effort')
+    predicate = RelationPredicate.from_raw('partnered with, collaborates with, required extra team effort')
     summary = RelationSummary(
         key=RelationKey('SRC', 'TGT'),
         predicate=predicate,
-        description='SRC partnered with TGT and required extra CMC team effort.',
+        description='SRC partnered with TGT and required extra team effort.',
         weight=2.0,
         source_id='chunk-primary-predicate',
         file_path='source.md',
@@ -1152,19 +1167,19 @@ def test_relation_vector_content_uses_primary_predicate_for_surface_form():
         truncate='',
         semantics=RelationSemantics.from_text(
             predicate.text,
-            'SRC partnered with TGT and required extra CMC team effort.',
+            'SRC partnered with TGT and required extra team effort.',
         ),
     )
 
     projection = build_relation_storage_projection(summary)
     payload = next(iter(projection.relation_vdb_payload.values()))
 
-    assert projection.graph_edge_data['keywords'] == 'partnered with, collaborates with, required extra cmc team effort'
-    assert payload['keywords'] == 'partnered with, collaborates with, required extra cmc team effort'
+    assert projection.graph_edge_data['keywords'] == 'partnered with, collaborates with, required extra team effort'
+    assert payload['keywords'] == 'partnered with, collaborates with, required extra team effort'
     assert payload['content'].splitlines()[:3] == [
-        'partnered with, collaborates with, required extra cmc team effort\tSRC',
+        'partnered with, collaborates with, required extra team effort\tSRC',
         'TGT',
-        'SRC partnered with TGT and required extra CMC team effort.',
+        'SRC partnered with TGT and required extra team effort.',
     ]
     assert 'relation: SRC --partnered with--> TGT' in payload['content']
     assert 'predicate: partnered with' in payload['content']
@@ -1176,9 +1191,9 @@ def test_relation_vector_content_uses_canonical_prefix_for_primary_predicate():
         'requires updates to avoid systematic amendment, allows flexibility language for'
     )
     summary = RelationSummary(
-        key=RelationKey('IMPD/IND', 'CSTD'),
+        key=RelationKey('Protocol Package', 'Transfer Adapter'),
         predicate=predicate,
-        description='IMPD/IND requires updates to avoid systematic amendment.',
+        description='Protocol Package requires updates to avoid systematic amendment.',
         weight=2.0,
         source_id='chunk-primary-prefix',
         file_path='source.md',
@@ -1186,14 +1201,14 @@ def test_relation_vector_content_uses_canonical_prefix_for_primary_predicate():
         truncate='',
         semantics=RelationSemantics.from_text(
             predicate.text,
-            'IMPD/IND requires updates to avoid systematic amendment.',
+            'Protocol Package requires updates to avoid systematic amendment.',
         ),
     )
 
     payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
 
     assert payload['keywords'] == 'requires updates to avoid systematic amendment, allows flexibility language for'
-    assert 'relation: IMPD/IND --requires--> CSTD' in payload['content']
+    assert 'relation: Protocol Package --requires--> Transfer Adapter' in payload['content']
     assert 'predicate: requires' in payload['content']
 
 
@@ -1208,38 +1223,38 @@ def test_relation_predicate_aliases_do_not_merge_antonyms():
 def test_relation_semantics_classifies_risk_phrasing_as_impact():
     semantics = RelationSemantics.from_text(
         'poses risk to',
-        'The use of CSTDs can pose risks to product quality and accurate dosing.',
+        'The use of transfer adapters can pose risks to product quality and accurate dosing.',
     )
 
     assert RelationFacet.IMPACT in semantics.facets
     assert RelationFacet.CONSEQUENCE in semantics.facets
 
     summary = RelationSummary(
-        key=RelationKey('CSTD', 'Product Quality'),
+        key=RelationKey('Transfer Adapter', 'Product Quality'),
         predicate=RelationPredicate.from_raw('poses risk to'),
-        description='The use of CSTDs can pose risks to product quality.',
+        description='The use of transfer adapters can pose risks to product quality.',
         weight=1.0,
         source_id='chunk-risk',
         file_path='source.md',
         created_at=123,
         truncate='',
         semantics=semantics,
-        evidence_spans=('The use of CSTDs can pose risks to product quality.',),
+        evidence_spans=('The use of transfer adapters can pose risks to product quality.',),
     )
     payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
 
     assert 'search_hints: impact consequence effect result outcome' in payload['content']
-    assert 'relation: CSTD --poses risk to--> Product Quality' in payload['content']
-    assert 'source_entity: CSTD' in payload['content']
+    assert 'relation: Transfer Adapter --poses risk to--> Product Quality' in payload['content']
+    assert 'source_entity: Transfer Adapter' in payload['content']
     assert 'target_entity: Product Quality' in payload['content']
 
 
 @pytest.mark.offline
 def test_relation_vector_content_adds_predicate_specific_search_hints():
     represented_summary = RelationSummary(
-        key=RelationKey('CSTD Strategy WG', 'Vasco Filipe'),
+        key=RelationKey('Adapter Strategy WG', 'Vasco Filipe'),
         predicate=RelationPredicate.from_raw('represented by'),
-        description='Vasco Filipe represents the CSTD Strategy WG.',
+        description='Vasco Filipe represents the Adapter Strategy WG.',
         weight=1.0,
         source_id='chunk-represented',
         file_path='source.md',
@@ -1247,13 +1262,13 @@ def test_relation_vector_content_adds_predicate_specific_search_hints():
         truncate='',
         semantics=RelationSemantics.from_text(
             'represented by',
-            'Vasco Filipe represents the CSTD Strategy WG.',
+            'Vasco Filipe represents the Adapter Strategy WG.',
         ),
     )
     collaboration_summary = RelationSummary(
-        key=RelationKey('Sanofi MSAT Goa', 'Alnylam Pharmaceuticals'),
+        key=RelationKey('Company A', 'Company B'),
         predicate=RelationPredicate.from_raw('collaborated with'),
-        description='Sanofi and Alnylam collaborated during the Fitusiran transition.',
+        description='Company A and Company B collaborated during the product transition.',
         weight=1.0,
         source_id='chunk-collaboration',
         file_path='source.md',
@@ -1261,7 +1276,7 @@ def test_relation_vector_content_adds_predicate_specific_search_hints():
         truncate='',
         semantics=RelationSemantics.from_text(
             'collaborated with',
-            'Sanofi and Alnylam collaborated during the Fitusiran transition.',
+            'Company A and Company B collaborated during the product transition.',
         ),
     )
 
@@ -1301,15 +1316,15 @@ def test_relation_vector_content_emits_generic_search_hints_when_no_rule_matches
 @pytest.mark.offline
 def test_relation_vector_content_emits_member_of_hint():
     summary = RelationSummary(
-        key=RelationKey('Vasco Filipe', 'CSTD Strategy WG'),
+        key=RelationKey('Vasco Filipe', 'Adapter Strategy WG'),
         predicate=RelationPredicate.from_raw('member of'),
-        description='Vasco Filipe is a member of the CSTD Strategy WG.',
+        description='Vasco Filipe is a member of the Adapter Strategy WG.',
         weight=1.0,
         source_id='chunk-member',
         file_path='source.md',
         created_at=123,
         truncate='',
-        semantics=RelationSemantics.from_text('member of', 'Vasco Filipe is a member of the CSTD Strategy WG.'),
+        semantics=RelationSemantics.from_text('member of', 'Vasco Filipe is a member of the Adapter Strategy WG.'),
     )
 
     payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
@@ -1320,15 +1335,15 @@ def test_relation_vector_content_emits_member_of_hint():
 @pytest.mark.offline
 def test_relation_vector_content_emits_manufactured_by_hint():
     summary = RelationSummary(
-        key=RelationKey('Fitusiran', 'Sanofi MSAT Goa'),
+        key=RelationKey('Product A', 'Manufacturing Site'),
         predicate=RelationPredicate.from_raw('manufactured by'),
-        description='Fitusiran is manufactured by Sanofi MSAT Goa.',
+        description='Product A is manufactured by Manufacturing Site.',
         weight=1.0,
         source_id='chunk-manufacturing',
         file_path='source.md',
         created_at=123,
         truncate='',
-        semantics=RelationSemantics.from_text('manufactured by', 'Fitusiran is manufactured by Sanofi MSAT Goa.'),
+        semantics=RelationSemantics.from_text('manufactured by', 'Product A is manufactured by Manufacturing Site.'),
     )
 
     payload = next(iter(build_relation_storage_projection(summary).relation_vdb_payload.values()))
@@ -1346,12 +1361,12 @@ def test_relation_vector_content_emits_domain_specific_hint_clusters():
         ),
         (
             'classified as',
-            'Antineoplastic Drug is classified as HD.',
+            'Classified Item is classified as Restricted.',
             'classification category taxonomy type class part of grouping',
         ),
         (
             'holds commercial rights to, obtained commercial rights to',
-            'Sanofi MSAT Goa holds commercial rights to Fitusiran.',
+            'Company A holds commercial rights to Product A.',
             'business agreement contract license rights commercial negotiation alliance',
         ),
         (
@@ -1361,12 +1376,12 @@ def test_relation_vector_content_emits_domain_specific_hint_clusters():
         ),
         (
             'authored',
-            'Julia Marinina authored the Fitusiran lessons learned presentation.',
+            'Julia Marinina authored the Product A lessons learned presentation.',
             'document author prepared published drafted presentation handbook source',
         ),
         (
             'based in',
-            'Sanofi MSAT Goa is based in Goa.',
+            'Manufacturing Site is based in Goa.',
             'location site facility geography country market region',
         ),
         (
@@ -1415,10 +1430,10 @@ def test_relation_fact_preserves_direction_for_inverse_predicate():
     fact = RelationFact.from_record(
         [
             'relation',
-            'CSTD Strategy WG',
+            'Adapter Strategy WG',
             'Vasco Filipe',
             'represented by',
-            'The CSTD Strategy WG is represented by Vasco Filipe.',
+            'The Adapter Strategy WG is represented by Vasco Filipe.',
         ],
         'chunk-represented',
         123,
@@ -1426,7 +1441,7 @@ def test_relation_fact_preserves_direction_for_inverse_predicate():
     )
 
     assert fact is not None
-    assert fact.key == RelationKey('Vasco Filipe', 'CSTD Strategy WG')
+    assert fact.key == RelationKey('Vasco Filipe', 'Adapter Strategy WG')
     assert fact.predicate.text == 'represents'
 
 
@@ -1435,10 +1450,10 @@ def test_relation_fact_keeps_mixed_inverse_predicates_unflipped():
     fact = RelationFact.from_record(
         [
             'relation',
-            'CSTD Strategy WG',
+            'Adapter Strategy WG',
             'Vasco Filipe',
             'represented by, includes',
-            'The CSTD Strategy WG is represented by Vasco Filipe and includes multiple workstreams.',
+            'The Adapter Strategy WG is represented by Vasco Filipe and includes multiple workstreams.',
         ],
         'chunk-mixed',
         123,
@@ -1446,7 +1461,7 @@ def test_relation_fact_keeps_mixed_inverse_predicates_unflipped():
     )
 
     assert fact is not None
-    assert fact.key == RelationKey('CSTD Strategy WG', 'Vasco Filipe')
+    assert fact.key == RelationKey('Adapter Strategy WG', 'Vasco Filipe')
     assert fact.predicate.text == 'represented by, includes'
 
 
@@ -2003,26 +2018,28 @@ async def test_alias_resolution_skips_alias_that_would_collapse_existing_edge():
 
     class FakeEntityVdb:
         async def hybrid_entity_search(self, entity_name, *, top_k):
-            if entity_name == 'Sanofi':
-                return [{'entity_name': 'Sanofi MSAT Goa', 'entity_type': 'Organization'}]
+            if entity_name == 'Acme':
+                return [{'entity_name': 'Acme Research Center', 'entity_type': 'Organization'}]
             return []
 
     llm_response = (
-        '[{"new_entity": "Sanofi", "matches_existing": true, '
-        '"canonical": "Sanofi MSAT Goa", "confidence": 0.95, '
+        '[{"new_entity": "Acme", "matches_existing": true, '
+        '"canonical": "Acme Research Center", "confidence": 0.95, '
         '"reasoning": "LLM considered this the same organization"}]'
     )
     llm_model_func = AsyncMock(return_value=llm_response)
     all_nodes = {
-        'Sanofi': [_entity_fact('Sanofi', entity_type='organization', description='Sanofi')],
-        'Sanofi MSAT Goa': [_entity_fact('Sanofi MSAT Goa', entity_type='organization', description='Sanofi MSAT Goa')],
+        'Acme': [_entity_fact('Acme', entity_type='organization', description='Acme')],
+        'Acme Research Center': [
+            _entity_fact('Acme Research Center', entity_type='organization', description='Acme Research Center')
+        ],
     }
     all_edges = {
-        RelationKey('Sanofi', 'Sanofi MSAT Goa'): [
+        RelationKey('Acme', 'Acme Research Center'): [
             _relation_fact(
-                'Sanofi',
-                'Sanofi MSAT Goa',
-                description='Sanofi works with Sanofi MSAT Goa.',
+                'Acme',
+                'Acme Research Center',
+                description='Acme works with Acme Research Center.',
                 keywords='works with',
             )
         ]
@@ -2057,35 +2074,37 @@ async def test_alias_resolution_skips_alias_that_would_collapse_edge_after_prior
 
     class FakeEntityVdb:
         async def hybrid_entity_search(self, entity_name, *, top_k):
-            if entity_name in {'Sanofi', 'Sanofi MSAT'}:
-                return [{'entity_name': 'Sanofi MSAT Goa', 'entity_type': 'Organization'}]
+            if entity_name in {'Acme', 'Acme Research'}:
+                return [{'entity_name': 'Acme Research Center', 'entity_type': 'Organization'}]
             return []
 
     llm_response = (
         '['
-        '{"new_entity": "Sanofi", "matches_existing": true, '
-        '"canonical": "Sanofi MSAT Goa", "confidence": 0.95, '
+        '{"new_entity": "Acme", "matches_existing": true, '
+        '"canonical": "Acme Research Center", "confidence": 0.95, '
         '"reasoning": "abbreviation"}, '
-        '{"new_entity": "Sanofi MSAT", "matches_existing": true, '
-        '"canonical": "Sanofi MSAT Goa", "confidence": 0.95, '
+        '{"new_entity": "Acme Research", "matches_existing": true, '
+        '"canonical": "Acme Research Center", "confidence": 0.95, '
         '"reasoning": "abbreviation"}'
         ']'
     )
     llm_model_func = AsyncMock(return_value=llm_response)
     all_nodes = {
-        'Sanofi': [_entity_fact('Sanofi', entity_type='organization', description='Sanofi')],
-        'Sanofi MSAT': [_entity_fact('Sanofi MSAT', entity_type='organization', description='Sanofi MSAT')],
-        'Sanofi MSAT Goa': [_entity_fact('Sanofi MSAT Goa', entity_type='organization', description='Sanofi MSAT Goa')],
+        'Acme': [_entity_fact('Acme', entity_type='organization', description='Acme')],
+        'Acme Research': [_entity_fact('Acme Research', entity_type='organization', description='Acme Research')],
+        'Acme Research Center': [
+            _entity_fact('Acme Research Center', entity_type='organization', description='Acme Research Center')
+        ],
     }
     edge_records = [
         _relation_fact(
-            'Sanofi',
-            'Sanofi MSAT',
-            description='Sanofi works with Sanofi MSAT.',
+            'Acme',
+            'Acme Research',
+            description='Acme works with Acme Research.',
             keywords='works with',
         )
     ]
-    all_edges = {RelationKey('Sanofi', 'Sanofi MSAT'): edge_records}
+    all_edges = {RelationKey('Acme', 'Acme Research'): edge_records}
 
     resolved_nodes, resolved_edges = await _resolve_entity_aliases_for_batch(
         all_nodes=all_nodes,
@@ -2102,8 +2121,8 @@ async def test_alias_resolution_skips_alias_that_would_collapse_edge_after_prior
         },
     )
 
-    assert set(resolved_nodes) == {'Sanofi MSAT', 'Sanofi MSAT Goa'}
-    resolved_key = RelationKey('Sanofi MSAT Goa', 'Sanofi MSAT')
+    assert set(resolved_nodes) == {'Acme Research', 'Acme Research Center'}
+    resolved_key = RelationKey('Acme Research Center', 'Acme Research')
     assert set(resolved_edges) == {resolved_key}
     assert resolved_edges[resolved_key][0].key == resolved_key
     assert all(edge_key.src != edge_key.tgt for edge_key in resolved_edges)
@@ -2234,23 +2253,32 @@ class TestEntityFilterMatching:
     """Tests for entity filter normalization used during retrieval."""
 
     def test_matches_entity_filter_ignores_punctuation_and_case(self):
-        assert _matches_entity_filter('iCMC-NPP leader guidance', 'iCMC NPP')
-        assert _matches_entity_filter('ICMC NPP leader guidance', 'icmc-npp')
-        assert not _matches_entity_filter('SARA lessons learned', 'iCMC NPP')
-        assert not _matches_entity_filter('iCMC-NPP leader guidance', '')
+        assert _matches_entity_filter('Alpha-Launch leader guidance', 'Alpha Launch')
+        assert _matches_entity_filter('ALPHA LAUNCH leader guidance', 'alpha-launch')
+        assert not _matches_entity_filter('Beta lessons learned', 'Alpha Launch')
+        assert not _matches_entity_filter('Alpha-Launch leader guidance', '')
 
     def test_relation_matches_entity_filter_uses_relation_text_when_entities_miss(self):
         relation = {
-            'src_id': 'Sanofi',
-            'tgt_id': 'Alnylam',
-            'description': 'Lessons learned from Fitusiran transition and collaboration.',
+            'src_id': 'Partner A',
+            'tgt_id': 'Partner B',
+            'description': 'Lessons learned from compound alpha transition and collaboration.',
             'keywords': 'collaborates with',
         }
 
         from yar.operate import _relation_matches_entity_filter
 
-        assert _relation_matches_entity_filter(relation, 'fitusiran', set())
-        assert not _relation_matches_entity_filter(relation, 'jctd', set())
+        assert _relation_matches_entity_filter(relation, 'compound alpha', set())
+        assert not _relation_matches_entity_filter(relation, 'compound beta', set())
+
+    def test_auto_entity_filter_still_applies_to_direct_entity_queries(self):
+        query_param = QueryParam(mode='mix')
+
+        with patch('yar.operate.resolve_entity_filter', return_value='compound-alpha'):
+            resolved = _apply_auto_entity_filter('What is the Compound Alpha project status?', query_param)
+
+        assert resolved == 'compound-alpha'
+        assert query_param.entity_filter == 'compound-alpha'
 
     @pytest.mark.asyncio
     async def test_vector_context_filter_matches_hyphenated_source_metadata(self):
@@ -2261,18 +2289,20 @@ class TestEntityFilterMatching:
                 {
                     'id': 'chunk-1',
                     'content': 'The leader must avoid delaying submission.',
-                    'file_path': '2019 iCMC-NPP lessons learned.pptx',
+                    'file_path': '2019 Alpha-Launch lessons learned.pptx',
                     's3_key': 'default/doc-1/processed.md',
                     'score': 0.91,
                 }
             ]
         )
-        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, entity_filter='iCMC NPP', enable_bm25_fusion=False)
+        query_param = QueryParam(
+            mode='mix', top_k=5, chunk_top_k=5, entity_filter='Alpha Launch', enable_bm25_fusion=False
+        )
 
         chunks = await _get_vector_context('What must the leader avoid?', chunks_vdb, query_param)
 
         assert len(chunks) == 1
-        assert chunks[0]['file_path'] == '2019 iCMC-NPP lessons learned.pptx'
+        assert chunks[0]['file_path'] == '2019 Alpha-Launch lessons learned.pptx'
 
     @pytest.mark.asyncio
     async def test_vector_context_filter_returns_empty_when_no_field_matches(self):
@@ -2282,18 +2312,181 @@ class TestEntityFilterMatching:
             return_value=[
                 {
                     'id': 'chunk-1',
-                    'content': 'SARA sharing lessons learned.',
-                    'file_path': '2019 SARA lessons learned.pptx',
+                    'content': 'Beta sharing lessons learned.',
+                    'file_path': '2019 Beta lessons learned.pptx',
                     's3_key': 'default/doc-1/processed.md',
                     'score': 0.91,
                 }
             ]
         )
-        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, entity_filter='iCMC NPP', enable_bm25_fusion=False)
+        query_param = QueryParam(
+            mode='mix', top_k=5, chunk_top_k=5, entity_filter='Alpha Launch', enable_bm25_fusion=False
+        )
 
         chunks = await _get_vector_context('What must the leader avoid?', chunks_vdb, query_param)
 
         assert chunks == []
+
+    @pytest.mark.asyncio
+    async def test_vector_context_marks_exact_support_metadata(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.query = AsyncMock(
+            return_value=[
+                {
+                    'id': 'chunk-1',
+                    'content': 'Transfer valve definition by Safety Standard: sealed connector.',
+                    'file_path': 'transfer-valve.pptx',
+                    'score': 0.91,
+                }
+            ]
+        )
+        query_param = QueryParam(mode='hybrid', top_k=5, chunk_top_k=5, enable_bm25_fusion=False)
+
+        chunks = await _get_vector_context(
+            'What is the definition of transfer valve according to Safety Standard?',
+            chunks_vdb,
+            query_param,
+            phrase_terms=['Transfer Valve Definition'],
+        )
+
+        assert chunks[0]['metadata_query_match'] == 1.5
+        assert chunks[0]['exact_phrase_match'] == 1.0
+        guidance_chunks_vdb = MagicMock()
+        guidance_chunks_vdb.cosine_better_than_threshold = 0.4
+        guidance_chunks_vdb.query = AsyncMock(
+            return_value=[
+                {
+                    'id': 'chunk-2',
+                    'content': 'Process Standard states transfer valves should be used when compounding volatile reagents.',
+                    'file_path': 'transfer-valve.pptx',
+                    'score': 0.82,
+                }
+            ]
+        )
+
+        guidance_chunks = await _get_vector_context(
+            'How does Process Standard guidance recommend transfer valve use?',
+            guidance_chunks_vdb,
+            query_param,
+            phrase_terms=['Process Standard guidance'],
+        )
+
+        assert guidance_chunks[0]['metadata_query_match'] == 1.25
+
+    @pytest.mark.asyncio
+    async def test_vector_context_adds_guidance_supplemental_results(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.hybrid_search = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        'id': 'definition',
+                        'content': 'Transfer valve definition by Safety Standard: sealed connector.',
+                        'file_path': 'definition.pdf',
+                        'score': 0.91,
+                    }
+                ],
+                [
+                    {
+                        'id': 'use-guidance',
+                        'content': 'Process Standard states transfer valves should be used when handling volatile reagents.',
+                        'file_path': 'guidance.pdf',
+                        'score': 0.80,
+                    }
+                ],
+            ]
+        )
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, enable_bm25_fusion=True)
+
+        chunks = await _get_vector_context(
+            'What is the definition of transfer valve, and what guidance recommends its use for handling volatile reagents?',
+            chunks_vdb,
+            query_param,
+        )
+
+        assert chunks_vdb.hybrid_search.await_count == 2
+        assert [chunk['chunk_id'] for chunk in chunks] == ['use-guidance', 'definition']
+        assert chunks[0]['metadata_query_match'] >= 0.85
+
+    @pytest.mark.asyncio
+    async def test_vector_context_adds_temporal_supplemental_results(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.hybrid_search = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        'id': 'background',
+                        'content': 'IND Phase 1 background.',
+                        'file_path': 'background.pdf',
+                        'score': 0.91,
+                    }
+                ],
+                [
+                    {
+                        'id': 'timeline',
+                        'content': 'US submission in Mar 24 and US approval in Mar 25.',
+                        'file_path': 'timeline.pdf',
+                        'score': 0.80,
+                    }
+                ],
+            ]
+        )
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, enable_bm25_fusion=True)
+
+        chunks = await _get_vector_context(
+            'What is the EU approval timeline and project management impact?',
+            chunks_vdb,
+            query_param,
+        )
+
+        assert chunks_vdb.hybrid_search.await_count == 2
+        supplemental_call = chunks_vdb.hybrid_search.await_args_list[1]
+        assert 'EU approval' in supplemental_call.args[0]
+        assert 'EU approval' in supplemental_call.kwargs['phrase_terms']
+        assert 'approval date' in supplemental_call.args[0]
+        assert [chunk['chunk_id'] for chunk in chunks] == ['timeline', 'background']
+
+    @pytest.mark.asyncio
+    async def test_vector_context_adds_action_supplemental_results(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.hybrid_search = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        'id': 'context',
+                        'content': 'Lessons learned context for conflict management.',
+                        'file_path': 'context.pdf',
+                        'score': 0.91,
+                    }
+                ],
+                [
+                    {
+                        'id': 'actions',
+                        'content': 'Conflict management requires quick reaction and practical action steps.',
+                        'file_path': 'actions.pdf',
+                        'score': 0.80,
+                    }
+                ],
+            ]
+        )
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, enable_bm25_fusion=True)
+
+        chunks = await _get_vector_context(
+            'How can lessons learned in conflict management be applied?',
+            chunks_vdb,
+            query_param,
+        )
+
+        assert chunks_vdb.hybrid_search.await_count == 2
+        supplemental_call = chunks_vdb.hybrid_search.await_args_list[1]
+        assert 'conflict management' in supplemental_call.args[0]
+        assert 'conflict management requires' in supplemental_call.args[0]
+        assert 'conflict management' in supplemental_call.kwargs['phrase_terms']
+        assert [chunk['chunk_id'] for chunk in chunks] == ['actions', 'context']
 
     @pytest.mark.asyncio
     async def test_naive_query_passes_low_level_phrases_to_chunk_search(self):
@@ -2301,7 +2494,7 @@ class TestEntityFilterMatching:
             mode='naive',
             top_k=5,
             chunk_top_k=5,
-            ll_keywords=['J-CTD', 'shipping validation between the US and Japan', 'sales limits'],
+            ll_keywords=['REG-CTD', 'shipping validation between Region A and Region B', 'sales limits'],
             only_need_context=True,
             enable_bm25_fusion=True,
             model_func=AsyncMock(return_value='unused'),
@@ -2313,9 +2506,9 @@ class TestEntityFilterMatching:
             'max_total_tokens': 4000,
         }
         vector_chunk = {
-            'content': 'Shipping Validation is executed between US and JP.',
-            'file_path': 'Japanese iCMC Operations Managers handbook.pdf',
-            'chunk_id': 'chunk-japan',
+            'content': 'Shipping Validation is executed between Region A and Region B.',
+            'file_path': 'regional operations handbook.pdf',
+            'chunk_id': 'chunk-region',
         }
         vector_context_mock = AsyncMock(return_value=[vector_chunk])
 
@@ -2324,7 +2517,7 @@ class TestEntityFilterMatching:
             patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=[vector_chunk])),
         ):
             result = await naive_query(
-                'Japanese iCMC Operations Managers handbook FMA J-CTD shipping validation sales limits',
+                'Regional operations handbook shipping validation sales limits',
                 chunks_vdb,
                 query_param,
                 global_config,
@@ -2332,7 +2525,8 @@ class TestEntityFilterMatching:
 
         assert result.raw_data['metadata']['processing_info']['total_chunks_found'] == 1
         assert vector_context_mock.await_args.kwargs['phrase_terms'] == [
-            'shipping validation between the US and Japan',
+            'REG-CTD',
+            'shipping validation between Region A and Region B',
             'sales limits',
         ]
 
@@ -2354,9 +2548,9 @@ class TestEntityFilterMatching:
             'max_total_tokens': 4000,
         }
         vector_chunk = {
-            'content': 'Shipment to depot happens 1-3 months before Start packaging.',
+            'content': 'Timeline step happens 1-3 months before the launch milestone.',
             'file_path': 'workflow.pdf',
-            'chunk_id': 'chunk-shipment',
+            'chunk_id': 'chunk-workflow',
         }
         vector_context_mock = AsyncMock(return_value=[vector_chunk])
 
@@ -2365,37 +2559,59 @@ class TestEntityFilterMatching:
             patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=[vector_chunk])),
         ):
             await naive_query(
-                'What is the standard duration of shipment to depot?',
+                'What is the standard duration before the launch milestone?',
                 chunks_vdb,
                 query_param,
                 global_config,
             )
 
-        assert vector_context_mock.await_args.kwargs['phrase_terms'] == ['shipment to depot']
+        assert vector_context_mock.await_args.kwargs['phrase_terms'] is None
 
     def test_derive_phrase_terms_prefers_explicit_low_level_keywords(self):
         assert _derive_phrase_terms_for_chunk_search(
-            'What is the standard duration of shipment to depot?',
+            'What is the standard duration before the launch milestone?',
             ['explicit retrieval phrase'],
         ) == ['explicit retrieval phrase']
 
     def test_supporting_evidence_spans_linearize_html_tables_and_workflows(self):
         content = """
         <table><thead><tr><th>Challenge</th><th>Mitigation</th></tr></thead>
-        <tbody><tr><td>How to avoid overdosing?</td><td>Confirm the dose (Mock prep)</td></tr></tbody></table>
+        <tbody><tr><td>How to avoid contamination?</td><td>Confirm the cleaning cycle</td></tr></tbody></table>
         ## Timeline Stages
-        * 6-3 months before Start packaging
-        * Batch shipped and Issue DP transfer Order and shipment TC
+        * 6-3 months before launch milestone
+        * Final verification completed before release
         """
 
         spans = _extract_supporting_evidence_spans(
             content,
-            query='What was put in place to mitigate overdosing and shipment to depot?',
+            query='What was put in place to mitigate contamination before launch?',
         )
 
-        assert any('Challenge: How to avoid overdosing?' in span for span in spans)
-        assert any('Mitigation: Confirm the dose (Mock prep)' in span for span in spans)
-        assert any('Workflow timeline and shipment evidence' in span for span in spans)
+        assert any('Challenge: How to avoid contamination?' in span for span in spans)
+        assert any('Mitigation: Confirm the cleaning cycle' in span for span in spans)
+        assert any('Workflow timeline evidence' in span for span in spans)
+
+    def test_supporting_evidence_spans_linearize_markdown_tables_and_label_lists(self):
+        content = """
+        | Product | Role |
+        | :--- | :--- |
+        | Example Device | Project Leader |
+
+        * **Status:**
+            * Planned
+            * Actions opened
+            * Actions finalized
+        """
+
+        spans = _extract_supporting_evidence_spans(
+            content,
+            query='What role and status did the product have?',
+            topic_terms=['Example Device'],
+            facet_terms=['Project Leader', 'status'],
+        )
+
+        assert any('Product: Example Device | Role: Project Leader' in span for span in spans)
+        assert any('Status: Planned; Actions opened; Actions finalized' in span for span in spans)
 
 
 # ============================================================================
@@ -2900,10 +3116,10 @@ class TestGetKeywordsFromQuery:
 class TestAugmentRetrievalKeywords:
     """Tests for deterministic keyword expansion on brittle retrieval intents."""
 
-    def test_temporal_project_freeze_query_adds_timeline_terms(self):
+    def test_temporal_and_study_queries_add_generic_terms(self):
         hl, ll = _augment_retrieval_keywords(
-            'What are the dates or milestones mentioned during the project freeze period?',
-            ['project freeze'],
+            'What are the dates or milestones mentioned during the platform launch period?',
+            ['launch milestones'],
             [],
         )
 
@@ -2911,32 +3127,83 @@ class TestAugmentRetrievalKeywords:
         assert 'background' in hl
         assert 'chronology' in hl
         assert 'timeline' in hl
-        assert 'project freeze background' in hl
-        assert 'project freeze' in ll
+        assert 'key events' in hl
+        assert ll == []
+
         hl, ll = _augment_retrieval_keywords(
-            'Which studies were delayed or impacted by the project freeze?',
+            'Which studies were delayed or impacted by the launch change?',
             ['study delays'],
             [],
         )
 
-        assert 'clinical development plan' in hl
-        assert 'lean package to submission' in hl
-        assert 'study start delay' in hl
-        assert 'Clinical Development Plan' in ll
+        assert 'timeline' in hl
+        assert 'studies' in ll
+        assert 'domain-specific plan' not in hl
+        assert 'Domain-Specific Plan' not in ll
+
+        terms = _tokenize_relevance_terms('Which sponsors owned the statuses of these studies?')
+        assert {'sponsor', 'status', 'study'} <= terms
+        assert _should_enable_exact_chunk_fusion(
+            'How does Process Standard guidance recommend handling volatile reagents?',
+            ['Process Standard'],
+        )
+        assert _should_enable_exact_chunk_fusion(
+            'Who were the sponsors and what was the status of the session?',
+            ['sponsors'],
+        )
+        assert _normalize_retrieval_query_typos('Wht is the best practce?') == 'What is the best practice?'
+        assert _normalize_retrieval_query_typos('Who were the sponsors?') == 'Who were the sponsors?'
+
+        guidance_query = _guidance_chunk_search_query('How does Safety Standard guidance recommend transfer valve use?')
+        assert 'Safety' in guidance_query
+        assert 'Standard' in guidance_query
+        assert 'transfer' in guidance_query
+        assert 'valve' in guidance_query
+        assert 'should' in guidance_query
+        assert 'must' in guidance_query
+
+        hl, ll = _augment_retrieval_keywords(
+            'How can effective conflict management be applied based on lessons learned?',
+            ['conflict management'],
+            ['Partner Alpha'],
+        )
+        assert 'best practice' in hl
+        assert 'practical actions' in hl
+        assert 'implementation steps' in hl
+        assert 'action plan' in hl
+        assert 'requires' in hl
+        assert 'Best Practice' in ll
+
+    def test_qualified_temporal_queries_preserve_timeline_table_terms(self):
+        query = 'How did the EU approval timeline compare with the PX-482 Phase 1 milestone?'
+        search_query = _temporal_chunk_search_query(query)
+
+        assert 'EU approval' in search_query
+        assert 'EU submission' in search_query
+        assert 'EU: Approval' in search_query
+
+    def test_precise_temporal_query_combines_code_and_timeline_terms(self):
+        query = (
+            'What is the significance of the EU approval timeline for PX-482 Phase 1 and its project management impact?'
+        )
+        search_query = _precise_temporal_chunk_search_query(query)
+
+        assert 'PX-482' in search_query
+        assert 'EU approval' in search_query
+        assert 'EU submission' in search_query
+        assert 'key dates' in search_query
 
     def test_document_number_query_adds_guideline_resource_terms(self):
         hl, ll = _augment_retrieval_keywords(
-            'Which internal document number is referenced as the TT guideline in the Best Practice section?',
+            'Which internal document number is referenced as the implementation guideline in the Best Practice section?',
             ['document lookup'],
-            ['TT'],
+            ['Implementation Guideline'],
         )
 
         assert 'document number' in hl
         assert 'guideline reference' in hl
         assert 'links to resources' in hl
-        assert 'technology transfer' in hl
-        assert 'TT guideline' in ll
-        assert 'Technology Transfer' in ll
+        assert 'Implementation Guideline' in ll
         assert 'Best Practice' in ll
 
     def test_exact_chunk_queries_add_table_and_section_terms(self):
@@ -2952,68 +3219,120 @@ class TestAugmentRetrievalKeywords:
         assert _should_enable_exact_chunk_fusion('Which Critical Success Factors are listed?', ll)
 
         hl, ll = _augment_retrieval_keywords(
-            'List the sites mentioned in the PMG Green Light Presentation with open CAPAs.',
-            ['site listing'],
-            [],
-        )
-
-        assert 'CAPAs still opened' in hl
-        assert 'Site/Entity' in ll
-        assert 'Total Nr of CAPAs/ number of CAPAs still opened' in ll
-        assert _should_enable_exact_chunk_fusion('Which sites have open CAPAs?', ll)
-
-        hl, ll = _augment_retrieval_keywords(
-            'What is the current due date for updating the Fitusiran PFP QAG between ICF and DP-FRA?',
-            ['deadline lookup'],
-            ['QAG'],
-        )
-
-        assert 'current due date' in hl
-        assert 'request extension' in hl
-        assert 'Distribution of PFP QAG between ICF & DP-FRA' in ll
-        assert 'Current due date 04Mar24' in ll
-        assert _should_enable_exact_chunk_fusion('What is the current due date for the QAG?', ll)
-
-        hl, ll = _augment_retrieval_keywords(
-            'List the types of differences that lead to conflicts in CMC strategy management.',
+            'List the types of differences that lead to conflicts in strategy management.',
             ['conflict causes'],
             [],
         )
 
-        assert 'conflict from disagreement' in hl
-        assert 'difference of perception' in hl
-        assert 'difference of perception of issue' in ll
-        assert 'difference of communication' in ll
-        assert _should_enable_exact_chunk_fusion('List the types of differences that lead to conflicts.', ll)
+        assert 'sources of conflict' in hl
+        assert 'types of differences' in hl
+        assert 'conflict drivers' in hl
+        assert not _should_enable_exact_chunk_fusion('List the types of differences that lead to conflicts.', ll)
 
         hl, ll = _augment_retrieval_keywords(
-            'In 16-LLsession-09, what are the explicit sources of conflict listed under Recognize conflict?',
+            'In session 09, what are the explicit sources of conflict listed under Recognize conflict?',
             ['conflict sources'],
             [],
         )
 
-        assert 'conflict from disagreement' in hl
-        assert 'difference of perception of issue' in ll
+        assert 'sources of conflict' in hl
 
     def test_exact_chunk_lookup_query_appends_literal_terms(self):
-        query = 'What is the current due date for the QAG?'
+        query = 'Which document number is listed in the best practice?'
         search_query = _build_exact_chunk_search_query(
             query,
             [
-                'QAG',
-                'Distribution of PFP QAG between ICF & DP-FRA',
-                'Current due date 04Mar24',
-                'Current due date 04Mar24',
-                'Request extension to 15May2024',
+                'Best Practice',
+                'Document number DOC-123',
+                'Document number DOC-123',
+                'Guideline reference GL-45',
             ],
             exact_lookup=True,
         )
 
         assert not search_query.startswith(query)
-        assert search_query.startswith('Distribution of PFP QAG between ICF & DP-FRA')
-        assert search_query.count('Current due date 04Mar24') == 1
-        assert 'Request extension to 15May2024' in search_query
-        assert _build_exact_chunk_search_query(query, ['Current due date 04Mar24'], exact_lookup=False) == query
+        assert search_query.startswith('Best Practice')
+        assert search_query.count('Document number DOC-123') == 1
+        assert 'Guideline reference GL-45' in search_query
+        assert 'document number' in search_query
+        assert _build_exact_chunk_search_query(query, ['Document number DOC-123'], exact_lookup=False) == query
+        metadata_query = _build_exact_chunk_search_query(
+            'Who were the sponsors and what was the status of the blinded comparator session?',
+            ['sponsors'],
+            exact_lookup=True,
+        )
+        assert metadata_query.startswith('Who were the sponsors')
+        assert metadata_query.endswith('sponsors status')
+        supplemental_metadata_query = _metadata_chunk_search_query(
+            'Who were the sponsors and what was the status of the blinded comparator session?'
+        )
+        assert supplemental_metadata_query.startswith('the blinded comparator session')
+        assert 'session sponsor status' in supplemental_metadata_query
+        assert 'blinded' in supplemental_metadata_query
+        assert 'comparator' in supplemental_metadata_query
+        definition_query = _build_exact_chunk_search_query(
+            'What is the definition according to Safety Standard?',
+            ['Safety Standard'],
+            exact_lookup=True,
+        )
+        assert definition_query.startswith('Safety Standard')
+        assert 'definition' in definition_query
+
+    def test_precise_entity_terms_trigger_exact_chunk_lookup(self):
+        assert _should_enable_exact_chunk_fusion(
+            'Who is Jane Doe in the context of the clinical study?',
+            ['Jane Doe'],
+        )
+        assert _should_enable_exact_chunk_fusion(
+            'What role does ABCD play in the development of adaptive devices?',
+            ['ABCD', 'adaptive devices'],
+        )
+        assert not _should_enable_exact_chunk_fusion(
+            'What is the overall project context?',
+            ['project context'],
+        )
+        assert not _should_enable_exact_chunk_fusion(
+            'How does the compound alpha presentation discuss device?',
+            ['2024-02-21 Compound Alpha Milestone Presentation'],
+        )
+
+    def test_entity_lookup_query_preserves_precise_terms(self):
+        search_query = _build_entity_lookup_query(
+            'What role did Jane Doe play for ABCD123?',
+            ['project role', 'ABCD123'],
+            'project role, ABCD123',
+        )
+
+        assert 'ABCD123' in _split_keyword_terms(search_query)
+        assert 'Jane Doe' in _split_keyword_terms(search_query)
+        assert 'Doe Jane' in _split_keyword_terms(search_query)
+
+    def test_chunk_phrase_terms_include_precise_singletons(self):
+        phrase_terms = _chunk_phrase_terms_for_search(
+            ['transfer adapters', 'Safety Standard', 'NHA', 'product quality']
+        )
+
+        assert phrase_terms is not None
+        assert 'transfer adapters' in phrase_terms
+        assert 'Safety Standard' in phrase_terms
+        assert 'NHA' not in phrase_terms
+        assert 'product quality' in phrase_terms
+
+    def test_exact_chunk_lookup_keeps_precise_terms_from_query(self):
+        query = 'Who is Jane Doe in the context of the clinical study?'
+        search_query = _build_exact_chunk_search_query(query, ['Jane Doe'], exact_lookup=True)
+
+        assert search_query.startswith('Jane Doe')
+        assert 'Doe Jane' in search_query
+        assert 'Doe, Jane' in search_query
+        assert (
+            _build_exact_chunk_search_query(
+                'What role does ABCD play in the development of adaptive devices?',
+                ['ABCD', 'adaptive devices'],
+                exact_lookup=True,
+            )
+            == 'ABCD'
+        )
 
     def test_bait_queries_are_not_expanded(self):
         hl, ll = _augment_retrieval_keywords(
@@ -4103,12 +4422,12 @@ class TestOperateHelpers:
         """Local mode should preserve all focused auto-generated low-level keywords."""
         enriched = _enrich_local_keywords(
             hl_keywords=['hemophilia treatment', 'drug comparison'],
-            ll_keywords=['Fitusiran', 'company research', 'Eptacog'],
+            ll_keywords=['PX-482', 'company research', 'Product Beta'],
             mode='local',
             user_supplied_ll=False,
         )
 
-        assert enriched == ['Fitusiran', 'Eptacog']
+        assert enriched == ['PX-482', 'Product Beta']
 
     def test_enrich_local_keywords_falls_back_to_query_when_high_level_is_generic(self):
         """When all HL terms are generic, local mode should use the original query."""
@@ -4409,9 +4728,9 @@ class TestPerformKgSearchScoreAwareMerge:
             patch('yar.operate._get_edge_data', new=edge_mock),
         ):
             result = await _perform_kg_search(
-                query='What are the japan-specific activities?',
-                ll_keywords='Foreign Manufacturer Accreditation, J-CTD',
-                hl_keywords='Japanese iCMC Operations Managers handbook',
+                query='What are the region-specific activities?',
+                ll_keywords='Foreign Manufacturer Accreditation, Submission Package',
+                hl_keywords='Regional operations handbook',
                 knowledge_graph_inst=MagicMock(),
                 entities_vdb=MagicMock(),
                 relationships_vdb=MagicMock(),
@@ -4432,8 +4751,8 @@ class TestPerformKgSearchScoreAwareMerge:
 
         with patch('yar.operate._get_edge_data', new=edge_mock):
             result = await _perform_kg_search(
-                query='What risks does the CSTD strategy address for product quality and dosing?',
-                ll_keywords='CSTD strategy, product quality, dosing',
+                query='What risks does the adapter strategy address for product quality and dosing?',
+                ll_keywords='adapter strategy, product quality, dosing',
                 hl_keywords='risk mitigation, product quality, dosing, manufacturing strategy',
                 knowledge_graph_inst=MagicMock(),
                 entities_vdb=MagicMock(),
@@ -4450,6 +4769,38 @@ class TestPerformKgSearchScoreAwareMerge:
         assert result['final_relations'] == []
 
     @pytest.mark.asyncio
+    async def test_perform_kg_search_uses_high_level_phrases_for_chunk_search(self):
+        query_param = QueryParam(mode='hybrid', top_k=3, chunk_top_k=3, enable_bm25_fusion=True)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.hybrid_search = AsyncMock(return_value=[])
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(return_value=([], []))),
+            patch('yar.operate._get_edge_data', new=AsyncMock(return_value=([], []))),
+        ):
+            result = await _perform_kg_search(
+                query='What best practices come from the lessons learned?',
+                ll_keywords='Partner Alpha, communication',
+                hl_keywords='best practice, conflict management, lessons learned',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=chunks_vdb,
+            )
+
+        chunks_vdb.hybrid_search.assert_awaited_once()
+        phrase_terms = chunks_vdb.hybrid_search.await_args.kwargs['phrase_terms']
+        assert phrase_terms is not None
+        assert 'conflict management' in phrase_terms
+        assert 'lessons learned' in phrase_terms
+        assert result['chunk_phrase_terms'] == phrase_terms
+
+    @pytest.mark.asyncio
     async def test_global_search_uses_single_relation_query_when_primary_hits(self):
         query_param = QueryParam(mode='global', top_k=3)
         text_chunks_db = MagicMock()
@@ -4459,8 +4810,8 @@ class TestPerformKgSearchScoreAwareMerge:
 
         with patch('yar.operate._get_edge_data', new=edge_mock):
             result = await _perform_kg_search(
-                query='What risks does the CSTD strategy address?',
-                ll_keywords='CSTD strategy',
+                query='What risks does the adapter strategy address?',
+                ll_keywords='adapter strategy',
                 hl_keywords='risk mitigation',
                 knowledge_graph_inst=MagicMock(),
                 entities_vdb=MagicMock(),
@@ -4654,13 +5005,13 @@ class TestEntityQueryEmbeddingReuse:
         relationships_vdb.cosine_better_than_threshold = 0.2
 
         relation_props = {
-            ('Sanofi MSAT Goa', 'CSTD Strategy Proposal'): {
-                'description': 'Sanofi develops the CSTD strategy proposal.',
+            ('Company A', 'Adapter Strategy Proposal'): {
+                'description': 'Company A develops the adapter strategy proposal.',
                 'keywords': 'develops',
                 'weight': 1.0,
             },
-            ('Sanofi MSAT Goa', 'CSTD'): {
-                'description': 'CSTD strategy mitigates product quality and accurate dosing risks.',
+            ('Company A', 'Transfer Adapter'): {
+                'description': 'Adapter strategy mitigates product quality and accurate dosing risks.',
                 'keywords': 'mitigates',
                 'weight': 2.0,
             },
@@ -4679,9 +5030,9 @@ class TestEntityQueryEmbeddingReuse:
         knowledge_graph_inst.get_edges_batch = AsyncMock(side_effect=get_edges_batch)
         knowledge_graph_inst.get_nodes_batch = AsyncMock(
             return_value={
-                'Sanofi MSAT Goa': {'entity_type': 'ORG', 'description': 'Sanofi'},
-                'CSTD Strategy Proposal': {'entity_type': 'DOCUMENT', 'description': 'Strategy proposal'},
-                'CSTD': {'entity_type': 'DEVICE', 'description': 'Closed system transfer device'},
+                'Company A': {'entity_type': 'ORG', 'description': 'Company A'},
+                'Adapter Strategy Proposal': {'entity_type': 'DOCUMENT', 'description': 'Strategy proposal'},
+                'Transfer Adapter': {'entity_type': 'DEVICE', 'description': 'Closed system transfer device'},
             }
         )
 
@@ -4689,17 +5040,17 @@ class TestEntityQueryEmbeddingReuse:
 
         async def query_relationship(term, *, top_k):
             query_terms.append(term)
-            assert term == 'CSTD strategy, product quality, dosing'
+            assert term == 'adapter strategy, product quality, dosing'
             return [
                 {
-                    'src_id': 'Sanofi MSAT Goa',
-                    'tgt_id': 'CSTD Strategy Proposal',
+                    'src_id': 'Company A',
+                    'tgt_id': 'Adapter Strategy Proposal',
                     'source_type': 'vector',
                     'score': 0.8,
                 },
                 {
-                    'src_id': 'Sanofi MSAT Goa',
-                    'tgt_id': 'CSTD',
+                    'src_id': 'Company A',
+                    'tgt_id': 'Transfer Adapter',
                     'source_type': 'bm25',
                     'score': 0.7,
                 },
@@ -4709,32 +5060,32 @@ class TestEntityQueryEmbeddingReuse:
 
         with patch('yar.operate.logger.info') as info_mock:
             edge_datas, entity_datas = await _get_edge_data(
-                'CSTD strategy, product quality, dosing',
+                'adapter strategy, product quality, dosing',
                 knowledge_graph_inst,
                 relationships_vdb,
                 QueryParam(mode='global', top_k=2),
-                query='What risks does the CSTD strategy address for product quality and dosing?',
+                query='What risks does the adapter strategy address for product quality and dosing?',
             )
 
-        assert query_terms == ['CSTD strategy, product quality, dosing']
+        assert query_terms == ['adapter strategy, product quality, dosing']
         assert [(edge['src_id'], edge['tgt_id']) for edge in edge_datas] == [
-            ('Sanofi MSAT Goa', 'CSTD'),
-            ('Sanofi MSAT Goa', 'CSTD Strategy Proposal'),
+            ('Company A', 'Transfer Adapter'),
+            ('Company A', 'Adapter Strategy Proposal'),
         ]
         assert edge_datas[0]['query_focus_overlap'] > edge_datas[1]['query_focus_overlap']
         diagnostic_call = next(
             call for call in info_mock.call_args_list if call.args[0] == 'Relation primary ranking: %s'
         )
         diagnostic_payload = json.loads(diagnostic_call.args[1])
-        assert diagnostic_payload['query'] == 'CSTD strategy, product quality, dosing'
+        assert diagnostic_payload['query'] == 'adapter strategy, product quality, dosing'
         assert diagnostic_payload['raw_candidates'] == 2
         assert diagnostic_payload['deduplicated_candidates'] == 2
         assert diagnostic_payload['graph_validated'] == 2
         assert diagnostic_payload['ranked'][0]['source_type'] == 'bm25'
         assert [entity['entity_name'] for entity in entity_datas] == [
-            'Sanofi MSAT Goa',
-            'CSTD',
-            'CSTD Strategy Proposal',
+            'Company A',
+            'Transfer Adapter',
+            'Adapter Strategy Proposal',
         ]
 
 
@@ -5035,6 +5386,8 @@ class TestResponseQualityControls:
             'vector_chunks': [],
             'chunk_tracking': {},
             'query_embedding': None,
+            'll_keywords_for_search': 'diabetes, glycemic control',
+            'hl_keywords_for_search': 'long-term complications, chronic conditions, care planning',
         }
         truncation_result = {
             'filtered_entities': [{'entity_name': 'Diabetes'}],
@@ -5054,15 +5407,13 @@ class TestResponseQualityControls:
                 }
             ]
         )
+        context_mock = AsyncMock(return_value=('Context block', {'data': {'chunks': []}, 'metadata': {}}))
 
         with (
             patch('yar.operate._perform_kg_search', new=AsyncMock(return_value=search_result)),
             patch('yar.operate._apply_token_truncation', new=AsyncMock(return_value=truncation_result)),
             patch('yar.operate._merge_all_chunks', new=merge_mock),
-            patch(
-                'yar.operate._build_context_str',
-                new=AsyncMock(return_value=('Context block', {'data': {'chunks': []}, 'metadata': {}})),
-            ),
+            patch('yar.operate._build_context_str', new=context_mock),
         ):
             result = await _build_query_context(
                 query='What are the long-term complications associated with diabetes?',
@@ -5076,8 +5427,18 @@ class TestResponseQualityControls:
             )
 
         assert result is not None
-        assert merge_mock.await_args.kwargs['topic_terms'] == ['diabetes']
-        assert merge_mock.await_args.kwargs['facet_terms'] == ['long-term complications', 'chronic conditions']
+        assert merge_mock.await_args.kwargs['topic_terms'] == ['diabetes', 'glycemic control']
+        assert merge_mock.await_args.kwargs['facet_terms'] == [
+            'long-term complications',
+            'chronic conditions',
+            'care planning',
+        ]
+        assert context_mock.await_args.kwargs['topic_terms'] == ['diabetes', 'glycemic control']
+        assert context_mock.await_args.kwargs['facet_terms'] == [
+            'long-term complications',
+            'chronic conditions',
+            'care planning',
+        ]
 
     def test_should_validate_inline_citations_default_is_on(self):
         # References default-on: when nothing in the query/system prompt forbids citations,
@@ -5196,6 +5557,733 @@ class TestResponseQualityControls:
         assert merged[0]['merge_score'] > merged[1]['merge_score']
 
     @pytest.mark.asyncio
+    async def test_merge_all_chunks_prefers_precise_low_level_entity_matches(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': (
+                        '# Project responsibilities\n'
+                        'Company A manages regulatory responsibilities for a different clinical program.'
+                    ),
+                    'file_path': 'generic_responsibilities.md',
+                    'chunk_id': 'generic-responsibilities',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.95,
+                    'source_order': 1,
+                },
+                {
+                    'content': (
+                        '# Device X123 project background\n'
+                        'Company A responsible for device development and manufacture and regulatory submissions.'
+                    ),
+                    'file_path': 'device_x123.md',
+                    'chunk_id': 'device-x123-background',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.55,
+                    'source_order': 2,
+                },
+            ],
+            query='What are the responsibilities of Company A in the Device X123 project?',
+            topic_terms=['Company A', 'Device X123'],
+            facet_terms=['project responsibilities'],
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged] == ['device-x123-background']
+        assert merged[0]['precise_focus_overlap'] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_keeps_action_support_with_precise_entity(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': (
+                        '# Collaboration context\nPartner Alpha collaboration context for managing conflict in CMC strategy.'
+                    ),
+                    'file_path': 'conflict.md',
+                    'chunk_id': 'context',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.95,
+                    'source_order': 1,
+                },
+                {
+                    'content': (
+                        'Conflict management requires: Quick reaction; express needs with One Voice; '
+                        'SMEs interact proactively; have a joint CMC team meeting face to face.'
+                    ),
+                    'file_path': 'conflict.md',
+                    'chunk_id': 'actions',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.55,
+                    'source_order': 2,
+                },
+                {
+                    'content': '# Action plan toward Best Practice\nDevelop unrelated risk-review implementation steps.',
+                    'file_path': 'risk_review.md',
+                    'chunk_id': 'risk-review-action',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.99,
+                    'source_order': 3,
+                },
+            ],
+            query='How can effective conflict management be applied to CMC strategy development based on lessons learned from the Partner Alpha collaboration?',
+            topic_terms=['Partner Alpha', 'conflict management'],
+            facet_terms=['lessons learned', 'CMC strategy development'],
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged] == ['actions', 'context']
+        assert 'Quick reaction' in merged[0]['content']
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_keeps_temporal_chunks_without_precise_entity(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'PX-482 Phase 1 background and first approval context.',
+                    'file_path': 'product.md',
+                    'chunk_id': 'product',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.95,
+                    'source_order': 1,
+                },
+                {
+                    'content': 'Project management impact from an unrelated portfolio pause.',
+                    'file_path': 'freeze.md',
+                    'chunk_id': 'freeze',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.99,
+                    'source_order': 2,
+                },
+                {
+                    'content': 'Risk row: EU approval planned in March 2025 if overseas inspection remains on track.',
+                    'file_path': 'risk.md',
+                    'chunk_id': 'risk',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.98,
+                    'source_order': 3,
+                },
+                {
+                    'content': 'EU submission is planned for 29 March 2024. 2024: EU: Submission (Mar 24). 2025: EU: Approval (Mar 25).',
+                    'chunk_id': 'timeline',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.60,
+                    'source_order': 3,
+                },
+            ],
+            query='How did the EU approval timeline compare with PX-482 Phase 1?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['approval timeline'],
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged[:2]] == ['timeline', 'product']
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_filters_unanchored_timeline_for_precise_queries(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'PX-482 Phase 1 background and first approval context.',
+                    'file_path': 'product.md',
+                    'chunk_id': 'product',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.80,
+                    'source_order': 1,
+                },
+                {
+                    'content': 'EU submission is planned for 29 March 2024. 2025: EU: Approval (Mar 25).',
+                    'file_path': 'other-product.md',
+                    'chunk_id': 'other-timeline',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.99,
+                    'source_order': 2,
+                },
+            ],
+            query='What is the EU approval date for PX-482 Phase 1?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['approval date'],
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged] == ['product']
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_keeps_cross_document_timeline_for_impact_queries(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'PX-482 Phase 1 background and first approval context.',
+                    'file_path': 'product.md',
+                    'chunk_id': 'product',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.80,
+                    'source_order': 1,
+                },
+                {
+                    'content': 'Program timeline: EU submission is planned for 29 March 2024; EU approval in March 2025 is on the critical path for project management and cross-functional collaboration.',
+                    'file_path': 'portfolio.md',
+                    'chunk_id': 'portfolio-timeline',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.70,
+                    'source_order': 2,
+                },
+                {
+                    'content': 'Portfolio readiness depends on cross-functional collaboration and coordination across delivery teams.',
+                    'file_path': 'portfolio.md',
+                    'chunk_id': 'portfolio-collaboration',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.65,
+                    'source_order': 3,
+                },
+                {
+                    'content': 'Project management playbook: clinical-study timelines require early comparator sourcing and coordination.',
+                    'file_path': 'generic-playbook.md',
+                    'chunk_id': 'generic-timeline',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.95,
+                    'source_order': 2,
+                },
+            ],
+            query='What is the significance of the EU approval timeline for PX-482 Phase 1 and how does it impact project management?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['approval timeline', 'project management impact'],
+            query_param=query_param,
+        )
+
+        chunk_ids = [chunk['chunk_id'] for chunk in merged]
+        assert 'product' in chunk_ids
+        assert 'portfolio-timeline' in chunk_ids
+        assert 'portfolio-collaboration' in chunk_ids
+        assert 'generic-timeline' not in chunk_ids
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_prioritizes_metadata_support_for_lookup_queries(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'General guidance references process-standard recommendations for the workflow.',
+                    'file_path': 'general.md',
+                    'chunk_id': 'general',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.99,
+                    'source_order': 1,
+                },
+                {
+                    'content': 'Transfer valve definition by Safety Standard: sealed connector.',
+                    'file_path': 'definition.md',
+                    'chunk_id': 'definition',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.50,
+                    'source_order': 2,
+                },
+                {
+                    'content': 'Unrelated project schedule with a high retrieval score.',
+                    'file_path': 'off-topic.md',
+                    'chunk_id': 'off-topic',
+                    'source_type': 'vector',
+                    'retrieval_score': 1.0,
+                    'source_order': 0,
+                },
+            ],
+            query='What is the definition of transfer valve according to Safety Standard?',
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged] == ['definition']
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_adds_bounded_adjacent_document_chunks(self, monkeypatch):
+        monkeypatch.setenv('YAR_SIBLING_CHUNK_LIMIT', '2')
+        monkeypatch.setenv('YAR_SIBLING_CHUNK_WINDOW', '1')
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        text_chunks_db = MagicMock()
+        text_chunks_db.get_chunk_ids_by_doc_id = MagicMock(return_value=['chunk-1', 'chunk-2', 'chunk-3', 'chunk-4'])
+
+        chunk_payloads = {
+            'chunk-1': {
+                'id': 'chunk-1',
+                'content': 'Context page before the retrieved section.',
+                'file_path': 'source.md',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 1,
+            },
+            'chunk-2': {
+                'id': 'chunk-2',
+                'content': '# Best Practice\nRetrieved anchor section.',
+                'file_path': 'source.md',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 2,
+            },
+            'chunk-3': {
+                'id': 'chunk-3',
+                'content': '# Lessons Learned\nAdjacent supporting section.',
+                'file_path': 'source.md',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 3,
+            },
+            'chunk-4': {
+                'id': 'chunk-4',
+                'content': 'Outside the configured sibling window.',
+                'file_path': 'source.md',
+                'full_doc_id': 'doc-1',
+                'chunk_order_index': 4,
+            },
+        }
+        text_chunks_db.get_by_ids = MagicMock(side_effect=lambda ids: [chunk_payloads[chunk_id] for chunk_id in ids])
+
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': '# Best Practice\nRetrieved anchor section.',
+                    'file_path': 'source.md',
+                    'chunk_id': 'chunk-2',
+                    'full_doc_id': 'doc-1',
+                    'chunk_order_index': 2,
+                    'source_type': 'vector',
+                    'retrieval_score': 0.9,
+                    'source_order': 1,
+                }
+            ],
+            query='What best practice lessons are listed?',
+            text_chunks_db=text_chunks_db,
+            query_param=query_param,
+        )
+
+        assert [chunk['chunk_id'] for chunk in merged] == ['chunk-2', 'chunk-1', 'chunk-3']
+        assert [chunk['source_type'] for chunk in merged[1:]] == ['sibling', 'sibling']
+
+    def test_prioritize_substantive_chunks_demotes_metadata_for_process_queries(self):
+        chunks = [
+            {
+                'chunk_id': 'metadata',
+                'content': '# Context\nName the Best Practice: Managing conflict\nObjective: Share background.',
+            },
+            {
+                'chunk_id': 'steps',
+                'content': '# Best Practice\n1) Recognize conflict\n2) Question the relationship',
+            },
+        ]
+
+        reordered = _prioritize_substantive_chunks(chunks, 'How should teams manage conflict?')
+        metadata_lookup = _prioritize_substantive_chunks(chunks, 'Who sponsored the session?')
+
+        assert [chunk['chunk_id'] for chunk in reordered] == ['steps', 'metadata']
+        assert [chunk['chunk_id'] for chunk in metadata_lookup] == ['metadata', 'steps']
+
+        focused_metadata_lookup = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'target-metadata',
+                    'content': '# Lessons Learning\nSession: LL-016\nStatus: Planned; Actions opened; Actions finalized\nSponsor: Alicia Morgan / Ben Torres\nName the Best Practice: Prototype comparator supply',
+                },
+                {
+                    'chunk_id': 'wrong-session-metadata',
+                    'content': '# Lessons Learning\nSession: LL-012\nStatus: Planned; Actions opened; Actions finalized\nSponsor: Drew Patel / Casey Lin\nName the Best Practice: Process Handoff End to End',
+                },
+                {
+                    'chunk_id': 'subject-without-metadata',
+                    'content': '# Best Practice\nPrototype comparator supply for clinical studies.',
+                },
+                {
+                    'chunk_id': 'subject-sponsor-only',
+                    'content': '# Context\nSponsor: Alicia Morgan\nPrototype comparator supply',
+                },
+                {
+                    'chunk_id': 'subject-status-only',
+                    'content': '# Action plan\nStatus: Planned\nPrototype comparator supply',
+                },
+            ],
+            'Who were the sponsors involved in the session on prototype comparator supply, and what was the status of the session?',
+        )
+
+        assert [chunk['chunk_id'] for chunk in focused_metadata_lookup] == ['target-metadata']
+
+        best_practice_order = _prioritize_substantive_chunks(
+            [
+                {'chunk_id': 'action', 'content': '# Action plan toward Best Practice\nFollow-up actions.'},
+                {'chunk_id': 'practice', 'content': '# Best Practice\nFollow the implementation guideline.'},
+            ],
+            'What are the best practices for process handoff, and how can teams apply them?',
+        )
+        assert [chunk['chunk_id'] for chunk in best_practice_order] == ['practice', 'action']
+
+        lessons_order = _prioritize_substantive_chunks(
+            [
+                {'chunk_id': 'context', 'content': '# Context\nName the Best Practice: Managing conflict.'},
+                {'chunk_id': 'lessons', 'content': '# Lessons Learned\nConflict management requires communication.'},
+            ],
+            'What best practices come from the lessons learned?',
+        )
+        assert [chunk['chunk_id'] for chunk in lessons_order] == ['lessons', 'context']
+
+        role_objective_order = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'role-objective-context',
+                    'content': 'Objective: Share recent handoff experience. Target potential users: teams. The opportunity was triggered by Alicia Morgan and Ben Torres.',
+                },
+                {
+                    'chunk_id': 'reversed-name',
+                    'content': 'Attendees: Raman, Priya | Functions: Launch Programs Project Leader',
+                },
+                {'chunk_id': 'action-plan', 'content': 'Action plan toward implementation with Ben Torres only.'},
+                {'chunk_id': 'other-objective', 'content': 'Objective: unrelated collaboration topic.'},
+            ],
+            'What role did Alicia Morgan play, and how does this relate to the objectives?',
+        )
+        assert [chunk['chunk_id'] for chunk in role_objective_order] == ['role-objective-context']
+        reversed_name_order = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'reversed-name',
+                    'content': 'Attendees: Raman, Priya | Functions: Launch Programs Project Leader',
+                },
+                {'chunk_id': 'other', 'content': 'Roles and responsibility action plan without the named person.'},
+            ],
+            'What roles did Priya Raman play?',
+        )
+        assert [chunk['chunk_id'] for chunk in reversed_name_order] == ['reversed-name']
+
+        temporal_order = _prioritize_substantive_chunks(
+            [
+                {'chunk_id': 'metadata', 'content': 'Facilitator: Dr. Smith\nDate: Jan 2024\nParticipants: team'},
+                {
+                    'chunk_id': 'timeline',
+                    'content': '# Timeline\nRegulatory submission March 2024; market approval planned March 2025.',
+                },
+            ],
+            'What is the approval timeline for Product X?',
+        )
+        assert [chunk['chunk_id'] for chunk in temporal_order] == ['timeline', 'metadata']
+
+    def test_metadata_query_match_score_boosts_definition_chunks(self):
+        definition_chunk = (
+            'transfer valve definition by Safety Standard: sealed connector that mechanically prohibits escape.'
+        )
+        flowchart_chunk = 'Transfer valve request workflow: Team A sends memo and adds the device to the dossier.'
+
+        query = 'What is the definition of transfer valves according to Safety Standard?'
+
+        assert _metadata_query_match_score(definition_chunk, query) > _metadata_query_match_score(
+            flowchart_chunk,
+            query,
+        )
+
+    def test_metadata_chunk_search_query_preserves_session_subject_phrase(self):
+        query = (
+            'Who were the sponsors involved in the session on prototype comparator supply, '
+            'and what was the status of the session?'
+        )
+
+        search_query = _metadata_chunk_search_query(query)
+
+        assert 'prototype comparator supply' in search_query
+        assert 'sponsor' in search_query
+        assert 'status' in search_query
+
+    def test_evidence_spans_include_requested_metadata_label_variants(self):
+        query = (
+            'Who were the sponsors involved in the session on prototype comparator supply, '
+            'and what was the status of the session?'
+        )
+        spans = _extract_supporting_evidence_spans(
+            '# Lessons Learning\n'
+            '## Prototype comparator supply\n'
+            '* **Session:** LL-016\n'
+            '* **Sponsor:** Alicia Morgan, Ben Torres\n'
+            '* **Status:**\n'
+            '    * Planned\n'
+            '    * Actions opened\n'
+            '    * Actions finalized\n',
+            query=query,
+        )
+
+        assert 'Sponsor: Alicia Morgan, Ben Torres' in spans
+        assert 'Status: Planned; Actions opened; Actions finalized' in spans
+
+    def test_evidence_spans_combine_objective_target_and_best_practice(self):
+        spans = _extract_supporting_evidence_spans(
+            '| Code | 2016-LL-12 |\n'
+            '| :--- | :--- |\n'
+            '| **Name the Best Practice** | Process Handoff End to End |\n'
+            '| **Objective** | Share recent handoff experience from Project Orion to benefit to upcoming product teams |\n'
+            '| **Target potential users** | Identify teams who can use and/or benefit from this practice |\n',
+            query='How does this role relate to objectives?',
+        )
+
+        assert (
+            'Objective: Share recent handoff experience from Project Orion to benefit to upcoming product teams; '
+            'Target potential users: Identify teams who can use and/or benefit from this practice; '
+            'Best practice: Process Handoff End to End'
+        ) in spans
+
+    def test_evidence_spans_prioritize_date_bearing_timeline_lines(self):
+        spans = _extract_supporting_evidence_spans(
+            'Submission remains on track for approval.\nSubmission Q1 2024 remains on track for approval.\n',
+            query='What is the submission timeline?',
+        )
+
+        assert spans[0] == 'Submission Q1 2024 remains on track for approval.'
+
+    def test_temporal_signal_ignores_common_time_adjectives(self):
+        generic = _chunk_relevance_components(
+            {'content': '# Status\nThe current formulation remains under review.'},
+            set(),
+        )
+        milestone = _chunk_relevance_components(
+            {'content': '# Status\nThe submission milestone remains under review.'},
+            set(),
+        )
+
+        assert generic['body_temporal_signal'] == 0.0
+        assert milestone['body_temporal_signal'] == 1.0
+
+    def test_prompt_chunk_context_labels_unanchored_timeline_chunks(self):
+        prompt_chunks, _text_units, _reference_list = _build_prompt_chunk_context(
+            [
+                {
+                    'chunk_id': 'timeline',
+                    'file_path': 'timeline.pdf',
+                    'reference_id': '1',
+                    'content': ('EU submission is planned for 29 March 2024. 2025: EU: Approval (Mar 25).'),
+                }
+            ],
+            [{'reference_id': '1', 'file_path': 'timeline.pdf'}],
+            include_reference_ids=True,
+            query='How did the EU approval timeline compare with PX-482 Phase 1?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['EU approval timeline'],
+        )
+
+        assert prompt_chunks[0]['content'].startswith('Cross-document timeline evidence:')
+        assert 'do not transfer its dates or milestones' in prompt_chunks[0]['content']
+
+        noncomparison_chunks, _text_units, _reference_list = _build_prompt_chunk_context(
+            [
+                {
+                    'chunk_id': 'timeline',
+                    'file_path': 'timeline.pdf',
+                    'reference_id': '1',
+                    'content': 'EU submission is planned for 29 March 2024. 2025: EU: Approval (Mar 25).',
+                },
+                {
+                    'chunk_id': 'product',
+                    'file_path': 'product.pdf',
+                    'reference_id': '2',
+                    'content': 'PX-482 Phase 1 received Approval: US (IND) and Turkey (IMPD).',
+                },
+            ],
+            [{'reference_id': '1', 'file_path': 'timeline.pdf'}, {'reference_id': '2', 'file_path': 'product.pdf'}],
+            include_reference_ids=True,
+            query='What is the EU approval date for PX-482 Phase 1?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['EU approval date'],
+        )
+
+        assert len(noncomparison_chunks) == 1
+        assert 'PX-482 Phase 1' in noncomparison_chunks[0]['content']
+
+        impact_chunks, _text_units, _reference_list = _build_prompt_chunk_context(
+            [
+                {
+                    'chunk_id': 'timeline',
+                    'file_path': 'timeline.pdf',
+                    'reference_id': '1',
+                    'content': 'Program timeline: EU submission is planned for 29 March 2024; EU approval in March 2025 is on the critical path.',
+                },
+                {
+                    'chunk_id': 'product',
+                    'file_path': 'product.pdf',
+                    'reference_id': '2',
+                    'content': 'PX-482 Phase 1 received an initial clearance.',
+                },
+                {
+                    'chunk_id': 'generic-timeline',
+                    'file_path': 'generic.pdf',
+                    'reference_id': '3',
+                    'content': 'Program timeline: cross-functional coordination affects project management readiness.',
+                },
+            ],
+            [
+                {'reference_id': '1', 'file_path': 'timeline.pdf'},
+                {'reference_id': '2', 'file_path': 'product.pdf'},
+                {'reference_id': '3', 'file_path': 'generic.pdf'},
+            ],
+            include_reference_ids=True,
+            query='What is the significance of the EU approval timeline for PX-482 Phase 1 and its project management impact?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['EU approval timeline', 'project management impact'],
+        )
+
+        assert len(impact_chunks) == 2
+        assert impact_chunks[0]['content'].startswith('Cross-document timeline evidence:')
+        assert all('cross-functional coordination' not in chunk.get('content', '') for chunk in impact_chunks)
+        assert 'portfolio/project timeline' in impact_chunks[0]['content']
+
+    def test_filter_prompt_relations_anchors_precise_timeline_queries(self):
+        filtered = _filter_prompt_relations_for_query(
+            [
+                {'relation': 'PX-482 --cleared--> NHA', 'description': 'PX-482 received IND clearance.'},
+                {'relation': 'Portfolio Pause --delayed--> Clinical Studies', 'description': '14 Nov 2018 freeze.'},
+            ],
+            'What is the significance of the US approval timeline for PX-482 Phase 1?',
+            ['PX-482', 'Phase 1'],
+        )
+
+        assert [relation['relation'] for relation in filtered] == ['PX-482 --cleared--> NHA']
+
+    def test_normalize_query_shaped_response_removes_unsupported_role_glosses(self):
+        response = _normalize_query_shaped_response(
+            query='What role did Alicia play, and how does this relate to the objectives?',
+            response='Alicia Morgan was a sponsor and organizer of the session, with sponsorship and organization by Alicia Morgan and Ben Torres.',
+            available_refs=[
+                {
+                    'content': (
+                        'Sponsor: Alicia Morgan / Ben Torres. '
+                        'The opportunity to join effort with the handoff team was triggered by Alicia Morgan & Ben Torres.'
+                    )
+                }
+            ],
+        )
+
+        assert 'organizer' not in response
+        assert 'organization' not in response
+        assert 'sponsor of the session' in response
+
+    def test_normalize_query_shaped_response_keeps_availability_label(self):
+        response = _normalize_query_shaped_response(
+            query='What roles did Priya Raman play in both sessions?',
+            response='Priya Raman was the participant representing the Insulin availability category.',
+            available_refs=[{'content': 'Availability: Insulin | Participants: Priya Raman'}],
+        )
+
+        assert response == 'Priya Raman was the participant listed under the Insulin availability category.'
+
+    def test_normalize_query_shaped_response_adds_objective_rows(self):
+        response = _normalize_query_shaped_response(
+            query='How does Alicia Morgan relate to the objectives?',
+            response='Alicia Morgan served as a sponsor.',
+            available_refs=[
+                {
+                    'content': (
+                        'Table row: Code: **Objective** | 2016-LL-12: Share recent handoff experience.\n'
+                        'Table row: Code: **Target potential users** | 2016-LL-12: Identify teams who can use the practice.'
+                    )
+                }
+            ],
+        )
+
+        assert 'Objective: Share recent handoff experience.' in response
+        assert 'Target potential users: Identify teams who can use the practice.' in response
+
+    def test_normalize_query_shaped_response_adds_best_practice_label(self):
+        response = _normalize_query_shaped_response(
+            query='What is the best practce for onboarding?',
+            response='Use the checklist and review it weekly.',
+            available_refs=[
+                {
+                    'content': (
+                        'Table row: **Name the Best Practice** | 2026-EX-01: Team Onboarding Checklist\n'
+                        'Table row: **Objective** | Improve handoff quality.'
+                    )
+                }
+            ],
+        )
+
+        assert response.startswith('Name the Best Practice: Team Onboarding Checklist.')
+
+    def test_normalize_query_shaped_response_frames_lessons_learned_answers(self):
+        response = _normalize_query_shaped_response(
+            query='What lessons were learned about scope and team responsibilities?',
+            response='Scope ownership was unclear, and team responsibilities overlapped.',
+            available_refs=[{'content': 'Lessons Learned: scope ownership unclear; responsibilities overlapped.'}],
+        )
+
+        assert response.startswith('The lessons learned were: scope ownership was unclear')
+
+    def test_normalize_query_shaped_response_preserves_role_objective_labels(self):
+        response = _normalize_query_shaped_response(
+            query='What role did Alicia Morgan play, and how does this relate to objectives?',
+            response=(
+                'Alicia Morgan is listed as **Sponsor** of the session, directly aligning with '
+                'the initiative endorsed by her and Ben Torres; this timing aimed to leverage '
+                'a recently implemented end-to-end process handoff approach '
+                '(Process Handoff-GEN-014176, Nov-2015) to share experience and enhance further implementation.'
+            ),
+            available_refs=[
+                {
+                    'content': (
+                        'Sponsor: Alicia Morgan / Ben Torres\n'
+                        'Context for LL: the opportunity to join effort was triggered by Alicia Morgan & Ben Torres.\n'
+                        'Objective: Share recent handoff experience.\n'
+                        'Target potential users: Identify teams who can use and/or benefit from this practice.'
+                    )
+                }
+            ],
+        )
+
+        assert 'played a significant sponsor role alongside Ben Torres' in response
+        assert 'goal was to share recent handoff experience' in response
+        assert 'by identifying teams who can use and/or benefit from this practice' in response
+        assert 'Process Handoff-GEN' not in response
+
+    def test_normalize_query_shaped_response_expands_generic_guidance_conditions(self):
+        response = _normalize_query_shaped_response(
+            query='What guidance recommends transfer valve use?',
+            response='Transfer valves must be used when administering volatile reagents under specified conditions.',
+            available_refs=[
+                {
+                    'content': (
+                        'Transfer valves must be used when administering volatile reagents '
+                        'when the dosage form allows it and no other containment protects health care practitioner.'
+                    )
+                }
+            ],
+        )
+
+        assert 'under specified conditions' not in response
+        assert 'when the dosage form allows it' in response
+
+    def test_normalize_query_shaped_response_removes_negative_role_label(self):
+        response = _normalize_query_shaped_response(
+            query='What roles did Priya Raman play?',
+            response='Priya Raman was listed under Insulin with no further role label specified.',
+            available_refs=[{'content': 'Availability: Insulin | Participants: Priya Raman'}],
+        )
+
+        assert response == 'Priya Raman was listed under Insulin.'
+
+    def test_normalize_query_shaped_response_rewrites_participant_role_label(self):
+        response = _normalize_query_shaped_response(
+            query='What roles did Priya Raman play?',
+            response='Priya Raman is listed under Availability: Insulin with the role of Participants.',
+            available_refs=[{'content': 'Availability: Insulin | Participants: Priya Raman'}],
+        )
+
+        assert response == 'Priya Raman is listed as a participant under Availability: Insulin.'
+
+    @pytest.mark.asyncio
     async def test_merge_all_chunks_uses_low_level_terms_for_relation_chunk_selection(self):
         query_param = QueryParam(mode='hybrid', top_k=4, chunk_top_k=4)
         relation_chunk_mock = AsyncMock(return_value=[])
@@ -5207,14 +6295,14 @@ class TestResponseQualityControls:
                 vector_chunks=[],
                 query='What are the japan-specific activities?',
                 topic_terms=['Foreign Manufacturer Accreditation', 'J-CTD'],
-                facet_terms=['Japanese iCMC Operations Managers handbook'],
+                facet_terms=['Japanese Operations Managers handbook'],
                 text_chunks_db=MagicMock(),
                 query_param=query_param,
             )
 
         ranking_query = relation_chunk_mock.await_args.args[4]
         assert 'What are the japan-specific activities?' in ranking_query
-        assert 'Japanese iCMC Operations Managers handbook' in ranking_query
+        assert 'Japanese Operations Managers handbook' in ranking_query
         assert 'Foreign Manufacturer Accreditation' in ranking_query
         assert 'J-CTD' in ranking_query
 
@@ -5237,7 +6325,7 @@ class TestResponseQualityControls:
         text_chunks_db.get_by_ids = AsyncMock(side_effect=fake_get_by_ids)
         relations = [
             {
-                'src_id': 'Japanese iCMC Handbook',
+                'src_id': 'Japanese Operations Handbook',
                 'tgt_id': 'Abbreviations',
                 'keywords': 'references',
                 'description': 'The handbook references abbreviations.',
@@ -5442,17 +6530,17 @@ class TestResponseQualityControls:
             'score': 0.5,
         }
         supported_relation = {
-            'src_id': 'CSTD strategy',
-            'tgt_id': 'Overdosing mitigation',
+            'src_id': 'Adapter strategy',
+            'tgt_id': 'Dosing error mitigation',
             'keywords': 'mitigates',
-            'description': 'CSTD strategy mitigates overdosing.',
+            'description': 'Adapter strategy mitigates dosing error.',
             'score': 0.5,
-            'evidence_spans': ['CSTD strategy mitigates overdosing in the source table.'],
+            'evidence_spans': ['Adapter strategy mitigates dosing error in the source table.'],
         }
 
         result = await _apply_token_truncation(
             {
-                'query': 'Which mitigation evidence addresses overdosing?',
+                'query': 'Which mitigation evidence addresses dosing error?',
                 'final_entities': [],
                 'final_relations': [unsupported_relation, supported_relation],
             },
@@ -5464,7 +6552,7 @@ class TestResponseQualityControls:
             },
         )
 
-        assert result['relations_context'][0]['entity1'] == 'CSTD strategy'
+        assert result['relations_context'][0]['entity1'] == 'Adapter strategy'
         assert result['filtered_relations'] == [supported_relation]
         assert '__rerank_score' not in supported_relation
 
@@ -5473,18 +6561,18 @@ class TestResponseQualityControls:
         tokenizer = MagicMock(encode=Mock(side_effect=lambda _text: [0] * 5))
         result = await _apply_token_truncation(
             {
-                'query': 'Which mitigation evidence addresses overdosing?',
+                'query': 'Which mitigation evidence addresses dosing error?',
                 'final_entities': [],
                 'final_relations': [
                     {
-                        'src_id': 'CSTD strategy',
-                        'tgt_id': 'Overdosing mitigation',
+                        'src_id': 'Adapter strategy',
+                        'tgt_id': 'Dosing error mitigation',
                         'keywords': 'mitigates',
-                        'description': 'CSTD strategy mitigates overdosing.',
+                        'description': 'Adapter strategy mitigates dosing error.',
                         'score': 0.5,
                         'created_at': 1,
                         'file_path': 'source.md',
-                        'evidence_spans': ['CSTD strategy mitigates overdosing in the source table.'],
+                        'evidence_spans': ['Adapter strategy mitigates dosing error in the source table.'],
                     }
                 ],
             },
@@ -5510,7 +6598,7 @@ class TestResponseQualityControls:
         }
         assert set(result['relations_context'][0]) <= allowed_keys
         assert result['relations_context'][0]['evidence_spans'] == [
-            'CSTD strategy mitigates overdosing in the source table.'
+            'Adapter strategy mitigates dosing error in the source table.'
         ]
 
     @pytest.mark.asyncio
@@ -5656,14 +6744,56 @@ class TestResponseQualityControls:
         assert [reference['file_path'] for reference in visible_references] == ['medical_diabetes.md']
         assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1']
 
+    def test_prepare_visible_reference_payload_keeps_cited_prompt_chunks(self):
+        visible_references, visible_chunks = _prepare_visible_reference_payload(
+            [
+                {
+                    'reference_id': '1',
+                    'content': '== Signs and symptoms ==\n=== Long-term complications ===\nDiabetes can cause retinopathy, nephropathy, neuropathy, and diabetic foot problems.',
+                    'file_path': 'medical_diabetes.md',
+                    'chunk_id': 'diabetes-1',
+                    'intent_relevance': 0.82,
+                    'query_focus_overlap': 0.50,
+                    'heading_topic_match': 1.0,
+                    'body_topic_match': 1.0,
+                    'heading_facet_match': 1.0,
+                    'body_facet_match': 1.0,
+                },
+                {
+                    'reference_id': '2',
+                    'content': '=== Complications ===\nCOVID-19 complications may include pneumonia and multi-organ failure.',
+                    'file_path': 'medical_covid-19.md',
+                    'chunk_id': 'covid-1',
+                    'intent_relevance': 0.18,
+                    'query_focus_overlap': 0.20,
+                    'heading_topic_match': 0.0,
+                    'body_topic_match': 0.0,
+                    'heading_facet_match': 0.0,
+                    'body_facet_match': 0.0,
+                },
+            ],
+            [
+                {'reference_id': '1', 'file_path': 'medical_diabetes.md'},
+                {'reference_id': '2', 'file_path': 'medical_covid-19.md'},
+            ],
+            'What are the long-term complications associated with diabetes?',
+            include_reference_ids=True,
+        )
+
+        assert [reference['file_path'] for reference in visible_references] == [
+            'medical_diabetes.md',
+            'medical_covid-19.md',
+        ]
+        assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1', 'covid-1']
+
     def test_prepare_visible_reference_payload_drops_near_best_off_topic_doc_when_topic_signal_exists(self):
         visible_references, visible_chunks = _prepare_visible_reference_payload(
             [
                 {
                     'reference_id': '1',
-                    'content': '=== Sarclisa manufacturing flow ===\nThe Netherlands physical flow created label and shipping consequences for Sarclisa.',
-                    'file_path': 'sarclisa.md',
-                    'chunk_id': 'sarclisa-1',
+                    'content': '=== Device X123 manufacturing flow ===\nThe regional physical flow created label and shipping consequences for Device X123.',
+                    'file_path': 'device-x123.md',
+                    'chunk_id': 'device-x123-1',
                     'intent_relevance': 0.78,
                     'query_focus_overlap': 0.72,
                     'heading_topic_match': 1.0,
@@ -5685,17 +6815,17 @@ class TestResponseQualityControls:
                 },
             ],
             [
-                {'reference_id': '1', 'file_path': 'sarclisa.md'},
+                {'reference_id': '1', 'file_path': 'device-x123.md'},
                 {'reference_id': '2', 'file_path': 'other-program.md'},
             ],
-            'What were the manufacturing consequences for Sarclisa in the Netherlands?',
+            'What were the manufacturing consequences for Device X123 in the region?',
             include_reference_ids=False,
-            topic_terms=['Sarclisa'],
+            topic_terms=['Device X123'],
             facet_terms=['manufacturing consequences', 'regulatory submission impact'],
         )
 
-        assert [reference['file_path'] for reference in visible_references] == ['sarclisa.md']
-        assert [chunk['chunk_id'] for chunk in visible_chunks] == ['sarclisa-1']
+        assert [reference['file_path'] for reference in visible_references] == ['device-x123.md']
+        assert [chunk['chunk_id'] for chunk in visible_chunks] == ['device-x123-1']
 
     def test_prepare_visible_reference_payload_uses_best_chunk_per_document_group(self):
         visible_references, visible_chunks = _prepare_visible_reference_payload(
@@ -5828,7 +6958,7 @@ class TestResponseQualityControls:
             patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
         ):
             result = await kg_query(
-                query='What is CSTD strategy?',
+                query='What is adapter strategy?',
                 knowledge_graph_inst=MagicMock(),
                 entities_vdb=MagicMock(),
                 relationships_vdb=MagicMock(),
@@ -5972,9 +7102,9 @@ class TestResponseQualityControls:
                 'retrieval_score': 0.95,
             },
             {
-                'content': 'LL-2 - Difficult tracking of scope change in SoW\n\nLL-3 - "New Phase 1 clinical strategy tested"\nA new Phase 1 (SAD) clinical strategy was tested by MyoKardia: powder in bottle directly to the clinical center.',
-                'file_path': 'myokardia.pdf',
-                'chunk_id': 'myokardia-1',
+                'content': 'LL-2 - Difficult tracking of scope change in SoW\n\nLL-3 - "New Phase 1 clinical strategy tested"\nA new Phase 1 clinical strategy was tested by PX-482: powder in bottle directly to the clinical center.',
+                'file_path': 'product-alpha.pdf',
+                'chunk_id': 'product-alpha-1',
                 'retrieval_score': 0.70,
             },
             {
@@ -5995,7 +7125,88 @@ class TestResponseQualityControls:
             topic_terms=['powder in bottle directly to the clinical center'],
         )
 
-        assert processed[0]['chunk_id'] == 'myokardia-1'
+        assert processed[0]['chunk_id'] == 'product-alpha-1'
+
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_prioritizes_upstream_exact_support_metadata(self):
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=3, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Workflow for adding a requested transfer valve to a dossier.',
+                'file_path': 'workflow.pdf',
+                'chunk_id': 'workflow',
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'Safety Standard definition: a sealed connector that prevents reagent escape.',
+                'file_path': 'definition.pdf',
+                'chunk_id': 'definition',
+                'retrieval_score': 0.70,
+                'metadata_query_match': 1.0,
+            },
+        ]
+
+        processed = await process_chunks_unified(
+            query='What is the definition according to Safety Standard?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='hybrid',
+            chunk_token_limit=10_000,
+        )
+
+        assert processed[0]['chunk_id'] == 'definition'
+
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_keeps_third_project_impact_passage_per_document(self):
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=8, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Product X approval timeline overview.',
+                'file_path': 'product.md',
+                'chunk_id': 'product-1',
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'Product X phase study milestone detail.',
+                'file_path': 'product.md',
+                'chunk_id': 'product-2',
+                'retrieval_score': 0.90,
+            },
+            {
+                'content': 'Project management impact: readiness and coordination dependencies across teams.',
+                'file_path': 'product.md',
+                'chunk_id': 'product-3',
+                'retrieval_score': 0.85,
+            },
+            {
+                'content': 'Appendix note without answer-bearing detail.',
+                'file_path': 'product.md',
+                'chunk_id': 'product-4',
+                'retrieval_score': 0.80,
+            },
+            {
+                'content': 'Portfolio timeline comparator for approval readiness.',
+                'file_path': 'portfolio.md',
+                'chunk_id': 'portfolio-1',
+                'retrieval_score': 0.75,
+            },
+        ]
+
+        processed = await process_chunks_unified(
+            query='What is the significance of the approval timeline for Product X and how does it impact project management?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='mix',
+            chunk_token_limit=10_000,
+        )
+
+        chunk_ids = [chunk['chunk_id'] for chunk in processed]
+        assert 'product-3' in chunk_ids
+        assert 'product-4' not in chunk_ids
 
     @pytest.mark.asyncio
     async def test_process_chunks_unified_keeps_multiple_passages_for_single_document_lists(self):
@@ -6038,7 +7249,7 @@ class TestResponseQualityControls:
     def test_build_query_shaping_instructions_for_binary_queries(self):
         """Binary questions should force a yes/no-first response contract."""
         instructions = _build_query_shaping_instructions(
-            'Does the NeoGAA China submission include full detail for the reaction steps?'
+            'Does the submission include full detail for the reaction steps?'
         )
 
         assert instructions[0].startswith('If the context supports a binary judgment')
@@ -6056,15 +7267,6 @@ class TestResponseQualityControls:
         assert any('List every supported item explicitly' in instruction for instruction in instructions)
         assert any('separate them with semicolons' in instruction for instruction in instructions)
 
-    def test_build_query_shaping_instructions_for_qag_due_dates(self):
-        """QAG due-date questions should preserve current-date versus extension semantics."""
-        instructions = _build_query_shaping_instructions(
-            'What is the current due date for updating the Fitusiran PFP QAG between ICF and DP-FRA?'
-        )
-
-        assert any('Current due date' in instruction for instruction in instructions)
-        assert any('Request extension' in instruction for instruction in instructions)
-
     def test_build_query_shaping_instructions_for_choice_queries(self):
         """Choice questions should answer with the supported option only."""
         instructions = _build_query_shaping_instructions(
@@ -6080,7 +7282,7 @@ class TestResponseQualityControls:
     def test_build_query_shaping_instructions_for_recommendation_queries(self):
         """Recommendation-style binary questions should avoid substituting model caution for source-backed advice."""
         instructions = _build_query_shaping_instructions(
-            'Would you agree to change the storage condition on short notice prior to NDA submission?'
+            'Would you agree to change the storage condition on short notice prior to approval dossier submission?'
         )
 
         assert any('cautionary judgment' in instruction for instruction in instructions)
@@ -6096,12 +7298,89 @@ class TestResponseQualityControls:
         assert any('repeats the subject of the question' in instruction for instruction in instructions)
         assert any('Do not answer with a bare list' in instruction for instruction in instructions)
         assert any('same order the source presents' in instruction for instruction in instructions)
+        role_instructions = _build_query_shaping_instructions('What roles did Priya Raman play in both sessions?')
+        assert any('explicitly adjacent to the person name' in instruction for instruction in role_instructions)
+        assert any('category in the same row' in instruction for instruction in role_instructions)
+        assert any('non-role header such as Availability' in instruction for instruction in role_instructions)
+        assert any('do not add labels such as organizer' in instruction for instruction in role_instructions)
+        assert any('Do not add negative exclusions' in instruction for instruction in role_instructions)
+        assert any('answer each context separately' in instruction for instruction in role_instructions)
+
+    def test_build_query_shaping_instructions_for_best_practice_queries(self):
+        instructions = _build_query_shaping_instructions(
+            'What is the best practice for process handoff implementation?'
+        )
+
+        assert any('substantive Best Practice' in instruction for instruction in instructions)
+        assert any('exact supported actions or bullets' in instruction for instruction in instructions)
+        assert any('omit detailed action-plan rows' in instruction for instruction in instructions)
+        lessons_instructions = _build_query_shaping_instructions(
+            'What lessons were learned about scope definition and team responsibilities?'
+        )
+        assert any('scoped to named topics' in instruction for instruction in lessons_instructions)
+        metadata_instructions = _build_query_shaping_instructions(
+            'Who were the sponsors and what was the status of the session?'
+        )
+        assert any('copy the exact requested field values' in instruction for instruction in metadata_instructions)
+        assert any(
+            'Include every comma- or slash-separated sponsor name' in instruction
+            for instruction in metadata_instructions
+        )
+        assert any('Do not merge Sponsor' in instruction for instruction in metadata_instructions)
+        objective_instructions = _build_query_shaping_instructions(
+            'What role did Alicia play, and how does this relate to the objectives?'
+        )
+        assert any('explicit Objective row' in instruction for instruction in objective_instructions)
+        assert any('objective verb/action' in instruction for instruction in objective_instructions)
+        assert any('Target potential users row' in instruction for instruction in objective_instructions)
+        assert any(
+            'separate Objective and Target potential users rows' in instruction
+            for instruction in objective_instructions
+        )
+        guidance_instructions = _build_query_shaping_instructions(
+            'What is the definition of transfer valves according to Safety Standard, and how does Process Standard recommend their use?'
+        )
+        assert any(
+            'preserve modal verbs and conditions separately' in instruction for instruction in guidance_instructions
+        )
+        acronym_instructions = _build_query_shaping_instructions('How should ABC be handled according to the standard?')
+        assert any('do not guess acronym expansions' in instruction for instruction in acronym_instructions)
+
+        importance_instructions = _build_query_shaping_instructions(
+            'Why is it important to align recommendations with the regional team during a program pause?'
+        )
+        assert any('downstream impacts' in instruction for instruction in importance_instructions)
+        assert any('commitments' in instruction for instruction in importance_instructions)
+        assert any('stakeholder-alignment' in instruction for instruction in importance_instructions)
+        assert any('list-level alignment statement' in instruction for instruction in importance_instructions)
+
+        timeline_instructions = _build_query_shaping_instructions(
+            'What is the significance of the EU approval timeline for Product X?'
+        )
+        assert any('critical-path milestones' in instruction for instruction in timeline_instructions)
+        assert any('undated approval or clearance label' in instruction for instruction in timeline_instructions)
+        assert any('portfolio/project timeline evidence' in instruction for instruction in timeline_instructions)
+        compare_timeline_instructions = _build_query_shaping_instructions(
+            'How did the EU approval timeline compare with the PX-482 Phase 1 milestone?'
+        )
+        assert any('do not transfer dates' in instruction for instruction in compare_timeline_instructions)
+        assert any('cross-document timeline evidence' in instruction for instruction in compare_timeline_instructions)
+
+        consequence_instructions = _build_query_shaping_instructions(
+            'What were the consequences of the delayed approval dossier submission?'
+        )
+        assert any('supported consequence' in instruction for instruction in consequence_instructions)
+        assert any('distinct item' in instruction for instruction in consequence_instructions)
+
+        mitigation_instructions = _build_query_shaping_instructions(
+            'What mitigation steps were put in place to address the contamination risk?'
+        )
+        assert any('distinct concrete action' in instruction for instruction in mitigation_instructions)
+        assert any('Do not compress' in instruction for instruction in mitigation_instructions)
 
     def test_build_query_shaping_instructions_for_template_queries(self):
         """Risk-format questions should reproduce source templates verbatim without expanding ellipses into bracketed labels."""
-        instructions = _build_query_shaping_instructions(
-            'Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk'
-        )
+        instructions = _build_query_shaping_instructions('What phrasing should we use for the risk template?')
 
         assert any('ellipses' in instruction for instruction in instructions)
         assert any('bracketed' in instruction for instruction in instructions)
@@ -6112,58 +7391,12 @@ class TestResponseQualityControls:
             for instruction in instructions
         )
 
-    def test_normalize_query_shaped_response_preserves_risk_template(self):
-        """Risk-format questions should collapse invented bracket placeholders back to the source template."""
-        response = (
-            'To phrase the CMC risk correctly, use the syntax: '
-            '**Due to [cause] the risk [risk description] could impact [impact area]** [1].'
-        )
-        available_refs = [
-            {'excerpt': 'The use of the syntaxe of the description : Due to ... the risk ...could impact ....'}
-        ]
-
-        normalized = _normalize_query_shaped_response(
-            query='Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk',
-            response=response,
-            available_refs=available_refs,
-        )
-
-        assert normalized == 'The correct syntax is: Due to ... the risk ... could impact .... [1]'
-
     def test_normalize_query_shaped_response_strips_single_fact_markdown(self):
-        """Single-fact answers should return the supported option plainly without markdown emphasis."""
+        """Single-fact answers should keep model wording while removing markdown emphasis."""
         normalized = _normalize_query_shaped_response(
             query='For biologics should we ask shipping validation question in type C or B meeting',
             response='Ask the shipping validation question in a **Type C meeting** [1].',
             available_refs=[],
         )
 
-        assert normalized == 'In a Type C meeting [1].'
-
-    def test_normalize_query_shaped_response_collapses_meeting_choice(self):
-        """Single-fact meeting-choice answers should collapse to the supported meeting phrase."""
-        normalized = _normalize_query_shaped_response(
-            query='For biologics should we ask shipping validation question in type C or B meeting',
-            response='Add the shipping validation question in type C meeting [1].',
-            available_refs=[],
-        )
-
-        assert normalized == 'In type C meeting [1].'
-
-    def test_normalize_query_shaped_response_corrects_qag_current_due_date(self):
-        """QAG current-due-date answers should not confuse requested extension with current due date."""
-        normalized = _normalize_query_shaped_response(
-            query='What is the current due date for updating the Fitusiran PFP QAG between ICF and DP-FRA?',
-            response='The current due date is 15May2024.',
-            available_refs=[
-                {
-                    'raw_content': (
-                        '| Update needed | Distribution of PFP QAG between ICF & DP-FRA | '
-                        'Current due date 04Mar24 (initial due date 04Dec23). '
-                        'Request extension to 15May2024 |'
-                    )
-                }
-            ],
-        )
-
-        assert normalized == 'The current due date is 04Mar2024, with a requested extension to 15May2024.'
+        assert normalized == 'Ask the shipping validation question in a Type C meeting [1].'

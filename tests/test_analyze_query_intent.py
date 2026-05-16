@@ -1,9 +1,7 @@
 """Behavioral tests for analyze_query_intent's regex cascade.
 
-The classifier is a 200-line conditional with corpus-specific patterns. Without these
-fixtures, an editor can change a single regex and silently shift mode routing for whole
-classes of queries. Each test pins one decision branch.
-
+The classifier routes broad query shapes to retrieval modes. Each fixture pins
+one generic decision branch so regex changes do not silently shift mode routing.
 We assert on the returned ``kind`` key. The recommended_chunk_limit / per_document_limit
 fields are intentionally not asserted here; tests/test_lexical_boost.py and
 tests/test_retrieval_scoring.py cover their downstream effect.
@@ -29,11 +27,6 @@ class TestAnalyzeQueryIntent:
             ('What is the phrasing of the risk in this template?', 'risk_format'),
             # Material lookup: literal 'link to the material' phrasing.
             ('Provide the link to the material for compound X', 'material_lookup'),
-            # Document completeness: pharma-corpus completeness phrasing.
-            (
-                'Provide the full detail covering each section of the submission',
-                'document_completeness',
-            ),
             # Comparison: explicit compare phrasing.
             ('Compare drug A and drug B for efficacy and safety profiles in clinical use', 'comparison'),
             # Enumeration: list/items phrasing.
@@ -44,16 +37,19 @@ class TestAnalyzeQueryIntent:
         intent = analyze_query_intent(query)
         # Non-strict: the cascade may merge neighboring patterns. We only require that the
         # expected branch matches; more specific tests pin the harder boundaries.
-        assert intent['kind'] == expected_kind, (
-            f'query={query!r} expected kind={expected_kind!r} got intent={intent!r}'
-        )
+        assert intent['kind'] == expected_kind, f'query={query!r} expected kind={expected_kind!r} got intent={intent!r}'
 
     def test_short_factual_query_falls_to_single_fact(self) -> None:
-        # Short queries (<=7 tokens) without any other branch firing should land in single_fact,
-        # not the default profile. This is what gives small queries a per-document cap.
+        # Very short queries without any other branch firing should land in single_fact,
+        # but still allow two chunks from one document for split table/header evidence.
         intent = analyze_query_intent('What is mRNA?')
         assert intent['kind'] == 'single_fact'
-        assert intent['per_document_limit'] == 1
+        assert intent['per_document_limit'] == 2
+
+    def test_six_token_query_falls_to_default(self) -> None:
+        intent = analyze_query_intent('alpha beta gamma delta epsilon zeta')
+
+        assert intent['kind'] == 'default'
 
     def test_long_unmatched_query_falls_to_default(self) -> None:
         # A long query that matches no specific pattern should hit the default profile.
@@ -74,6 +70,53 @@ class TestAnalyzeQueryIntent:
         # 'A or B' style choice questions are handled by the single_fact branch, not enumeration.
         intent = analyze_query_intent('Which method should we use, method A or method B?')
         assert intent['kind'] == 'single_fact'
+
+    def test_lessons_learned_domain_phrase_does_not_force_enumeration(self) -> None:
+        intent = analyze_query_intent(
+            'How can retrospectives be applied to process strategy development '
+            'based on lessons learned from the collaboration?'
+        )
+
+        assert intent['kind'] == 'source_reference'
+        assert intent['recommended_mode'] == 'hybrid'
+
+    def test_lessons_learned_category_query_still_enumerates(self) -> None:
+        intent = analyze_query_intent('What are the 3 categories of lessons learned about chemistry?')
+
+        assert intent['kind'] == 'enumeration'
+        assert intent['recommended_mode'] == 'naive'
+
+    def test_main_driver_query_routes_to_exact_chunk_lookup(self) -> None:
+        intent = analyze_query_intent('What are the main drivers behind the device strategy proposal?')
+
+        assert intent['kind'] == 'enumeration'
+        assert intent['recommended_mode'] == 'naive'
+
+    def test_domain_queries_follow_generic_intent_branches(self) -> None:
+        issue_intent = analyze_query_intent(
+            'What are the key issues identified in the implementation review, '
+            'and how does the tool contribute to these challenges?'
+        )
+        source_intent = analyze_query_intent(
+            'What is the significance of the approval timeline according to the product presentation?'
+        )
+
+        assert issue_intent['kind'] == 'enumeration'
+        assert issue_intent['recommended_mode'] == 'naive'
+        assert source_intent['kind'] == 'source_reference'
+        assert source_intent['recommended_mode'] == 'hybrid'
+
+    def test_project_impact_queries_keep_extra_chunks_per_document(self) -> None:
+        intent = analyze_query_intent(
+            'What is the significance of the approval timeline for Product X, '
+            'and how does it impact project management?'
+        )
+
+        assert intent['kind'] == 'consequence'
+        assert intent['recommended_chunk_limit'] == 8
+        assert intent['per_document_limit'] == 3
+        assert intent['allow_single_document_expansion'] is True
+        assert intent['recommended_mode'] == 'mix'
 
     def test_intent_profile_always_has_required_keys(self) -> None:
         # Every branch must return the same shape; downstream code reads these unconditionally.

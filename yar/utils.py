@@ -3327,10 +3327,11 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
         'will ',
     )
     enumeration_patterns = (
-        r'\b(?:what|which)\s+(?:are|were)\s+(?:the\s+)?(?:\d+\s+)?(?:categories|types|steps|phases|reasons|risks|issues|drivers|benefits|consequences|impacts|outcomes)\b',
+        r'\b(?:what|which)\s+(?:are|were)\s+(?:the\s+)?(?:\d+\s+)?'
+        r'(?:(?:key|main|primary|major|important)\s+)?'
+        r'(?:categories|types|steps|phases|reasons|risks|issues|drivers|benefits|consequences|impacts|outcomes)\b',
         r'\bhow many\b',
         r'\b(?:list|lists|enumerate|enumeration)\b',
-        r'\b(?:lessons learned|recommendations|actions)\b',
     )
     comparison_patterns = (
         r'\bcompare\b',
@@ -3361,26 +3362,12 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
     )
 
     risk_format_patterns = (
-        r'\b(?:syntax(?:e)?|phrase|phrasing|wording)\b.*\brisk\b',
-        r'\brisk\b.*\b(?:syntax(?:e)?|phrase|phrasing|wording)\b',
-    )
-    role_interface_patterns = (
-        r'\bprimary interface\b',
-        r'\ball activities in scope\b',
-        r'\bin scope of the sub-?team\b',
-    )
-    culture_domain_patterns = (
-        r'\b(?:domains?|dimensions?) of experience\b.*\bcorporate culture\b',
-        r'\bcorporate culture\b.*\b(?:domains?|dimensions?) of experience\b',
+        r'\b(?:syntax|phrase|phrasing|wording)\b.*\brisk\b',
+        r'\brisk\b.*\b(?:syntax|phrase|phrasing|wording)\b',
     )
     material_lookup_patterns = (
         r'\bprovide the link\b',
         r'\blink to the material\b',
-    )
-    document_completeness_patterns = (
-        r'\bfull detail\b.*\b(?:included|covering)\b.*\bsubmission\b',
-        r'\bsubmission\b.*\bfull detail\b.*\b(?:included|covering)\b',
-        r'\bsteps? of rea\w+\b.*\bsubmission\b',
     )
     source_reference_patterns = (
         r'\baccording to\b',
@@ -3396,11 +3383,11 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
     is_mitigation = any(re.search(pattern, normalized_query) for pattern in mitigation_patterns)
     is_risk_format = any(re.search(pattern, normalized_query) for pattern in risk_format_patterns)
     is_binary = normalized_query.startswith(binary_prefixes)
-    is_role_interface = is_binary and any(re.search(pattern, normalized_query) for pattern in role_interface_patterns)
-    is_culture_domain = any(re.search(pattern, normalized_query) for pattern in culture_domain_patterns)
     is_material_lookup = any(re.search(pattern, normalized_query) for pattern in material_lookup_patterns)
-    is_document_completeness = any(re.search(pattern, normalized_query) for pattern in document_completeness_patterns)
-    is_source_reference = any(re.search(pattern, normalized_query) for pattern in source_reference_patterns)
+    is_lessons_learned_reference = bool(re.search(r'\blessons? learned\b', normalized_query)) and not is_enumeration
+    is_source_reference = is_lessons_learned_reference or any(
+        re.search(pattern, normalized_query) for pattern in source_reference_patterns
+    )
     is_choice = (
         ' or ' in normalized_query
         and not is_binary
@@ -3409,6 +3396,22 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
         and any(re.search(pattern, normalized_query) for pattern in (r'\bwhat\b', r'\bwhich\b', r'\bshould\b'))
     )
 
+    project_impact_query = is_consequence and bool(
+        re.search(
+            r'\b(?:project\s+management|critical\s+path|collaboration|coordination|'
+            r'dependenc(?:y|ies)|stakeholders?|portfolio|program|readiness)\b',
+            normalized_query,
+        )
+    )
+
+    if project_impact_query:
+        return {
+            'kind': 'consequence',
+            'recommended_chunk_limit': 8,
+            'per_document_limit': 3,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'mix',
+        }
     if is_consequence:
         return {
             'kind': 'consequence',
@@ -3433,22 +3436,7 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'allow_single_document_expansion': True,
             'recommended_mode': 'global',
         }
-    if is_role_interface:
-        return {
-            'kind': 'role_interface',
-            'recommended_chunk_limit': 4,
-            'per_document_limit': 2,
-            'allow_single_document_expansion': True,
-            'recommended_mode': 'naive',
-        }
-    if is_culture_domain:
-        return {
-            'kind': 'culture_domain',
-            'recommended_chunk_limit': 6,
-            'per_document_limit': 2,
-            'allow_single_document_expansion': True,
-            'recommended_mode': 'naive',
-        }
+
     if is_material_lookup:
         return {
             'kind': 'material_lookup',
@@ -3457,14 +3445,7 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'allow_single_document_expansion': True,
             'recommended_mode': 'hybrid',
         }
-    if is_document_completeness:
-        return {
-            'kind': 'document_completeness',
-            'recommended_chunk_limit': 4,
-            'per_document_limit': 1,
-            'allow_single_document_expansion': True,
-            'recommended_mode': 'hybrid',
-        }
+
     if is_source_reference:
         return {
             'kind': 'source_reference',
@@ -3506,11 +3487,11 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'allow_single_document_expansion': False,
             'recommended_mode': 'mix',
         }
-    if len(query_terms) <= 7:
+    if len(query_terms) <= 5:
         return {
             'kind': 'single_fact',
             'recommended_chunk_limit': 4,
-            'per_document_limit': 1,
+            'per_document_limit': 2,
             'allow_single_document_expansion': False,
             'recommended_mode': 'mix',
         }
@@ -3663,6 +3644,18 @@ async def process_chunks_unified(
             )
 
     # 4. Prefer exact-support chunks when upstream retrieval already attached intent metadata.
+    if len(unique_chunks) > 1:
+        ranked_exact_chunks = sorted(
+            enumerate(unique_chunks),
+            key=lambda item: (
+                -(cast(float, _safe_float(item[1].get('metadata_query_match'), 0.0) or 0.0)),
+                -(cast(float, _safe_float(item[1].get('exact_phrase_match'), 0.0) or 0.0)),
+                -(cast(float, _safe_float(item[1].get('precise_focus_overlap'), 0.0) or 0.0)),
+                item[0],
+            ),
+        )
+        if ranked_exact_chunks and ranked_exact_chunks[0][0] != 0:
+            unique_chunks = [chunk for _, chunk in ranked_exact_chunks]
 
     # 5. Apply adaptive chunk budgeting before token truncation.
     configured_chunk_limit = (
@@ -3743,6 +3736,19 @@ async def process_chunks_unified(
             # a non-existent relevance_key forces _mmr_reorder onto its position-based fallback,
             # so diversity does not undo earlier lexical-boost reorderings.
             unique_chunks = _mmr_reorder(unique_chunks, lambda_=mmr_lambda, relevance_key=None)
+
+    if len(unique_chunks) > 1:
+        ranked_exact_chunks = sorted(
+            enumerate(unique_chunks),
+            key=lambda item: (
+                -(cast(float, _safe_float(item[1].get('metadata_query_match'), 0.0) or 0.0)),
+                -(cast(float, _safe_float(item[1].get('exact_phrase_match'), 0.0) or 0.0)),
+                -(cast(float, _safe_float(item[1].get('precise_focus_overlap'), 0.0) or 0.0)),
+                item[0],
+            ),
+        )
+        if ranked_exact_chunks and ranked_exact_chunks[0][0] != 0:
+            unique_chunks = [chunk for _, chunk in ranked_exact_chunks]
 
     # 6. Token-based final truncation
     tokenizer = global_config.get('tokenizer')
@@ -4215,32 +4221,36 @@ def convert_to_user_format(
 
         if original_relation:
             # Use original database data
-            formatted_relationships.append(
-                {
-                    'src_id': original_relation.get('src_id', entity1),
-                    'tgt_id': original_relation.get('tgt_id', entity2),
-                    'description': original_relation.get('description', ''),
-                    'keywords': original_relation.get('keywords', ''),
-                    'weight': original_relation.get('weight', 1.0),
-                    'source_id': original_relation.get('source_id', ''),
-                    'file_path': original_relation.get('file_path', 'unknown_source'),
-                    'created_at': original_relation.get('created_at', ''),
-                }
-            )
+            relation_payload = {
+                'src_id': original_relation.get('src_id', entity1),
+                'tgt_id': original_relation.get('tgt_id', entity2),
+                'description': original_relation.get('description', ''),
+                'keywords': original_relation.get('keywords', ''),
+                'weight': original_relation.get('weight', 1.0),
+                'source_id': original_relation.get('source_id', ''),
+                'file_path': original_relation.get('file_path', 'unknown_source'),
+                'created_at': original_relation.get('created_at', ''),
+            }
+            evidence_spans = original_relation.get('evidence_spans') or relation.get('evidence_spans')
+            if evidence_spans:
+                relation_payload['evidence_spans'] = evidence_spans
+            formatted_relationships.append(relation_payload)
         else:
             # Fallback to LLM context data (for backward compatibility)
-            formatted_relationships.append(
-                {
-                    'src_id': entity1,
-                    'tgt_id': entity2,
-                    'description': relation.get('description', ''),
-                    'keywords': relation.get('keywords', ''),
-                    'weight': relation.get('weight', 1.0),
-                    'source_id': relation.get('source_id', ''),
-                    'file_path': relation.get('file_path', 'unknown_source'),
-                    'created_at': relation.get('created_at', ''),
-                }
-            )
+            relation_payload = {
+                'src_id': entity1,
+                'tgt_id': entity2,
+                'description': relation.get('description', ''),
+                'keywords': relation.get('keywords', ''),
+                'weight': relation.get('weight', 1.0),
+                'source_id': relation.get('source_id', ''),
+                'file_path': relation.get('file_path', 'unknown_source'),
+                'created_at': relation.get('created_at', ''),
+            }
+            evidence_spans = relation.get('evidence_spans')
+            if evidence_spans:
+                relation_payload['evidence_spans'] = evidence_spans
+            formatted_relationships.append(relation_payload)
 
     # Convert chunks format (chunks already contain complete data)
     formatted_chunks = []
