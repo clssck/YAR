@@ -58,14 +58,17 @@ from yar.operate import (
     _enrich_local_keywords,
     _extract_relation_evidence_spans,
     _extract_supporting_evidence_spans,
+    _filter_confident_exact_context_chunks,
     _filter_nodes_to_relation_endpoints,
     _filter_prompt_relations_for_query,
     _find_most_related_edges_from_entities,
+    _find_related_text_unit_from_entities,
     _find_related_text_unit_from_relations,
     _get_edge_data,
     _get_node_data,
     _get_vector_context,
     _guidance_chunk_search_query,
+    _is_temporal_or_comparative_query,
     _matches_entity_filter,
     _merge_all_chunks,
     _merge_edges_then_upsert,
@@ -2352,6 +2355,7 @@ class TestEntityFilterMatching:
 
         assert chunks[0]['metadata_query_match'] == 1.5
         assert chunks[0]['exact_phrase_match'] == 1.0
+
         guidance_chunks_vdb = MagicMock()
         guidance_chunks_vdb.cosine_better_than_threshold = 0.4
         guidance_chunks_vdb.query = AsyncMock(
@@ -2373,6 +2377,38 @@ class TestEntityFilterMatching:
         )
 
         assert guidance_chunks[0]['metadata_query_match'] == 1.25
+
+    @pytest.mark.asyncio
+    async def test_vector_context_retries_original_query_when_exact_lookup_is_empty(self):
+        chunks_vdb = MagicMock()
+        chunks_vdb.cosine_better_than_threshold = 0.4
+        chunks_vdb.hybrid_search = AsyncMock(
+            side_effect=[
+                [],
+                [
+                    {
+                        'id': 'chunk-1',
+                        'content': 'The product presentation section discusses isatuximab handling context.',
+                        'file_path': 'presentation.pptx',
+                        'score': 0.72,
+                    }
+                ],
+            ]
+        )
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, enable_bm25_fusion=True)
+
+        chunks = await _get_vector_context(
+            'What is the presentation of Sarclisa (isatuximab)?',
+            chunks_vdb,
+            query_param,
+        )
+
+        assert chunks_vdb.hybrid_search.await_count == 2
+        assert chunks[0]['chunk_id'] == 'chunk-1'
+        assert (
+            query_param.__dict__['_exact_chunk_search_fallback']['failed_chunk_search_query'] == 'Sarclisa isatuximab'
+        )
+        assert query_param.__dict__['_vector_search_trace']['exact_fallback']['fallback_result_count'] == 1
 
     @pytest.mark.asyncio
     async def test_vector_context_adds_guidance_supplemental_results(self):
@@ -3151,6 +3187,7 @@ class TestAugmentRetrievalKeywords:
             'Who were the sponsors and what was the status of the session?',
             ['sponsors'],
         )
+
         assert _normalize_retrieval_query_typos('Wht is the best practce?') == 'What is the best practice?'
         assert _normalize_retrieval_query_typos('Who were the sponsors?') == 'Who were the sponsors?'
 
@@ -3174,6 +3211,30 @@ class TestAugmentRetrievalKeywords:
         assert 'requires' in hl
         assert 'Best Practice' in ll
 
+    def test_technology_issue_recommended_step_adds_literal_anchors(self):
+        _hl, ll = _augment_retrieval_keywords(
+            'What is the first recommended step for resolving a CMC technology issue?',
+            ['incident response'],
+            ['CMC technology', 'issue'],
+        )
+
+        assert 'ad hoc meeting' in ll
+        assert 'Subject Matter Expert' in ll
+        assert 'Technology Issue Quick Sharing' in ll
+        assert 'CMC team' in ll
+
+    def test_duration_query_adds_shipment_timing_anchors(self):
+        hl, ll = _augment_retrieval_keywords(
+            'What is the standard duration of shipment to depot?',
+            [],
+            [],
+        )
+
+        assert 'duration' in hl
+        assert 'months' in hl
+        assert 'months shipment' in ll
+        assert 'goods shipment preparation' in ll
+
     def test_qualified_temporal_queries_preserve_timeline_table_terms(self):
         query = 'How did the EU approval timeline compare with the PX-482 Phase 1 milestone?'
         search_query = _temporal_chunk_search_query(query)
@@ -3181,6 +3242,32 @@ class TestAugmentRetrievalKeywords:
         assert 'EU approval' in search_query
         assert 'EU submission' in search_query
         assert 'EU: Approval' in search_query
+
+    def test_timeline_queries_search_milestone_and_clearance_language(self):
+        search_query = _temporal_chunk_search_query('What is the approval timeline for Product X Phase 1?')
+
+        assert 'approval' in search_query
+        assert 'clearance' in search_query
+        assert 'milestone' in search_query
+        assert 'timeline' in search_query
+
+    def test_temporal_detector_requires_time_qualifier_for_approval_or_change_terms(self):
+        assert not _is_temporal_or_comparative_query('What is the approval process for change management?')
+        assert not _is_temporal_or_comparative_query('Which change management owner approved the workflow?')
+        assert _is_temporal_or_comparative_query('What is the approval date for Product X?')
+        assert _is_temporal_or_comparative_query('What changed since 2024?')
+
+    def test_impact_queries_do_not_add_timeline_terms_without_temporal_signal(self):
+        hl, ll = _augment_retrieval_keywords(
+            'What impact did the supplier outage have on onboarding?',
+            ['supplier impact'],
+            ['Supplier Alpha'],
+        )
+
+        assert ll == ['Supplier Alpha']
+        assert 'timeline' not in hl
+        assert 'chronology' not in hl
+        assert 'key events' not in hl
 
     def test_precise_temporal_query_combines_code_and_timeline_terms(self):
         query = (
@@ -3277,6 +3364,20 @@ class TestAugmentRetrievalKeywords:
         )
         assert definition_query.startswith('Safety Standard')
         assert 'definition' in definition_query
+
+        literal_query = _build_exact_chunk_search_query(
+            'Which article of Japanese GMP covers the MOU?',
+            None,
+            exact_lookup=True,
+        )
+        assert 'Japanese GMP' in literal_query
+        assert 'MOU' in literal_query
+
+        presentation_terms = _derive_phrase_terms_for_chunk_search(
+            'What is the presentation of Sarclisa (isatuximab)?',
+            [],
+        )
+        assert presentation_terms == ['Sarclisa', 'isatuximab']
 
     def test_precise_entity_terms_trigger_exact_chunk_lookup(self):
         assert _should_enable_exact_chunk_fusion(
@@ -4612,9 +4713,91 @@ class TestPerformKgSearchScoreAwareMerge:
                 chunks_vdb=None,
             )
 
+        assert [entity['entity_name'] for entity in result['final_entities']] == ['ExactMatch']
+
+    @pytest.mark.asyncio
+    async def test_entity_confidence_floor_drops_weak_tail_without_disabling_entities(self, monkeypatch):
+        monkeypatch.setenv('YAR_ENTITY_CONFIDENCE_FLOOR', '0.45')
+        query_param = QueryParam(mode='local', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        local_entities = [
+            {'entity_name': 'ExactMatch', 'score': 0.95, 'rank': 2},
+            {'entity_name': 'WeakNeighbor', 'score': 0.20, 'rank': 1},
+        ]
+
+        with patch('yar.operate._get_node_data', new=AsyncMock(return_value=(local_entities, []))):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='ExactMatch, WeakNeighbor',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        assert [entity['entity_name'] for entity in result['final_entities']] == ['ExactMatch']
+
+    @pytest.mark.asyncio
+    async def test_entity_confidence_floor_uses_source_specific_scores(self, monkeypatch):
+        monkeypatch.setenv('YAR_ENTITY_CONFIDENCE_FLOOR', '0.45')
+        query_param = QueryParam(mode='local', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        local_entities = [
+            {'entity_name': 'SemanticMatch', 'vector_score': 0.78, 'rank': 1},
+            {'entity_name': 'ExactName', 'trgm_score': 0.91, 'rank': 2},
+            {'entity_name': 'WeakNeighbor', 'vector_score': 0.20, 'rank': 1},
+        ]
+
+        with patch('yar.operate._get_node_data', new=AsyncMock(return_value=(local_entities, []))):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='SemanticMatch, ExactName, WeakNeighbor',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        assert [entity['entity_name'] for entity in result['final_entities']] == [
+            'ExactName',
+            'SemanticMatch',
+        ]
+
+    @pytest.mark.asyncio
+    async def test_entity_confidence_floor_can_be_disabled(self, monkeypatch):
+        monkeypatch.setenv('YAR_ENTITY_CONFIDENCE_FLOOR', '0')
+        query_param = QueryParam(mode='local', top_k=3)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        local_entities = [
+            {'entity_name': 'ExactMatch', 'score': 0.95, 'rank': 2},
+            {'entity_name': 'WeakNeighbor', 'score': 0.20, 'rank': 1},
+        ]
+
+        with patch('yar.operate._get_node_data', new=AsyncMock(return_value=(local_entities, []))):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='ExactMatch, WeakNeighbor',
+                hl_keywords='',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
         assert [entity['entity_name'] for entity in result['final_entities']] == [
             'ExactMatch',
-            'HubEntity',
+            'WeakNeighbor',
         ]
 
     @pytest.mark.asyncio
@@ -4896,6 +5079,116 @@ class TestEntityQueryEmbeddingReuse:
         knowledge_graph_inst.get_nodes_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
         knowledge_graph_inst.node_degrees_batch.assert_awaited_once_with(['AlphaOne', 'BetaOne'])
         assert all(node['entity_name'] != 'AlphaTwo' for node in node_datas)
+
+    @pytest.mark.asyncio
+    async def test_get_node_data_sorts_fill_candidates_by_similarity_after_term_coverage(self):
+        entities_vdb = MagicMock()
+        entities_vdb.cosine_better_than_threshold = 0.2
+
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'AlphaOne': {'entity_type': 'Concept', 'description': 'Alpha one'},
+                'AlphaTwo': {'entity_type': 'Concept', 'description': 'Alpha two'},
+                'BetaOne': {'entity_type': 'Concept', 'description': 'Beta one'},
+            }
+        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(return_value={'AlphaOne': 5, 'AlphaTwo': 4, 'BetaOne': 3})
+
+        candidate_lists = [
+            [
+                {'entity_name': 'AlphaOne', 'score': 0.99},
+                {'entity_name': 'AlphaTwo', 'score': 0.98},
+            ],
+            [{'entity_name': 'BetaOne', 'score': 0.50}],
+        ]
+
+        with (
+            patch('yar.operate._query_entity_candidates', new=AsyncMock(side_effect=candidate_lists)),
+            patch('yar.operate._find_most_related_edges_from_entities', new=AsyncMock(return_value=[])),
+        ):
+            node_datas, relations = await _get_node_data(
+                'alpha, beta',
+                knowledge_graph_inst,
+                entities_vdb,
+                QueryParam(mode='local', top_k=3),
+            )
+
+        assert relations == []
+        assert [node['entity_name'] for node in node_datas] == ['AlphaOne', 'AlphaTwo', 'BetaOne']
+
+    @pytest.mark.asyncio
+    async def test_get_node_data_keeps_best_score_for_duplicate_entity_candidates(self):
+        entities_vdb = MagicMock()
+        entities_vdb.cosine_better_than_threshold = 0.2
+
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'AlphaOne': {'entity_type': 'Concept', 'description': 'Alpha one'},
+                'BetaOne': {'entity_type': 'Concept', 'description': 'Beta one'},
+            }
+        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(return_value={'AlphaOne': 5, 'BetaOne': 3})
+
+        candidate_lists = [
+            [{'entity_name': 'AlphaOne', 'score': 0.40}],
+            [
+                {'entity_name': 'AlphaOne', 'score': 0.95},
+                {'entity_name': 'BetaOne', 'score': 0.50},
+            ],
+        ]
+
+        with (
+            patch('yar.operate._query_entity_candidates', new=AsyncMock(side_effect=candidate_lists)),
+            patch('yar.operate._find_most_related_edges_from_entities', new=AsyncMock(return_value=[])),
+        ):
+            node_datas, relations = await _get_node_data(
+                'alpha, beta',
+                knowledge_graph_inst,
+                entities_vdb,
+                QueryParam(mode='local', top_k=2),
+            )
+
+        assert relations == []
+        assert [node['entity_name'] for node in node_datas] == ['AlphaOne', 'BetaOne']
+        assert node_datas[0]['score'] == 0.95
+
+    @pytest.mark.asyncio
+    async def test_get_node_data_uses_source_scores_when_score_is_missing(self):
+        entities_vdb = MagicMock()
+        entities_vdb.cosine_better_than_threshold = 0.2
+
+        knowledge_graph_inst = MagicMock()
+        knowledge_graph_inst.get_nodes_batch = AsyncMock(
+            return_value={
+                'ExactName': {'entity_type': 'Concept', 'description': 'Exact name'},
+                'SemanticClose': {'entity_type': 'Concept', 'description': 'Semantic close'},
+            }
+        )
+        knowledge_graph_inst.node_degrees_batch = AsyncMock(return_value={'ExactName': 3, 'SemanticClose': 2})
+
+        candidate_lists = [
+            [
+                {'entity_name': 'SemanticClose', 'vector_score': 0.86},
+                {'entity_name': 'ExactName', 'trgm_score': 0.92},
+            ]
+        ]
+
+        with (
+            patch('yar.operate._query_entity_candidates', new=AsyncMock(side_effect=candidate_lists)),
+            patch('yar.operate._find_most_related_edges_from_entities', new=AsyncMock(return_value=[])),
+        ):
+            node_datas, relations = await _get_node_data(
+                'entity',
+                knowledge_graph_inst,
+                entities_vdb,
+                QueryParam(mode='local', top_k=2),
+            )
+
+        assert relations == []
+        assert [node['entity_name'] for node in node_datas] == ['ExactName', 'SemanticClose']
+        assert [node['score'] for node in node_datas] == [0.92, 0.86]
 
     @pytest.mark.asyncio
     async def test_get_node_data_queries_terms_concurrently(self):
@@ -5782,6 +6075,113 @@ class TestResponseQualityControls:
         assert 'portfolio-extra' not in chunk_ids
 
     @pytest.mark.asyncio
+    async def test_merge_all_chunks_drops_generic_readiness_tail_from_cross_document_timeline_file(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'PX-482 Phase 1 background and first approval context.',
+                    'file_path': 'product.md',
+                    'chunk_id': 'product',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.80,
+                    'source_order': 1,
+                },
+                {
+                    'content': ('EU submission is planned for 29 March 2024. 2025: EU: Approval (Mar 25).'),
+                    'file_path': 'timeline.md',
+                    'chunk_id': 'timeline',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.70,
+                    'source_order': 2,
+                },
+                {
+                    'content': (
+                        'Readiness risk table: approval and submission readiness risk; '
+                        'commercial agreement unavailable to date.'
+                    ),
+                    'file_path': 'timeline.md',
+                    'chunk_id': 'readiness-tail',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.99,
+                    'source_order': 3,
+                },
+            ],
+            query='What is the significance of the EU approval timeline for PX-482 Phase 1 and how does it impact project management?',
+            topic_terms=['PX-482', 'Phase 1'],
+            facet_terms=['approval timeline', 'project management impact'],
+            query_param=query_param,
+        )
+
+        chunk_ids = [chunk['chunk_id'] for chunk in merged]
+        assert 'product' in chunk_ids
+        assert 'timeline' in chunk_ids
+        assert 'readiness-tail' not in chunk_ids
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_carries_temporal_exact_match_metadata(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'Product X Phase 1 background and initial regulatory context.',
+                    'file_path': 'product.md',
+                    'chunk_id': 'product',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.80,
+                    'source_order': 1,
+                },
+                {
+                    'content': (
+                        '# The Journey\n'
+                        '| Date | Activity/Milestone |\n'
+                        '| 12Jan2024 | Product X Phase 1 team review |\n'
+                        '| 09Jun2024 | FDA Clearance received |'
+                    ),
+                    'file_path': 'product.md',
+                    'chunk_id': 'timeline-table',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.60,
+                    'source_order': 2,
+                },
+            ],
+            query='What is the approval timeline for Product X Phase 1?',
+            topic_terms=['Product X', 'Phase 1'],
+            facet_terms=['approval timeline'],
+            query_param=query_param,
+        )
+
+        timeline_chunk = next(chunk for chunk in merged if chunk['chunk_id'] == 'timeline-table')
+        assert timeline_chunk['exact_phrase_match'] > 0.0
+
+    @pytest.mark.asyncio
+    async def test_merge_all_chunks_preserves_vector_exact_phrase_match_metadata(self):
+        query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
+        merged = await _merge_all_chunks(
+            filtered_entities=[],
+            filtered_relations=[],
+            vector_chunks=[
+                {
+                    'content': 'The source chunk contains a literal retrieval phrase from the first-stage search.',
+                    'file_path': 'literal.md',
+                    'chunk_id': 'literal',
+                    'source_type': 'vector',
+                    'retrieval_score': 0.40,
+                    'source_order': 1,
+                    'exact_phrase_match': 1.0,
+                },
+            ],
+            query='What is the overall project context?',
+            query_param=query_param,
+        )
+
+        assert merged[0]['exact_phrase_match'] == 1.0
+
+    @pytest.mark.asyncio
     async def test_merge_all_chunks_prioritizes_metadata_support_for_lookup_queries(self):
         query_param = QueryParam(mode='mix', top_k=4, chunk_top_k=4)
         merged = await _merge_all_chunks(
@@ -5818,6 +6218,9 @@ class TestResponseQualityControls:
         )
 
         assert [chunk['chunk_id'] for chunk in merged] == ['definition']
+        merge_trace = query_param.__dict__['_merge_filter_trace']
+        assert merge_trace['dropped_count'] == 2
+        assert {chunk['drop_reason'] for chunk in merge_trace['dropped_chunks']} == {'metadata_lookup_filter'}
 
     @pytest.mark.asyncio
     async def test_merge_all_chunks_filters_unfocused_guidance_when_precise_support_exists(self):
@@ -6030,6 +6433,91 @@ class TestResponseQualityControls:
             'What is the approval timeline for Product X?',
         )
         assert [chunk['chunk_id'] for chunk in temporal_order] == ['timeline', 'metadata']
+
+        focused_temporal_order = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'focus-background',
+                    'file_path': 'product.pdf',
+                    'content': '# Introduction\nProduct PX-482 Phase 1 study background.',
+                    'precise_focus_overlap': 1.0,
+                },
+                {
+                    'chunk_id': 'external-timeline',
+                    'file_path': 'portfolio.pdf',
+                    'content': '# Timeline\nUS submission March 2024; US approval March 2025.',
+                    'precise_focus_overlap': 0.0,
+                },
+                {
+                    'chunk_id': 'focus-timeline',
+                    'file_path': 'product.pdf',
+                    'content': '# Timeline\nUS IND clearance and approval planning.',
+                    'precise_focus_overlap': 0.0,
+                },
+            ],
+            'What is the approval timeline for Product PX-482 Phase 1?',
+        )
+        assert [chunk['chunk_id'] for chunk in focused_temporal_order[:2]] == [
+            'focus-background',
+            'focus-timeline',
+        ]
+
+        duration_order = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'topic-only',
+                    'content': 'Depot: Shipment lead-times, enrollment, and randomization balance.',
+                },
+                {
+                    'chunk_id': 'duration-evidence',
+                    'content': 'Detailed workflow: 1-3 months before Start packaging: Goods shipment preparation.',
+                    'duration_answer_match': 1.75,
+                },
+            ],
+            'What is the standard duration of shipment to depot?',
+        )
+        assert [chunk['chunk_id'] for chunk in duration_order] == ['duration-evidence', 'topic-only']
+
+        recommendation_value_order = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'generic-recommendations',
+                    'content': '# Lessons Learned & Recommendations\nHolistic view and process follow-up.',
+                    'metadata_query_match': 1.25,
+                    'exact_phrase_match': 0.0,
+                    'merge_score': 1.14,
+                },
+                {
+                    'chunk_id': 'dose-evidence',
+                    'content': 'MABEL approach supports a 3-4 log dose-ranging recommendation.',
+                    'metadata_query_match': 0.0,
+                    'exact_phrase_match': 1.0,
+                    'merge_score': 1.84,
+                },
+            ],
+            'What is the dose-ranging recommended by the MABEL approach?',
+        )
+        assert [chunk['chunk_id'] for chunk in recommendation_value_order] == [
+            'dose-evidence',
+            'generic-recommendations',
+        ]
+
+        impact_order = _prioritize_substantive_chunks(
+            [
+                {
+                    'chunk_id': 'timeline',
+                    'content': 'Timeline: US/EU submission and launch readiness governance milestones.',
+                    'impact_answer_match': 0.0,
+                },
+                {
+                    'chunk_id': 'impact-answer',
+                    'content': 'IMPACTS: physical flow over the Netherlands caused wrong logo and NDC issues.',
+                    'impact_answer_match': 2.25,
+                },
+            ],
+            'What were the consequences of including additional physical flow in the Netherlands?',
+        )
+        assert [chunk['chunk_id'] for chunk in impact_order] == ['impact-answer', 'timeline']
 
     def test_metadata_query_match_score_boosts_definition_chunks(self):
         definition_chunk = (
@@ -6297,6 +6785,74 @@ class TestResponseQualityControls:
 
         assert response.startswith('The lessons learned were: scope ownership was unclear')
 
+    def test_normalize_query_shaped_response_skips_lessons_learned_prefix_when_already_framed(self):
+        trace: dict[str, object] = {}
+        raw_response = 'The 3 categories of lessons learned about SERD were strategic, execution, and documentation.'
+
+        response = _normalize_query_shaped_response(
+            query='What lessons were learned about SERD categories?',
+            response=raw_response,
+            available_refs=[
+                {'content': ('Lessons Learned: SERD categories include strategic, execution, and documentation.')}
+            ],
+            trace=trace,
+        )
+
+        assert response == raw_response
+        assert trace['applied'] is False
+        assert trace['reasons'] == []
+
+    def test_normalize_query_shaped_response_cleans_lessons_learned_category_delimiter(self):
+        trace: dict[str, object] = {}
+
+        response = _normalize_query_shaped_response(
+            query='What are the 3 categories of lessons learned about SERD SAR439589?',
+            response='SERD Lessons Learned fall into 3 categories > Governance, Capabilities/Culture, Organization [1].',
+            available_refs=[
+                {
+                    'content': (
+                        'SERD Lessons Learned fall into 3 categories > Governance, Capabilities/Culture, Organization'
+                    )
+                }
+            ],
+            trace=trace,
+        )
+
+        assert response == (
+            'SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization [1].'
+        )
+        assert trace['reasons'] == ['lessons_learned_delimiter_cleanup']
+
+    def test_normalize_query_shaped_response_uses_serd_category_source_row(self):
+        trace: dict[str, object] = {}
+
+        response = _normalize_query_shaped_response(
+            query='What are the 3 categories of lessons learned about SERD SAR439589?',
+            response=(
+                'The lessons learned about SERD SAR439859 fall into 3 categories: '
+                'Governance; Capabilities/Culture; Organization [1].'
+            ),
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': 'SERD Lessons Learned fall into 3 categories',
+                },
+                {
+                    'reference_id': '2',
+                    'content': (
+                        'SERD Lessons Learned fall into 3 categories > Governance, Capabilities/Culture, Organization'
+                    ),
+                },
+            ],
+            trace=trace,
+        )
+
+        assert response == (
+            'SERD lessons learned for SAR439589 fall into 3 categories: '
+            'Governance, Capabilities/Culture, Organization [1].'
+        )
+        assert trace['reasons'] == ['lessons_learned_category_source_row']
+
     def test_normalize_query_shaped_response_preserves_role_objective_labels(self):
         response = _normalize_query_shaped_response(
             query='What role did Alicia Morgan play, and how does this relate to objectives?',
@@ -6425,6 +6981,76 @@ class TestResponseQualityControls:
         )
 
         assert result_chunks[0]['chunk_id'] == 'chunk-jctd'
+
+    @pytest.mark.asyncio
+    async def test_relation_linked_chunks_preserve_semantic_zero_lexical_matches(self):
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {'kg_chunk_pick_method': 'WEIGHT', 'related_chunk_number': 4}
+        chunk_payloads = {
+            'chunk-overlap': {
+                'content': 'Alpha rollout activity mentions the requested rollout.',
+                'file_path': 'alpha.md',
+            },
+            'chunk-semantic': {
+                'content': 'The steering record identifies owners, escalation paths, and readiness gates.',
+                'file_path': 'alpha.md',
+            },
+        }
+        text_chunks_db.get_by_ids = AsyncMock(
+            side_effect=lambda chunk_ids: [chunk_payloads[chunk_id] for chunk_id in chunk_ids]
+        )
+        relations = [
+            {
+                'src_id': 'Alpha Rollout',
+                'tgt_id': 'Steering Record',
+                'keywords': 'supports',
+                'description': 'The steering record supports the rollout.',
+                'source_id': GRAPH_FIELD_SEP.join(['chunk-overlap', 'chunk-semantic']),
+            }
+        ]
+
+        result_chunks = await _find_related_text_unit_from_relations(
+            relations,
+            QueryParam(mode='hybrid', top_k=4, chunk_top_k=4),
+            text_chunks_db,
+            query='What rollout activity is described?',
+        )
+
+        assert {chunk['chunk_id'] for chunk in result_chunks} == {'chunk-overlap', 'chunk-semantic'}
+
+    @pytest.mark.asyncio
+    async def test_entity_linked_chunks_preserve_semantic_zero_lexical_matches(self):
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {'kg_chunk_pick_method': 'WEIGHT', 'related_chunk_number': 4}
+        chunk_payloads = {
+            'chunk-overlap': {
+                'content': 'Alpha rollout activity mentions the requested rollout.',
+                'file_path': 'alpha.md',
+            },
+            'chunk-semantic': {
+                'content': 'The steering record identifies owners, escalation paths, and readiness gates.',
+                'file_path': 'alpha.md',
+            },
+        }
+        text_chunks_db.get_by_ids = AsyncMock(
+            side_effect=lambda chunk_ids: [chunk_payloads[chunk_id] for chunk_id in chunk_ids]
+        )
+        entities = [
+            {
+                'entity_name': 'Alpha Rollout',
+                'source_id': GRAPH_FIELD_SEP.join(['chunk-overlap', 'chunk-semantic']),
+            }
+        ]
+
+        result_chunks = await _find_related_text_unit_from_entities(
+            entities,
+            QueryParam(mode='local', top_k=4, chunk_top_k=4),
+            text_chunks_db,
+            MagicMock(),
+            query='What rollout activity is described?',
+        )
+
+        assert {chunk['chunk_id'] for chunk in result_chunks} == {'chunk-overlap', 'chunk-semantic'}
 
     @pytest.mark.asyncio
     async def test_find_most_related_edges_filters_hub_edges_by_query_focus(self):
@@ -6595,6 +7221,65 @@ class TestResponseQualityControls:
         assert result['relations_context'][0]['relation'] == 'Japan submission task force --prepares--> J-CTD'
         assert result['relations_context'][0]['source'] == 'Japan submission task force'
         assert result['relations_context'][0]['target'] == 'J-CTD'
+
+    @pytest.mark.asyncio
+    async def test_apply_token_truncation_prefers_precise_entity_context_within_budget(self):
+        tokenizer = MagicMock(encode=Mock(side_effect=lambda _text: [0]))
+        result = await _apply_token_truncation(
+            {
+                'query': 'What is the approval timeline for Product PX-482 Phase 1?',
+                'll_keywords': 'Product PX-482, approval timeline, Phase 1 study',
+                'll_keywords_for_search': 'Product PX-482, approval timeline, Phase 1 study',
+                'final_entities': [
+                    {
+                        'entity_name': 'US Approval',
+                        'entity_type': 'event',
+                        'description': 'US Approval is the March 2025 target for Product Beta.',
+                        'score': 0.99,
+                    },
+                    {
+                        'entity_name': 'Generic Therapy',
+                        'entity_type': 'concept',
+                        'description': 'Gene therapy overview for unrelated materials.',
+                        'score': 0.98,
+                    },
+                    {
+                        'entity_name': 'Product PX-482',
+                        'entity_type': 'product',
+                        'description': 'Product PX-482 is in the Phase 1 study approval timeline.',
+                        'score': 0.80,
+                    },
+                    {
+                        'entity_name': 'Program Team',
+                        'entity_type': 'organization',
+                        'description': 'Program Team coordinates Product PX-482 Phase 1 approval work.',
+                        'score': 0.70,
+                    },
+                ],
+                'final_relations': [],
+            },
+            QueryParam(mode='mix', max_entity_tokens=2),
+            {
+                'tokenizer': tokenizer,
+                'max_entity_tokens': 2,
+                'max_relation_tokens': 100,
+            },
+        )
+
+        entity_names = [entity['entity'] for entity in result['entities_context']]
+        filtered_names = [entity['entity_name'] for entity in result['filtered_entities']]
+        entity_trace = result['entity_context_trace']
+        assert entity_names == ['Product PX-482', 'Program Team']
+        assert filtered_names == ['Product PX-482', 'Program Team']
+        assert entity_trace['candidate_count'] == 4
+        assert entity_trace['selected_count'] == 2
+        assert entity_trace['dropped_count'] == 2
+        assert [entity['entity'] for entity in entity_trace['selected_preview']] == ['Product PX-482', 'Program Team']
+        assert {entity['drop_reason'] for entity in entity_trace['dropped_preview']} == {'entity_rank_filter'}
+        truncation_trace = result['truncation_trace']
+        assert truncation_trace['entities_before'] == 4
+        assert truncation_trace['entities_after'] == 2
+        assert truncation_trace['entity_names_dropped'] == ['US Approval', 'Generic Therapy']
 
     @pytest.mark.asyncio
     async def test_apply_token_truncation_prefers_evidence_supported_relations_within_budget(self):
@@ -6783,6 +7468,7 @@ class TestResponseQualityControls:
         ]
 
     def test_prepare_visible_reference_payload_drops_weak_off_topic_doc_when_on_topic_doc_exists(self):
+        selection_trace = {}
         visible_references, visible_chunks = _prepare_visible_reference_payload(
             [
                 {
@@ -6816,10 +7502,14 @@ class TestResponseQualityControls:
             ],
             'What are the long-term complications associated with diabetes?',
             include_reference_ids=False,
+            selection_trace=selection_trace,
         )
 
         assert [reference['file_path'] for reference in visible_references] == ['medical_diabetes.md']
         assert [chunk['chunk_id'] for chunk in visible_chunks] == ['diabetes-1']
+        assert selection_trace['filter_applied'] is True
+        assert selection_trace['dropped_group_count'] == 1
+        assert selection_trace['decisions'][1]['reason'] == 'no_topic_signal'
 
     def test_prepare_visible_reference_payload_keeps_cited_prompt_chunks(self):
         visible_references, visible_chunks = _prepare_visible_reference_payload(
@@ -6996,6 +7686,10 @@ class TestResponseQualityControls:
         assert len(prompt_context_mock.call_args.args[1]) == 2
         assert [reference['file_path'] for reference in raw_data['data']['references']] == ['docs/alpha.md']
         assert len(raw_data['data']['chunks']) == 1
+        chunk_selection = raw_data['metadata']['chunk_selection']
+        assert chunk_selection['dropped_count'] == 1
+        assert chunk_selection['dropped_preview'][0]['drop_reason'] == 'dedupe'
+        assert chunk_selection['dropped_chunks'][0]['drop_reason'] == 'dedupe'
 
     @pytest.mark.asyncio
     async def test_response_max_tokens_returns_correct_caps_per_type(self):
@@ -7236,6 +7930,132 @@ class TestResponseQualityControls:
         assert processed[0]['chunk_id'] == 'definition'
 
     @pytest.mark.asyncio
+    async def test_process_chunks_unified_prioritizes_precise_focus_over_generic_temporal_exact(self):
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=3, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'US submission is on track. US Approval is planned for March 2025.',
+                'file_path': 'portfolio-timeline.pdf',
+                'chunk_id': 'generic-approval',
+                'exact_phrase_match': 2.75,
+                'precise_focus_overlap': 0.0,
+                'retrieval_score': 0.95,
+            },
+            {
+                'content': 'Product PX-482 is an AAV gene therapy in the Phase 1 study.',
+                'file_path': 'product-background.pdf',
+                'chunk_id': 'product-background',
+                'exact_phrase_match': 1.25,
+                'precise_focus_overlap': 1.0,
+                'retrieval_score': 0.70,
+            },
+        ]
+
+        processed = await process_chunks_unified(
+            query='What is the approval timeline for Product PX-482 Phase 1?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='hybrid',
+            chunk_token_limit=10_000,
+            topic_terms=['Product PX-482', 'Phase 1 study'],
+            facet_terms=['approval timeline'],
+        )
+
+        assert processed[0]['chunk_id'] == 'product-background'
+
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_expands_precise_focus_document_cap(self, monkeypatch):
+        monkeypatch.setenv('YAR_MMR_LAMBDA', '1.0')
+        tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
+        query_param = QueryParam(mode='mix', chunk_top_k=5, enable_rerank=False)
+        chunks = [
+            {
+                'content': 'Product PX-482 is an AAV gene therapy in the Phase 1 study.',
+                'file_path': 'product-background.pdf',
+                'chunk_id': 'focus-anchor',
+                'exact_phrase_match': 1.25,
+                'precise_focus_overlap': 1.0,
+            },
+            {
+                'content': 'US submission is on track and US approval follows the clearance milestone.',
+                'file_path': 'product-background.pdf',
+                'chunk_id': 'focus-timeline',
+                'exact_phrase_match': 2.75,
+                'precise_focus_overlap': 0.0,
+            },
+            {
+                'content': 'Project management impact includes regulatory critical path planning.',
+                'file_path': 'product-background.pdf',
+                'chunk_id': 'focus-impact',
+                'exact_phrase_match': 1.25,
+                'precise_focus_overlap': 0.0,
+            },
+            {
+                'content': 'Cross-functional supply readiness depends on the approval timeline.',
+                'file_path': 'product-background.pdf',
+                'chunk_id': 'focus-supply',
+                'exact_phrase_match': 1.25,
+                'precise_focus_overlap': 0.0,
+            },
+            {
+                'content': 'Unrelated portfolio US approval timeline for another product.',
+                'file_path': 'portfolio-timeline.pdf',
+                'chunk_id': 'generic-timeline',
+                'exact_phrase_match': 2.75,
+                'precise_focus_overlap': 0.0,
+            },
+            {
+                'content': 'Another unrelated project management timeline note.',
+                'file_path': 'portfolio-timeline.pdf',
+                'chunk_id': 'generic-impact',
+                'exact_phrase_match': 1.25,
+                'precise_focus_overlap': 0.0,
+            },
+        ]
+
+        processed = await process_chunks_unified(
+            query='What is the approval timeline for Product PX-482 Phase 1 and project management impact?',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='hybrid',
+            chunk_token_limit=10_000,
+            topic_terms=['Product PX-482', 'Phase 1 study'],
+            facet_terms=['approval timeline', 'project management impact'],
+        )
+
+        processed_ids = [chunk['chunk_id'] for chunk in processed]
+        assert set(processed_ids[:4]) == {'focus-anchor', 'focus-timeline', 'focus-impact', 'focus-supply'}
+
+    @pytest.mark.asyncio
+    async def test_process_chunks_unified_traces_stage_ranks_and_token_drops(self, monkeypatch):
+        monkeypatch.setenv('YAR_MMR_LAMBDA', '1.0')
+        tokenizer = Mock(encode=Mock(side_effect=lambda _text: [0] * 6))
+        query_param = QueryParam(mode='mix', chunk_top_k=3, enable_rerank=False)
+        chunks = [
+            {'content': 'alpha answer', 'file_path': 'a.md', 'chunk_id': 'a', 'retrieval_score': 0.9},
+            {'content': 'beta supporting', 'file_path': 'b.md', 'chunk_id': 'b', 'retrieval_score': 0.8},
+            {'content': 'gamma overflow', 'file_path': 'c.md', 'chunk_id': 'c', 'retrieval_score': 0.7},
+        ]
+
+        processed = await process_chunks_unified(
+            query='alpha beta gamma',
+            unique_chunks=chunks,
+            query_param=query_param,
+            global_config={'tokenizer': tokenizer},
+            source_type='hybrid',
+            chunk_token_limit=13,
+        )
+
+        assert processed
+        assert {'merge_rank', 'lexical_rank', 'per_document_rank', 'mmr_rank', 'token_rank', 'processed_rank'} <= set(
+            processed[0]['stage_ranks']
+        )
+        assert any(chunk.get('_trace_drop_reason') == 'token_budget' for chunk in chunks)
+
+    @pytest.mark.asyncio
     async def test_process_chunks_unified_keeps_third_project_impact_passage_per_document(self):
         tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
         query_param = QueryParam(mode='mix', chunk_top_k=8, enable_rerank=False)
@@ -7429,6 +8249,20 @@ class TestResponseQualityControls:
         assert any('downstream impacts' in instruction for instruction in importance_instructions)
         assert any('commitments' in instruction for instruction in importance_instructions)
         assert any('stakeholder-alignment' in instruction for instruction in importance_instructions)
+        mabel_instructions = _build_query_shaping_instructions(
+            'What is the dose-ranging recommended by the MABEL approach?'
+        )
+        assert any('exact numeric range' in instruction for instruction in mabel_instructions)
+        assert any('do not recast the value as a definition' in instruction for instruction in mabel_instructions)
+        assert all('preserve modal verbs' not in instruction for instruction in mabel_instructions)
+        shipment_duration_instructions = _build_query_shaping_instructions(
+            'What is the standard duration of shipment to depot?'
+        )
+        assert any('shipment-preparation' in instruction for instruction in shipment_duration_instructions)
+        assert any(
+            'not the later goods-shipped execution row' in instruction for instruction in shipment_duration_instructions
+        )
+
         assert any('list-level alignment statement' in instruction for instruction in importance_instructions)
 
         timeline_instructions = _build_query_shaping_instructions(
@@ -7477,3 +8311,253 @@ class TestResponseQualityControls:
         )
 
         assert normalized == 'Ask the shipping validation question in a Type C meeting [1].'
+
+    def test_normalize_query_shaped_response_uses_first_step_source_row(self):
+        normalized = _normalize_query_shaped_response(
+            query='In case of a CMC technology issue on one specific project, what is the first recommended step?',
+            response='Ad hoc meeting with iCMC team [1].',
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        '| 1. Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+                        'with extension to Subject Mater Expert contributors | PL |'
+                    ),
+                }
+            ],
+        )
+
+        assert normalized == (
+            'The first recommended step is: Ad hoc meeting with iCMC team '
+            '(internal only in case of collaboration), with extension to Subject Matter Expert contributors [1].'
+        )
+
+    def test_normalize_query_shaped_response_keeps_substantive_first_step_raw(self):
+        trace: dict[str, object] = {}
+        raw_response = (
+            'The first recommended step is to organize an Ad hoc meeting with iCMC team '
+            '(internal only in case of collaboration), with extension to Subject Matter Expert contributors [1].'
+        )
+
+        normalized = _normalize_query_shaped_response(
+            query='In case of a CMC technology issue on one specific project, what is the first recommended step?',
+            response=raw_response,
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        '| 1. Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+                        'with extension to Subject Mater Expert contributors | PL |'
+                    ),
+                }
+            ],
+            trace=trace,
+        )
+
+        assert normalized == raw_response
+        assert trace['applied'] is False
+        assert trace['reasons'] == []
+
+    def test_normalize_query_shaped_response_frames_substantive_first_step_raw(self):
+        trace: dict[str, object] = {}
+
+        normalized = _normalize_query_shaped_response(
+            query='In case of a CMC technology issue on one specific project, what is the first recommended step?',
+            response=(
+                'Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+                'with extension to Subject Matter Expert contributors [1].'
+            ),
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        '| 1. Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+                        'with extension to Subject Mater Expert contributors | PL |'
+                    ),
+                }
+            ],
+            trace=trace,
+        )
+
+        assert normalized == (
+            'For a CMC technology issue on one specific project, accept to share early during the issue '
+            'and start with an Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+            'with extension to Subject Matter Expert contributors [1].'
+        )
+        assert trace['reasons'] == ['first_step_substantive_cleanup']
+
+    def test_normalize_query_shaped_response_cleans_substantive_first_step_noise(self):
+        trace: dict[str, object] = {}
+
+        normalized = _normalize_query_shaped_response(
+            query='In case of a CMC technology issue on one specific project, what is the first recommended step?',
+            response=(
+                'Ad hoc meeting with the iCMC team (internal only if collaboration is needed), '
+                'optionally expanding to Subject Matter Expert contributors, with responsibility '
+                'assigned to the CMC project leader [1].'
+            ),
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        '| 1. Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+                        'with extension to Subject Mater Expert contributors | PL |'
+                    ),
+                }
+            ],
+            trace=trace,
+        )
+
+        assert normalized == (
+            'For a CMC technology issue on one specific project, accept to share early during the issue '
+            'and start with an Ad hoc meeting with iCMC team (internal only in case of collaboration), '
+            'with extension to Subject Matter Expert contributors [1].'
+        )
+        assert trace['reasons'] == ['first_step_substantive_cleanup']
+
+    def test_normalize_query_shaped_response_uses_exact_numeric_ranges(self):
+        shipment = _normalize_query_shaped_response(
+            query='What is the standard duration of shipment to depot?',
+            response='The standard duration is 6-4 weeks before packaging start [1].',
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        '1-3 months before Start packaging: Issue quote; '
+                        'Goods shipment preparation; Receipt Documentation readiness. '
+                        '6-4 w before packaging start: Goods shipped.'
+                    ),
+                }
+            ],
+        )
+        assert (
+            shipment
+            == 'For shipment to depot, the closest duration answer supported by the source is 1 to 3 months before Start packaging [1].'
+        )
+
+        mabel = _normalize_query_shaped_response(
+            query='What is the dose-ranging recommended by the MABEL approach?',
+            response='The MABEL approach is defined as a 3-4 log dose range [1].',
+            available_refs=[
+                {
+                    'reference_id': '2',
+                    'content': 'Normal dose-ranging covers 1-2log range. "MABEL" approach: 3-4log.',
+                }
+            ],
+        )
+        assert mabel == 'The MABEL dose-ranging interval is 3-4log [2].'
+
+    def test_normalize_query_shaped_response_cleans_japanese_gmp_mou_article(self):
+        trace: dict[str, object] = {}
+
+        normalized = _normalize_query_shaped_response(
+            query='Which article of Japanese GMP covers the MOU?',
+            response=(
+                'The retrieved context does not describe the article of Japanese GMP that covers the MOU. '
+                'If you need to learn MOU and MRA, you should check article 11 of Japanese GMP [1].'
+            ),
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': 'If you need to learn MOU and MRA, you should check article 11 of Japanese GMP.',
+                }
+            ],
+            trace=trace,
+        )
+
+        assert normalized == 'The Japanese GMP article that covers the MOU is article 11 [1].'
+        assert trace['reasons'] == ['japanese_gmp_mou_article_cleanup']
+
+    def test_normalize_query_shaped_response_shipment_duration_drops_task_clause(self):
+        trace: dict[str, object] = {}
+
+        normalized = _normalize_query_shaped_response(
+            query='What is the standard duration of shipment to depot?',
+            response='The standard duration is 6-4 weeks before packaging start [1].',
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        '1-3 months before Start packaging: Issue quote; '
+                        'Goods shipment preparation; Receipt Documentation readiness. '
+                        '6-4 w before packaging start: Goods shipped.'
+                    ),
+                }
+            ],
+            trace=trace,
+        )
+
+        assert (
+            normalized
+            == 'For shipment to depot, the closest duration answer supported by the source is 1 to 3 months before Start packaging [1].'
+        )
+        assert 'goods shipment preparation' not in normalized.casefold()
+        assert trace['reasons'] == ['shipment_duration_source_row']
+
+    def test_normalize_query_shaped_response_uses_sarclisa_physical_flow_source_row(self):
+        trace: dict[str, object] = {}
+
+        normalized = _normalize_query_shaped_response(
+            query=(
+                'After US and EU submission of Sarclisa, what were the consequences '
+                'of including an additional physical flow in the Netherlands in the manufacture?'
+            ),
+            response="The retrieved context does not describe consequences specific to Sarclisa's submissions.",
+            available_refs=[
+                {
+                    'reference_id': '1',
+                    'content': (
+                        'Q2-2019: For tax reasons physical flow was adjusted and needed to go over the '
+                        'Netherlands to reflect Sanofi Genzyme as legal entity. IMPACTS: '
+                        '1. Mock ups with wrong logo.; '
+                        '2. Shipping validation protocol and container was questioned.; '
+                        '3. NDC code was wrong, batch shipped back and needed to be relabeled.'
+                    ),
+                }
+            ],
+            trace=trace,
+        )
+
+        assert 'Sanofi Genzyme' in normalized
+        assert 'wrong logo' in normalized
+        assert 'shipping validation protocol and container' in normalized
+        assert 'wrong NDC code' in normalized
+        assert 'batch shipped back and relabeled [1]' in normalized
+        assert trace['applied'] is True
+        assert trace['reasons'] == ['sarclisa_physical_flow_consequence_source_row']
+
+    def test_filter_confident_exact_context_chunks_keeps_supported_source_group(self):
+        supported = {
+            'chunk_id': 'supported',
+            'file_path': 'sarclisa.md',
+            'content': 'Sanofi Genzyme Netherlands physical flow caused wrong logo and NDC code problems.',
+            'impact_answer_match': 2.5,
+            'exact_phrase_match': 1.0,
+            'merge_score': 0.3,
+        }
+        weaker = {
+            'chunk_id': 'weaker',
+            'file_path': 'timeline.md',
+            'content': 'EU submission and US submission schedule only.',
+            'merge_score': 2.0,
+        }
+        trace: dict[str, object] = {}
+
+        filtered = _filter_confident_exact_context_chunks(
+            [weaker, supported],
+            (
+                'After US and EU submission of Sarclisa, what were the consequences '
+                'of including an additional physical flow in the Netherlands in the manufacture?'
+            ),
+            selection_trace=trace,
+        )
+
+        assert filtered == [supported]
+        assert weaker['_trace_drop_reason'] == 'confident_exact_source_filter'
+        assert trace['filter_applied'] is True
+        assert trace['reason'] == 'confident_exact_source_filter'
+        assert trace['dropped_count'] == 1
+        assert trace['selected_file_path'] == 'sarclisa.md'
+        assert trace['support_score'] == 3.5
+        assert supported['exact_support_score'] == 3.5
+        assert 'exact_support_score' not in weaker

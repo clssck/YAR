@@ -57,6 +57,8 @@ from dotenv import load_dotenv
 from yar.tracing import TraceManager, noop_trace_manager, trace_sequence_preview
 from yar.utils import logger
 
+_TRUE_ENV_VALUES = frozenset({'1', 'true', 'yes', 'on'})
+
 # Suppress legacy wrapper deprecation warnings that remain necessary while
 # ragas.evaluate() in 0.4.x still expects legacy Metric/BaseRagasEmbeddings types.
 warnings.filterwarnings(
@@ -177,21 +179,13 @@ CONNECT_TIMEOUT_SECONDS = 180.0
 READ_TIMEOUT_SECONDS = 300.0
 TOTAL_TIMEOUT_SECONDS = 180.0
 
-# Anti-hedging prompt for evaluation - encourages confident answers instead of
-# "the context does not explicitly..." hedging that RAGAS scores as 0.0 relevance
 EVAL_USER_PROMPT = os.getenv(
     'EVAL_USER_PROMPT',
-    'Answer confidently and directly based on the provided context. '
-    'For lessons learned, key steps, best practices, or recommendations, answer only the exact requested item: '
-    'extract concise heading/action labels from the most relevant context and do not include background, examples, costs, rationale, or implementation details unless explicitly asked. '
-    'For list/count/enumeration questions, start by restating the requested subject using the user question wording, preserve source numbering, and include each listed item explicitly. '
-    'If the context has a numbered list, copy the list item labels and key sub-bullets closely instead of compressing them into broad prose. '
-    'For yes/no questions, start with "Yes" or "No" and immediately give one brief evidence-based sentence that cites or closely paraphrases the key supporting phrase from the context. '
-    'Never answer with only Yes or No. '
-    'Do not add your own caution, policy advice, or unsupported conditions. '
-    'If the context describes a pending question, requested feedback, or proposed next step, keep it pending and do not rewrite it as approval or endorsement. '
-    'Synthesize information across sources. Avoid phrases like "does not explicitly mention" '
-    'or "context does not detail". If information is partial, provide only the supported portion and stop there.',
+    'Answer the user question directly using only the retrieved context. '
+    'Keep the answer concise and focused on the requested subject. '
+    'Preserve names, numbers, dates, labels, and quoted wording exactly when they appear in context. '
+    'Do not add unsupported background, cautions, or assumptions. '
+    'If the retrieved context does not contain the answer, say that the available context is insufficient.',
 )
 
 EVAL_EVIDENCE_GROUNDING_PROMPT = (
@@ -199,17 +193,13 @@ EVAL_EVIDENCE_GROUNDING_PROMPT = (
     'Internally select the shortest exact context span(s) supporting each factual clause; '
     'preserve numbers, dates, table cells, row labels, and quoted wording exactly. '
     'Cite the supporting [n] when reference ids are present, and answer only from claims '
-    'that those spans or the surrounding chunk text directly support. '
-    'Do not use or mention benchmark ground_truth, expected_answer, or context_reference. '
-    'For binary feasibility, acceptability, or endorsement questions, start with Yes or No '
-    'only when the context itself contains a final approval or recommendation; otherwise '
-    'answer with pending or conditional wording.'
+    'that those spans or the surrounding chunk text directly support.'
 )
 
 
-# RAGAS AnswerRelevancy strictness - number of questions generated per answer
-# Lower = less strict (1-2), Higher = more strict (3-5). Default 3 often too harsh.
-EVAL_ANSWER_RELEVANCY_STRICTNESS = int(os.getenv('EVAL_ANSWER_RELEVANCY_STRICTNESS', '2'))
+# RAGAS AnswerRelevancy strictness - number of questions generated per answer.
+# Keep the RAGAS default so reported scores remain comparable with standard runs.
+EVAL_ANSWER_RELEVANCY_STRICTNESS = int(os.getenv('EVAL_ANSWER_RELEVANCY_STRICTNESS', '3'))
 
 
 def _is_nan(value: Any) -> bool:
@@ -261,130 +251,11 @@ def _calculate_ragas_score(metrics: dict[str, float]) -> float:
     return sum(metrics[metric_name] for metric_name in REQUIRED_METRIC_NAMES) / len(REQUIRED_METRIC_NAMES)
 
 
-def _normalize_metric_text(value: Any) -> str:
-    return ' '.join(re.findall(r'[a-z0-9]+', str(value or '').casefold()))
-
-
 def _strip_reference_citations(answer: str) -> str:
     """Remove bracketed numeric citation markers before metric scoring."""
     without_citations = re.sub(r'\s*\[(?:\d+(?:\s*,\s*\d+)*)\]', '', str(answer or ''))
     without_citation_spacing = re.sub(r'\s+([,.;:!?])', r'\1', without_citations)
     return ' '.join(without_citation_spacing.split())
-
-
-def _context_supports_reference(reference: str, contexts: list[str]) -> bool:
-    reference_text = _normalize_metric_text(reference)
-    if not reference_text:
-        return False
-    reference_tokens = set(reference_text.split())
-    for context in contexts:
-        context_text = _normalize_metric_text(context)
-        if not context_text:
-            continue
-        if reference_text in context_text:
-            return True
-        context_tokens = set(context_text.split())
-        if reference_tokens and len(reference_tokens & context_tokens) / len(reference_tokens) >= 0.6:
-            return True
-    return False
-
-
-def _answer_addresses_question(question: str, answer: str) -> bool:
-    stop_words = {
-        'what',
-        'which',
-        'when',
-        'where',
-        'who',
-        'should',
-        'would',
-        'based',
-        'lessons',
-        'learned',
-        'lesson',
-        'about',
-        'from',
-        'with',
-        'into',
-        'under',
-        'after',
-        'before',
-        'during',
-        'the',
-        'and',
-        'for',
-        'that',
-        'this',
-        'bear',
-        'mind',
-        'standard',
-        'duration',
-        'format',
-        'recommended',
-        'key',
-    }
-    question_tokens = [
-        token for token in _normalize_metric_text(question).split() if len(token) > 2 and token not in stop_words
-    ]
-    if not question_tokens:
-        return False
-    answer_tokens = set(_normalize_metric_text(answer).split())
-    if not answer_tokens:
-        return False
-    return len(set(question_tokens) & answer_tokens) / len(set(question_tokens)) >= 0.25
-
-
-def _has_substantive_answer_reference_match(answer_text: str, reference_text: str) -> bool:
-    if len(answer_text) < 20:
-        return False
-    stop_words = {
-        'and',
-        'are',
-        'for',
-        'from',
-        'into',
-        'that',
-        'the',
-        'this',
-        'with',
-        'would',
-        'yes',
-    }
-    answer_tokens = {token for token in answer_text.split() if len(token) > 2 and token not in stop_words}
-    return len(answer_tokens) >= 2 and (answer_text in reference_text or reference_text in answer_text)
-
-
-def _stabilize_benchmark_metrics(
-    question: str,
-    answer: str,
-    reference: str,
-    contexts: list[str],
-    metrics: dict[str, float],
-) -> dict[str, float]:
-    """Correct clearly false zero metrics when answer/reference/context fully agree."""
-    stabilized = dict(metrics)
-    answer_text = _normalize_metric_text(answer)
-    reference_text = _normalize_metric_text(reference)
-    context_support = _context_supports_reference(reference, contexts)
-    if (stabilized.get('context_recall') or 0.0) < 1.0 and context_support:
-        stabilized['context_recall'] = 1.0
-    if not answer_text or not reference_text:
-        return stabilized
-    answer_reference_match = (
-        answer_text == reference_text or answer_text in reference_text or reference_text in answer_text
-    )
-    if not answer_reference_match:
-        return stabilized
-
-    if stabilized.get('faithfulness') == 0.0 and context_support:
-        stabilized['faithfulness'] = 1.0
-    if stabilized.get('answer_relevance') == 0.0 and (
-        _answer_addresses_question(question, answer)
-        or answer_text == reference_text
-        or (context_support and _has_substantive_answer_reference_match(answer_text, reference_text))
-    ):
-        stabilized['answer_relevance'] = 1.0
-    return stabilized
 
 
 async def _collect_metric_verdict_traces(
@@ -450,6 +321,9 @@ def _coerce_skip_flag(value: Any) -> bool:
     return str(value).strip().lower() in {'1', 'true', 'yes', 'y'}
 
 
+_EXPORTED_SOURCE_NAME_RE = re.compile(r'^doc_[0-9a-f]{8,}_(?P<name>.+)$', re.IGNORECASE)
+
+
 def _normalize_document_identifier(value: Any) -> str | None:
     """Normalize document names and paths for retrieval matching."""
     if not isinstance(value, str):
@@ -468,6 +342,30 @@ def _normalize_document_identifier(value: Any) -> str | None:
     return candidate.casefold()
 
 
+def _document_identifier_variants(value: Any) -> set[str]:
+    """Return stable document-name variants for matching corpus exports to source files."""
+    normalized = _normalize_document_identifier(value)
+    if not normalized:
+        return set()
+
+    variants = {normalized}
+    stem = normalized.rsplit('.', 1)[0]
+    variants.add(stem)
+
+    match = _EXPORTED_SOURCE_NAME_RE.match(stem)
+    if match:
+        exported_stem = match.group('name').strip()
+        if exported_stem:
+            variants.add(exported_stem)
+
+    for candidate in tuple(variants):
+        compact = ''.join(ch for ch in candidate if ch.isalnum())
+        if compact:
+            variants.add(f'compact:{compact}')
+
+    return variants
+
+
 def _collect_expected_documents(source_documents: Any) -> dict[str, Any]:
     """Return display names and normalized identifiers for expected documents."""
     documents = source_documents if isinstance(source_documents, list) else []
@@ -475,9 +373,9 @@ def _collect_expected_documents(source_documents: Any) -> dict[str, Any]:
     identifiers: set[str] = set()
     for document in documents:
         if isinstance(document, str):
-            normalized = _normalize_document_identifier(document)
-            if normalized:
-                identifiers.add(normalized)
+            document_identifiers = _document_identifier_variants(document)
+            if document_identifiers:
+                identifiers.update(document_identifiers)
                 if document not in display_names:
                     display_names.append(document)
             continue
@@ -499,11 +397,11 @@ def _collect_expected_documents(source_documents: Any) -> dict[str, Any]:
         document_identifiers: set[str] = set()
         fallback_identifier = None
         for key in ('name', 'file_path', 'document_title', 'title', 'url'):
-            normalized = _normalize_document_identifier(document.get(key))
-            if not normalized:
+            document_variants = _document_identifier_variants(document.get(key))
+            if not document_variants:
                 continue
-            document_identifiers.add(normalized)
-            fallback_identifier = fallback_identifier or normalized
+            document_identifiers.update(document_variants)
+            fallback_identifier = fallback_identifier or sorted(document_variants)[0]
         identifiers.update(document_identifiers)
         if raw_display:
             if raw_display not in display_names:
@@ -548,24 +446,22 @@ def _extract_retrieved_documents(result: dict[str, Any]) -> list[dict[str, Any]]
             ),
             None,
         )
-        identifiers = {
-            normalized
-            for key in (
-                'file_path',
-                'document_title',
-                'file_name',
-                'document_name',
-                'source_file_path',
-                'source_file_name',
-                'name',
-                'title',
-            )
-            if (normalized := _normalize_document_identifier(record.get(key)))
-        }
+        identifiers: set[str] = set()
+        for key in (
+            'file_path',
+            'document_title',
+            'file_name',
+            'document_name',
+            'source_file_path',
+            'source_file_name',
+            'name',
+            'title',
+        ):
+            identifiers.update(_document_identifier_variants(record.get(key)))
         if not identifiers:
             fallback_identifier = _normalize_document_identifier(record.get('s3_key'))
             if fallback_identifier:
-                identifiers = {fallback_identifier}
+                identifiers = _document_identifier_variants(record.get('s3_key'))
                 display_name = display_name or record.get('s3_key')
         if not identifiers:
             continue
@@ -816,6 +712,75 @@ def _flatten_references_to_contexts_and_sources(
     return contexts, sources
 
 
+def _relationship_evidence_to_contexts_and_sources(
+    relationships: list[Any],
+    *,
+    limit: int = 4,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Flatten retrieved KG relation evidence into RAGAS contexts.
+
+    `/query` generation sees both KG relationships and text chunks. RAGAS should
+    evaluate against the same retrieved evidence, not only the chunk references.
+    Only extractive relation evidence spans are included here; relation summaries
+    without source-backed spans are intentionally excluded.
+    """
+    contexts: list[str] = []
+    sources: list[dict[str, Any]] = []
+    seen_contexts: set[str] = set()
+    if not isinstance(relationships, list) or limit <= 0:
+        return contexts, sources
+
+    for relation in relationships:
+        if not isinstance(relation, dict):
+            continue
+        evidence_spans = relation.get('evidence_spans')
+        if not isinstance(evidence_spans, list):
+            continue
+
+        src = str(relation.get('src_id') or relation.get('entity1') or '').strip()
+        tgt = str(relation.get('tgt_id') or relation.get('entity2') or '').strip()
+        predicate = str(relation.get('keywords') or relation.get('predicate') or 'related_to').strip()
+        meta = {
+            'reference_id': '',
+            'document_title': '',
+            'file_path': str(relation.get('file_path') or ''),
+            'context_type': 'relationship_evidence',
+        }
+        relation_label = f'{src} --{predicate}--> {tgt}' if src or tgt else predicate
+        for span_index, span in enumerate(evidence_spans):
+            span_text = str(span or '').strip()
+            if not span_text:
+                continue
+            context = f'Relationship: {relation_label}\nEvidence: {span_text}'
+            context = _context_with_source_label(context, relation, meta)
+            if context in seen_contexts:
+                continue
+            seen_contexts.add(context)
+            contexts.append(context)
+            sources.append({**meta, 'content_index': span_index})
+            if len(contexts) >= limit:
+                return contexts, sources
+    return contexts, sources
+
+
+def _prepend_unique_contexts(
+    prefix_contexts: list[str],
+    prefix_sources: list[dict[str, Any]],
+    contexts: list[str],
+    sources: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    combined_contexts: list[str] = []
+    combined_sources: list[dict[str, Any]] = []
+    seen_contexts: set[str] = set()
+    for context, source in [*zip(prefix_contexts, prefix_sources, strict=False), *zip(contexts, sources, strict=False)]:
+        if context in seen_contexts:
+            continue
+        seen_contexts.add(context)
+        combined_contexts.append(context)
+        combined_sources.append(source)
+    return combined_contexts, combined_sources
+
+
 def _trace_sources_summary(context_sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for source in context_sources:
@@ -851,169 +816,6 @@ def _trace_context_payload(
     return payload
 
 
-def _normalize_benchmark_answer(question: str, answer: str, references: list[Any]) -> str:
-    """Normalize unstable LiteLLM benchmark answers into source-backed benchmark phrasing."""
-    normalized_question = ' '.join((question or '').casefold().split())
-    reference_text = ' '.join(
-        ' '.join(str(ref.get('content') or ref.get('excerpt') or '').split())
-        for ref in (references if isinstance(references, list) else [])
-        if isinstance(ref, dict)
-    ).casefold()
-
-    if (
-        'shipping validation question' in normalized_question
-        and 'type c or b meeting' in normalized_question
-        and 'type c meeting' in reference_text
-    ):
-        return 'For biologics, the shipping validation question should be asked in a Type C meeting.'
-
-    if (
-        'first recommended step' in normalized_question
-        and 'technology issue' in normalized_question
-        and 'ad hoc meeting' in reference_text
-        and 'icmc team' in reference_text
-        and ('subject matter expert' in reference_text or 'subject mater expert' in reference_text)
-    ):
-        return (
-            'For a CMC technology issue, the first recommended step is: Best Practice 1/2 recommends '
-            'an ad hoc meeting with the iCMC team, internal only in case of collaboration, with extension '
-            'to Subject Matter Expert contributors.'
-        )
-
-    if 'correct descriptive syntax' in normalized_question and 'cmc risk' in normalized_question:
-        has_literal_template = re.search(
-            r'due to\s*(?:\.{3}|…)\s*the risk\s*(?:\.{3}|…)\s*could impact\s*(?:\.{3,4}|…{1,4})',
-            reference_text,
-        )
-        has_risk_impact_table = 'description of the risk and nature of the impact' in reference_text or (
-            'risk of event' in reference_text and 'impact:' in reference_text
-        )
-        if has_literal_template or has_risk_impact_table:
-            return (
-                'Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: '
-                'Due to ... the risk ... could impact ....'
-            )
-
-    if normalized_question.startswith('would you agree to change the storage condition') and (
-        (
-            'labelling working group' in reference_text
-            and ('nda submission' in reference_text or 'prior submission' in reference_text)
-        )
-        or (
-            'cmc recommends' in reference_text
-            and 'new storage conditions' in reference_text
-            and ('prior submission' in reference_text or 'initial submission' in reference_text)
-        )
-        or (
-            'change storage direction' in reference_text
-            and ('2 to 8' in reference_text or '2°c to 8°c' in reference_text)
-            and ('12-month' in reference_text or '12 months' in reference_text)
-        )
-    ):
-        return (
-            'Yes, CMC recommended changing the Fitusiran storage conditions '
-            'before submission while maintaining the submission date.'
-        )
-
-    if 'risk to proceed with the compliance gaps acceptable' in normalized_question and (
-        'low likelihood of affecting submission or approval' in reference_text
-        or ('low likelihood' in reference_text and 'annual testing at an external laboratory' in reference_text)
-    ):
-        return (
-            'Yes, the compliance gaps were assessed as having a low likelihood of affecting '
-            'submission or approval, with annual testing at an external laboratory as mitigation.'
-        )
-
-    if (
-        'lesson learned on comparability' in normalized_question
-        and 'provide the link to the material' in normalized_question
-        and 'prepare comparability protocol early' in reference_text
-    ):
-        return 'Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.'
-
-    if (
-        'strategy for filing the 20 mg pfp feasible' in normalized_question
-        and 'ask fda' in reference_text
-        and 'would be sufficient to support approval' in reference_text
-    ):
-        return (
-            'The proposal had many complexities that warranted FDA feedback, and the team planned '
-            'to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP '
-            'would be sufficient to support approval.'
-        )
-
-    if (
-        'format is recommended for transfer for cmc source documents' in normalized_question
-        and 'ctd structure' in reference_text
-    ):
-        return 'The recommended format is to organize uploaded CMC source documents according to the CTD structure.'
-
-    if '3 categories of lessons learned about serd' in normalized_question and all(
-        term in reference_text for term in ('governance', 'capabilities/culture', 'organization')
-    ):
-        return 'SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'
-
-    if (
-        'lesson learned about regulatory strategy' in normalized_question
-        and 'pre-ind' in normalized_question
-        and 'sarp' in normalized_question
-        and 'strategy of an early pre-ind should' in reference_text
-        and 'submitted without pre-ind' in reference_text
-    ):
-        return (
-            'For SARP regulatory pre-IND strategy, the lesson learned states that the strategy of an early '
-            'pre-IND should be targeted, or the IND should be submitted without pre-IND.'
-        )
-
-    if 'japan-specific activities' in normalized_question:
-        has_fma_activity = 'foreign manufacturer accreditation' in reference_text or 'managed fmas' in reference_text
-        has_jctd_activity = 'j-ctd' in reference_text and 'cddc' in reference_text and 'r-cmc' in reference_text
-        has_transfer_activity = (
-            'analytical transfer' in reference_text or 'analytical method transfer' in reference_text
-        ) and 'shipping validation' in reference_text
-        if has_fma_activity and has_jctd_activity and has_transfer_activity:
-            return (
-                'Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, '
-                'analytical method transfer to Japanese labs, shipping validation between the US and Japan, '
-                'J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, '
-                'stability, and sales limits.'
-            )
-
-    if (
-        'minimum information fields' in normalized_question
-        and 'batch analysis table' in normalized_question
-        and 'aav product' in normalized_question
-        and 'batch number' in reference_text
-        and 'batch size' in reference_text
-        and 'manufacturing site' in reference_text
-        and 'manufacturing date' in reference_text
-        and 'control methods' in reference_text
-        and 'acceptance criteria' in reference_text
-        and 'test results' in reference_text
-        and 'batch yield' in reference_text
-        and ('total vgs' in reference_text or 'total vector genomes' in reference_text)
-    ):
-        return (
-            'For an AAV product batch analysis table, batch number, batch size, manufacturing site, '
-            'manufacturing date, control methods, acceptance criteria and test results should be listed, '
-            'and batch yield by total vgs is reported for AAV DS batch analysis.'
-        )
-
-    if (
-        'defining the m3 strategy' in normalized_question
-        and 'level of detail' in normalized_question
-        and ('lcm' in reference_text or 'life cycle management' in reference_text)
-    ):
-        return 'The key point is to keep life cycle management (LCM) in mind.'
-
-    if 'standard duration of shipment to depot' in normalized_question and (
-        '1-3 month' in reference_text or '1-3 months' in reference_text
-    ):
-        return 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
-
-    return answer
-
-
 def _resolve_benchmark_query(question: str, test_case: dict[str, Any] | None) -> str:
     """Return the retrieval query used for benchmark calls."""
     if not test_case:
@@ -1023,14 +825,8 @@ def _resolve_benchmark_query(question: str, test_case: dict[str, Any] | None) ->
 
 
 def _build_eval_user_prompt(test_case: dict[str, Any] | None) -> str:
-    """Compose generation-only benchmark prompt invariants without changing retrieval payloads."""
-    prompt_parts = [EVAL_USER_PROMPT, EVAL_EVIDENCE_GROUNDING_PROMPT]
-    if test_case and test_case.get('retrieval_query') and test_case.get('question'):
-        prompt_parts.append(
-            'The query text may contain retrieval keywords; answer this benchmark question exactly: '
-            f'{test_case["question"]}'
-        )
-    return ' '.join(prompt_parts)
+    """Compose generic generation instructions without adding benchmark answers."""
+    return ' '.join([EVAL_USER_PROMPT, EVAL_EVIDENCE_GROUNDING_PROMPT])
 
 
 _REFERENCE_FOCUS_STOPWORDS = {
@@ -1103,11 +899,6 @@ def _references_from_chunks(
         phrase_hits = sum(1 for phrase in focus_phrases if phrase and phrase in text)
         numeric_hits = len({token for token in focus_tokens & text_tokens if any(char.isdigit() for char in token)})
         score = float(token_hits) + (3.0 * phrase_hits) + (2.0 * numeric_hits)
-        if {'risk', 'impact'} <= focus_tokens:
-            if 'description of the risk and nature of the impact' in text:
-                score += 6.0
-            elif 'risk of event' in text and 'impact:' in text:
-                score += 4.0
         return score, phrase_hits, token_hits
 
     scored_chunks: list[tuple[tuple[float, int, int], int, dict[str, Any]]] = []
@@ -1136,14 +927,32 @@ def _references_from_chunks(
     return references
 
 
-def _summarize_chunk(chunk: dict[str, Any]) -> dict[str, str]:
+def _summarize_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
     """Convert a chunk record into a compact diagnostic entry."""
-    return {
+    summary: dict[str, Any] = {
         'reference_id': str(chunk.get('reference_id') or ''),
         'chunk_id': str(chunk.get('chunk_id') or ''),
         'file_path': str(chunk.get('file_path') or ''),
         'excerpt': _preview_text(chunk.get('content', '')),
     }
+    for key in (
+        'source_type',
+        'retrieval_score',
+        'merge_score',
+        'query_overlap',
+        'priority_match',
+        'precise_focus_overlap',
+        'metadata_query_match',
+        'exact_phrase_match',
+        'duration_answer_match',
+        'impact_answer_match',
+        'stage_ranks',
+        'drop_reason',
+    ):
+        value = chunk.get(key)
+        if value is not None:
+            summary[key] = value
+    return summary
 
 
 def _pick_results_for_diagnostics(
@@ -1227,21 +1036,106 @@ def _render_case_diagnostics_markdown(payload: dict[str, Any]) -> str:
             lines.append(f'- Expected documents: {", ".join(case["expected_documents"])}')
         if case.get('retrieved_documents'):
             lines.append(f'- Retrieved documents (ordered): {", ".join(case["retrieved_documents"])}')
+        retrieval_status = case.get('retrieval_status')
+        if retrieval_status not in (None, 'success'):
+            lines.append(
+                f'- Retrieval status: `{retrieval_status}` '
+                f'message={case.get("retrieval_message", "")!r} '
+                f'failure_reason={case.get("retrieval_failure_reason", "")!r}'
+            )
         if case.get('diagnostic_error'):
             lines.extend(['', f'[diagnostic_error] {case["diagnostic_error"]}', ''])
             continue
 
         processing_info = case.get('processing_info', {})
-        if processing_info:
-            lines.extend(
-                [
-                    '',
-                    '### Retrieval metadata',
-                    '',
-                    f'- Keywords: HL={case.get("keywords", {}).get("high_level", [])} | LL={case.get("keywords", {}).get("low_level", [])}',
-                    f'- Processing info: {processing_info}',
-                ]
+        retrieval_trace = case.get('retrieval_trace', {})
+        vector_search = case.get('vector_search', {})
+        if processing_info or retrieval_trace or vector_search:
+            lines.extend(['', '### Retrieval metadata', ''])
+            keywords = case.get('keywords', {})
+            if isinstance(keywords, dict) and keywords:
+                lines.append(f'- Keywords: HL={keywords.get("high_level", [])} | LL={keywords.get("low_level", [])}')
+            if processing_info:
+                lines.append(f'- Processing info: {processing_info}')
+            if isinstance(retrieval_trace, dict) and retrieval_trace:
+                if 'total_hit_count' in retrieval_trace or 'zero_hits' in retrieval_trace:
+                    lines.append(
+                        '- Raw retrieval: '
+                        f'total_hits={retrieval_trace.get("total_hit_count")} '
+                        f'zero_hits={retrieval_trace.get("zero_hits")} '
+                        f'entities={retrieval_trace.get("entity_count")} '
+                        f'relations={retrieval_trace.get("relation_count")} '
+                        f'vector_chunks={retrieval_trace.get("vector_chunk_count")}'
+                    )
+                else:
+                    lines.append(
+                        '- Retrieval query terms: '
+                        f'LL={retrieval_trace.get("low_level_keywords_for_search", "")!r} '
+                        f'HL={retrieval_trace.get("high_level_keywords_for_search", "")!r} '
+                        f'exact_lookup={retrieval_trace.get("exact_chunk_lookup")}'
+                    )
+            if isinstance(vector_search, dict) and vector_search:
+                lines.append(
+                    '- Vector search: '
+                    f'exact_lookup={vector_search.get("exact_chunk_lookup")} '
+                    f'query={vector_search.get("chunk_search_query")!r} '
+                    f'raw={vector_search.get("raw_result_count")} '
+                    f'valid={vector_search.get("valid_chunk_count")} '
+                    f'failure={vector_search.get("failure_reason")!r} '
+                    f'fallback={vector_search.get("exact_fallback")}'
+                )
+        chunk_selection = case.get('chunk_selection', {})
+        if isinstance(chunk_selection, dict) and chunk_selection:
+            lines.append(
+                f'- Chunk selection: candidates={chunk_selection.get("candidate_count", 0)} '
+                f'selected={chunk_selection.get("selected_count", 0)} '
+                f'dropped={chunk_selection.get("dropped_count", 0)}'
             )
+            visible_group_decisions = chunk_selection.get('visible_group_decisions')
+            if isinstance(visible_group_decisions, dict) and visible_group_decisions:
+                lines.append(
+                    f'- Visible groups: filter_applied={visible_group_decisions.get("filter_applied", False)} '
+                    f'selected={visible_group_decisions.get("selected_group_count", 0)} '
+                    f'dropped={visible_group_decisions.get("dropped_group_count", 0)} '
+                    f'reason={visible_group_decisions.get("reason", "")}'
+                )
+        exact_context_filter = case.get('exact_context_filter', {})
+        if isinstance(exact_context_filter, dict) and exact_context_filter:
+            lines.append(
+                f'- Exact context filter: applied={exact_context_filter.get("filter_applied", False)} '
+                f'reason={exact_context_filter.get("reason", "")} '
+                f'dropped={exact_context_filter.get("dropped_count", 0)} '
+                f'selected_file={exact_context_filter.get("selected_file_path", "")}'
+            )
+        answer_shaping = case.get('answer_shaping', {})
+        if isinstance(answer_shaping, dict) and answer_shaping:
+            lines.append(
+                f'- Answer shaping: applied={answer_shaping.get("applied", False)} '
+                f'reasons={answer_shaping.get("reasons", [])}'
+            )
+        entity_context_selection = case.get('entity_context_selection', {})
+        if isinstance(entity_context_selection, dict) and entity_context_selection:
+            lines.append(
+                f'- Entity context: candidates={entity_context_selection.get("candidate_count", 0)} '
+                f'selected={entity_context_selection.get("selected_count", 0)} '
+                f'dropped={entity_context_selection.get("dropped_count", 0)}'
+            )
+        entity_truncation = case.get('entity_truncation', {})
+        if isinstance(entity_truncation, dict) and entity_truncation:
+            lines.append(
+                f'- Entity truncation: before={entity_truncation.get("entities_before", 0)} '
+                f'after={entity_truncation.get("entities_after", 0)} '
+                f'dropped_names={entity_truncation.get("entity_names_dropped", [])}'
+            )
+        merge_filter = case.get('merge_filter', {})
+        if isinstance(merge_filter, dict) and merge_filter:
+            lines.append(
+                f'- Merge filter: dropped={merge_filter.get("dropped_count", 0)} '
+                f'reasons={merge_filter.get("reason_counts", {})}'
+            )
+        merge_drop_trace = case.get('merge_drop_trace', [])
+        if isinstance(merge_drop_trace, list):
+            lines.append(f'- Merge drop trace entries: {len(merge_drop_trace)}')
 
         lines.extend(
             ['', '### Answer', '', case.get('answer', ''), '', '### Ground truth', '', case.get('ground_truth', '')]
@@ -1332,10 +1226,15 @@ class RAGEvaluator:
         self.case_mode_overrides_source = case_mode_overrides_source
         self.eval_run_id = _resolve_eval_run_id(eval_run_id)
         # Eval reaches the API via POST /query, so the API-side `app.query`
-        # span is the only trace we want. Force a no-op manager here so the
-        # eval process never emits its own spans even if YAR_TRACE_ENABLED
-        # leaks in from the parent shell.
-        self.tracing = noop_trace_manager(default_project='yar-eval')
+        # span remains canonical. Emit eval.case spans only when explicitly
+        # requested so Phoenix can link evaluation rows back to API traces
+        # without letting a parent shell's YAR_TRACE_ENABLED change defaults.
+        eval_trace_enabled = os.getenv('YAR_EVAL_TRACE_ENABLED', '').strip().casefold() in _TRUE_ENV_VALUES
+        self.tracing = (
+            TraceManager.from_env(default_project='yar-eval', enabled_by_default=True)
+            if eval_trace_enabled
+            else noop_trace_manager(default_project='yar-eval')
+        )
 
         self.eval_model = None
         self.eval_embedding_model = None
@@ -1624,10 +1523,18 @@ class RAGEvaluator:
 
         return normalized_cases
 
-    def _request_headers(self) -> dict[str, str]:
+    def _request_headers(self, *, case_number: int | None = None) -> dict[str, str]:
         """Return request headers for YAR API calls."""
+        headers: dict[str, str] = {}
         api_key = os.getenv('YAR_API_KEY')
-        return {'X-API-Key': api_key} if api_key else {}
+        if api_key:
+            headers['X-API-Key'] = api_key
+        eval_run_id = str(getattr(self, 'eval_run_id', '') or '').strip()
+        if eval_run_id:
+            headers['X-Session-Id'] = eval_run_id
+            if case_number is not None:
+                headers['X-YAR-Trace-Tags'] = f'eval_run:{eval_run_id},eval_case:{case_number}'
+        return headers
 
     def _build_query_payload(
         self,
@@ -1649,7 +1556,7 @@ class RAGEvaluator:
             'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'true').lower() == 'true',
             'enable_bm25_fusion': os.getenv('EVAL_ENABLE_BM25_FUSION', 'true').lower() == 'true',
             'bm25_weight': float(os.getenv('EVAL_BM25_WEIGHT', '0.3')),
-            'disable_cache': os.getenv('EVAL_DISABLE_CACHE', 'false').lower() == 'true',
+            'disable_cache': os.getenv('EVAL_DISABLE_CACHE', 'true').lower() == 'true',
         }
         if include_response_type:
             payload['response_type'] = 'Single Paragraph'
@@ -1699,17 +1606,29 @@ class RAGEvaluator:
         endpoint: str,
         payload: dict[str, Any],
         client: httpx.AsyncClient,
+        *,
+        case_number: int | None = None,
     ) -> dict[str, Any]:
         """POST a query payload to the YAR API and return the JSON response."""
         try:
-            headers = self._request_headers()
+            headers = self._request_headers(case_number=case_number)
             response = await client.post(
                 f'{self.rag_api_url}{endpoint}',
                 json=payload,
                 headers=headers or None,
             )
             response.raise_for_status()
-            return response.json()
+            payload_json = response.json()
+            if isinstance(payload_json, dict):
+                trace_id = response.headers.get('x-yar-trace-id')
+                span_id = response.headers.get('x-yar-span-id')
+                if trace_id:
+                    payload_json['_trace_id'] = trace_id
+                    payload_json['_span_id'] = span_id or ''
+                    payload_json['_trace_project'] = os.getenv('YAR_TRACE_PROJECT') or os.getenv(
+                        'PHOENIX_PROJECT_NAME', 'yar-app'
+                    )
+            return payload_json
         except httpx.ConnectError as e:
             raise Exception(
                 f'Cannot connect to YAR API at {self.rag_api_url}\n'
@@ -1731,6 +1650,8 @@ class RAGEvaluator:
         question: str,
         client: httpx.AsyncClient,
         test_case: dict[str, Any] | None = None,
+        *,
+        case_number: int | None = None,
     ) -> dict[str, Any]:
         """
         Generate a full RAG response by calling the YAR API.
@@ -1743,17 +1664,23 @@ class RAGEvaluator:
         Returns:
             Dictionary with answer text and retrieved context chunks.
         """
+        if case_number is None and test_case:
+            raw_case_number = test_case.get('test_number')
+            case_number = int(raw_case_number) if raw_case_number is not None else None
         retrieval_question = _resolve_benchmark_query(question, test_case)
         query_payload = self._build_query_payload(retrieval_question, test_case, include_response_type=True)
-        result = await self._post_query('/query', query_payload, client)
+        result = await self._post_query('/query', query_payload, client, case_number=case_number)
 
         answer = result.get('response', 'No response generated')
         references = result.get('references', [])
+        relationship_contexts: list[str] = []
+        relationship_sources: list[dict[str, Any]] = []
         if test_case and test_case.get('retrieval_query'):
             retrieval_result = await self._post_query(
                 '/query/data',
                 self._build_query_payload(retrieval_question, test_case, include_response_type=False),
                 client,
+                case_number=case_number,
             )
             retrieval_data = retrieval_result.get('data', {}) if isinstance(retrieval_result, dict) else {}
             if isinstance(retrieval_data, dict):
@@ -1766,7 +1693,7 @@ class RAGEvaluator:
                 chunk_references = _references_from_chunks(
                     retrieval_data.get('chunks'),
                     focus_terms=focus_terms,
-                    limit=2,
+                    limit=int(os.getenv('EVAL_CONTEXT_REFERENCE_LIMIT', '4')),
                 )
                 if chunk_references:
                     references = chunk_references
@@ -1774,8 +1701,19 @@ class RAGEvaluator:
                     query_data_references = retrieval_data.get('references')
                     if isinstance(query_data_references, list) and query_data_references:
                         references = query_data_references
-        answer = _normalize_benchmark_answer(question=question, answer=str(answer), references=references)
+                relationship_contexts, relationship_sources = _relationship_evidence_to_contexts_and_sources(
+                    retrieval_data.get('relationships'),
+                    limit=int(os.getenv('EVAL_RELATION_CONTEXT_LIMIT', '4')),
+                )
+        answer = str(answer)
         contexts, context_sources = _flatten_references_to_contexts_and_sources(references)
+        if relationship_contexts:
+            contexts, context_sources = _prepend_unique_contexts(
+                relationship_contexts,
+                relationship_sources,
+                contexts,
+                context_sources,
+            )
 
         if self.debug_mode:
             logger.info('[DEBUG] Query: %s', question[:100])
@@ -1790,10 +1728,20 @@ class RAGEvaluator:
                 if len(contexts) > 3:
                     logger.info('[DEBUG] ... and %d more contexts', len(contexts) - 3)
 
+        api_trace_id = result.get('_trace_id')
+        api_span_id = result.get('_span_id')
+        api_trace_project = result.get('_trace_project')
         return {
             'answer': answer,
             'contexts': contexts,
             'context_sources': context_sources,
+            'trace_id': api_trace_id,
+            'span_id': api_span_id,
+            'trace_project': api_trace_project,
+            'api_trace_id': api_trace_id,
+            'api_span_id': api_span_id,
+            'api_trace_project': api_trace_project,
+            'metadata': result.get('metadata', {}) if isinstance(result.get('metadata'), dict) else {},
         }
 
     async def evaluate_retrieval_case(
@@ -1814,6 +1762,7 @@ class RAGEvaluator:
                     '/query/data',
                     self._build_query_payload(retrieval_question, test_case, include_response_type=False),
                     client,
+                    case_number=case_number,
                 )
                 if result.get('status') not in {None, 'success'}:
                     raise Exception(result.get('message', 'Retrieval query failed'))
@@ -2057,7 +2006,19 @@ class RAGEvaluator:
 
             # Stage 1: Generate RAG response
             try:
-                rag_response = await self.generate_rag_response(question=question, client=client, test_case=test_case)
+                rag_response = await self.generate_rag_response(
+                    question=question,
+                    client=client,
+                    test_case=test_case,
+                    case_number=case_number,
+                )
+                trace_span.set_attributes(
+                    {
+                        'api.trace_id': rag_response.get('api_trace_id'),
+                        'api.span_id': rag_response.get('api_span_id'),
+                        'api.trace_project': rag_response.get('api_trace_project'),
+                    }
+                )
             except Exception as e:
                 logger.error('Error generating response for test %s: %s', case_number, str(e))
                 progress_counter['completed'] += 1
@@ -2153,14 +2114,8 @@ class RAGEvaluator:
 
                     raw_metrics = _extract_metrics(scores_row)
                     raw_ragas_score = _calculate_ragas_score(raw_metrics)
-                    metrics = _stabilize_benchmark_metrics(
-                        question=question,
-                        answer=eval_answer,
-                        reference=str(ragas_reference),
-                        contexts=retrieved_contexts,
-                        metrics=raw_metrics,
-                    )
-                    ragas_score = _calculate_ragas_score(metrics)
+                    metrics = raw_metrics
+                    ragas_score = raw_ragas_score
                     result_status = 'success' if _has_complete_metrics(metrics) else 'incomplete'
                     trace_span.set_attributes(
                         {
@@ -2190,8 +2145,17 @@ class RAGEvaluator:
                         'ragas_score': round(ragas_score, 4) if not _is_nan(ragas_score) else float('nan'),
                         'status': result_status,
                         'timestamp': datetime.now().isoformat(),
+                        'trace_id': rag_response.get('trace_id'),
+                        'span_id': rag_response.get('span_id'),
+                        'trace_project': rag_response.get('trace_project'),
+                        'api_trace_id': rag_response.get('api_trace_id'),
+                        'api_span_id': rag_response.get('api_span_id'),
+                        'api_trace_project': rag_response.get('api_trace_project'),
+                        'evaluated_answer': rag_response['answer'],
+                        'evaluated_contexts': retrieved_contexts,
+                        'evaluated_context_sources': rag_response.get('context_sources', []),
+                        'evaluated_metadata': rag_response.get('metadata', {}),
                     }
-
                     if result_status == 'incomplete':
                         result['warning'] = (
                             'RAGAS returned incomplete or NaN metrics; excluding this case from aggregate success metrics.'
@@ -2214,6 +2178,9 @@ class RAGEvaluator:
                         'ragas_score': 0,
                         'status': 'error',
                         'timestamp': datetime.now().isoformat(),
+                        'api_trace_id': rag_response.get('api_trace_id'),
+                        'api_span_id': rag_response.get('api_span_id'),
+                        'api_trace_project': rag_response.get('api_trace_project'),
                     }
                     return self._finalize_trace_result(result, trace_span, status='ragas_error')
                 finally:
@@ -2298,8 +2265,9 @@ class RAGEvaluator:
                 'timestamp',
                 'trace_id',
                 'span_id',
+                'api_trace_id',
+                'api_span_id',
             ]
-
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
 
@@ -2320,6 +2288,8 @@ class RAGEvaluator:
                         'timestamp': result.get('timestamp', ''),
                         'trace_id': result.get('trace_id', ''),
                         'span_id': result.get('span_id', ''),
+                        'api_trace_id': result.get('api_trace_id', ''),
+                        'api_span_id': result.get('api_span_id', ''),
                     }
                 )
 
@@ -2514,13 +2484,33 @@ class RAGEvaluator:
         requested_payload = self._build_query_payload(retrieval_question, test_case, include_response_type=False)
         requested_query_mode = str(requested_payload.get('mode', self.query_mode))
         try:
-            answer_result = await self.generate_rag_response(question=question, client=client, test_case=test_case)
+            evaluated_contexts = result.get('evaluated_contexts')
+            evaluated_context_sources = result.get('evaluated_context_sources')
+            if isinstance(evaluated_contexts, list):
+                answer_result = {
+                    'answer': result.get('evaluated_answer', ''),
+                    'contexts': evaluated_contexts,
+                    'context_sources': evaluated_context_sources if isinstance(evaluated_context_sources, list) else [],
+                }
+            else:
+                answer_result = await self.generate_rag_response(
+                    question=question,
+                    client=client,
+                    test_case=test_case,
+                    case_number=case_number,
+                )
+            evaluated_metadata = result.get('evaluated_metadata')
+            answer_metadata = (
+                evaluated_metadata if isinstance(evaluated_metadata, dict) else answer_result.get('metadata', {})
+            )
+            if not isinstance(answer_metadata, dict):
+                answer_metadata = {}
             ragas_contexts = answer_result.get('contexts', [])
             ragas_context_sources = answer_result.get('context_sources', [])
             ragas_reference = str(test_case.get('context_reference') or test_case.get('ground_truth') or '')
-            retrieval_result = await self._post_query('/query/data', requested_payload, client)
-            if retrieval_result.get('status') not in {None, 'success'}:
-                raise Exception(retrieval_result.get('message', 'Retrieval query failed'))
+            retrieval_result = await self._post_query('/query/data', requested_payload, client, case_number=case_number)
+            retrieval_status = retrieval_result.get('status') if isinstance(retrieval_result, dict) else None
+            retrieval_message = retrieval_result.get('message', '') if isinstance(retrieval_result, dict) else ''
 
             expected_documents = _collect_expected_documents(test_case.get('source_documents'))
             retrieved_documents = _extract_retrieved_documents(retrieval_result)
@@ -2539,6 +2529,10 @@ class RAGEvaluator:
                 )
                 requested_query_mode = str(metadata.get('requested_query_mode') or requested_query_mode)
 
+            retrieval_trace = metadata.get('retrieval', {}) if isinstance(metadata, dict) else {}
+            vector_search = metadata.get('vector_search', {}) if isinstance(metadata, dict) else {}
+            if not vector_search and isinstance(retrieval_trace, dict):
+                vector_search = retrieval_trace.get('vector_search', {}) or {}
             verdict_traces = await _collect_metric_verdict_traces(
                 llm=getattr(self, 'eval_llm', None),
                 question=question,
@@ -2559,7 +2553,13 @@ class RAGEvaluator:
                 'trace_id': result.get('trace_id'),
                 'span_id': result.get('span_id'),
                 'trace_project': result.get('trace_project'),
-                'answer': answer_result.get('answer', ''),
+                'api_trace_id': result.get('api_trace_id'),
+                'api_span_id': result.get('api_span_id'),
+                'api_trace_project': result.get('api_trace_project'),
+                'retrieval_status': retrieval_status,
+                'retrieval_message': retrieval_message,
+                'retrieval_failure_reason': metadata.get('failure_reason', '') if isinstance(metadata, dict) else '',
+                'answer': result.get('evaluated_answer') or answer_result.get('answer', ''),
                 'ground_truth': test_case.get('ground_truth', ''),
                 'ragas_reference': ragas_reference,
                 'ragas_contexts': ragas_contexts,
@@ -2571,6 +2571,24 @@ class RAGEvaluator:
                 'retrieval_metrics': retrieval_metrics,
                 'keywords': metadata.get('keywords', {}) if isinstance(metadata, dict) else {},
                 'processing_info': metadata.get('processing_info', {}) if isinstance(metadata, dict) else {},
+                'chunk_selection': metadata.get('chunk_selection', {}) if isinstance(metadata, dict) else {},
+                'exact_context_filter': (
+                    answer_metadata.get('exact_context_filter')
+                    or (metadata.get('exact_context_filter', {}) if isinstance(metadata, dict) else {})
+                ),
+                'answer_shaping': (
+                    answer_metadata.get('answer_shaping')
+                    or (metadata.get('answer_shaping', {}) if isinstance(metadata, dict) else {})
+                ),
+                'group_filter': metadata.get('group_filter', {}) if isinstance(metadata, dict) else {},
+                'entity_context_selection': metadata.get('entity_context_selection', {})
+                if isinstance(metadata, dict)
+                else {},
+                'entity_truncation': metadata.get('entity_truncation', {}) if isinstance(metadata, dict) else {},
+                'merge_filter': metadata.get('merge_filter', {}) if isinstance(metadata, dict) else {},
+                'merge_drop_trace': metadata.get('merge_drop_trace', []) if isinstance(metadata, dict) else [],
+                'retrieval_trace': retrieval_trace if isinstance(retrieval_trace, dict) else {},
+                'vector_search': vector_search if isinstance(vector_search, dict) else {},
                 'reference_previews': [
                     _summarize_reference(reference)
                     for reference in (references if isinstance(references, list) else [])[:5]
@@ -2593,6 +2611,9 @@ class RAGEvaluator:
                 'trace_id': result.get('trace_id'),
                 'span_id': result.get('span_id'),
                 'trace_project': result.get('trace_project'),
+                'api_trace_id': result.get('api_trace_id'),
+                'api_span_id': result.get('api_span_id'),
+                'api_trace_project': result.get('api_trace_project'),
                 'diagnostic_error': str(exc),
             }
 
@@ -2891,8 +2912,8 @@ async def main():
       EVAL_ENABLE_BM25_FUSION     Enable BM25 fusion: vector + BM25 search (default: true)
       EVAL_BM25_WEIGHT            BM25 weight for fusion 0.0-1.0 (default: 0.3)
       EVAL_DISABLE_CACHE          Disable keyword/query cache during evaluation (default: true)
-      EVAL_USER_PROMPT            Custom prompt for anti-hedging behavior
-      EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 2)
+      EVAL_USER_PROMPT            Custom prompt for evaluation answer style
+      EVAL_ANSWER_RELEVANCY_STRICTNESS  RAGAS strictness 1-5 (default: 3)
       YAR_API_KEY                 API key for YAR authentication (optional)
       YAR_EVAL_RUN_ID            Trace/evaluation run grouping ID (optional)
                 """,

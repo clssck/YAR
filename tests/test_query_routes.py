@@ -134,6 +134,61 @@ class TestHelperFunctions:
         assert result == 'Alpha is supported [2], and beta is supported [5].'
         assert '### References' not in result
 
+    def test_normalize_query_response_text_collapses_duplicate_inline_ids(self):
+        """Response cleanup should collapse repeated adjacent citation markers."""
+        from yar.api.routers.query_routes import _normalize_query_response_text
+
+        text = 'Scope was unclear [1][1], and responsibilities overlapped [2] [2].'
+
+        result = _normalize_query_response_text(text, keep_inline_citations=True)
+
+        assert result == 'Scope was unclear [1], and responsibilities overlapped [2].'
+
+    def test_normalize_query_response_text_unwraps_markdown_citations(self):
+        """Response cleanup should canonicalize emphasized inline IDs."""
+        from yar.api.routers.query_routes import _normalize_query_response_text
+
+        text = 'Scope was unclear *[1]*, and responsibilities overlapped **[2]**.'
+
+        result = _normalize_query_response_text(text, keep_inline_citations=True)
+
+        assert result == 'Scope was unclear [1], and responsibilities overlapped [2].'
+
+    def test_filter_references_for_answer_support_trims_irrelevant_chunk_content(self):
+        """Answer-support filtering keeps direct support while dropping same-file distractors."""
+        from yar.api.routers.query_routes import _filter_references_for_answer_support
+
+        references = [
+            {
+                'reference_id': '1',
+                'file_path': 'sarclisa.pdf',
+                'content': [
+                    'CMC team page with launch quotes and guests.',
+                    'Sarclisa has two single-use vial presentations: 500 mg/25 mL and 100 mg/5 mL.',
+                    'Governance timeline with boards and launch readiness.',
+                ],
+            },
+            {
+                'reference_id': 'kg-e-1',
+                'file_path': 'sarclisa.pdf',
+                'content': ['Entity: Sarclisa. Description: first antibody approved by FDA.'],
+            },
+        ]
+
+        filtered = _filter_references_for_answer_support(
+            references,
+            response_text='Sarclisa has two single-use vial presentations: 500 mg/25 mL and 100 mg/5 mL [1].',
+            query='What is the presentation of Sarclisa (isatuximab)?',
+        )
+
+        assert filtered == [
+            {
+                'reference_id': '1',
+                'file_path': 'sarclisa.pdf',
+                'content': ['Sarclisa has two single-use vial presentations: 500 mg/25 mL and 100 mg/5 mL.'],
+            }
+        ]
+
     @pytest.mark.asyncio
     async def test_attach_presigned_urls_ignores_failures(self):
         """Presign failures should stay non-fatal and preserve other URLs."""
@@ -156,6 +211,70 @@ class TestHelperFunctions:
 
         assert enriched[0]['presigned_url'] == 'https://example.test/alpha.pdf'
         assert 'presigned_url' not in enriched[1]
+
+    def test_knowledge_graph_reference_items_exposes_source_backed_evidence(self):
+        """KG relationship evidence shown to generation should also be reference-visible."""
+        from yar.api.routers.query_routes import _knowledge_graph_reference_items
+
+        data = {
+            'relationships': [
+                {
+                    'src_id': 'Phexxi',
+                    'tgt_id': 'Market Access',
+                    'keywords': 'depends on',
+                    'file_path': 'launch.md',
+                    'evidence_spans': [
+                        'Commercial launch depends on market-access readiness.',
+                        'Commercial launch depends on market-access readiness.',
+                    ],
+                }
+            ],
+            'entities': [
+                {
+                    'entity_name': 'Phexxi',
+                    'entity_type': 'Product',
+                    'description': 'A named launch product in the source context.',
+                    'file_path': 'product.md',
+                }
+            ],
+        }
+
+        references = _knowledge_graph_reference_items(data, include_content=True)
+
+        assert [ref['reference_id'] for ref in references] == ['kg-r-1', 'kg-e-2']
+        assert references[0]['file_path'] == 'launch.md'
+        assert references[0]['content'] == [
+            'Relationship: Phexxi --depends on--> Market Access Evidence: Commercial launch depends on market-access readiness.'
+        ]
+        assert references[1]['content'] == [
+            'Entity: Phexxi (Product) Description: A named launch product in the source context.'
+        ]
+
+    def test_append_knowledge_graph_references_preserves_existing_reference_payload(self):
+        """Appending KG references must not mutate caller-owned references."""
+        from yar.api.routers.query_routes import _append_knowledge_graph_references
+
+        original = [{'reference_id': '1', 'file_path': 'chunk.md'}]
+        data = {
+            'entities': [
+                {
+                    'entity_name': 'Alpha',
+                    'description': 'Alpha is explicitly described in KG context.',
+                }
+            ]
+        }
+
+        references = _append_knowledge_graph_references(
+            original,
+            data,
+            include_content=False,
+        )
+
+        assert original == [{'reference_id': '1', 'file_path': 'chunk.md'}]
+        assert references[0] == original[0]
+        assert references[1]['reference_id'] == 'kg-e-1'
+        assert references[1]['excerpt'] == 'Entity: Alpha Description: Alpha is explicitly described in KG context.'
+        assert 'content' not in references[1]
 
 
 # =============================================================================
@@ -240,7 +359,7 @@ class TestQueryRequestModel:
             top_k=5,
             enable_bm25_fusion=True,
             bm25_weight=0.65,
-            entity_filter='Fitusiran',
+            entity_filter='Product A',
         )
         param = req.to_query_params(is_stream=False)
         assert param.mode == 'local'
@@ -248,7 +367,7 @@ class TestQueryRequestModel:
         assert param.stream is False
         assert param.enable_bm25_fusion is True
         assert param.bm25_weight == 0.65
-        assert param.entity_filter == 'Fitusiran'
+        assert param.entity_filter == 'Product A'
 
 
 # =============================================================================

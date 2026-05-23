@@ -84,7 +84,19 @@ class TestAnalyzeQueryIntent:
         intent = analyze_query_intent('What are the 3 categories of lessons learned about chemistry?')
 
         assert intent['kind'] == 'enumeration'
-        assert intent['recommended_mode'] == 'naive'
+        assert intent['recommended_mode'] == 'hybrid'
+
+    def test_mabel_dose_range_query_routes_to_mix_evidence(self) -> None:
+        intent = analyze_query_intent('What is the dose-ranging recommended by the MABEL approach?')
+
+        assert intent['kind'] == 'single_fact'
+        assert intent['recommended_mode'] == 'mix'
+
+    def test_project_technology_issue_recommended_step_keeps_mix_mode(self) -> None:
+        intent = analyze_query_intent('What is the first recommended step for resolving a technology issue?')
+
+        assert intent['kind'] == 'mitigation'
+        assert intent['recommended_mode'] == 'mix'
 
     def test_main_driver_query_routes_to_exact_chunk_lookup(self) -> None:
         intent = analyze_query_intent('What are the main drivers behind the device strategy proposal?')
@@ -117,6 +129,33 @@ class TestAnalyzeQueryIntent:
         assert intent['per_document_limit'] == 3
         assert intent['allow_single_document_expansion'] is True
         assert intent['recommended_mode'] == 'mix'
+
+    def test_significance_project_management_queries_expand_retrieval_budget(self) -> None:
+        intent = analyze_query_intent(
+            'What is the significance of the approval timeline for Product X in project management?'
+        )
+
+        assert intent['kind'] == 'consequence'
+        assert intent['recommended_chunk_limit'] == 8
+        assert intent['per_document_limit'] == 3
+        assert intent['allow_single_document_expansion'] is True
+        assert intent['recommended_mode'] == 'mix'
+
+    def test_standalone_significance_queries_expand_retrieval_budget(self) -> None:
+        intent = analyze_query_intent('What is the significance of the approval decision?')
+
+        assert intent['kind'] == 'consequence'
+        assert intent['recommended_chunk_limit'] == 6
+        assert intent['per_document_limit'] == 2
+        assert intent['allow_single_document_expansion'] is True
+        assert intent['recommended_mode'] == 'mix'
+
+    def test_prerequisite_before_and_since_do_not_force_comparison(self) -> None:
+        prerequisite_intent = analyze_query_intent('What must be completed before releasing the package?')
+        causal_intent = analyze_query_intent('What risks changed since the supplier review failed?')
+
+        assert prerequisite_intent['kind'] != 'comparison'
+        assert causal_intent['kind'] != 'comparison'
 
     def test_intent_profile_always_has_required_keys(self) -> None:
         # Every branch must return the same shape; downstream code reads these unconditionally.

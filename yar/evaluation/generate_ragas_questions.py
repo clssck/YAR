@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import random
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,9 @@ load_dotenv(REPO_ROOT / '.env', override=False)
 DEFAULT_PROJECT = 'ragas_generated_real_source_docs'
 DEFAULT_CONTEXT = (
     'Generate realistic, answerable RAG evaluation questions from the provided source chunks. '
+    'Questions must be self-contained for retrieval: include the source document title, session, '
+    'project, product, section, or another distinctive anchor visible in the chunk. Do not write '
+    'context-dependent questions such as "in the provided context", "this document", or "the passage". '
     'Questions should be independent of the original hand-written benchmark and must be answerable '
     'from the reference contexts.'
 )
@@ -175,6 +179,66 @@ def _normalize_for_match(value: Any) -> str:
     return ' '.join(str(value or '').casefold().split())
 
 
+_SOURCE_ANCHOR_STOPWORDS = frozenset(
+    {
+        'and',
+        'canonical',
+        'doc',
+        'document',
+        'final',
+        'for',
+        'learned',
+        'learning',
+        'lesson',
+        'lessons',
+        'outcome',
+        'processed',
+        'session',
+        'source',
+        'the',
+    }
+)
+
+
+def _source_title_from_path(source_document: str) -> str:
+    name = Path(source_document).name
+    name = re.sub(r'^doc_[0-9a-f]{32}_', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\.canonical\.md$|\.processed\.md$|\.[^.]+$', '', name, flags=re.IGNORECASE)
+    return name.replace('_', ' ').strip()
+
+
+def _source_anchor_terms(source_title: str) -> set[str]:
+    tokens = re.findall(r'[a-z0-9]+', source_title.casefold())
+    return {token for token in tokens if token not in _SOURCE_ANCHOR_STOPWORDS and (token.isdigit() or len(token) >= 4)}
+
+
+def _question_mentions_source_anchor(question: str, source_title: str) -> bool:
+    question_terms = set(re.findall(r'[a-z0-9]+', question.casefold()))
+    anchor_terms = _source_anchor_terms(source_title)
+    return not anchor_terms or bool(question_terms & anchor_terms)
+
+
+def _clean_context_dependent_question(question: str) -> str:
+    cleaned = re.sub(r'\b(?:in|from|based on)\s+the\s+provided\s+context\b', '', question, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\b(?:according to|in)\s+the\s+passage\b', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned[:1].lower() + cleaned[1:] if cleaned[:1].isupper() else cleaned
+
+
+def _anchor_question_to_sources(question: str, source_documents: Sequence[str]) -> str:
+    titles = [_source_title_from_path(source) for source in source_documents]
+    titles = [title for title in titles if title]
+    if not titles:
+        return question
+    if all(_question_mentions_source_anchor(question, title) for title in titles[:2]):
+        return question
+
+    cleaned_question = _clean_context_dependent_question(question)
+    if len(titles) == 1:
+        return f'In the {titles[0]} document, {cleaned_question}'
+    return f'Across the {titles[0]} and {titles[1]} documents, {cleaned_question}'
+
+
 def infer_source_documents(reference_contexts: Sequence[str], source_chunks: Sequence[SourceChunk]) -> list[str]:
     """Infer source documents for generated samples by matching contexts to input chunks."""
     matched: list[str] = []
@@ -210,18 +274,21 @@ def build_eval_cases_from_testset_rows(
             continue
 
         source_documents = infer_source_documents(reference_contexts, source_chunks)
+        anchored_question = _anchor_question_to_sources(question, source_documents)
         case: dict[str, Any] = {
             'id': f'ragas-generated-{index:03d}',
-            'question': question,
+            'question': anchored_question,
             'ground_truth': reference,
             'context_reference': reference,
-            'retrieval_query': question,
+            'retrieval_query': anchored_question,
             'retrieval_mode': retrieval_mode,
             'source_documents': source_documents,
             'project': project,
             'generated_by': 'ragas.testset.TestsetGenerator',
             'synthesizer_name': row.get('synthesizer_name') or '',
         }
+        if anchored_question != question:
+            case['original_question'] = question
         if reference_contexts:
             case['reference_contexts'] = reference_contexts
         if row.get('persona_name'):
@@ -343,16 +410,20 @@ def generate_testset_rows(
     except ImportError as exc:
         raise ImportError('langchain-core is required for RAGAS question generation.') from exc
 
-    documents = [
-        Document(
-            page_content=chunk.content,
-            metadata={
-                'source': chunk.source_document,
-                'chunk_order_index': chunk.chunk_order_index,
-            },
+    documents = []
+    for chunk in source_chunks:
+        source_title = _source_title_from_path(chunk.source_document)
+        page_content = f'Source document: {source_title}\n\n{chunk.content}' if source_title else chunk.content
+        documents.append(
+            Document(
+                page_content=page_content,
+                metadata={
+                    'source': chunk.source_document,
+                    'source_title': source_title,
+                    'chunk_order_index': chunk.chunk_order_index,
+                },
+            )
         )
-        for chunk in source_chunks
-    ]
     generator, llm_model, embedding_model = _build_ragas_generator(llm_context)
     testset = generator.generate_with_chunks(
         chunks=documents,

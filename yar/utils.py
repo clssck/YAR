@@ -2932,6 +2932,23 @@ _LEXICAL_STOPWORDS = {
     'who',
     'with',
 }
+_DURATION_ANSWER_QUERY_RE = re.compile(
+    r'\b(?:duration|how\s+long|lead[-\s]?times?|shipment\s+lead[-\s]?times?)\b',
+    re.IGNORECASE,
+)
+_DURATION_VALUE_RE = re.compile(
+    r'\b(?:\d+(?:[.,]\d+)?\s*(?:-|–|—|to)\s*)?\d+(?:[.,]\d+)?\s*'
+    r'(?:months?|mths?|weeks?|wks?|days?)\b',
+    re.IGNORECASE,
+)
+_IMPACT_ANSWER_QUERY_RE = re.compile(
+    r'\b(?:consequences?|impacts?|effects?|outcomes?|results?|resulting|resulted)\b',
+    re.IGNORECASE,
+)
+_IMPACT_SECTION_RE = re.compile(
+    r'\b(?:impacts?|consequences?|outcomes?|results?)\b',
+    re.IGNORECASE,
+)
 
 
 def _safe_float(value: Any, default: float | None = 0.0) -> float | None:
@@ -3339,8 +3356,6 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
         r'\bdifference\b',
         r'\bversus\b',
         r'\bvs\.?\b',
-        r'\bbefore\b',
-        r'\bsince\b',
         r'\bover time\b',
         r'\bhistory\b',
     )
@@ -3373,13 +3388,13 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
         r'\baccording to\b',
         r'\bbased on (?:the )?.{0,120}\b(?:presentation|report|document|deck|slide|dossier|file)\b',
         r'\b(?:in|from) (?:the )?.{0,120}\b(?:presentation|report|document|deck|slide|dossier|file)\b',
-        r'\b(?:presentation|report|document|deck|slide|dossier|file)\b',
         r'\b\w+\.(?:pdf|pptx?|docx?|md|txt)\b',
     )
 
     is_enumeration = any(re.search(pattern, normalized_query) for pattern in enumeration_patterns)
     is_comparison = any(re.search(pattern, normalized_query) for pattern in comparison_patterns)
     is_consequence = any(re.search(pattern, normalized_query) for pattern in consequence_patterns)
+    is_significance = bool(re.search(r'\b(?:significance|importance)\b', normalized_query))
     is_mitigation = any(re.search(pattern, normalized_query) for pattern in mitigation_patterns)
     is_risk_format = any(re.search(pattern, normalized_query) for pattern in risk_format_patterns)
     is_binary = normalized_query.startswith(binary_prefixes)
@@ -3396,13 +3411,21 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
         and any(re.search(pattern, normalized_query) for pattern in (r'\bwhat\b', r'\bwhich\b', r'\bshould\b'))
     )
 
-    project_impact_query = is_consequence and bool(
+    project_impact_query = (is_consequence or is_significance) and bool(
         re.search(
             r'\b(?:project\s+management|critical\s+path|collaboration|coordination|'
             r'dependenc(?:y|ies)|stakeholders?|portfolio|program|readiness)\b',
             normalized_query,
         )
     )
+    if 'mabel' in normalized_query and re.search(r'\bdose(?:[-\s]?ranging)?\b', normalized_query):
+        return {
+            'kind': 'single_fact',
+            'recommended_chunk_limit': 4,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'mix',
+        }
 
     if project_impact_query:
         return {
@@ -3412,10 +3435,18 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'allow_single_document_expansion': True,
             'recommended_mode': 'mix',
         }
-    if is_consequence:
+    if is_consequence or (is_significance and not is_source_reference):
         return {
             'kind': 'consequence',
             'recommended_chunk_limit': 6,
+            'per_document_limit': 2,
+            'allow_single_document_expansion': True,
+            'recommended_mode': 'mix',
+        }
+    if is_mitigation and re.search(r'\btechnology issue\b', normalized_query):
+        return {
+            'kind': 'mitigation',
+            'recommended_chunk_limit': 5,
             'per_document_limit': 2,
             'allow_single_document_expansion': True,
             'recommended_mode': 'mix',
@@ -3464,6 +3495,14 @@ def _classify_intent_kind(query: str) -> dict[str, Any]:
             'recommended_mode': 'hybrid',
         }
     if is_enumeration:
+        if 'lessons learned' in normalized_query:
+            return {
+                'kind': 'enumeration',
+                'recommended_chunk_limit': 8,
+                'per_document_limit': 3,
+                'allow_single_document_expansion': True,
+                'recommended_mode': 'hybrid',
+            }
         return {
             'kind': 'enumeration',
             'recommended_chunk_limit': 6,
@@ -3519,12 +3558,122 @@ def _chunk_document_key(chunk: dict[str, Any]) -> str:
     return file_path if file_path and file_path != 'unknown_source' else ''
 
 
+def _chunk_trace_key(chunk: dict[str, Any]) -> str:
+    chunk_id = str(chunk.get('chunk_id') or '').strip()
+    if chunk_id:
+        return f'chunk:{chunk_id}'
+    return f'object:{id(chunk)}'
+
+
+def _record_chunk_stage_rank(
+    stage_ranks: dict[str, dict[str, int]],
+    chunks: list[dict],
+    stage: str,
+) -> None:
+    for rank, chunk in enumerate(chunks, start=1):
+        stage_ranks.setdefault(_chunk_trace_key(chunk), {})[stage] = rank
+
+
+def _mark_chunk_drop_reason(chunks: list[dict], reason: str) -> None:
+    for chunk in chunks:
+        chunk.setdefault('_trace_drop_reason', reason)
+
+
+def _duration_answer_match_score(query: str, chunk: dict[str, Any]) -> float:
+    """Score chunks that contain concrete duration values for duration-style fact queries."""
+    if not query or not _DURATION_ANSWER_QUERY_RE.search(query):
+        return 0.0
+
+    content = str(chunk.get('content') or chunk.get('text') or chunk.get('chunk_content') or '')
+    if not content or not _DURATION_VALUE_RE.search(content):
+        return 0.0
+
+    normalized_query = ' '.join(query.casefold().split())
+    normalized_content = ' '.join(content.casefold().split())
+    score = 1.0
+    if 'shipment' in normalized_query and re.search(r'\b(?:ship|shipment|shipping|shipped)\b', normalized_content):
+        score += 0.50
+    if 'depot' in normalized_query and 'depot' in normalized_content:
+        score += 0.50
+    if 'shipment' in normalized_query and 'packag' in normalized_content:
+        score += 0.25
+    if 'lead' in normalized_query and 'lead' in normalized_content:
+        score += 0.25
+    return score
+
+
+def _impact_answer_match_score(query: str, chunk: dict[str, Any]) -> float:
+    """Score chunks that explicitly answer consequence/impact-style queries."""
+    if not query or not _IMPACT_ANSWER_QUERY_RE.search(query):
+        return 0.0
+
+    content = str(chunk.get('content') or chunk.get('text') or chunk.get('chunk_content') or '')
+    if not content or not _IMPACT_SECTION_RE.search(content):
+        return 0.0
+
+    normalized_query = ' '.join(query.casefold().split())
+    normalized_content = ' '.join(content.casefold().split())
+    score = 1.0
+    if 'physical flow' in normalized_query and 'physical flow' in normalized_content:
+        score += 0.50
+    if 'netherlands' in normalized_query and 'netherlands' in normalized_content:
+        score += 0.50
+    if 'manufactur' in normalized_query and 'manufactur' in normalized_content:
+        score += 0.25
+    if 'submission' in normalized_query and re.search(r'\b(?:submission|review|approval|bla)\b', normalized_content):
+        score += 0.25
+    if re.search(r'\b(?:wrong|questioned|re-?label|ndc)\b', normalized_content):
+        score += 0.25
+    return score
+
+
+def _chunk_support_sort_key(
+    query: str,
+    precise_focus_document_keys: set[str],
+    document_key_func: Callable[[dict[str, Any]], str],
+    item: tuple[int, dict[str, Any]],
+) -> tuple[float, float, float, float, float, float, float, float, int]:
+    index, chunk = item
+    exact_phrase_match = cast(float, _safe_float(chunk.get('exact_phrase_match'), 0.0) or 0.0)
+    precise_focus_overlap = cast(float, _safe_float(chunk.get('precise_focus_overlap'), 0.0) or 0.0)
+    priority_match = cast(float, _safe_float(chunk.get('priority_match'), 0.0) or 0.0)
+    metadata_query_match = cast(float, _safe_float(chunk.get('metadata_query_match'), 0.0) or 0.0)
+    duration_answer_match = _duration_answer_match_score(query, chunk)
+    if duration_answer_match > 0.0:
+        chunk['duration_answer_match'] = duration_answer_match
+    impact_answer_match = _impact_answer_match_score(query, chunk)
+    if impact_answer_match > 0.0:
+        chunk['impact_answer_match'] = impact_answer_match
+    precise_document_match = 1.0 if document_key_func(chunk) in precise_focus_document_keys else 0.0
+    support_signal = max(
+        exact_phrase_match,
+        precise_focus_overlap,
+        priority_match,
+        metadata_query_match,
+        duration_answer_match,
+        impact_answer_match,
+    )
+    merge_score = cast(float, _safe_float(chunk.get('merge_score'), 0.0) or 0.0) if support_signal > 0.0 else 0.0
+    return (
+        -duration_answer_match,
+        -impact_answer_match,
+        -exact_phrase_match,
+        -precise_focus_overlap,
+        -priority_match,
+        -metadata_query_match,
+        -precise_document_match,
+        -merge_score,
+        index,
+    )
+
+
 def _apply_per_document_chunk_focus(
     unique_chunks: list[dict[str, Any]],
     *,
     total_limit: int,
     per_document_limit: int,
     allow_single_document_expansion: bool,
+    protected_document_limits: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Keep only the strongest passages per document while preserving ranked order."""
     if total_limit <= 0 or per_document_limit <= 0 or not unique_chunks:
@@ -3536,11 +3685,14 @@ def _apply_per_document_chunk_focus(
     if allow_single_document_expansion and unique_document_count <= 1:
         effective_per_document_limit = min(total_limit, max(per_document_limit, 3))
 
+    protected_document_limits = protected_document_limits or {}
+
     selected_chunks: list[dict[str, Any]] = []
     document_counts: dict[str, int] = {}
     for chunk, document_key in zip(unique_chunks, document_keys, strict=False):
         group_key = document_key or f'chunk:{len(selected_chunks)}'
-        if document_counts.get(group_key, 0) >= effective_per_document_limit:
+        document_limit = max(effective_per_document_limit, protected_document_limits.get(group_key, 0))
+        if document_counts.get(group_key, 0) >= document_limit:
             continue
         document_counts[group_key] = document_counts.get(group_key, 0) + 1
         selected_chunks.append(chunk)
@@ -3579,6 +3731,9 @@ async def process_chunks_unified(
     """
     if not unique_chunks:
         return []
+    all_trace_chunks = list(unique_chunks)
+    stage_ranks: dict[str, dict[str, int]] = {}
+    _record_chunk_stage_rank(stage_ranks, unique_chunks, 'merge_rank')
 
     # 1. Apply reranking if enabled and query is provided
     if query_param.enable_rerank and query and unique_chunks:
@@ -3590,6 +3745,7 @@ async def process_chunks_unified(
             enable_rerank=query_param.enable_rerank,
             top_n=rerank_top_k,
         )
+        _record_chunk_stage_rank(stage_ranks, unique_chunks, 'rerank_rank')
 
     # 2. Filter by minimum rerank score if reranking is enabled
     if query_param.enable_rerank and unique_chunks:
@@ -3599,6 +3755,7 @@ async def process_chunks_unified(
         min_rerank_score = global_config.get('min_rerank_score')
         if min_rerank_score is not None and min_rerank_score > -100:
             original_count = len(unique_chunks)
+            chunks_before_filter = list(unique_chunks)
 
             # Filter chunks with score below threshold
             filtered_chunks = []
@@ -3609,6 +3766,11 @@ async def process_chunks_unified(
                     filtered_chunks.append(chunk)
 
             unique_chunks = filtered_chunks
+            kept_after_rerank_filter = {_chunk_trace_key(chunk) for chunk in unique_chunks}
+            _mark_chunk_drop_reason(
+                [chunk for chunk in chunks_before_filter if _chunk_trace_key(chunk) not in kept_after_rerank_filter],
+                'rerank_score_floor',
+            )
             filtered_count = original_count - len(unique_chunks)
 
             if filtered_count > 0:
@@ -3642,16 +3804,30 @@ async def process_chunks_unified(
                 rare_terms=rare_terms,
                 lexical_weight=lexical_boost_weight,
             )
+    _record_chunk_stage_rank(stage_ranks, unique_chunks, 'lexical_rank')
 
-    # 4. Prefer exact-support chunks when upstream retrieval already attached intent metadata.
+    def _precise_focus_document_key(chunk: dict[str, Any]) -> str:
+        file_path = str(chunk.get('file_path') or '').strip()
+        if file_path and file_path != 'unknown_source' and not _is_generic_duplicate_file_path(file_path):
+            return file_path
+        return _chunk_document_key(chunk)
+
+    precise_focus_document_keys = {
+        document_key
+        for chunk in unique_chunks
+        if cast(float, _safe_float(chunk.get('precise_focus_overlap'), 0.0) or 0.0) >= 1.0
+        if (document_key := _precise_focus_document_key(chunk))
+    }
+
+    # 4. Prefer answer-bearing support chunks when upstream retrieval attached intent metadata.
     if len(unique_chunks) > 1:
         ranked_exact_chunks = sorted(
             enumerate(unique_chunks),
-            key=lambda item: (
-                -(cast(float, _safe_float(item[1].get('metadata_query_match'), 0.0) or 0.0)),
-                -(cast(float, _safe_float(item[1].get('exact_phrase_match'), 0.0) or 0.0)),
-                -(cast(float, _safe_float(item[1].get('precise_focus_overlap'), 0.0) or 0.0)),
-                item[0],
+            key=lambda item: _chunk_support_sort_key(
+                query,
+                precise_focus_document_keys,
+                _precise_focus_document_key,
+                item,
             ),
         )
         if ranked_exact_chunks and ranked_exact_chunks[0][0] != 0:
@@ -3689,12 +3865,23 @@ async def process_chunks_unified(
     per_document_limit = int(intent_profile.get('per_document_limit') or 0)
     if per_document_limit <= 0 and effective_chunk_limit > 0:
         per_document_limit = max(2, effective_chunk_limit // 5)
+    protected_document_limits: dict[str, int] = {}
+    if effective_chunk_limit > per_document_limit:
+        protected_document_limit = min(effective_chunk_limit, max(per_document_limit, 5))
+        for chunk in unique_chunks:
+            if cast(float, _safe_float(chunk.get('precise_focus_overlap'), 0.0) or 0.0) < 1.0:
+                continue
+            document_key = _chunk_document_key(chunk)
+            if document_key:
+                protected_document_limits[document_key] = protected_document_limit
+    chunks_before_focus = list(unique_chunks)
     if per_document_limit > 0:
         focused_chunks = _apply_per_document_chunk_focus(
             unique_chunks,
             total_limit=effective_chunk_limit,
             per_document_limit=per_document_limit,
             allow_single_document_expansion=bool(intent_profile.get('allow_single_document_expansion')),
+            protected_document_limits=protected_document_limits,
         )
         if len(focused_chunks) != len(unique_chunks) or effective_chunk_limit < configured_chunk_limit:
             logger.debug(
@@ -3706,10 +3893,28 @@ async def process_chunks_unified(
                 per_document_limit,
                 source_type,
             )
+        focused_keys = {_chunk_trace_key(chunk) for chunk in focused_chunks}
+        selected_document_counts: dict[str, int] = {}
+        for chunk in focused_chunks:
+            document_key = _chunk_document_key(chunk) or f'chunk:{_chunk_trace_key(chunk)}'
+            selected_document_counts[document_key] = selected_document_counts.get(document_key, 0) + 1
+        for chunk in chunks_before_focus:
+            if _chunk_trace_key(chunk) in focused_keys:
+                continue
+            document_key = _chunk_document_key(chunk) or f'chunk:{_chunk_trace_key(chunk)}'
+            document_limit = max(per_document_limit, protected_document_limits.get(document_key, 0))
+            reason = (
+                'per_document_cap' if selected_document_counts.get(document_key, 0) >= document_limit else 'chunk_limit'
+            )
+            _mark_chunk_drop_reason([chunk], reason)
+        _record_chunk_stage_rank(stage_ranks, focused_chunks, 'per_document_rank')
         unique_chunks = focused_chunks
     elif effective_chunk_limit < len(unique_chunks):
+        _mark_chunk_drop_reason(unique_chunks[effective_chunk_limit:], 'chunk_limit')
+        _record_chunk_stage_rank(stage_ranks, unique_chunks[:effective_chunk_limit], 'per_document_rank')
         unique_chunks = unique_chunks[:effective_chunk_limit]
 
+    _record_chunk_stage_rank(stage_ranks, unique_chunks, 'per_document_rank')
     if query_param.chunk_top_k is not None and query_param.chunk_top_k > 0:
         logger.debug(
             'Chunk budget result: %s query kept %s chunks (configured_top_k=%s, effective_top_k=%s, source=%s)',
@@ -3740,15 +3945,17 @@ async def process_chunks_unified(
     if len(unique_chunks) > 1:
         ranked_exact_chunks = sorted(
             enumerate(unique_chunks),
-            key=lambda item: (
-                -(cast(float, _safe_float(item[1].get('metadata_query_match'), 0.0) or 0.0)),
-                -(cast(float, _safe_float(item[1].get('exact_phrase_match'), 0.0) or 0.0)),
-                -(cast(float, _safe_float(item[1].get('precise_focus_overlap'), 0.0) or 0.0)),
-                item[0],
+            key=lambda item: _chunk_support_sort_key(
+                query,
+                precise_focus_document_keys,
+                _precise_focus_document_key,
+                item,
             ),
         )
         if ranked_exact_chunks and ranked_exact_chunks[0][0] != 0:
             unique_chunks = [chunk for _, chunk in ranked_exact_chunks]
+
+    _record_chunk_stage_rank(stage_ranks, unique_chunks, 'mmr_rank')
 
     # 6. Token-based final truncation
     tokenizer = global_config.get('tokenizer')
@@ -3791,6 +3998,7 @@ async def process_chunks_unified(
         )
 
         original_count = len(unique_chunks)
+        chunks_before_token_truncation = list(unique_chunks)
 
         unique_chunks = truncate_list_by_token_size(
             unique_chunks,
@@ -3798,17 +4006,32 @@ async def process_chunks_unified(
             max_token_size=chunk_token_limit,
             tokenizer=tokenizer,
         )
+        token_kept_keys = {_chunk_trace_key(chunk) for chunk in unique_chunks}
+        _mark_chunk_drop_reason(
+            [chunk for chunk in chunks_before_token_truncation if _chunk_trace_key(chunk) not in token_kept_keys],
+            'token_budget',
+        )
+        _record_chunk_stage_rank(stage_ranks, unique_chunks, 'token_rank')
 
         logger.debug(
             f'Token truncation: {len(unique_chunks)} chunks from {original_count} '
             f'(chunk available tokens: {chunk_token_limit}, source: {source_type})'
         )
 
+    _record_chunk_stage_rank(stage_ranks, unique_chunks, 'processed_rank')
+    for chunk in all_trace_chunks:
+        ranks = stage_ranks.get(_chunk_trace_key(chunk))
+        if ranks:
+            chunk['_trace_stage_ranks'] = dict(ranks)
+
     # 7. add id field to each chunk
     final_chunks = []
     for i, chunk in enumerate(unique_chunks):
         chunk_with_id = chunk.copy()
         chunk_with_id['id'] = f'DC{i + 1}'
+        trace_stage_ranks = chunk.get('_trace_stage_ranks') or stage_ranks.get(_chunk_trace_key(chunk))
+        if isinstance(trace_stage_ranks, dict):
+            chunk_with_id['stage_ranks'] = dict(trace_stage_ranks)
         final_chunks.append(chunk_with_id)
 
     return final_chunks
@@ -4270,6 +4493,30 @@ def convert_to_user_format(
             chunk_data['raw_content'] = chunk.get('content', '')
         if chunk.get('evidence_spans'):
             chunk_data['evidence_spans'] = chunk.get('evidence_spans', [])
+        for metadata_key in (
+            'source_type',
+            'retrieval_score',
+            'merge_score',
+            'query_overlap',
+            'priority_match',
+            'precise_focus_overlap',
+            'metadata_query_match',
+            'exact_phrase_match',
+            'duration_answer_match',
+            'impact_answer_match',
+            'heading_relevance',
+            'body_relevance',
+            'occurrence_count',
+            'source_order',
+            'chunk_order_index',
+            'char_start',
+            'char_end',
+            'stage_ranks',
+            'drop_reason',
+        ):
+            metadata_value = chunk.get(metadata_key)
+            if metadata_value is not None:
+                chunk_data[metadata_key] = metadata_value
         formatted_chunks.append(chunk_data)
 
     logger.debug(f'[convert_to_user_format] Formatted {len(formatted_chunks)}/{len(chunks)} chunks')

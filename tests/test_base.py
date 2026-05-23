@@ -42,12 +42,9 @@ from yar.evaluation.eval_rag_quality import (
     _has_complete_metrics,
     _load_bottom_case_numbers,
     _load_case_mode_overrides,
-    _normalize_benchmark_answer,
     _parse_case_numbers,
     _pick_results_for_diagnostics,
-    _references_from_chunks,
     _resolve_benchmark_query,
-    _stabilize_benchmark_metrics,
     _strip_reference_citations,
 )
 from yar.yar import YAR, _resolve_effective_query_mode
@@ -466,7 +463,7 @@ class TestEdgeCases:
             ll_keywords=['low', 'level'],
             enable_bm25_fusion=True,
             bm25_weight=0.4,
-            entity_filter='Fitusiran',
+            entity_filter='Product A',
         )
         assert param.mode == 'hybrid'
         assert param.response_type == 'Bullet Points'
@@ -474,7 +471,7 @@ class TestEdgeCases:
         assert param.max_total_tokens == 32000
         assert param.enable_bm25_fusion is True
         assert param.bm25_weight == 0.4
-        assert param.entity_filter == 'Fitusiran'
+        assert param.entity_filter == 'Product A'
 
 
 @pytest.mark.offline
@@ -512,7 +509,7 @@ class TestYARQueryMethods:
             enable_rerank=True,
             enable_bm25_fusion=True,
             bm25_weight=0.55,
-            entity_filter='Fitusiran',
+            entity_filter='Product A',
         )
 
         returned_result = QueryResult(
@@ -533,7 +530,7 @@ class TestYARQueryMethods:
         assert cloned_param.stream is False
         assert cloned_param.enable_bm25_fusion is True
         assert cloned_param.bm25_weight == 0.55
-        assert cloned_param.entity_filter == 'Fitusiran'
+        assert cloned_param.entity_filter == 'Product A'
         assert cloned_param.user_prompt == 'Be precise'
         assert cloned_param.model_func is original_param.model_func
         assert original_param.only_need_context is False
@@ -587,70 +584,56 @@ class TestYARQueryMethods:
                 'What are the 3 categories of lessons learned about chemistry?',
                 'mix',
             )
-            == 'naive'
+            == 'hybrid'
         )
         assert (
             _resolve_effective_query_mode(
-                'What was put in place to mitigate overdosing in low dose drugs?',
+                'What was put in place to mitigate contamination during manufacturing?',
                 'mix',
             )
             == 'global'
         )
         assert (
             _resolve_effective_query_mode(
-                'In case of a CMC technology issue on one specific project what is the first recommended step?',
-                'mix',
-            )
-            == 'global'
-        )
-        assert (
-            _resolve_effective_query_mode(
-                'After US and EU submission of sarclisa what were the consequences?',
+                'What is the first recommended step for resolving a technology issue?',
                 'mix',
             )
             == 'mix'
         )
         assert (
             _resolve_effective_query_mode(
-                'Do we already use powder in a bottle directly for phase 1 study?',
+                'After the regional submissions, what were the consequences for the launch plan?',
+                'mix',
+            )
+            == 'mix'
+        )
+        assert (
+            _resolve_effective_query_mode(
+                'Do we already use the direct-fill container in phase 1 studies?',
                 'mix',
             )
             == 'hybrid'
         )
         assert (
             _resolve_effective_query_mode(
-                'Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk',
+                'What phrasing should we use for the risk template?',
                 'mix',
             )
             == 'global'
         )
         assert (
             _resolve_effective_query_mode(
-                'Is the sub-team leader the primary interface to the CMC project leader for all activities in scope of the subteam',
-                'mix',
-            )
-            == 'naive'
-        )
-        assert (
-            _resolve_effective_query_mode(
-                'From leasson learned session regarding external collaboration what are 4 domains of experience of our corporate culture?',
-                'mix',
-            )
-            == 'naive'
-        )
-        assert (
-            _resolve_effective_query_mode(
-                'Does full detail were included covering 2 to 3 steps of reation in NeoGAA china submission?',
+                'Is there a lessons learned document? If yes provide the link to the material',
                 'mix',
             )
             == 'hybrid'
         )
         assert (
             _resolve_effective_query_mode(
-                'Is there lesson learned on comparability? If yes provide the link to the material',
+                'What is the dose-ranging recommended by the MABEL approach?',
                 'mix',
             )
-            == 'hybrid'
+            == 'mix'
         )
         assert _resolve_effective_query_mode('Summarize the platform strategy.', 'mix') == 'mix'
 
@@ -873,31 +856,27 @@ class TestEvaluationHarnessHelpers:
 
         assert payload['mode'] == 'naive'
 
-    def test_build_query_payload_uses_yes_no_evidence_prompt(self):
-        """Eval payloads should force a short evidence sentence after yes/no answers."""
+    def test_build_query_payload_uses_generic_evidence_prompt(self):
+        """Eval payloads should request concise answers grounded in retrieved evidence."""
         evaluator = object.__new__(RAGEvaluator)
         evaluator.query_mode = 'mix'
         evaluator.debug_mode = False
 
         payload = RAGEvaluator._build_query_payload(
             evaluator,
-            'Does the NeoGAA China submission include full detail for the reaction steps?',
-            {},
+            'Does the submission include full detail for the reaction steps?',
+            {'retrieval_query': 'reaction steps', 'question': 'original question should not leak'},
             include_response_type=True,
         )
 
         assert payload['response_type'] == 'Single Paragraph'
         assert payload['user_prompt'].startswith(EVAL_USER_PROMPT)
-        assert 'Never answer with only Yes or No' in payload['user_prompt']
-        assert 'brief evidence-based sentence' in payload['user_prompt']
-        assert 'closely paraphrases the key supporting phrase' in payload['user_prompt']
-        assert 'list/count/enumeration questions' in payload['user_prompt']
-        assert 'copy the list item labels and key sub-bullets closely' in payload['user_prompt']
-        assert 'Do not add your own caution' in payload['user_prompt']
-        assert 'keep it pending' in payload['user_prompt']
+        assert 'retrieved context' in payload['user_prompt']
+        assert 'Preserve names, numbers, dates, labels' in payload['user_prompt']
         assert 'extractive evidence spans' in payload['user_prompt']
         assert 'shortest exact context span(s)' in payload['user_prompt']
-        assert 'final approval or recommendation' in payload['user_prompt']
+        assert ('benchmark question ' + 'exactly') not in payload['user_prompt']
+        assert 'original question should not leak' not in payload['user_prompt']
 
     def test_load_case_mode_overrides_validates_keys_and_modes(self, tmp_path):
         overrides_path = tmp_path / 'case_modes.json'
@@ -996,7 +975,7 @@ class TestEvaluationHarnessHelpers:
                 'chunks': [
                     {
                         'file_path': 'doc.pdf',
-                        'content': 'Shipment to depot 1-3 months before Start packaging.',
+                        'content': 'Support window runs 1-3 months before launch.',
                     }
                 ]
             }
@@ -1005,16 +984,16 @@ class TestEvaluationHarnessHelpers:
         with patch.object(RAGEvaluator, '_post_query', new=AsyncMock(side_effect=[query_call, retrieval_call])):
             result = await RAGEvaluator.generate_rag_response(
                 evaluator,
-                question='What is the standard duration of shipment to depot?',
+                question='What is the standard support window?',
                 client=Mock(),
                 test_case={
-                    'retrieval_query': 'shipment to depot 1-3 months before Start packaging',
+                    'retrieval_query': 'support window 1-3 months before launch',
                     'retrieval_mode': 'naive',
                 },
             )
 
-        assert result['answer'] == 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
-        assert result['contexts'] == ['Source: doc.pdf\n\nShipment to depot 1-3 months before Start packaging.']
+        assert result['answer'] == 'I could not find relevant information in the knowledge base. [no-context]'
+        assert result['contexts'] == ['Source: doc.pdf\n\nSupport window runs 1-3 months before launch.']
 
     def test_load_test_dataset_rejects_legacy_dataset_mode(self, tmp_path):
         """Datasets should no longer embed per-case modes now that the harness takes an explicit sidecar."""
@@ -1566,389 +1545,10 @@ class TestEvaluationHarnessHelpers:
         assert diagnostic['test_number'] == 19
 
 
-class TestNormalizeBenchmarkAnswer:
-    def test_shipping_validation_question_normalizes_to_meeting_phrase(self):
-        refs = [{'excerpt': 'Best Practices: Consider to add shipping validation question in type C meeting'}]
-        assert (
-            _normalize_benchmark_answer(
-                'For biologics should we ask shipping validation question in type C or B meeting',
-                'Ask shipping validation question in type C meeting [1].',
-                refs,
-            )
-            == 'For biologics, the shipping validation question should be asked in a Type C meeting.'
-        )
-
-    def test_risk_format_question_normalizes_to_source_template(self):
-        refs = [{'excerpt': 'The use of the syntaxe of the description : Due to ... the risk ...could impact ....'}]
-        assert (
-            _normalize_benchmark_answer(
-                'Based on lessons learned What is the correct descriptive syntaxe to phrase the CMC risk',
-                'Due to ... the risk ...could impact ... [1].',
-                refs,
-            )
-            == 'Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: Due to ... the risk ... could impact ....'
-        )
-
-    def test_risk_format_question_normalizes_from_risk_impact_table(self):
-        refs = [
-            {
-                'content': [
-                    'Key CMC Risks and Mitigation for Fitusiran. '
-                    'Description of the risk and nature of the impact. '
-                    'Risk of event: discontinuation of post launch DS supply. '
-                    'Impact: inability to supply the market post launch.'
-                ]
-            }
-        ]
-        assert (
-            _normalize_benchmark_answer(
-                'Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
-                "I couldn't find relevant information in the knowledge base to answer your question.",
-                refs,
-            )
-            == 'Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: Due to ... the risk ... could impact ....'
-        )
-
-    def test_technology_issue_first_step_question_normalizes_to_source_backed_step(self):
-        refs = [
-            {
-                'content': [
-                    'Best Practice 1/2. 1 Ad hoc meeting with iCMC team (internal only in case of collaboration), '
-                    'with extension to Subject Mater Expert contributors.'
-                ]
-            }
-        ]
-        assert (
-            _normalize_benchmark_answer(
-                'In case of a CMC technology issue on one specific project, what is the first recommended step?',
-                'Ad hoc meeting with iCMC team (internal only in case of collaboration) with extension to Subject Matter Expert contributors [1].',
-                refs,
-            )
-            == 'For a CMC technology issue, the first recommended step is: Best Practice 1/2 recommends an ad hoc meeting with the iCMC team, internal only in case of collaboration, with extension to Subject Matter Expert contributors.'
-        )
-
-    def test_references_from_chunks_prioritizes_risk_impact_table_for_risk_focus(self):
-        chunks = [
-            {
-                'file_path': 'sarp.pdf',
-                'content': 'CMC Cross-Sharing lessons learned. The delays experienced were not due to CMC.',
-            },
-            {
-                'file_path': 'fitusiran.pdf',
-                'content': (
-                    'Key CMC Risks and Mitigation for Fitusiran. '
-                    'Description of the risk and nature of the impact. '
-                    'Risk of event: discontinuation of post launch DS supply. '
-                    'Impact: inability to supply the market post launch.'
-                ),
-            },
-        ]
-
-        refs = _references_from_chunks(
-            chunks,
-            focus_terms=['lessons learned correct descriptive syntax phrase CMC risk due risk could impact'],
-            limit=1,
-        )
-
-        assert refs[0]['file_path'] == 'fitusiran.pdf'
-
-    def test_storage_condition_question_normalizes_to_source_backed_recommendation(self):
-        refs = [
-            {
-                'excerpt': 'A Change in Shelf life and storage condition has been recommended by the Labelling Working Group prior to NDA submission.'
-            }
-        ]
-        assert (
-            _normalize_benchmark_answer(
-                'Would you agree to change the storage condition o short notice prior to NDA submission',
-                'Yes; the CMC team recommends implementing new storage conditions for Fitusiran prior to US submission [1].',
-                refs,
-            )
-            == 'Yes, CMC recommended changing the Fitusiran storage conditions before submission while maintaining the submission date.'
-        )
-
-    def test_storage_condition_question_normalizes_from_cmc_recommendation_source(self):
-        refs = [
-            {
-                'excerpt': 'CMC recommends to implement new storage conditions into the dossier prior submission maintaining US submission date.'
-            }
-        ]
-
-        assert (
-            _normalize_benchmark_answer(
-                'Would you agree to change the storage condition on short notice prior to NDA submission',
-                'No; the context says this is only a proposal [1].',
-                refs,
-            )
-            == 'Yes, CMC recommended changing the Fitusiran storage conditions before submission while maintaining the submission date.'
-        )
-
-
-def test_20mg_pfp_question_normalizes_to_pending_fda_feedback():
-    refs = [
-        {
-            'excerpt': 'The proposal had many complexities and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence would be sufficient to support approval.'
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'Is the strategy for filing the 20 mg PFP feasible',
-            'Regulators endorsed the strategy for filing the 20 mg PFP [1].',
-            refs,
-        )
-        == 'The proposal had many complexities that warranted FDA feedback, and the team planned to ask FDA whether the proposed clinical, device, and CMC evidence for the 20 mg PFP would be sufficient to support approval.'
-    )
-
-
-def test_alnylam_transfer_format_question_normalizes_to_ctd_structure():
-    refs = [{'excerpt': 'Uploaded files should be organized according to CTD structure with an Excel tracking sheet.'}]
-    assert (
-        _normalize_benchmark_answer(
-            'Based on Alnylam collaboration What format is recommended for transfer for CMC source documents from third party to Sanofi?',
-            'Fitusiran',
-            refs,
-        )
-        == 'The recommended format is to organize uploaded CMC source documents according to the CTD structure.'
-    )
-
-
-def test_compliance_gap_question_normalizes_to_source_backed_acceptance_phrase():
-    refs = [
-        {
-            'excerpt': 'The compliance gaps were assessed as low likelihood of affecting submission or approval, with annual testing at an external laboratory as mitigation.'
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'Is the risk to proceed with the compliance gaps acceptable',
-            'Yes, proceeding with the identified specification gaps is conditionally acceptable [1].',
-            refs,
-        )
-        == 'Yes, the compliance gaps were assessed as having a low likelihood of affecting submission or approval, with annual testing at an external laboratory as mitigation.'
-    )
-
-
-def test_comparability_material_question_normalizes_to_document_reference():
-    refs = [
-        {
-            'excerpt': 'Prepare comparability protocol early and apply to all studies / submission to authorities over BPs might be beneficial.'
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'Is there lesson learned on comparability? If yes provide the link to the material',
-            'Yes, there is a lesson learned on comparability and the material is linked in the references [1].',
-            refs,
-        )
-        == 'Yes. The comparability lesson learned is documented in 2016-LL-11-IntraClusterDiabetes-Comparability_Similarity.pptx.'
-    )
-
-
-def test_serd_categories_question_normalizes_to_source_heading():
-    refs = [{'excerpt': 'SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'}]
-    assert (
-        _normalize_benchmark_answer(
-            'What are the 3 categories of lessons learned about SERD SAR439859',
-            'The 3 categories are Governance, Capabilities/Culture, and Organization [1].',
-            refs,
-        )
-        == 'SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'
-    )
-
-
-def test_sarp_pre_ind_question_normalizes_to_source_backed_lesson():
-    refs = [
-        {
-            'excerpt': (
-                'Regulatory Pre-IND Strategy. Conclusions: Strategy of an early pre-IND should '
-                'be targeted or IND should be submitted without pre-IND.'
-            )
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'What is the lesson learned about regulatory strategy related to pre-IND and IND from the Sustained API Release Platform (SARP)?',
-            'Early pre-IND should be targeted or the IND should be submitted without pre-IND [1].',
-            refs,
-        )
-        == 'For SARP regulatory pre-IND strategy, the lesson learned states that the strategy of an early pre-IND should be targeted, or the IND should be submitted without pre-IND.'
-    )
-
-
-def test_japan_specific_activities_question_normalizes_to_concise_summary():
-    refs = [
-        {
-            'excerpt': 'Japan-specific activities include Foreign Manufacturer Accreditation management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and sales limits.'
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'What are the japan-specific activities',
-            'Some Japan-specific activities are described in the handbook [1].',
-            refs,
-        )
-        == 'Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.'
-    )
-
-
-def test_japan_specific_activities_question_normalizes_from_fma_source_wording():
-    refs = [
-        {
-            'content': [
-                'J-OM managed FMAs of two sites with KW-QA colleagues. '
-                'Within KW launch readiness, only analytical transfer must be started. '
-                'Shipping Validation is executed between US and JP. '
-                'J-CTD preparation was fully managed by CDDC and R-CMC.'
-            ]
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'What are the japan-specific activities',
-            'Long verbose handbook answer [1].',
-            refs,
-        )
-        == 'Japan-specific activities include Foreign Manufacturer Accreditation (FMA) management, analytical method transfer to Japanese labs, shipping validation between the US and Japan, J-CTD preparation managed by CDDC and R-CMC, and cross-functional work on filter selection, stability, and sales limits.'
-    )
-
-
-def test_aav_batch_analysis_question_normalizes_to_source_backed_fields():
-    refs = [
-        {
-            'excerpt': (
-                'What information should stay on the batch analysis table (for AAV product)? '
-                'Batch number, batch size, manufacturing site, manufacturing date, control methods, '
-                'acceptance criteria and the test results should be listed together. Batch yield by '
-                'total vgs is reported for AAV DS batch analysis.'
-            )
-        }
-    ]
-    assert (
-        _normalize_benchmark_answer(
-            'What are the minimum information fields to keep on the batch analysis table for an AAV product?',
-            'Batch number; batch size; manufacturing site; manufacturing date; control methods; acceptance criteria; test results; batch yield by total vector genomes [1].',
-            refs,
-        )
-        == 'For an AAV product batch analysis table, batch number, batch size, manufacturing site, manufacturing date, control methods, acceptance criteria and test results should be listed, and batch yield by total vgs is reported for AAV DS batch analysis.'
-    )
-
-
-def test_m3_strategy_question_normalizes_to_lcm_sentence():
-    refs = [{'excerpt': 'LCM should be kept in mind when defining the M3 strategy and the level of detail.'}]
-    assert (
-        _normalize_benchmark_answer(
-            'What is key to bear in mind when defining the M3 strategy and content /level of detail',
-            'LCM',
-            refs,
-        )
-        == 'The key point is to keep life cycle management (LCM) in mind.'
-    )
-
-
-def test_shipment_duration_question_normalizes_to_timeline_sentence():
-    refs = [{'excerpt': 'Shipment to depot 1-3 months before Start packaging.'}]
-    assert (
-        _normalize_benchmark_answer(
-            'What is the standard duration of shipment to depot?',
-            'The context does not detail a standard duration [1].',
-            refs,
-        )
-        == 'The standard duration of shipment to depot is 1-3 months before Start packaging.'
-    )
-
-
 def test_strip_reference_citations_removes_numeric_markers_only():
     assert _strip_reference_citations('Answer one.[1] Answer two [2, 3]. Keep [not a citation].') == (
         'Answer one. Answer two. Keep [not a citation].'
     )
-
-
-def test_stabilize_benchmark_metrics_promotes_supported_exact_matches():
-    metrics = {
-        'faithfulness': 0.0,
-        'answer_relevance': 0.5,
-        'context_recall': 0.0,
-        'context_precision': 1.0,
-    }
-    stabilized = _stabilize_benchmark_metrics(
-        question='What is the standard duration of shipment to depot?',
-        answer='1-3 months before Start packaging.',
-        reference='1-3 months before Start packaging.',
-        contexts=['Timeline Stages: 1-3 months before Start packaging.'],
-        metrics=metrics,
-    )
-    assert stabilized['faithfulness'] == 1.0
-    assert stabilized['context_recall'] == 1.0
-
-
-def test_stabilize_benchmark_metrics_promotes_supported_context_recall_without_exact_answer_match():
-    metrics = {
-        'faithfulness': 1.0,
-        'answer_relevance': 0.6,
-        'context_recall': 0.75,
-        'context_precision': 1.0,
-    }
-    stabilized = _stabilize_benchmark_metrics(
-        question='What are the 6 best practices related to iCMC team members goal setting?',
-        answer='The answer lists the six iCMC goal-setting practices in compact prose.',
-        reference='Translate global project goals into yearly CMC deliverables and define individual objectives.',
-        contexts=['Translate global project goals into yearly CMC deliverables and define individual objectives.'],
-        metrics=metrics,
-    )
-    assert stabilized['context_recall'] == 1.0
-
-
-def test_stabilize_benchmark_metrics_promotes_relevance_for_exact_match():
-    metrics = {
-        'faithfulness': 1.0,
-        'answer_relevance': 0.0,
-        'context_recall': 1.0,
-        'context_precision': 1.0,
-    }
-    stabilized = _stabilize_benchmark_metrics(
-        question='What are the 3 categories of lessons learned about SERD SAR439859',
-        answer='SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.',
-        reference='SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.',
-        contexts=['SERD Lessons Learned fall into 3 categories: Governance, Capabilities/Culture, Organization.'],
-        metrics=metrics,
-    )
-    assert stabilized['answer_relevance'] == 1.0
-
-
-def test_stabilize_benchmark_metrics_promotes_supported_substantive_answer_in_reference():
-    metrics = {
-        'faithfulness': 0.5,
-        'answer_relevance': 0.0,
-        'context_recall': 1.0,
-        'context_precision': 1.0,
-    }
-    stabilized = _stabilize_benchmark_metrics(
-        question='Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
-        answer='Due to ... the risk ... could impact ....',
-        reference='Risk Review CIR lessons learned for Gap b says to keep the syntaxe of the description: Due to ... the risk ... could impact ....',
-        contexts=[
-            'Gap b: To improve Quality of Risk assessment to ease RR. The use of the syntaxe of the description: Due to ... the risk ... could impact ....'
-        ],
-        metrics=metrics,
-    )
-    assert stabilized['answer_relevance'] == 1.0
-
-
-def test_stabilize_benchmark_metrics_does_not_promote_short_answer_substrings():
-    metrics = {
-        'faithfulness': 1.0,
-        'answer_relevance': 0.0,
-        'context_recall': 1.0,
-        'context_precision': 1.0,
-    }
-    stabilized = _stabilize_benchmark_metrics(
-        question='Can PMG green light be given for Fitusiran?',
-        answer='yes',
-        reference='Yes, the PMG committee accepted the proposal for issuance of Green Light.',
-        contexts=['The PMG committee accepted the proposal for issuance of Green Light.'],
-        metrics=metrics,
-    )
-    assert stabilized['answer_relevance'] == 0.0
 
 
 def test_resolve_benchmark_query_uses_retrieval_override():

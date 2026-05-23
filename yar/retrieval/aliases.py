@@ -14,6 +14,19 @@ from yar.utils import logger
 _ALIAS_CONFIG_PATH = Path(__file__).resolve().parents[2] / 'config' / 'entity_aliases.yaml'
 _ALIAS_BOUNDARY_TEMPLATE = r'(?<!\w){alias}(?!\w)'
 
+_AUTO_FILTER_CONTEXTUAL_ALIAS_TERMS = frozenset(
+    {
+        'alliance',
+        'alliances',
+        'collaboration',
+        'collaborations',
+        'partner',
+        'partners',
+        'partnership',
+        'partnerships',
+    }
+)
+
 
 @dataclass(frozen=True)
 class _AliasRule:
@@ -34,14 +47,12 @@ def resolve_entity_filter(query: str) -> str | None:
     if not rules:
         return None
 
-    matches = _find_matching_canonicals(normalized_query, rules)
+    matches = _find_matching_canonicals(normalized_query, rules, require_auto_filter_safe_alias=True)
     if not matches:
         return None
 
     if len(matches) > 1:
-        logger.info(
-            f'Entity alias resolver matched multiple canonicals {matches}; using {matches[0]} by config order'
-        )
+        logger.info(f'Entity alias resolver matched multiple canonicals {matches}; using {matches[0]} by config order')
 
     return matches[0]
 
@@ -95,10 +106,7 @@ def _extract_raw_entries(loaded_config: Any) -> list[Any]:
         return entity_entries
 
     if isinstance(entity_entries, dict):
-        return [
-            {'canonical': canonical, 'aliases': aliases}
-            for canonical, aliases in entity_entries.items()
-        ]
+        return [{'canonical': canonical, 'aliases': aliases} for canonical, aliases in entity_entries.items()]
 
     return []
 
@@ -159,16 +167,51 @@ def _compile_alias_pattern(alias: str) -> re.Pattern[str]:
     return re.compile(_ALIAS_BOUNDARY_TEMPLATE.format(alias=re.escape(alias)))
 
 
-def _find_matching_canonicals(query: str, rules: tuple[_AliasRule, ...]) -> list[str]:
+def _alias_allows_auto_filter(alias: str, canonical: str) -> bool:
+    """Return false for relationship/context aliases that should expand but not filter.
+
+    Auto entity filters are intentionally stronger than keyword expansion: they
+    remove chunks outside the resolved canonical. Aliases that describe a
+    collaboration or partner relationship are often context labels rather than
+    product/entity names, so using them as hard filters can discard the very
+    lessons or comparison material the user asked for.
+    """
+    if alias == canonical:
+        return True
+    alias_tokens = set(re.findall(r'[a-z0-9]+', alias))
+    return not bool(alias_tokens & _AUTO_FILTER_CONTEXTUAL_ALIAS_TERMS)
+
+
+def _find_matching_canonicals(
+    query: str,
+    rules: tuple[_AliasRule, ...],
+    *,
+    require_auto_filter_safe_alias: bool = False,
+) -> list[str]:
     matches: list[str] = []
     seen_matches: set[str] = set()
 
     for rule in rules:
-        if any(pattern.search(query) for pattern in rule.patterns):
-            if rule.canonical not in seen_matches:
-                seen_matches.add(rule.canonical)
-                matches.append(rule.canonical)
-
+        matched_canonical = False
+        matched_safe_alias = False
+        matched_context_alias = False
+        for alias, pattern in zip(rule.aliases, rule.patterns, strict=True):
+            if not pattern.search(query):
+                continue
+            if not require_auto_filter_safe_alias:
+                matched_safe_alias = True
+                break
+            if alias == rule.canonical:
+                matched_canonical = True
+            elif _alias_allows_auto_filter(alias, rule.canonical):
+                matched_safe_alias = True
+            else:
+                matched_context_alias = True
+        if require_auto_filter_safe_alias and matched_context_alias and not matched_canonical:
+            continue
+        if (matched_canonical or matched_safe_alias) and rule.canonical not in seen_matches:
+            seen_matches.add(rule.canonical)
+            matches.append(rule.canonical)
     return matches
 
 

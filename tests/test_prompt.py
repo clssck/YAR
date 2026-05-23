@@ -140,7 +140,9 @@ class TestEntityExtractionPrompts:
         assert 'entity{tuple_delimiter}Supplier Quality Escalation' in examples
         assert '[Company Logo]' in examples
         assert 'entity{tuple_delimiter}Submission Delay Decision' in examples
-        assert 'relation{tuple_delimiter}Steering Committee Meeting{tuple_delimiter}Submission Delay Decision' in examples
+        assert (
+            'relation{tuple_delimiter}Steering Committee Meeting{tuple_delimiter}Submission Delay Decision' in examples
+        )
         assert 'relation{tuple_delimiter}D. Lee{tuple_delimiter}Supplier Quality Escalation' in examples
         assert 'relation{tuple_delimiter}Management Teleconference{tuple_delimiter}Review Pre-reads' in examples
         assert 'relation{tuple_delimiter}Slide Wording Alignment{tuple_delimiter}Steering Committee Meeting' in examples
@@ -366,6 +368,8 @@ class TestRAGResponsePrompts:
         assert 'distinguish lesson/failure/problem statements' in naive_prompt
         assert 'answer only the requested definition' in rag_prompt
         assert 'answer only the requested definition' in naive_prompt
+        assert 'Never transfer a milestone/date/role/impact from one named subject to another' in rag_prompt
+        assert 'Never transfer a milestone/date/role/impact from one named subject to another' in naive_prompt
 
     def test_fail_response_exists(self):
         """Test fail response exists."""

@@ -633,38 +633,28 @@ _COMPARISON_TOPIC_STOPWORDS = frozenset(
         'would',
     }
 )
-_SHARED_LABEL_TERMS = frozenset({'aav', 'gene therapy', 'peptide', 'protein', 'small molecule'})
+_SHARED_LABEL_TERMS = frozenset({'gene therapy', 'peptide', 'protein', 'small molecule'})
 _COMPARISON_FALLBACK_PREFERRED_TERMS = frozenset(
     {
         'agency',
-        'aav',
         'agreement',
         'agreements',
         'alignment',
         'audit',
         'batch',
         'batches',
-        'capa',
         'comparator',
         'conflict',
-        'cstd',
         'device',
         'devices',
         'dossier',
-        'fda',
-        'freeze',
-        'efpeglenatide',
         'governance',
-        'fitusiran',
         'impurity',
-        'hanmi',
         'license',
         'manufacturing',
         'partner',
-        'pku',
         'partners',
         'pooling',
-        'qag',
         'quality',
         'risk',
         'specifications',
@@ -678,8 +668,8 @@ _COMPARISON_FALLBACK_PREFERRED_TERMS = frozenset(
 )
 
 _MECHANISM_BAIT_UNSAFE_TARGET_RE = re.compile(
-    r'\b(?:technology\s+transfer|icmc|cmc\s+collaboration|leader\s+role|ppq\s+assay|'
-    r'process\s+performance\s+qualification|governance|ways?\s+of\s+working)\b',
+    r'\b(?:technology\s+transfer|leader\s+role|process\s+performance\s+qualification|'
+    r'governance|ways?\s+of\s+working)\b',
     re.IGNORECASE,
 )
 
@@ -700,11 +690,7 @@ def _comparison_topic_terms(document_title: str, passage: str) -> set[str]:
     """Extract specific shared-topic terms for pre-filtering comparison pairs."""
     terms = _tokenize_comparison_text(f'{document_title} {passage}')
     return {
-        token
-        for token in terms
-        if token not in _COMPARISON_TOPIC_STOPWORDS
-        and (len(token) >= 4 or token in {'aav', 'cmc', 'cstd', 'gmp', 'pku', 'qag'})
-        and not token.isdigit()
+        token for token in terms if token not in _COMPARISON_TOPIC_STOPWORDS and len(token) >= 4 and not token.isdigit()
     }
 
 
@@ -752,7 +738,7 @@ def _comparison_uses_supported_shared_labels(query: str, passage_a: str, passage
 
 
 def _format_comparison_topic(term: str) -> str:
-    if term in {'cmc', 'cstd', 'gmp', 'pku', 'qag'}:
+    if 2 <= len(term) <= 4:
         return term.upper()
     return term.replace('_', ' ')
 

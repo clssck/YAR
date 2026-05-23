@@ -6,8 +6,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from yar.retrieval import resolve_entity_filter
 from yar.retrieval import aliases as aliases_module
+from yar.retrieval import expand_query_aliases, resolve_entity_filter
 
 
 @pytest.fixture(autouse=True)
@@ -24,14 +24,38 @@ def test_resolve_entity_filter_matches_aliases_with_whole_words(monkeypatch: pyt
         tmp_path,
         """
         entities:
-          - canonical: isatuximab
+          - canonical: product alpha
             aliases:
-              - sarclisa
+              - alpha brand
         """,
     )
 
-    assert resolve_entity_filter('Latest SARCLISA response data') == 'isatuximab'
-    assert resolve_entity_filter('Discuss isatuximab dosing guidance') == 'isatuximab'
+    assert resolve_entity_filter('Latest ALPHA BRAND response data') == 'product alpha'
+    assert resolve_entity_filter('Discuss product alpha dosing guidance') == 'product alpha'
+
+
+def test_resolve_entity_filter_ignores_contextual_relationship_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _set_alias_config(
+        monkeypatch,
+        tmp_path,
+        """
+        entities:
+          - canonical: compound alpha
+            aliases:
+              - alpha collaboration
+              - alpha alliance
+              - alpha
+        """,
+    )
+
+    query = 'What lessons were learned from the Alpha collaboration?'
+
+    assert resolve_entity_filter(query) is None
+    assert expand_query_aliases(query) == ['compound alpha', 'alpha collaboration', 'alpha alliance', 'alpha']
+    assert resolve_entity_filter('What is the Alpha dosing plan?') == 'compound alpha'
 
 
 def test_resolve_entity_filter_avoids_substring_false_positives(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -40,13 +64,13 @@ def test_resolve_entity_filter_avoids_substring_false_positives(monkeypatch: pyt
         tmp_path,
         """
         entities:
-          - canonical: isatuximab
+          - canonical: product alpha
             aliases:
-              - sarclisa
+              - alpha brand
         """,
     )
 
-    assert resolve_entity_filter('Compare sarclisab safety updates') is None
+    assert resolve_entity_filter('Compare alphabrand safety updates') is None
 
 
 def test_resolve_entity_filter_uses_first_matching_canonical_and_logs_tie(
@@ -69,7 +93,7 @@ def test_resolve_entity_filter_uses_first_matching_canonical_and_logs_tie(
     info_mock = Mock()
     monkeypatch.setattr(aliases_module.logger, 'info', info_mock)
 
-    assert resolve_entity_filter('Need the shared alias benchmark') == 'First Canonical'
+    assert resolve_entity_filter('Need the shared alias comparison') == 'First Canonical'
     info_mock.assert_called_once()
     assert 'using First Canonical by config order' in info_mock.call_args.args[0]
 
@@ -82,7 +106,7 @@ def test_resolve_entity_filter_returns_none_for_missing_or_empty_config(
     monkeypatch.setattr(aliases_module.logger, 'warning', warning_mock)
     monkeypatch.setattr(aliases_module, '_ALIAS_CONFIG_PATH', tmp_path / 'missing.yaml')
 
-    assert resolve_entity_filter('sarclisa update') is None
+    assert resolve_entity_filter('alpha brand update') is None
     warning_mock.assert_called_once()
 
     warning_mock.reset_mock()
@@ -91,7 +115,7 @@ def test_resolve_entity_filter_returns_none_for_missing_or_empty_config(
     monkeypatch.setattr(aliases_module, '_ALIAS_CONFIG_PATH', empty_config_path)
     aliases_module._load_alias_rules.cache_clear()
 
-    assert resolve_entity_filter('sarclisa update') is None
+    assert resolve_entity_filter('alpha brand update') is None
     warning_mock.assert_called_once()
 
 
@@ -101,38 +125,24 @@ def test_resolve_entity_filter_respects_disable_switch(monkeypatch: pytest.Monke
         tmp_path,
         """
         entities:
-          - canonical: isatuximab
+          - canonical: product alpha
             aliases:
-              - sarclisa
+              - alpha brand
         """,
     )
     monkeypatch.setenv('ENABLE_AUTO_ENTITY_FILTER', 'false')
 
-    assert resolve_entity_filter('sarclisa update') is None
+    assert resolve_entity_filter('alpha brand update') is None
 
 
-def test_shipped_config_resolves_key_queries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify config/entity_aliases.yaml resolves the miss-case queries we target."""
+def test_shipped_config_resolves_generic_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify config/entity_aliases.yaml contains only generic aliases."""
     monkeypatch.delenv('ENABLE_AUTO_ENTITY_FILTER', raising=False)
     aliases_module._load_alias_rules.cache_clear()
 
-    # Miss case #30 — brand name resolves to generic
-    assert resolve_entity_filter('presentation of sarclisa') == 'isatuximab'
-
-    # Miss case #11 — powder-in-bottle phrase resolves to program
-    assert resolve_entity_filter('Do we already use Powder in a bottle directly for phase 1 study?') == 'myokardia'
-
-    # Miss case #27 — typo variant resolves
-    assert resolve_entity_filter('CMC team freezd project timeline') == 'project freeze'
-
-    # Miss case #28 — topic phrase resolves
-    assert resolve_entity_filter('CMC outsourcing licensing check points') == 'licencing'
-
-    # Miss case #34 — alternate phrasing resolves
-    assert resolve_entity_filter('What are the japan-specific activities?') == 'japanese icmc handbook'
-
-    # Negative — an unrelated query does not trigger any alias
-    assert resolve_entity_filter('What is the standard duration of shipment to depot?') is None
+    assert resolve_entity_filter('FDA approval timeline') == 'us food and drug administration'
+    assert resolve_entity_filter('QMS audit findings') == 'quality management system'
+    assert resolve_entity_filter('What is the standard duration before the launch milestone?') is None
 
 
 def _set_alias_config(monkeypatch: pytest.MonkeyPatch, tmp_path, content: str) -> None:

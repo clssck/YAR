@@ -55,6 +55,74 @@ async def test_pgvector_query_binds_embedding_parameter(namespace: str, expected
 
 @pytest.mark.offline
 @pytest.mark.asyncio
+async def test_pgvector_entity_query_returns_confidence_scores() -> None:
+    db_query = AsyncMock(return_value=[])
+    storage = _make_storage(NameSpace.VECTOR_STORE_ENTITIES, db_query)
+
+    _ = await storage.query('ignored', top_k=5, query_embedding=[0.1, 0.2])
+
+    call = db_query.await_args_list[0]
+    sql = cast(str, call.args[0])
+
+    assert 'AS distance' in sql
+    assert 'AS vector_score' in sql
+    assert 'AS score' in sql
+    assert "'vector' AS source_type" in sql
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
+async def test_pgvector_hybrid_entity_search_preserves_vector_and_trigram_scores() -> None:
+    db_query = AsyncMock(
+        side_effect=[
+            [
+                {
+                    'entity_name': 'Acme',
+                    'entity_type': 'Organization',
+                    'content': 'semantic candidate',
+                    'created_at': 1,
+                    'distance': 0.60,
+                    'vector_score': 0.40,
+                    'score': 0.40,
+                    'source_type': 'vector',
+                }
+            ],
+            [
+                {
+                    'entity_name': 'Acme',
+                    'entity_type': 'Organization',
+                    'content': 'exact name candidate',
+                    'created_at': 1,
+                    'trgm_score': 0.92,
+                    'source_type': 'trigram',
+                },
+                {
+                    'entity_name': 'Acmf',
+                    'entity_type': 'Organization',
+                    'content': 'near name candidate',
+                    'created_at': 2,
+                    'trgm_score': 0.50,
+                    'source_type': 'trigram',
+                },
+            ],
+        ]
+    )
+    storage = _make_storage(NameSpace.VECTOR_STORE_ENTITIES, db_query)
+    storage.embedding_func = AsyncMock(return_value=[[0.1, 0.2]])
+
+    results = await storage.hybrid_entity_search('Acme', top_k=2, min_trigram_similarity=0.1)
+
+    assert [result['entity_name'] for result in results] == ['Acme', 'Acmf']
+    assert results[0]['source_type'] == 'vector+trigram'
+    assert results[0]['vector_score'] == 0.40
+    assert results[0]['trgm_score'] == 0.92
+    assert results[0]['score'] == 0.92
+    assert results[1]['source_type'] == 'trigram'
+    assert results[1]['score'] == 0.50
+
+
+@pytest.mark.offline
+@pytest.mark.asyncio
 async def test_pgvector_relationship_query_fuses_vector_and_bm25_primary_results() -> None:
     db_query = AsyncMock(
         side_effect=[

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from yar.evaluation.generate_ragas_questions import (
     SourceChunk,
+    _anchor_question_to_sources,
     build_eval_cases_from_testset_rows,
     collect_source_documents,
     infer_source_documents,
@@ -65,6 +66,33 @@ def test_infer_source_documents_matches_reference_contexts_to_chunks():
     assert infer_source_documents(['SARP pre-IND strategy'], chunks) == ['b.pdf']
 
 
+def test_anchor_question_to_sources_adds_document_title_when_missing():
+    anchored = _anchor_question_to_sources(
+        'Who is Danielle Combessis in the context of the clinical study?',
+        [
+            '/tmp/yar_ragas_ingested_sources/'
+            'doc_94a146ae87c53b9b59fdd61b9239bf4a_'
+            '18-lessons-learned-session-02-development-supply-outcome.md'
+        ],
+    )
+
+    assert anchored.startswith('In the 18-lessons-learned-session-02-development-supply-outcome document, ')
+    assert 'Who is Danielle Combessis' not in anchored
+    assert 'who is Danielle Combessis' in anchored
+
+
+def test_anchor_question_to_sources_preserves_existing_anchor():
+    question = 'In the adapter strategy workgroup document, what is the definition of transfer adapters?'
+
+    assert (
+        _anchor_question_to_sources(
+            question,
+            ['doc_9ece4c702bc5e6e24cf45f3654730866_adapter_strategy_workgroup_final.md'],
+        )
+        == question
+    )
+
+
 def test_build_eval_cases_from_testset_rows_maps_generated_schema():
     chunks = [
         SourceChunk(
@@ -95,15 +123,16 @@ def test_build_eval_cases_from_testset_rows_maps_generated_schema():
     assert cases == [
         {
             'id': 'ragas-generated-001',
-            'question': 'What is the first recommended step?',
+            'question': 'In the technology document, what is the first recommended step?',
             'ground_truth': 'Organize an ad hoc meeting with the iCMC team.',
             'context_reference': 'Organize an ad hoc meeting with the iCMC team.',
-            'retrieval_query': 'What is the first recommended step?',
+            'retrieval_query': 'In the technology document, what is the first recommended step?',
             'retrieval_mode': 'naive',
             'source_documents': ['technology.pdf'],
             'project': 'generated-project',
             'generated_by': 'ragas.testset.TestsetGenerator',
             'synthesizer_name': 'single_hop',
+            'original_question': 'What is the first recommended step?',
             'reference_contexts': ['ad hoc meeting with the iCMC team'],
             'persona_name': 'auditor',
             'query_style': 'formal',

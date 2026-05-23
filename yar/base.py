@@ -192,7 +192,7 @@ class QueryParam:
     """Optional filter to restrict results to entities/chunks containing this term.
     When provided, only retrieves entities whose name or description contains the filter term.
     Useful for multi-product corpora to prevent context mixing between different products.
-    Example: 'Fitusiran' to restrict results to Fitusiran-related content only.
+    Example: 'Product A' to restrict results to Product A-related content only.
     """
 
     disable_cache: bool = False

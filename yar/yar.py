@@ -2589,6 +2589,12 @@ class YAR:
                     'failure_reason': 'no_results',
                 },
             }
+            raw_search_trace = getattr(effective_param, '_raw_search_trace', None)
+            if isinstance(raw_search_trace, dict):
+                final_data['metadata']['retrieval'] = raw_search_trace
+            vector_search_trace = getattr(effective_param, '_vector_search_trace', None)
+            if isinstance(vector_search_trace, dict):
+                final_data['metadata']['vector_search'] = vector_search_trace
             _annotate_requested_query_mode(
                 final_data,
                 requested_mode=data_param.mode,

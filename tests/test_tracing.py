@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -94,6 +95,18 @@ def _active_trace_manager(*, capture_contexts=False, capture_prompts=False):
         ),
         tracer=_FakeTracer(),
     )
+
+
+def _event_attrs(span: _FakeSpan, name: str) -> dict:
+    for event_name, attributes in span.events:
+        if event_name == name:
+            return attributes
+    raise AssertionError(f'missing span event {name}')
+
+
+def _json_event_attr(attributes: dict, key: str):
+    value = attributes[key]
+    return json.loads(value) if isinstance(value, str) else value
 
 
 def _build_retrieval_evaluator(**kwargs):
@@ -280,11 +293,127 @@ class _FakeRag:
             'llm_response': {'content': 'answer text'},
             'data': {
                 'references': [{'reference_id': '1', 'file_path': 'doc.pdf'}],
-                'chunks': [{'reference_id': '1', 'content': 'secret context payload'}],
-                'entities': [{'entity_name': 'PKU'}],
+                'chunks': [
+                    {
+                        'reference_id': '1',
+                        'chunk_id': 'chunk-1',
+                        'content': 'secret context payload',
+                        'merge_score': 0.75,
+                    }
+                ],
+                'entities': [
+                    {
+                        'entity_name': 'PKU',
+                        'entity_type': 'disease',
+                        'description': 'PKU evidence from the knowledge graph',
+                        'file_path': 'kg.md',
+                    }
+                ],
                 'relationships': [],
             },
-            'metadata': {'query_mode': param.mode},
+            'metadata': {
+                'query_mode': param.mode,
+                'keywords': {'high_level': ['disease'], 'low_level': ['PKU']},
+                'retrieval': {
+                    'entity_keywords_for_search': 'PKU, Phenylketonuria',
+                    'chunk_phrase_terms': ['PKU'],
+                    'exact_chunk_lookup': True,
+                    'entity_filter': 'PKU',
+                },
+                'processing_info': {
+                    'total_entities_found': 1,
+                    'total_relations_found': 0,
+                    'final_chunks_count': 1,
+                    'source_breakdown': {'C': 1},
+                    'zero_hits': False,
+                },
+                'chunk_selection': {
+                    'candidate_count': 3,
+                    'selected_count': 1,
+                    'dropped_count': 2,
+                    'dropped_preview': [
+                        {
+                            'chunk_id': 'chunk-dropped',
+                            'file_path': 'secret.pdf',
+                            'drop_reason': 'not_final_context',
+                            'excerpt': 'secret dropped chunk payload should be bounded',
+                        }
+                    ],
+                    'dropped_chunks': [
+                        {
+                            'chunk_id': 'chunk-dropped',
+                            'file_path': 'secret.pdf',
+                            'drop_reason': 'not_final_context',
+                        }
+                    ],
+                    'visible_group_decisions': {
+                        'filter_applied': False,
+                        'reason': 'reference_ids_requested',
+                        'group_count': 2,
+                        'selected_group_count': 2,
+                        'dropped_group_count': 0,
+                        'decisions': [],
+                    },
+                },
+                'group_filter': {
+                    'filter_applied': True,
+                    'reason': 'filtered_weak_groups',
+                    'group_count': 2,
+                    'selected_group_count': 1,
+                    'dropped_group_count': 1,
+                },
+                'entity_context_selection': {
+                    'candidate_count': 4,
+                    'selected_count': 2,
+                    'dropped_count': 2,
+                },
+                'entity_truncation': {
+                    'entities_before': 4,
+                    'entities_after': 2,
+                    'relations_before': 3,
+                    'relations_after': 1,
+                },
+                'merge_filter': {
+                    'dropped_count': 1,
+                    'reason_counts': {'query_terms_low_relevance': 1},
+                    'dropped_preview': [
+                        {
+                            'chunk_id': 'merge-dropped',
+                            'file_path': 'merge.pdf',
+                            'drop_reason': 'query_terms_low_relevance',
+                            'excerpt': 'secret merge dropped payload should be bounded',
+                        }
+                    ],
+                },
+                'merge_drop_trace': [{'chunk_id': 'dropped', 'drop_reason': 'query_terms_low_relevance'}],
+                'exact_context_filter': {
+                    'filter_applied': True,
+                    'reason': 'confident_exact_source_filter',
+                    'group_count': 2,
+                    'selected_count': 1,
+                    'dropped_count': 1,
+                    'selected_group_key': 'file:doc.pdf',
+                    'selected_file_path': 'doc.pdf',
+                    'support_score': 2.5,
+                    'dropped_preview': [
+                        {
+                            'chunk_id': 'exact-dropped',
+                            'file_path': 'other.pdf',
+                            'drop_reason': 'confident_exact_source_filter',
+                            'excerpt': 'secret exact filter dropped payload should be bounded',
+                        }
+                    ],
+                },
+                'answer_shaping': {
+                    'applied': True,
+                    'reasons': ['sarclisa_physical_flow_consequence_source_row'],
+                    'raw_answer_length': 12,
+                    'final_answer_length': 11,
+                    'raw_answer_preview': 'raw answer',
+                    'final_answer_preview': 'final answer',
+                },
+                'auto_entity_filter': 'PKU',
+            },
         }
 
 
@@ -295,16 +424,196 @@ async def test_query_route_trace_redacts_sensitive_text_by_default():
     app.include_router(create_query_routes(_FakeRag(), tracing=manager))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
-        response = await client.post('/query', json={'query': 'What is PKU?', 'mode': 'mix'})
+        response = await client.post(
+            '/query',
+            json={
+                'query': 'What is PKU?',
+                'mode': 'mix',
+                'chunk_top_k': 4,
+                'retrieval_multiplier': 2,
+                'enable_bm25_fusion': True,
+                'disable_cache': True,
+            },
+        )
 
     assert response.status_code == 200
+    payload = response.json()
+    assert payload['metadata']['answer_shaping']['applied'] is True
+    assert payload['metadata']['exact_context_filter']['reason'] == 'confident_exact_source_filter'
     query_span = manager.tracer.spans[0].span
     assert query_span.attributes['input.query_length'] == len('What is PKU?')
     assert query_span.attributes['rag.reference_count'] == 1
     assert query_span.attributes['rag.source_files'] == ['doc.pdf']
+    assert query_span.attributes['rag.chunk_top_k'] == 4
+    assert query_span.attributes['rag.retrieval_multiplier'] == 2
+    assert query_span.attributes['rag.enable_bm25_fusion'] is True
+    assert query_span.attributes['rag.disable_cache'] is True
+    assert query_span.attributes['rag.keywords.low_level'] == ['PKU']
+    assert query_span.attributes['retrieval.entity_keywords_for_search'] == 'PKU, Phenylketonuria'
+    assert query_span.attributes['retrieval.chunk_phrase_terms'] == ['PKU']
+    assert query_span.attributes['retrieval.processing.final_chunks_count'] == 1
+    assert query_span.attributes['retrieval.source_breakdown.C'] == 1
+    assert query_span.attributes['retrieval.chunk_selection.candidate_count'] == 3
+    assert query_span.attributes['retrieval.chunk_selection.selected_count'] == 1
+    assert query_span.attributes['retrieval.chunk_selection.dropped_count'] == 2
+    assert query_span.attributes['retrieval.chunk_selection.visible_groups.group_count'] == 2
+    assert query_span.attributes['retrieval.chunk_selection.visible_groups.filter_applied'] is False
+    assert query_span.attributes['retrieval.chunk_selection.visible_groups.selected_group_count'] == 2
+    assert query_span.attributes['retrieval.chunk_selection.visible_groups.dropped_group_count'] == 0
+    assert query_span.attributes['retrieval.chunk_selection.visible_groups.reason'] == 'reference_ids_requested'
+    assert query_span.attributes['retrieval.group_filter.filter_applied'] is True
+    assert query_span.attributes['retrieval.group_filter.dropped_group_count'] == 1
+    assert query_span.attributes['retrieval.group_filter.reason'] == 'filtered_weak_groups'
+    assert query_span.attributes['retrieval.entity_context.candidate_count'] == 4
+    assert query_span.attributes['retrieval.entity_context.dropped_count'] == 2
+    assert query_span.attributes['retrieval.entity_truncation.entities_before'] == 4
+    assert query_span.attributes['retrieval.entity_truncation.entities_after'] == 2
+    assert query_span.attributes['retrieval.merge_filter.dropped_count'] == 1
+    assert query_span.attributes['retrieval.merge_filter.reason_counts.query_terms_low_relevance'] == 1
+    assert query_span.attributes['retrieval.merge_drop_trace.count'] == 1
+    assert query_span.attributes['retrieval.exact_context_filter.filter_applied'] is True
+    assert query_span.attributes['retrieval.exact_context_filter.reason'] == 'confident_exact_source_filter'
+    assert query_span.attributes['retrieval.exact_context_filter.dropped_count'] == 1
+    assert query_span.attributes['answer_shaping.applied'] is True
+    assert query_span.attributes['answer_shaping.reasons'] == ['sarclisa_physical_flow_consequence_source_row']
+    assert query_span.attributes['retrieval.auto_entity_filter'] == 'PKU'
     assert 'input.query' not in query_span.attributes
     assert 'output.answer' not in query_span.attributes
     assert 'rag.context_previews' not in query_span.attributes
+
+    chunk_drop_event = _event_attrs(query_span, 'retrieval.chunk_drops')
+    dropped_chunks = _json_event_attr(chunk_drop_event, 'dropped_chunks')
+    assert chunk_drop_event['dropped_count'] == 2
+    assert dropped_chunks
+    assert dropped_chunks[0]['chunk_id'] == 'chunk-dropped'
+    assert dropped_chunks[0]['drop_reason'] == 'not_final_context'
+    assert 'excerpt' not in dropped_chunks[0]
+    exact_context_event = _event_attrs(query_span, 'retrieval.exact_context_filter')
+    assert exact_context_event['dropped_count'] == 1
+    assert exact_context_event['reason'] == 'confident_exact_source_filter'
+    group_event = _event_attrs(query_span, 'retrieval.group_decisions')
+    assert group_event['filter_applied'] is False
+    assert group_event['reason'] == 'reference_ids_requested'
+    assert group_event['selected_group_count'] == 2
+    assert group_event['dropped_group_count'] == 0
+    assert 'decisions' not in group_event
+
+
+def test_trace_query_request_attrs_includes_retrieval_params():
+    from yar.api.routers.query_routes import QueryRequest, _trace_query_request_attrs
+
+    manager = _active_trace_manager()
+    request = QueryRequest(
+        query='What is PKU?',
+        mode='mix',
+        top_k=5,
+        chunk_top_k=10,
+        retrieval_multiplier=3,
+        enable_rerank=True,
+        enable_bm25_fusion=True,
+        bm25_weight=0.4,
+        entity_filter='Compound Alpha',
+        disable_cache=True,
+        hl_keywords=['metabolism'],
+    )
+
+    attrs = _trace_query_request_attrs('/query', request, manager)
+
+    assert attrs['retrieval.top_k'] == 5
+    assert attrs['retrieval.chunk_top_k'] == 10
+    assert attrs['retrieval.retrieval_multiplier'] == 3
+    assert attrs['retrieval.enable_rerank'] is True
+    assert attrs['retrieval.enable_bm25_fusion'] is True
+    assert attrs['retrieval.bm25_weight'] == 0.4
+    assert attrs['retrieval.entity_filter'] == 'Compound Alpha'
+    assert attrs['retrieval.disable_cache'] is True
+    assert attrs['retrieval.hl_keywords_provided'] is True
+    assert attrs['retrieval.ll_keywords_provided'] is False
+
+
+def test_trace_rag_result_attrs_surfaces_processing_info():
+    from yar.api.routers.query_routes import _trace_rag_result_attrs
+
+    manager = _active_trace_manager()
+    attrs = _trace_rag_result_attrs(
+        {
+            'status': 'success',
+            'message': 'ok',
+            'data': {'references': [], 'chunks': []},
+            'metadata': {
+                'keywords': {'high_level': ['alpha'], 'low_level': ['beta']},
+                'processing_info': {'zero_hits': True, 'total_entities_found': 0, 'final_chunks_count': 0},
+            },
+        },
+        manager,
+    )
+
+    assert attrs['retrieval.zero_hits'] is True
+    assert attrs['retrieval.keywords_hl'] == ['alpha']
+    assert attrs['retrieval.final_chunks_count'] == 0
+
+
+def test_result_tags_marks_zero_hits():
+    from yar.api.routers.query_routes import _result_tags
+
+    tags = _result_tags({'status': 'success', 'metadata': {'processing_info': {'zero_hits': True}}, 'data': {}})
+
+    assert 'zero_hits:true' in tags
+
+
+def test_retrieval_documents_from_result_includes_chunk_id():
+    from yar.api.routers.query_routes import _retrieval_documents_from_result
+
+    manager = _active_trace_manager(capture_contexts=True)
+    docs = _retrieval_documents_from_result(
+        {
+            'data': {
+                'references': [{'reference_id': '1', 'file_path': 'doc.pdf'}],
+                'chunks': [
+                    {
+                        'reference_id': '1',
+                        'chunk_id': 'abc-123',
+                        'content': 'chunk',
+                        'stage_ranks': {'merge_rank': 1, 'mmr_rank': 2, 'unknown_rank': 99},
+                        'merge_score': 0.75,
+                        'source_type': 'vector+entity',
+                        'drop_reason': 'not_final_context',
+                        'exact_support_score': 2.5,
+                    }
+                ],
+            }
+        },
+        manager,
+    )
+    docs_without_chunk_id = _retrieval_documents_from_result(
+        {'data': {'references': [{'reference_id': '2', 'file_path': 'doc.pdf'}], 'chunks': [{'reference_id': '2'}]}},
+        manager,
+    )
+    docs_with_filter_support = _retrieval_documents_from_result(
+        {
+            'data': {
+                'references': [{'reference_id': '3', 'file_path': 'selected.pdf'}],
+                'chunks': [{'reference_id': '3', 'chunk_id': 'selected', 'merge_score': 0.5}],
+            },
+            'metadata': {
+                'exact_context_filter': {
+                    'selected_file_path': 'selected.pdf',
+                    'support_score': 3.25,
+                }
+            },
+        },
+        manager,
+    )
+
+    assert docs[0]['metadata']['chunk_id'] == 'abc-123'
+    assert 'chunk_id' not in docs_without_chunk_id[0]['metadata']
+    assert docs[0]['metadata']['stage_ranks'] == {'merge_rank': 1, 'mmr_rank': 2}
+    assert docs[0]['metadata']['merge_score'] == 0.75
+    assert docs[0]['metadata']['source_type'] == 'vector+entity'
+    assert docs[0]['metadata']['drop_reason'] == 'not_final_context'
+    assert docs[0]['metadata']['exact_support_score'] == 2.5
+    assert docs[0]['score'] == 0.75
+    assert docs_with_filter_support[0]['metadata']['exact_support_score'] == 3.25
 
 
 @pytest.mark.asyncio
@@ -320,7 +629,13 @@ async def test_query_route_trace_includes_bounded_text_when_enabled():
     query_span = manager.tracer.spans[0].span
     assert query_span.attributes['input.query'] == 'What is PKU?'
     assert query_span.attributes['output.answer'] == 'answer text'
+    assert query_span.attributes['output.final_answer'] == 'answer text'
+    assert query_span.attributes['answer_shaping.raw_answer_preview'] == 'raw answer'
+    assert query_span.attributes['answer_shaping.final_answer_preview'] == 'final answer'
     assert query_span.attributes['rag.context_previews'] == ['secret conte...']
+    chunk_drop_event = _event_attrs(query_span, 'retrieval.chunk_drops')
+    dropped_chunks = _json_event_attr(chunk_drop_event, 'dropped_chunks')
+    assert dropped_chunks[0]['excerpt'] == 'secret dropp...'
 
 
 def test_start_llm_span_emits_openinference_attributes():
@@ -628,7 +943,13 @@ async def test_query_route_emits_synthetic_retriever_span():
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
         response = await client.post(
             '/query',
-            json={'query': 'What is PKU?', 'mode': 'mix', 'include_references': True},
+            json={
+                'query': 'What is PKU?',
+                'mode': 'mix',
+                'include_references': True,
+                'chunk_top_k': 6,
+                'entity_filter': 'PKU',
+            },
         )
 
     assert response.status_code == 200
@@ -640,7 +961,13 @@ async def test_query_route_emits_synthetic_retriever_span():
     retr_attrs = manager.tracer.spans[retr_idx].span.attributes
     assert retr_attrs['openinference.span.kind'] == 'RETRIEVER'
     assert retr_attrs['retrieval.requested_mode'] == 'mix'
-    assert retr_attrs['retrieval.document_count'] >= 0
+    assert retr_attrs['retrieval.document_count'] == 2
+    assert retr_attrs['retrieval.chunk_top_k'] == 6
+    assert retr_attrs['retrieval.entity_filter'] == 'PKU'
+    assert retr_attrs['retrieval.documents.0.document.id'] == '1'
+    assert retr_attrs['retrieval.documents.0.document.score'] == 0.75
+    assert retr_attrs['retrieval.documents.1.document.id'].startswith('kg-e-')
+    assert 'PKU evidence from the knowledge graph' in retr_attrs['retrieval.documents.1.document.content']
 
 
 def test_sample_ratio_parses_and_clamps(monkeypatch):

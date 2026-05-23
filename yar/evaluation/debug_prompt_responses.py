@@ -58,12 +58,12 @@ async def main():
         base_url=os.getenv('LLM_BINDING_HOST', 'https://api.openai.com/v1'),
     )
 
-    # Test specific queries that had issues
+    # Test a few representative dataset queries.
     test_queries = [
-        dataset[0],  # Q1 - Isatuximab (0.0 relevance issue)
-        dataset[1],  # Q2 - PKU IND
-        dataset[5],  # Q6 - Japanese iCMC (low relevance in full eval)
-        dataset[8],  # Q9 - Risk management (low in full eval)
+        dataset[0],
+        dataset[1],
+        dataset[5],
+        dataset[8],
     ]
 
     variants_to_test = ['baseline', 'mipro']

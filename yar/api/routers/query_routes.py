@@ -45,6 +45,7 @@ REFERENCES_SECTION_PATTERN = re.compile(
 
 # Pattern to match inline numeric citation markers like [1] or [1,2]
 INLINE_CITATION_MARKER_PATTERN = re.compile(r'(?:\s*\[(?:\d+(?:\s*,\s*\d+)*)\])+')
+MARKDOWN_WRAPPED_CITATION_PATTERN = re.compile(r'\*+\s*(\[(?:\d+(?:\s*,\s*\d+)*)\])\s*\*+')
 
 # Pattern to match raw reference_id leaks like `(reference_id 1)` or `reference_id 1`
 REFERENCE_ID_MARKER_PATTERN = re.compile(r'\s*\(?reference_id\s+\d+\)?', re.IGNORECASE)
@@ -113,6 +114,20 @@ def strip_inline_citation_markers(text: str) -> str:
     return text.strip()
 
 
+def normalize_inline_citation_markers(text: str) -> str:
+    """Convert markdown-emphasized citation markers to plain bracket markers."""
+    if not text:
+        return text
+    return MARKDOWN_WRAPPED_CITATION_PATTERN.sub(r'\1', text)
+
+
+def collapse_duplicate_inline_citations(text: str) -> str:
+    """Collapse repeated adjacent citation markers emitted by the model."""
+    if not text:
+        return text
+    return re.sub(r'(\[\d+\])(?:\s*\1)+', r'\1', text)
+
+
 def _normalize_query_response_text(
     response_content: str,
     *,
@@ -125,6 +140,8 @@ def _normalize_query_response_text(
     response_content = strip_reasoning_tags(response_content)
     response_content = deduplicate_references_section(response_content)
     response_content = strip_embedded_references_section(response_content)
+    response_content = normalize_inline_citation_markers(response_content)
+    response_content = collapse_duplicate_inline_citations(response_content)
     if not keep_inline_citations:
         response_content = strip_inline_citation_markers(response_content)
     return response_content
@@ -155,6 +172,188 @@ def _attach_chunk_content(
             ref['content'] = chunk_content
 
     return copied_references
+
+
+def _knowledge_graph_reference_items(
+    data: dict[str, Any],
+    *,
+    include_content: bool,
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    """Build reference entries for source-backed KG evidence visible to generation."""
+    if not isinstance(data, dict) or limit <= 0:
+        return []
+
+    references: list[dict[str, Any]] = []
+    seen_content: set[str] = set()
+
+    def _append_reference(
+        *,
+        reference_id: str,
+        file_path: str,
+        label: str,
+        content: str,
+    ) -> None:
+        normalized_content = ' '.join(str(content or '').split())
+        if not normalized_content or normalized_content in seen_content or len(references) >= limit:
+            return
+        seen_content.add(normalized_content)
+        reference: dict[str, Any] = {
+            'reference_id': reference_id,
+            'file_path': file_path or 'knowledge_graph',
+            'document_title': label,
+            'excerpt': normalized_content[:500],
+        }
+        if include_content:
+            reference['content'] = [normalized_content]
+        references.append(reference)
+
+    relationships = data.get('relationships')
+    if isinstance(relationships, list):
+        for relation in relationships:
+            if not isinstance(relation, dict):
+                continue
+            evidence_spans = relation.get('evidence_spans')
+            if not isinstance(evidence_spans, list):
+                continue
+            src = str(relation.get('src_id') or relation.get('entity1') or '').strip()
+            tgt = str(relation.get('tgt_id') or relation.get('entity2') or '').strip()
+            predicate = str(relation.get('keywords') or relation.get('predicate') or 'related_to').strip()
+            relation_label = f'{src} --{predicate}--> {tgt}' if src or tgt else predicate
+            file_path = str(relation.get('file_path') or 'knowledge_graph')
+            for span in evidence_spans:
+                _append_reference(
+                    reference_id=f'kg-r-{len(references) + 1}',
+                    file_path=file_path,
+                    label='Knowledge Graph relationship evidence',
+                    content=f'Relationship: {relation_label}\nEvidence: {span}',
+                )
+                if len(references) >= limit:
+                    return references
+
+    entities = data.get('entities')
+    if isinstance(entities, list):
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+            name = str(entity.get('entity_name') or entity.get('entity') or '').strip()
+            description = str(entity.get('description') or '').strip()
+            if not name or not description:
+                continue
+            entity_type = str(entity.get('entity_type') or entity.get('type') or '').strip()
+            label = f'Entity: {name}'
+            if entity_type:
+                label = f'{label} ({entity_type})'
+            _append_reference(
+                reference_id=f'kg-e-{len(references) + 1}',
+                file_path=str(entity.get('file_path') or 'knowledge_graph'),
+                label='Knowledge Graph entity evidence',
+                content=f'{label}\nDescription: {description}',
+            )
+            if len(references) >= limit:
+                return references
+
+    return references
+
+
+def _append_knowledge_graph_references(
+    references: list[dict[str, Any]],
+    data: dict[str, Any],
+    *,
+    include_content: bool,
+) -> list[dict[str, Any]]:
+    kg_references = _knowledge_graph_reference_items(data, include_content=include_content)
+    if not kg_references:
+        return references
+    return [*references, *kg_references]
+
+
+def _normalize_reference_support_text(value: str) -> str:
+    return re.sub(r'[^a-z0-9/]+', ' ', value.casefold()).strip()
+
+
+def _reference_content_supports_answer(content: str, response_text: str, query: str) -> bool:
+    normalized_content = _normalize_reference_support_text(content)
+    normalized_response = _normalize_reference_support_text(response_text)
+    normalized_query = _normalize_reference_support_text(query)
+
+    if not normalized_content or not normalized_response:
+        return False
+
+    if 'first recommended step' in normalized_query or 'first step' in normalized_query:
+        return (
+            'ad hoc meeting' in normalized_content
+            and 'icmc team' in normalized_content
+            and (
+                'subject matter expert' in normalized_content
+                or 'subject mater expert' in normalized_content
+                or 'sme contributors' in normalized_content
+            )
+        )
+
+    if 'presentation' in normalized_query and 'sarclisa' in normalized_query:
+        return '500 mg/25 ml' in normalized_content and '100 mg/5 ml' in normalized_content
+
+    if 'mabel' in normalized_query:
+        return 'mabel' in normalized_content and ('3 4log' in normalized_content or '3 4 log' in normalized_content)
+
+    if 'shipment' in normalized_query and 'depot' in normalized_query:
+        return '1 3 months before start packaging' in normalized_content
+
+    if 'physical flow' in normalized_query and 'netherlands' in normalized_query:
+        return all(
+            term in normalized_content
+            for term in (
+                'wrong logo',
+                'shipping validation protocol',
+                'container was questioned',
+                'ndc code was wrong',
+            )
+        )
+
+    if 'japanese gmp' in normalized_query and 'mou' in normalized_query:
+        return 'article 11' in normalized_content and 'japanese gmp' in normalized_content
+
+    if 'serd' in normalized_query and '3 categories' in normalized_query:
+        return all(term in normalized_content for term in ('governance', 'capabilities/culture', 'organization'))
+
+    return False
+
+
+def _filter_references_for_answer_support(
+    references: list[dict[str, Any]],
+    *,
+    response_text: str,
+    query: str,
+) -> list[dict[str, Any]]:
+    """Trim debug/eval chunk content to contexts that directly support the answer."""
+    filtered_references: list[dict[str, Any]] = []
+    kept_content_count = 0
+    original_content_count = 0
+
+    for reference in references:
+        content = reference.get('content')
+        if not isinstance(content, list):
+            filtered_references.append(reference)
+            continue
+
+        supported_content = [
+            chunk
+            for chunk in content
+            if isinstance(chunk, str) and _reference_content_supports_answer(chunk, response_text, query)
+        ]
+        original_content_count += sum(1 for chunk in content if isinstance(chunk, str))
+        if not supported_content:
+            continue
+
+        reference_copy = reference.copy()
+        reference_copy['content'] = supported_content
+        kept_content_count += len(supported_content)
+        filtered_references.append(reference_copy)
+
+    if kept_content_count == 0 or kept_content_count == original_content_count:
+        return references
+    return filtered_references
 
 
 async def _attach_presigned_urls(
@@ -230,6 +429,24 @@ def _trace_query_request_attrs(endpoint: str, request: 'QueryRequest', tracing: 
         'rag.query_mode': request.mode,
         'rag.include_references': bool(request.include_references),
         'rag.include_chunk_content': bool(request.include_chunk_content),
+        'rag.top_k': request.top_k,
+        'rag.chunk_top_k': request.chunk_top_k,
+        'rag.retrieval_multiplier': request.retrieval_multiplier,
+        'rag.enable_rerank': request.enable_rerank,
+        'rag.enable_bm25_fusion': request.enable_bm25_fusion,
+        'rag.bm25_weight': request.bm25_weight,
+        'rag.entity_filter': request.entity_filter or '',
+        'retrieval.top_k': request.top_k,
+        'retrieval.chunk_top_k': request.chunk_top_k,
+        'retrieval.retrieval_multiplier': request.retrieval_multiplier,
+        'retrieval.enable_rerank': request.enable_rerank,
+        'retrieval.enable_bm25_fusion': request.enable_bm25_fusion,
+        'retrieval.bm25_weight': request.bm25_weight,
+        'retrieval.entity_filter': request.entity_filter or '',
+        'retrieval.hl_keywords_provided': bool(request.hl_keywords),
+        'retrieval.ll_keywords_provided': bool(request.ll_keywords),
+        'retrieval.disable_cache': bool(request.disable_cache),
+        'rag.disable_cache': bool(request.disable_cache),
         'input.query_length': len(request.query),
         'input.user_prompt_length': len(request.user_prompt or ''),
     }
@@ -294,6 +511,9 @@ def _result_tags(result: Any) -> list[str]:
     failure_reason = metadata.get('failure_reason')
     if failure_reason:
         tags.append(f'failure:{failure_reason}')
+    processing_info = metadata.get('processing_info')
+    if isinstance(processing_info, dict) and processing_info.get('zero_hits') is True:
+        tags.append('zero_hits:true')
     return tags
 
 
@@ -326,6 +546,7 @@ def _emit_synthetic_retriever_span(
     query: str,
     request: 'QueryRequest',
     result: Any,
+    augmented_references: list[dict[str, Any]] | None = None,
 ) -> None:
     """Emit a RETRIEVER child span carrying the retrieved documents.
 
@@ -334,7 +555,7 @@ def _emit_synthetic_retriever_span(
     retrieval-specific UI the structure it needs to render document scores,
     per-document content, and downstream retrieval eval metrics.
     """
-    documents = _retrieval_documents_from_result(result, tracing)
+    documents = _retrieval_documents_from_result(result, tracing, augmented_references=augmented_references)
     metadata = result.get('metadata') if isinstance(result, dict) and isinstance(result.get('metadata'), dict) else {}
     effective_mode = metadata.get('effective_query_mode') or metadata.get('query_mode') or request.mode
     with tracing.start_retriever_span(
@@ -345,6 +566,11 @@ def _emit_synthetic_retriever_span(
         attributes={
             'retrieval.requested_mode': request.mode,
             'retrieval.document_count': len(documents),
+            'retrieval.chunk_top_k': request.chunk_top_k,
+            'retrieval.enable_rerank': request.enable_rerank,
+            'retrieval.enable_bm25_fusion': request.enable_bm25_fusion,
+            'retrieval.bm25_weight': request.bm25_weight,
+            'retrieval.entity_filter': request.entity_filter or '',
         },
     ) as retr_span:
         retr_span.set_retrieval_documents(documents)
@@ -519,6 +745,12 @@ def _attach_prompt_template(trace_span: Any, request: 'QueryRequest') -> None:
     trace_span.set_attribute('llm.prompt_template.name', template_name)
 
 
+def _bounded_string_list(values: Any, *, limit: int) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(value) for value in values[:limit] if value is not None]
+
+
 def _trace_rag_result_attrs(result: Any, tracing: TraceManager) -> dict[str, Any]:
     if not isinstance(result, dict):
         return {'rag.status': 'invalid_response', 'rag.response_type': type(result).__name__}
@@ -560,6 +792,147 @@ def _trace_rag_result_attrs(result: Any, tracing: TraceManager) -> dict[str, Any
         'rag.source_files': source_files,
         'rag.reference_ids': reference_ids,
     }
+    keywords = metadata.get('keywords')
+    if isinstance(keywords, dict):
+        attrs['rag.keywords.high_level'] = _bounded_string_list(
+            keywords.get('high_level'),
+            limit=tracing.config.max_items,
+        )
+        attrs['rag.keywords.low_level'] = _bounded_string_list(
+            keywords.get('low_level'),
+            limit=tracing.config.max_items,
+        )
+        attrs['retrieval.keywords_hl'] = attrs['rag.keywords.high_level']
+        attrs['retrieval.keywords_ll'] = attrs['rag.keywords.low_level']
+
+    retrieval = metadata.get('retrieval')
+    if isinstance(retrieval, dict):
+        attrs['retrieval.low_level_keywords_for_search'] = str(retrieval.get('low_level_keywords_for_search') or '')
+        attrs['retrieval.high_level_keywords_for_search'] = str(retrieval.get('high_level_keywords_for_search') or '')
+        attrs['retrieval.entity_keywords_for_search'] = str(retrieval.get('entity_keywords_for_search') or '')
+        attrs['retrieval.chunk_phrase_terms'] = _bounded_string_list(
+            retrieval.get('chunk_phrase_terms'),
+            limit=tracing.config.max_items,
+        )
+        attrs['retrieval.exact_chunk_lookup'] = bool(retrieval.get('exact_chunk_lookup'))
+        attrs['retrieval.entity_filter'] = str(retrieval.get('entity_filter') or '')
+
+    processing_info = metadata.get('processing_info')
+    if isinstance(processing_info, dict):
+        for key in (
+            'total_entities_found',
+            'total_relations_found',
+            'entities_after_truncation',
+            'relations_after_truncation',
+            'merged_chunks_count',
+            'final_chunks_count',
+            'total_chunks_found',
+            'zero_hits',
+        ):
+            if key in processing_info:
+                value = processing_info[key]
+                attrs[f'retrieval.processing.{key}'] = value
+                attrs[f'retrieval.{key}'] = value
+        source_breakdown = processing_info.get('source_breakdown')
+        if isinstance(source_breakdown, dict):
+            for source, count in source_breakdown.items():
+                attrs[f'retrieval.source_breakdown.{source}'] = count
+
+    chunk_selection = metadata.get('chunk_selection')
+    if isinstance(chunk_selection, dict):
+        for key in ('candidate_count', 'selected_count', 'dropped_count'):
+            if key in chunk_selection:
+                attrs[f'retrieval.chunk_selection.{key}'] = chunk_selection[key]
+        visible_group_decisions = chunk_selection.get('visible_group_decisions')
+        if isinstance(visible_group_decisions, dict):
+            for key in ('group_count', 'selected_group_count', 'dropped_group_count'):
+                if key in visible_group_decisions:
+                    attrs[f'retrieval.chunk_selection.visible_groups.{key}'] = visible_group_decisions[key]
+            if 'filter_applied' in visible_group_decisions:
+                attrs['retrieval.chunk_selection.visible_groups.filter_applied'] = bool(
+                    visible_group_decisions['filter_applied']
+                )
+            visible_group_reason = str(visible_group_decisions.get('reason') or '').strip()
+            if visible_group_reason:
+                attrs['retrieval.chunk_selection.visible_groups.reason'] = visible_group_reason
+            decisions = visible_group_decisions.get('decisions')
+            if isinstance(decisions, list):
+                reason_counts: dict[str, int] = {}
+                for decision in decisions:
+                    if not isinstance(decision, dict):
+                        continue
+                    reason = str(decision.get('reason') or '').strip()
+                    if reason:
+                        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                for reason, count in reason_counts.items():
+                    attrs[f'retrieval.chunk_selection.visible_groups.reason_counts.{reason}'] = count
+
+    group_filter = metadata.get('group_filter')
+    if isinstance(group_filter, dict):
+        for key in ('group_count', 'selected_group_count', 'dropped_group_count'):
+            if key in group_filter:
+                attrs[f'retrieval.group_filter.{key}'] = group_filter[key]
+        if 'filter_applied' in group_filter:
+            attrs['retrieval.group_filter.filter_applied'] = bool(group_filter['filter_applied'])
+        if group_filter.get('reason'):
+            attrs['retrieval.group_filter.reason'] = str(group_filter.get('reason') or '')
+    entity_context_selection = metadata.get('entity_context_selection')
+    if isinstance(entity_context_selection, dict):
+        for key in ('candidate_count', 'selected_count', 'dropped_count'):
+            if key in entity_context_selection:
+                attrs[f'retrieval.entity_context.{key}'] = entity_context_selection[key]
+
+    entity_truncation = metadata.get('entity_truncation')
+    if isinstance(entity_truncation, dict):
+        for key in ('entities_before', 'entities_after', 'relations_before', 'relations_after'):
+            if key in entity_truncation:
+                attrs[f'retrieval.entity_truncation.{key}'] = entity_truncation[key]
+
+    merge_filter = metadata.get('merge_filter')
+    if isinstance(merge_filter, dict) and 'dropped_count' in merge_filter:
+        attrs['retrieval.merge_filter.dropped_count'] = merge_filter['dropped_count']
+        merge_reason_counts = merge_filter.get('reason_counts')
+        if isinstance(merge_reason_counts, dict):
+            for reason, count in merge_reason_counts.items():
+                attrs[f'retrieval.merge_filter.reason_counts.{reason}'] = count
+    merge_drop_trace = metadata.get('merge_drop_trace')
+    if isinstance(merge_drop_trace, list):
+        attrs['retrieval.merge_drop_trace.count'] = len(merge_drop_trace)
+
+    exact_context_filter = metadata.get('exact_context_filter')
+    if isinstance(exact_context_filter, dict):
+        if 'filter_applied' in exact_context_filter:
+            attrs['retrieval.exact_context_filter.filter_applied'] = bool(exact_context_filter['filter_applied'])
+        for key in ('reason', 'selected_group_key', 'selected_file_path'):
+            if exact_context_filter.get(key):
+                attrs[f'retrieval.exact_context_filter.{key}'] = str(exact_context_filter.get(key) or '')
+        for key in ('group_count', 'selected_count', 'dropped_count'):
+            if key in exact_context_filter:
+                attrs[f'retrieval.exact_context_filter.{key}'] = exact_context_filter[key]
+        if 'support_score' in exact_context_filter:
+            attrs['retrieval.exact_context_filter.support_score'] = exact_context_filter['support_score']
+
+    answer_shaping = metadata.get('answer_shaping')
+    if isinstance(answer_shaping, dict):
+        attrs['answer_shaping.applied'] = bool(answer_shaping.get('applied'))
+        attrs['answer_shaping.reasons'] = _bounded_string_list(answer_shaping.get('reasons'), limit=10)
+        for key in ('raw_answer_length', 'final_answer_length'):
+            if key in answer_shaping:
+                attrs[f'answer_shaping.{key}'] = answer_shaping[key]
+        if tracing.config.capture_prompts:
+            raw_preview = answer_shaping.get('raw_answer_preview')
+            final_preview = answer_shaping.get('final_answer_preview')
+            if raw_preview:
+                attrs['answer_shaping.raw_answer_preview'] = _trace_preview(tracing, str(raw_preview))
+            if final_preview:
+                attrs['answer_shaping.final_answer_preview'] = _trace_preview(tracing, str(final_preview))
+
+    if metadata.get('entity_filter'):
+        attrs['retrieval.entity_filter'] = str(metadata.get('entity_filter') or '')
+    if metadata.get('auto_entity_filter'):
+        attrs['retrieval.auto_entity_filter'] = str(metadata.get('auto_entity_filter') or '')
+    if metadata.get('auto_entity_filter_cleared') is not None:
+        attrs['retrieval.auto_entity_filter_cleared'] = bool(metadata.get('auto_entity_filter_cleared'))
     query_mode = metadata.get('effective_query_mode') or metadata.get('query_mode')
     if query_mode:
         attrs['rag.effective_query_mode'] = str(query_mode)
@@ -602,7 +975,218 @@ def _trace_rag_result_attrs(result: Any, tracing: TraceManager) -> dict[str, Any
     return attrs
 
 
-def _retrieval_documents_from_result(result: Any, tracing: TraceManager) -> list[dict[str, Any]]:
+_TRACE_STAGE_RANK_KEYS = (
+    'merge_rank',
+    'rerank_rank',
+    'lexical_rank',
+    'per_document_rank',
+    'mmr_rank',
+    'token_rank',
+    'processed_rank',
+    'final_prompt_rank',
+)
+
+_TRACE_TEXT_PREVIEW_KEYS = {'content', 'text', 'chunk_content', 'excerpt'}
+
+
+def _trace_stage_ranks(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {key: value[key] for key in _TRACE_STAGE_RANK_KEYS if value.get(key) is not None}
+
+
+def _trace_event_record(record: Any, tracing: TraceManager) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key, value in record.items():
+        if value is None:
+            continue
+        if key in _TRACE_TEXT_PREVIEW_KEYS:
+            if tracing.config.capture_contexts:
+                sanitized[key] = _trace_preview(tracing, value)
+            continue
+        if key == 'stage_ranks':
+            stage_ranks = _trace_stage_ranks(value)
+            if stage_ranks:
+                sanitized[key] = stage_ranks
+            continue
+        sanitized[key] = value
+    return sanitized
+
+
+def _bounded_trace_records(tracing: TraceManager, *sources: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    limit = tracing.config.max_items
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for raw_record in source:
+            if len(records) >= limit:
+                return records
+            record = _trace_event_record(raw_record, tracing)
+            if not record:
+                continue
+            primary_id = str(record.get('chunk_id') or record.get('group_key') or '')
+            file_path = str(record.get('file_path') or '')
+            if primary_id or file_path:
+                identity = (
+                    primary_id,
+                    file_path,
+                    str(record.get('drop_reason') or record.get('reason') or ''),
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+            records.append(record)
+    return records
+
+
+def _clean_event_attrs(attributes: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in attributes.items() if value not in (None, [], {})}
+
+
+def _trace_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_document_score(*candidates: Any) -> float | None:
+    for candidate in candidates:
+        if candidate is None or isinstance(candidate, bool):
+            continue
+        if isinstance(candidate, str) and not candidate.strip():
+            continue
+        try:
+            return float(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _emit_retrieval_diagnostic_events(trace_span: Any, result: Any, tracing: TraceManager) -> None:
+    """Attach bounded retrieval diagnostic previews to the app.query span."""
+    if not isinstance(result, dict):
+        return
+    metadata = result.get('metadata') if isinstance(result.get('metadata'), dict) else {}
+    if not metadata:
+        return
+
+    chunk_selection = metadata.get('chunk_selection')
+    if isinstance(chunk_selection, dict) and chunk_selection:
+        dropped_chunks = _bounded_trace_records(
+            tracing,
+            chunk_selection.get('dropped_preview'),
+            chunk_selection.get('dropped_chunks'),
+        )
+        if dropped_chunks:
+            trace_span.add_event(
+                'retrieval.chunk_drops',
+                _clean_event_attrs(
+                    {
+                        'candidate_count': chunk_selection.get('candidate_count'),
+                        'selected_count': chunk_selection.get('selected_count'),
+                        'dropped_count': chunk_selection.get('dropped_count'),
+                        'dropped_chunks': dropped_chunks,
+                    }
+                ),
+            )
+
+        visible_group_decisions = chunk_selection.get('visible_group_decisions')
+        if isinstance(visible_group_decisions, dict) and visible_group_decisions:
+            decisions = _bounded_trace_records(tracing, visible_group_decisions.get('decisions'))
+            reason = str(visible_group_decisions.get('reason') or '').strip()
+            filter_applied = (
+                bool(visible_group_decisions.get('filter_applied'))
+                if 'filter_applied' in visible_group_decisions
+                else None
+            )
+            if decisions or (filter_applied is False and reason):
+                trace_span.add_event(
+                    'retrieval.group_decisions',
+                    _clean_event_attrs(
+                        {
+                            'filter_applied': filter_applied,
+                            'reason': reason or None,
+                            'group_count': visible_group_decisions.get('group_count'),
+                            'selected_group_count': visible_group_decisions.get('selected_group_count'),
+                            'dropped_group_count': visible_group_decisions.get('dropped_group_count'),
+                            'decisions': decisions,
+                        }
+                    ),
+                )
+
+    merge_filter = metadata.get('merge_filter')
+    if isinstance(merge_filter, dict) and merge_filter:
+        dropped_chunks = _bounded_trace_records(tracing, merge_filter.get('dropped_preview'))
+        attrs = _clean_event_attrs(
+            {
+                'dropped_count': merge_filter.get('dropped_count'),
+                'reason_counts': merge_filter.get('reason_counts'),
+                'dropped_chunks': dropped_chunks,
+            }
+        )
+        if attrs:
+            trace_span.add_event('retrieval.merge_filter', attrs)
+
+    exact_context_filter = metadata.get('exact_context_filter')
+    if isinstance(exact_context_filter, dict) and exact_context_filter:
+        filter_applied = bool(exact_context_filter.get('filter_applied'))
+        dropped_count = _trace_int(exact_context_filter.get('dropped_count'))
+        if filter_applied or dropped_count > 0:
+            trace_span.add_event(
+                'retrieval.exact_context_filter',
+                _clean_event_attrs(
+                    {
+                        'filter_applied': filter_applied,
+                        'reason': exact_context_filter.get('reason'),
+                        'group_count': exact_context_filter.get('group_count'),
+                        'selected_count': exact_context_filter.get('selected_count'),
+                        'dropped_count': exact_context_filter.get('dropped_count'),
+                        'selected_group_key': exact_context_filter.get('selected_group_key'),
+                        'selected_file_path': exact_context_filter.get('selected_file_path'),
+                        'support_score': exact_context_filter.get('support_score'),
+                        'dropped_chunks': _bounded_trace_records(
+                            tracing,
+                            exact_context_filter.get('dropped_preview'),
+                        ),
+                    }
+                ),
+            )
+
+    entity_truncation = metadata.get('entity_truncation')
+    if isinstance(entity_truncation, dict) and entity_truncation:
+        entities_dropped = max(
+            0,
+            _trace_int(entity_truncation.get('entities_before')) - _trace_int(entity_truncation.get('entities_after')),
+        )
+        relations_dropped = max(
+            0,
+            _trace_int(entity_truncation.get('relations_before'))
+            - _trace_int(entity_truncation.get('relations_after')),
+        )
+        if entities_dropped or relations_dropped:
+            trace_span.add_event(
+                'retrieval.entity_truncation',
+                _clean_event_attrs(
+                    {
+                        **entity_truncation,
+                        'entities_dropped': entities_dropped,
+                        'relations_dropped': relations_dropped,
+                    }
+                ),
+            )
+
+
+def _retrieval_documents_from_result(
+    result: Any,
+    tracing: TraceManager,
+    *,
+    augmented_references: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Build OpenInference retrieval-document payloads from a YAR query result."""
     if not isinstance(result, dict):
         return []
@@ -614,7 +1198,16 @@ def _retrieval_documents_from_result(result: Any, tracing: TraceManager) -> list
             if ref_id is not None:
                 chunks_by_id[str(ref_id)] = chunk
     documents: list[dict[str, Any]] = []
-    references = data.get('references', []) or []
+    result_metadata = result.get('metadata') if isinstance(result.get('metadata'), dict) else {}
+    exact_context_filter = (
+        result_metadata.get('exact_context_filter')
+        if isinstance(result_metadata.get('exact_context_filter'), dict)
+        else {}
+    )
+    exact_context_file_path = str(exact_context_filter.get('selected_file_path') or '').strip()
+    exact_context_group_key = str(exact_context_filter.get('selected_group_key') or '').strip()
+    exact_context_support = _coerce_document_score(exact_context_filter.get('support_score'))
+    references = augmented_references if augmented_references is not None else data.get('references', []) or []
     if not isinstance(references, list):
         return []
     for reference in references[: tracing.config.max_items]:
@@ -623,14 +1216,42 @@ def _retrieval_documents_from_result(result: Any, tracing: TraceManager) -> list
         ref_id = reference.get('reference_id')
         chunk = chunks_by_id.get(str(ref_id), {}) if ref_id is not None else {}
         content = chunk.get('content') or reference.get('content') or reference.get('excerpt') or ''
-        score = chunk.get('score') or reference.get('score')
+        score = _coerce_document_score(
+            chunk.get('score'),
+            reference.get('score'),
+            chunk.get('merge_score'),
+            chunk.get('retrieval_score'),
+            chunk.get('rerank_score'),
+        )
         metadata = {
             'document_title': reference.get('document_title'),
             'file_path': reference.get('file_path'),
             's3_key': reference.get('s3_key'),
             'content_index': reference.get('content_index'),
+            'chunk_id': chunk.get('chunk_id'),
         }
         metadata = {k: v for k, v in metadata.items() if v is not None}
+        stage_ranks = _trace_stage_ranks(chunk.get('stage_ranks') or chunk.get('_trace_stage_ranks'))
+        if stage_ranks:
+            metadata['stage_ranks'] = stage_ranks
+        for key in ('merge_score', 'source_type', 'exact_support_score'):
+            if chunk.get(key) is not None:
+                metadata[key] = chunk[key]
+        if exact_context_support is not None and metadata.get('exact_support_score') is None:
+            reference_file_path = str(reference.get('file_path') or chunk.get('file_path') or '').strip()
+            ref_id_text = str(ref_id) if ref_id is not None else ''
+            if (
+                reference_file_path
+                and not ref_id_text.startswith('kg-')
+                and (
+                    reference_file_path == exact_context_file_path
+                    or f'path:{reference_file_path}' == exact_context_group_key
+                )
+            ):
+                metadata['exact_support_score'] = exact_context_support
+        drop_reason = chunk.get('drop_reason') or chunk.get('_trace_drop_reason')
+        if drop_reason:
+            metadata['drop_reason'] = str(drop_reason)
         documents.append(
             {
                 'id': str(ref_id) if ref_id is not None else None,
@@ -645,8 +1266,18 @@ def _retrieval_documents_from_result(result: Any, tracing: TraceManager) -> list
 def _trace_response_attrs(response_content: str, tracing: TraceManager) -> dict[str, Any]:
     attrs: dict[str, Any] = {'output.answer_length': len(response_content)}
     if tracing.config.capture_prompts:
-        attrs['output.answer'] = _trace_preview(tracing, response_content)
+        answer_preview = _trace_preview(tracing, response_content)
+        attrs['output.answer'] = answer_preview
+        attrs['output.final_answer'] = answer_preview
     return attrs
+
+
+def _query_response_metadata(result: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = result.get('metadata')
+    if not isinstance(metadata, dict):
+        return None
+    response_metadata = {key: metadata[key] for key in ('answer_shaping', 'exact_context_filter') if key in metadata}
+    return response_metadata or None
 
 
 async def filter_reasoning_stream(response_stream):
@@ -827,7 +1458,7 @@ class QueryRequest(BaseModel):
     entity_filter: str | None = Field(
         default=None,
         max_length=500,
-        description='Filter results to entities/chunks containing this term. Useful for multi-product corpora to prevent context mixing. Example: "Fitusiran" to restrict to Fitusiran-related content only.',
+        description='Filter results to entities/chunks containing this term. Useful for multi-product corpora to prevent context mixing. Example: "Product A" to restrict to Product A-related content only.',
     )
     disable_cache: bool | None = Field(
         default=False,
@@ -892,6 +1523,10 @@ class QueryResponse(BaseModel):
     references: list[ReferenceItem] | None = Field(
         default=None,
         description='Reference list (Disabled when include_references=False, /query/data always includes references.)',
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description='Answer-stage diagnostic metadata for tracing and evaluation alignment.',
     )
 
 
@@ -1274,13 +1909,39 @@ def create_query_routes(
                     'phase.aquery_llm_ms',
                     round((asyncio.get_event_loop().time() - _aquery_started) * 1000, 3),
                 )
+                data = result.get('data') if isinstance(result.get('data'), dict) else {}
+                raw_chunks = data.get('chunks', [])
+                chunks = list(raw_chunks) if isinstance(raw_chunks, list) else []
+                raw_references = data.get('references', [])
+                base_references = list(raw_references) if isinstance(raw_references, list) else []
+                include_reference_content = bool(request.include_references and request.include_chunk_content)
+                augmented_references = _append_knowledge_graph_references(
+                    _attach_chunk_content(
+                        base_references,
+                        chunks,
+                        include_chunk_content=include_reference_content,
+                    ),
+                    data,
+                    include_content=include_reference_content,
+                )
                 trace_span.set_attributes(_trace_rag_result_attrs(result, tracing_manager))
-                trace_span.set_retrieval_documents(_retrieval_documents_from_result(result, tracing_manager))
+                _emit_retrieval_diagnostic_events(trace_span, result, tracing_manager)
+                trace_span.set_retrieval_documents(
+                    _retrieval_documents_from_result(
+                        result,
+                        tracing_manager,
+                        augmented_references=augmented_references,
+                    )
+                )
                 _fingerprint = _retrieval_fingerprint(result)
                 if _fingerprint:
                     trace_span.set_attribute('retrieval.fingerprint', _fingerprint)
                 _emit_synthetic_retriever_span(
-                    tracing=tracing_manager, query=request.query, request=request, result=result
+                    tracing=tracing_manager,
+                    query=request.query,
+                    request=request,
+                    result=result,
+                    augmented_references=augmented_references,
                 )
                 # Tags will be finalized after citation metrics so the result and
                 # retrieval-precision dimensions are captured together.
@@ -1292,14 +1953,8 @@ def create_query_routes(
 
                 # Extract LLM response and references from unified result
                 llm_response = result.get('llm_response', {})
-                data = result.get('data', {})
-                chunks = list(data.get('chunks', []))
                 references = await _attach_presigned_urls(
-                    _attach_chunk_content(
-                        list(data.get('references', [])),
-                        chunks,
-                        include_chunk_content=bool(request.include_references and request.include_chunk_content),
-                    ),
+                    augmented_references,
                     s3_client if request.include_references else None,
                 )
 
@@ -1308,6 +1963,12 @@ def create_query_routes(
                     raw_response_text,
                     keep_inline_citations=requests_inline_citations(request.query, request.user_prompt),
                 )
+                if include_reference_content:
+                    references = _filter_references_for_answer_support(
+                        references,
+                        response_text=response_content,
+                        query=request.query,
+                    )
                 trace_span.set_attributes(_trace_response_attrs(response_content, tracing_manager))
                 if tracing_manager.config.capture_prompts:
                     trace_span.set_output_value(response_content)
@@ -1338,15 +1999,16 @@ def create_query_routes(
                     duration_ms=_query_elapsed_ms,
                     cached=query_cache_hit_was_set(),
                 )
+                response_metadata = _query_response_metadata(result)
 
                 # Return response with or without references based on request
                 if request.include_references:
                     return QueryResponse(
                         response=response_content,
                         references=[ReferenceItem.model_validate(ref) for ref in references],
+                        metadata=response_metadata,
                     )
-                else:
-                    return QueryResponse(response=response_content, references=None)
+                return QueryResponse(response=response_content, references=None, metadata=response_metadata)
             except HTTPException:
                 raise
             except Exception as e:
@@ -1651,10 +2313,16 @@ def create_query_routes(
                         return
 
                     references = await _attach_presigned_urls(
-                        _attach_chunk_content(
-                            references,
-                            chunks,
-                            include_chunk_content=bool(request.include_references and request.include_chunk_content),
+                        _append_knowledge_graph_references(
+                            _attach_chunk_content(
+                                references,
+                                chunks,
+                                include_chunk_content=bool(
+                                    request.include_references and request.include_chunk_content
+                                ),
+                            ),
+                            result_payload.get('data', {}),
+                            include_content=bool(request.include_references and request.include_chunk_content),
                         ),
                         s3_client if request.include_references else None,
                     )

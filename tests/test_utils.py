@@ -99,6 +99,65 @@ def test_convert_to_user_format_prefers_context_content_and_preserves_raw_chunk(
     assert 'page_start' not in chunk
 
 
+def test_convert_to_user_format_preserves_chunk_scoring_metadata() -> None:
+    result = convert_to_user_format(
+        [],
+        [],
+        [
+            {
+                'reference_id': '1',
+                'content': 'Scored chunk text',
+                'file_path': 'source.md',
+                'chunk_id': 'chunk-1',
+                'source_type': 'entity+vector',
+                'retrieval_score': 0.83,
+                'merge_score': 2.4,
+                'exact_phrase_match': 3.0,
+                'metadata_query_match': 1.5,
+                'char_start': 10,
+                'char_end': 42,
+                'stage_ranks': {'merge_rank': 1, 'final_prompt_rank': 1},
+                'drop_reason': 'token_budget',
+            }
+        ],
+        [{'reference_id': '1', 'file_path': 'source.md'}],
+        'mix',
+    )
+
+    chunk = result['data']['chunks'][0]
+    assert chunk['source_type'] == 'entity+vector'
+    assert chunk['retrieval_score'] == 0.83
+    assert chunk['merge_score'] == 2.4
+    assert chunk['exact_phrase_match'] == 3.0
+    assert chunk['metadata_query_match'] == 1.5
+    assert chunk['char_start'] == 10
+    assert chunk['char_end'] == 42
+    assert chunk['stage_ranks'] == {'merge_rank': 1, 'final_prompt_rank': 1}
+    assert chunk['drop_reason'] == 'token_budget'
+
+
+def test_convert_to_user_format_preserves_relationship_evidence_spans() -> None:
+    result = convert_to_user_format(
+        [],
+        [
+            {
+                'entity1': 'Source',
+                'entity2': 'Target',
+                'description': 'Source supports Target.',
+                'keywords': 'supports',
+                'file_path': 'source.md',
+                'evidence_spans': ['Source supports Target in the source table.'],
+            }
+        ],
+        [],
+        [],
+        'mix',
+    )
+
+    relationship = result['data']['relationships'][0]
+    assert relationship['evidence_spans'] == ['Source supports Target in the source table.']
+
+
 def test_convert_to_user_format_preserves_page_range_metadata() -> None:
     result = convert_to_user_format(
         [],
@@ -1276,6 +1335,112 @@ def test_process_chunks_unified_disables_mmr_when_lambda_one(monkeypatch) -> Non
         'duplicate-b',
         'distinct',
     ]
+
+
+def test_process_chunks_unified_prefers_exact_support_over_metadata_sibling(monkeypatch) -> None:
+    monkeypatch.setenv('ENABLE_LEXICAL_BOOST', 'false')
+    chunks = [
+        {
+            'chunk_id': 'metadata-sibling',
+            'file_path': 'mabel.pdf',
+            'content': 'FDA guidance says a recommended starting-dose method should be considered.',
+            'merge_score': 0.0,
+            'metadata_query_match': 1.25,
+            'exact_phrase_match': 0.0,
+            'source_type': 'sibling',
+        },
+        {
+            'chunk_id': 'exact-answer',
+            'file_path': 'mabel.pdf',
+            'content': 'The MABEL approach recommended a 3-4 log dose-ranging window for the FIH study.',
+            'merge_score': 2.05,
+            'metadata_query_match': 0.0,
+            'exact_phrase_match': 1.0,
+            'priority_match': 1.0,
+            'source_type': 'relationship',
+        },
+    ]
+
+    processed = asyncio.run(
+        process_chunks_unified(
+            query='What is the dose-ranging recommended by the MABEL approach?',
+            unique_chunks=chunks,
+            query_param=QueryParam(chunk_top_k=1, enable_rerank=False),
+            global_config={},
+            source_type='global',
+        )
+    )
+
+    assert [chunk['chunk_id'] for chunk in processed] == ['exact-answer']
+    assert processed[0]['stage_ranks']['per_document_rank'] == 1
+
+
+def test_process_chunks_unified_prefers_numeric_duration_evidence(monkeypatch) -> None:
+    monkeypatch.setenv('ENABLE_LEXICAL_BOOST', 'false')
+    chunks = [
+        {
+            'chunk_id': 'lead-time-topic',
+            'file_path': 'supply.pdf',
+            'content': 'Depot: Shipment lead-times, enrollment, and randomization balance.',
+            'merge_score': 0.8,
+        },
+        {
+            'chunk_id': 'duration-answer',
+            'file_path': 'supply.pdf',
+            'content': 'Detailed workflow: 1-3 months before Start packaging: Goods shipment preparation.',
+            'merge_score': 0.1,
+        },
+    ]
+
+    processed = asyncio.run(
+        process_chunks_unified(
+            query='What is the standard duration of shipment to depot?',
+            unique_chunks=chunks,
+            query_param=QueryParam(chunk_top_k=1, enable_rerank=False),
+            global_config={},
+            source_type='mix',
+        )
+    )
+
+    assert [chunk['chunk_id'] for chunk in processed] == ['duration-answer']
+    assert processed[0]['duration_answer_match'] > 0.0
+
+
+def test_process_chunks_unified_prefers_impact_evidence_for_consequence_queries(monkeypatch) -> None:
+    monkeypatch.setenv('ENABLE_LEXICAL_BOOST', 'false')
+    chunks = [
+        {
+            'chunk_id': 'timeline',
+            'file_path': 'sarclisa.pdf',
+            'content': 'Timeline: US/EU submission and launch readiness governance milestones.',
+            'merge_score': 2.0,
+            'exact_phrase_match': 1.0,
+            'priority_match': 0.75,
+        },
+        {
+            'chunk_id': 'impact-answer',
+            'file_path': 'sarclisa.pdf',
+            'content': (
+                'Topic 5: financial flow. IMPACTS: physical flow over the Netherlands caused '
+                'mock ups with wrong logo, NDC code was wrong, and batches needed re-labeling.'
+            ),
+            'merge_score': 0.2,
+            'exact_phrase_match': 1.0,
+        },
+    ]
+
+    processed = asyncio.run(
+        process_chunks_unified(
+            query='What were the consequences of including additional physical flow in the Netherlands?',
+            unique_chunks=chunks,
+            query_param=QueryParam(chunk_top_k=1, enable_rerank=False),
+            global_config={},
+            source_type='mix',
+        )
+    )
+
+    assert [chunk['chunk_id'] for chunk in processed] == ['impact-answer']
+    assert processed[0]['impact_answer_match'] > 0.0
 
 
 class TestValidateAndStripUnsupportedQuotes:

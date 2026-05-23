@@ -3,9 +3,10 @@
 # Removes YAR Docker resources WITHOUT touching other stuff
 #
 # Usage:
-#   ./cleanup.sh           # Remove containers, images, network (keeps data)
-#   ./cleanup.sh --volumes # Also remove volumes (DELETES ALL DATA)
-#   ./cleanup.sh --all     # Nuclear option: remove everything including data
+#   ./cleanup.sh               # Interactive menu
+#   ./cleanup.sh --volumes     # Preselect cleanup plus Docker volumes
+#   ./cleanup.sh --all         # Preselect cleanup plus all local data
+#   ./cleanup.sh --eval-corpus # Preselect eval corpus reset flow
 
 set -e
 
@@ -19,6 +20,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
 echo -e "${BLUE}+------------------------------------------------------------------+${NC}"
 echo -e "${BLUE}|              YAR Cleanup                                      |${NC}"
 echo -e "${BLUE}+------------------------------------------------------------------+${NC}"
@@ -27,28 +35,149 @@ echo ""
 # Parse args
 REMOVE_VOLUMES=false
 REMOVE_ALL=false
+EVAL_CORPUS=false
+EVAL_ARGS=()
+EVAL_ARG_SEEN=false
 
-for arg in "$@"; do
-    case $arg in
-        --volumes)
+show_help() {
+    echo "Usage: ./cleanup.sh [OPTIONS]"
+    echo ""
+    echo "Run without options for the interactive menu."
+    echo ""
+    echo "Options:"
+    echo "  --volumes     Remove containers, images, network, and Docker volumes"
+    echo "  --all         Remove containers, images, network, Docker volumes, and local data/"
+    echo "  --eval-corpus Reset Postgres/RustFS corpus and ingest Phoenix eval docs"
+    echo ""
+    echo "Eval corpus options passed to scripts/reset_eval_corpus.sh:"
+    echo "  --skip-wipe --skip-ingest --rag-url URL --profile NAME --server-log PATH"
+    echo ""
+}
+
+choose_interactive_mode() {
+    local choice
+    echo -e "${YELLOW}Choose cleanup mode:${NC}"
+    echo "  1) Remove containers, images, network (keep data)"
+    echo "  2) Remove containers, images, network, and Docker volumes"
+    echo "  3) Remove everything including local data/"
+    echo "  4) Reset eval corpus and ingest Phoenix eval docs"
+    echo "  5) Exit"
+    echo ""
+    read -r -p "Choice [1]: " choice
+
+    case "${choice:-1}" in
+        1)
+            ;;
+        2)
             REMOVE_VOLUMES=true
             ;;
-        --all)
+        3)
             REMOVE_ALL=true
             REMOVE_VOLUMES=true
             ;;
-        --help|-h)
-            echo "Usage: ./cleanup.sh [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  (none)      Remove containers, images, network (keeps data volumes)"
-            echo "  --volumes   Also remove Docker volumes (DELETES RAG DATA)"
-            echo "  --all       Remove everything including local data/ directory"
-            echo ""
+        4)
+            EVAL_CORPUS=true
+            ;;
+        5|q|Q|quit|exit)
+            echo "Aborted."
             exit 0
             ;;
+        *)
+            echo -e "${RED}Invalid choice:${NC} $choice" >&2
+            exit 2
+            ;;
     esac
-done
+
+    if [ "$EVAL_CORPUS" = true ]; then
+        local reset_choice
+        local ingest_choice
+        local profile
+        local rag_url
+
+        echo ""
+        read -r -p "Wipe Postgres/RustFS datastore before ingest? [Y/n]: " reset_choice
+        if [[ "$reset_choice" =~ ^[Nn]$ ]]; then
+            EVAL_ARGS+=(--skip-wipe)
+        fi
+
+        read -r -p "Upload Phoenix eval documents after reset? [Y/n]: " ingest_choice
+        if [[ "$ingest_choice" =~ ^[Nn]$ ]]; then
+            EVAL_ARGS+=(--skip-ingest)
+        fi
+
+        read -r -p "YAR profile [${YAR_PROFILE:-dev}]: " profile
+        profile="${profile:-${YAR_PROFILE:-dev}}"
+        case "$profile" in
+            dev|work)
+                EVAL_ARGS+=(--profile "$profile")
+                ;;
+            *)
+                echo -e "${RED}Invalid profile:${NC} $profile (expected dev or work)" >&2
+                exit 2
+                ;;
+        esac
+
+        read -r -p "YAR API URL [${YAR_API_URL:-http://127.0.0.1:${PORT:-9621}}]: " rag_url
+        if [ -n "$rag_url" ]; then
+            EVAL_ARGS+=(--rag-url "$rag_url")
+        fi
+    fi
+}
+
+if [ "$#" -eq 0 ]; then
+    choose_interactive_mode
+else
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --volumes)
+                REMOVE_VOLUMES=true
+                ;;
+            --all)
+                REMOVE_ALL=true
+                REMOVE_VOLUMES=true
+                ;;
+            --eval-corpus)
+                EVAL_CORPUS=true
+                ;;
+            --skip-wipe|--skip-ingest)
+                EVAL_ARGS+=("$1")
+                EVAL_ARG_SEEN=true
+                ;;
+            --rag-url|--profile|--server-log)
+                EVAL_ARGS+=("$1" "${2:?missing value for $1}")
+                EVAL_ARG_SEEN=true
+                shift
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Unknown option:${NC} $1" >&2
+                echo "Run './cleanup.sh --help' for usage." >&2
+                exit 2
+                ;;
+        esac
+        shift
+    done
+fi
+
+if [ "$EVAL_CORPUS" = true ]; then
+    if [ "$REMOVE_VOLUMES" = true ] || [ "$REMOVE_ALL" = true ]; then
+        echo -e "${RED}--eval-corpus cannot be combined with --volumes or --all.${NC}" >&2
+        exit 2
+    fi
+    if [ ! -x "scripts/reset_eval_corpus.sh" ]; then
+        echo -e "${RED}Missing executable script:${NC} scripts/reset_eval_corpus.sh" >&2
+        exit 1
+    fi
+    exec "scripts/reset_eval_corpus.sh" "${EVAL_ARGS[@]}"
+fi
+
+if [ "$EVAL_ARG_SEEN" = true ]; then
+    echo -e "${RED}Eval corpus options require --eval-corpus.${NC}" >&2
+    exit 2
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Show what will be removed
@@ -127,13 +256,13 @@ if [ "$REMOVE_VOLUMES" = true ] || [ "$REMOVE_ALL" = true ]; then
         echo -e "  • Local data/ directory (RAG storage, uploaded documents)"
     fi
     echo ""
-    read -p "Are you sure? Type 'yes' to confirm: " CONFIRM
+    read -r -p "Are you sure? Type 'yes' to confirm: " CONFIRM
     if [ "$CONFIRM" != "yes" ]; then
         echo "Aborted."
         exit 0
     fi
 else
-    read -p "Proceed with cleanup? [Y/n]: " CONFIRM
+    read -r -p "Proceed with cleanup? [Y/n]: " CONFIRM
     if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
         echo "Aborted."
         exit 0

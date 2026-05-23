@@ -4077,25 +4077,63 @@ class PGVectorStorage(BaseVectorStorage):
         )
         trigram_results = trigram_results if trigram_results else []
 
-        # Mark source type for debugging
+        def _score_value(value: Any) -> float:
+            try:
+                return min(max(float(value), 0.0), 1.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # Mark source type for debugging before fusion.
         for r in vector_results:
             r['source_type'] = 'vector'
         for r in trigram_results:
             r['source_type'] = 'trigram'
 
-        # 3. Combine using Reciprocal Rank Fusion
+        # 3. Combine using Reciprocal Rank Fusion, then carry forward the
+        # source-specific confidence signals. RRF preserves only the first
+        # occurrence of each entity, so exact trigram confidence would otherwise
+        # be lost when the same entity also appears in vector results.
         fused_results = reciprocal_rank_fusion(
             [vector_results, trigram_results],
             id_key='entity_name',
             k=RRF_K,
         )
+        vector_by_name = {str(item.get('entity_name')): item for item in vector_results if item.get('entity_name')}
+        trigram_by_name = {str(item.get('entity_name')): item for item in trigram_results if item.get('entity_name')}
+
+        enriched_results: list[dict[str, Any]] = []
+        for item in fused_results[:top_k]:
+            entity_name = str(item.get('entity_name'))
+            vector_item = vector_by_name.get(entity_name)
+            trigram_item = trigram_by_name.get(entity_name)
+            enriched = item.copy()
+            source_types: list[str] = []
+            if vector_item is not None:
+                for key in ('distance', 'vector_score', 'score'):
+                    if key in vector_item:
+                        enriched[key] = vector_item.get(key)
+                source_types.append('vector')
+            if trigram_item is not None:
+                if 'trgm_score' in trigram_item:
+                    enriched['trgm_score'] = trigram_item.get('trgm_score')
+                source_types.append('trigram')
+
+            confidence_score = max(
+                _score_value(enriched.get('score')),
+                _score_value(enriched.get('vector_score')),
+                _score_value(enriched.get('trgm_score')),
+            )
+            if confidence_score > 0.0:
+                enriched['score'] = confidence_score
+            enriched['source_type'] = '+'.join(source_types) if source_types else enriched.get('source_type', 'unknown')
+            enriched_results.append(enriched)
 
         logger.debug(
             f'[{self.workspace}] Hybrid entity search for "{query}": {len(vector_results)} vector + '
-            f'{len(trigram_results)} trigram → {len(fused_results[:top_k])} fused'
+            f'{len(trigram_results)} trigram → {len(enriched_results)} fused'
         )
 
-        return fused_results[:top_k]
+        return enriched_results
 
     async def get_entity_linked_chunk_ids(
         self,
@@ -7315,7 +7353,7 @@ SQL_TEMPLATES = {
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                  FROM YAR_RELATION_CHUNKS WHERE workspace=$1 AND id = ANY($2)
                                 """,
-    'get_chunk_ids_by_doc': """SELECT id FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND full_doc_id=$2""",
+    'get_chunk_ids_by_doc': """SELECT id FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND full_doc_id=$2 ORDER BY chunk_order_index NULLS LAST, char_start NULLS LAST, id""",
     'delete_chunks_by_doc': """DELETE FROM YAR_DOC_CHUNKS WHERE workspace=$1 AND full_doc_id=$2 RETURNING id""",
     'upsert_doc_full': """INSERT INTO YAR_DOC_FULL (id, content, doc_name, workspace, s3_key, meta)
                         VALUES ($1, $2, $3, $4, $5, $6)
@@ -7437,7 +7475,11 @@ SQL_TEMPLATES = {
                 SELECT e.entity_name,
                        e.entity_type,
                        e.content,
-                       EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
+                       EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at,
+                       e.content_vector {distance_op} $2 AS distance,
+                       (1 - (e.content_vector {distance_op} $2)) AS vector_score,
+                       (1 - (e.content_vector {distance_op} $2)) AS score,
+                       'vector' AS source_type
                 FROM YAR_VDB_ENTITY e
                 WHERE e.workspace = $1
                   AND e.content_vector {distance_op} $2 < $3
@@ -7446,9 +7488,13 @@ SQL_TEMPLATES = {
                 """,
     'chunks': """
               SELECT c.id,
+                     c.full_doc_id,
+                     c.chunk_order_index,
                      c.content,
                      c.file_path,
                      d.s3_key,
+                     d.char_start,
+                     d.char_end,
                      EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
               FROM YAR_VDB_CHUNKS c
               LEFT JOIN YAR_DOC_CHUNKS d ON c.workspace = d.workspace AND c.id = d.id
