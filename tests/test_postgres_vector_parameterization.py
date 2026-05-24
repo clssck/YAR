@@ -190,6 +190,49 @@ async def test_pgvector_relationship_query_fuses_vector_and_bm25_primary_results
 
 
 @pytest.mark.offline
+@pytest.mark.asyncio
+async def test_pgvector_hybrid_search_falls_back_to_bm25_when_vector_provider_fails() -> None:
+    class ProviderError(Exception):
+        status_code = 403
+
+    db_query = AsyncMock(
+        side_effect=[
+            [],
+            [
+                {
+                    'id': 'chunk-bm25',
+                    'content': 'SERD lessons learned fall into three categories.',
+                    'file_path': 'serd.processed.md',
+                    'bm25_score': 0.9,
+                }
+            ],
+        ]
+    )
+    storage = _make_storage(NameSpace.VECTOR_STORE_CHUNKS, db_query)
+    storage.query = AsyncMock(side_effect=ProviderError('provider limit exceeded'))  # type: ignore[method-assign]
+
+    results = await storage.hybrid_search(
+        'SERD SAR439589',
+        top_k=3,
+        query_embedding=[0.1, 0.2],
+        phrase_terms=['SERD', 'SAR439589', 'SERD SAR439589'],
+    )
+
+    assert [result['id'] for result in results] == ['chunk-bm25']
+    assert results[0]['source_type'] == 'bm25'
+    trace = storage._last_hybrid_search_trace
+    assert trace['degraded_to_bm25'] is True
+    assert trace['bm25_result_count'] == 1
+    assert trace['vector_result_count'] == 0
+    assert trace['vector_error_type'] == 'ProviderError'
+    assert trace['vector_error_status_code'] == 403
+    assert trace['bm25_fallback_query'] == 'SERD'
+    assert trace['bm25_fallback_attempt_count'] == 1
+    assert db_query.await_count == 2
+    assert db_query.await_args_list[1].kwargs['params'][0] == 'SERD'
+
+
+@pytest.mark.offline
 def test_relationship_lexical_terms_expand_query_intent_without_fallback() -> None:
     contributor_terms = PGVectorStorage._relationship_lexical_terms(
         'Who contributes to the CSTD Strategy Working Group?'

@@ -412,16 +412,37 @@ def _collect_expected_documents(source_documents: Any) -> dict[str, Any]:
 
 
 def _extract_retrieved_documents(result: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract ordered, deduplicated retrieved documents from query/data responses."""
+    """Extract ordered, deduplicated retrieved documents from ranked query/data evidence."""
     data = result.get('data', {}) if isinstance(result, dict) else {}
+    metadata = result.get('metadata', {}) if isinstance(result, dict) else {}
+    vector_search = metadata.get('vector_search', {}) if isinstance(metadata, dict) else {}
+    if not vector_search and isinstance(metadata, dict):
+        retrieval_trace = metadata.get('retrieval', {})
+        if isinstance(retrieval_trace, dict):
+            vector_search = retrieval_trace.get('vector_search', {}) or {}
+
+    focus_terms: list[str] = []
+    if isinstance(vector_search, dict):
+        for key in ('query', 'chunk_search_query', 'hybrid_bm25_fallback_query'):
+            value = vector_search.get(key)
+            if isinstance(value, str) and value.strip():
+                focus_terms.append(value)
+        phrase_terms = vector_search.get('phrase_terms')
+        if isinstance(phrase_terms, list):
+            focus_terms.extend(str(term) for term in phrase_terms if str(term).strip())
+
     records: list[dict[str, Any]] = []
+    chunks = data.get('chunks') if isinstance(data, dict) else None
+    if isinstance(chunks, list):
+        chunk_records = [item for item in chunks if isinstance(item, dict)]
+        if focus_terms:
+            records.extend(_references_from_chunks(chunk_records, focus_terms=focus_terms, limit=len(chunk_records)))
+        else:
+            records.extend(chunk_records)
     for key in ('references',):
         value = data.get(key) if isinstance(data, dict) else None
         if isinstance(value, list):
             records.extend(item for item in value if isinstance(item, dict))
-    chunks = data.get('chunks') if isinstance(data, dict) else None
-    if isinstance(chunks, list):
-        records.extend(item for item in chunks if isinstance(item, dict))
     top_level_references = result.get('references') if isinstance(result, dict) else None
     if isinstance(top_level_references, list):
         records.extend(item for item in top_level_references if isinstance(item, dict))
@@ -995,6 +1016,24 @@ def _format_metric_value(value: Any) -> str:
     return 'n/a' if _is_nan(numeric) else f'{numeric:.4f}'
 
 
+def _classify_vector_search_failure(vector_search: dict[str, Any]) -> str:
+    """Classify vector retrieval failures without conflating provider errors with corpus misses."""
+    if not isinstance(vector_search, dict) or not vector_search:
+        return ''
+    status_code = vector_search.get('error_status_code') or vector_search.get('hybrid_vector_error_status_code')
+    if isinstance(status_code, int) and status_code >= 400:
+        return 'provider_error'
+    error_type = str(vector_search.get('error_type') or vector_search.get('hybrid_vector_error_type') or '')
+    if error_type and error_type not in {'', 'None'}:
+        return 'provider_error'
+    failure_reason = str(vector_search.get('failure_reason') or '')
+    if failure_reason in {'no_raw_results', 'no_valid_chunks'}:
+        return 'no_vector_hits'
+    if failure_reason == 'search_exception':
+        return 'search_exception'
+    return failure_reason
+
+
 def _render_case_diagnostics_markdown(payload: dict[str, Any]) -> str:
     """Render a compact markdown view for selected case diagnostics."""
     lines = [
@@ -1082,6 +1121,13 @@ def _render_case_diagnostics_markdown(payload: dict[str, Any]) -> str:
                     f'raw={vector_search.get("raw_result_count")} '
                     f'valid={vector_search.get("valid_chunk_count")} '
                     f'failure={vector_search.get("failure_reason")!r} '
+                    f'category={case.get("vector_failure_category", "")!r} '
+                    f'error_type={vector_search.get("error_type")!r} '
+                    f'error_status={vector_search.get("error_status_code")!r} '
+                    f'hybrid_degraded_bm25={vector_search.get("hybrid_degraded_to_bm25")!r} '
+                    f'hybrid_bm25={vector_search.get("hybrid_bm25_result_count")!r} '
+                    f'hybrid_vector_error={vector_search.get("hybrid_vector_error_type")!r} '
+                    f'hybrid_fallback={vector_search.get("hybrid_bm25_fallback_query")!r} '
                     f'fallback={vector_search.get("exact_fallback")}'
                 )
         chunk_selection = case.get('chunk_selection', {})
@@ -2533,6 +2579,9 @@ class RAGEvaluator:
             vector_search = metadata.get('vector_search', {}) if isinstance(metadata, dict) else {}
             if not vector_search and isinstance(retrieval_trace, dict):
                 vector_search = retrieval_trace.get('vector_search', {}) or {}
+            vector_failure_category = (
+                _classify_vector_search_failure(vector_search) if isinstance(vector_search, dict) else ''
+            )
             verdict_traces = await _collect_metric_verdict_traces(
                 llm=getattr(self, 'eval_llm', None),
                 question=question,
@@ -2589,6 +2638,7 @@ class RAGEvaluator:
                 'merge_drop_trace': metadata.get('merge_drop_trace', []) if isinstance(metadata, dict) else [],
                 'retrieval_trace': retrieval_trace if isinstance(retrieval_trace, dict) else {},
                 'vector_search': vector_search if isinstance(vector_search, dict) else {},
+                'vector_failure_category': vector_failure_category,
                 'reference_previews': [
                     _summarize_reference(reference)
                     for reference in (references if isinstance(references, list) else [])[:5]

@@ -206,6 +206,12 @@ def test_case_diagnostics_preserve_no_result_retrieval_trace():
                         'valid_chunk_count': 0,
                         'failure_reason': 'no_raw_results',
                         'exact_fallback': {'fallback_result_count': 0},
+                        'error_type': 'PermissionDeniedError',
+                        'error_status_code': 403,
+                        'hybrid_degraded_to_bm25': True,
+                        'hybrid_bm25_result_count': 2,
+                        'hybrid_vector_error_type': 'PermissionDeniedError',
+                        'hybrid_vector_error_status_code': 403,
                     },
                 },
             },
@@ -231,12 +237,16 @@ def test_case_diagnostics_preserve_no_result_retrieval_trace():
     assert diagnostic['retrieval_failure_reason'] == 'no_results'
     assert diagnostic['retrieval_trace']['zero_hits'] is True
     assert diagnostic['vector_search']['chunk_search_query'] == 'Japanese GMP MOU'
+    assert diagnostic['vector_failure_category'] == 'provider_error'
 
     markdown = _render_case_diagnostics_markdown(
         {'query_mode': 'mix', 'timestamp': 'now', 'selection': 'test', 'cases': [diagnostic]}
     )
     assert 'Retrieval status: `failure`' in markdown
     assert "query='Japanese GMP MOU'" in markdown
+    assert "category='provider_error'" in markdown
+    assert 'error_status=403' in markdown
+    assert 'hybrid_degraded_bm25=True' in markdown
 
 
 def test_case_diagnostics_use_evaluated_answer_contexts_and_trace_metadata():
@@ -280,7 +290,7 @@ def test_case_diagnostics_use_evaluated_answer_contexts_and_trace_metadata():
                     },
                     'answer_shaping': {
                         'applied': True,
-                        'reasons': ['sarclisa_physical_flow_consequence_source_row'],
+                        'reasons': ['physical_flow_consequence_source_row'],
                     },
                 },
             },
@@ -292,7 +302,7 @@ def test_case_diagnostics_use_evaluated_answer_contexts_and_trace_metadata():
     assert diagnostic['ragas_contexts'] == ['Evaluated context used for RAGAS.']
     assert diagnostic['ragas_context_sources'] == [{'file_path': 'sarclisa.md'}]
     assert diagnostic['exact_context_filter']['selected_file_path'] == 'sarclisa.md'
-    assert diagnostic['answer_shaping']['reasons'] == ['sarclisa_physical_flow_consequence_source_row']
+    assert diagnostic['answer_shaping']['reasons'] == ['physical_flow_consequence_source_row']
 
     markdown = _render_case_diagnostics_markdown(
         {'query_mode': 'mix', 'timestamp': 'now', 'selection': 'test', 'cases': [diagnostic]}
@@ -517,3 +527,37 @@ def test_retrieval_metrics_match_exported_markdown_to_original_source_name():
 
     assert metrics['hit@1'] == 1.0
     assert metrics['mrr'] == 1.0
+
+
+def test_retrieved_documents_score_ranked_chunks_before_reference_list():
+    retrieved = _extract_retrieved_documents(
+        {
+            'metadata': {
+                'vector_search': {
+                    'query': 'alpha target phrase',
+                    'phrase_terms': ['target phrase'],
+                }
+            },
+            'data': {
+                'references': [
+                    {'file_path': 'generic-best-practice.pptx'},
+                    {'file_path': 'technology-issue-quick-sharing.pdf'},
+                ],
+                'chunks': [
+                    {
+                        'file_path': 'generic-best-practice.pptx',
+                        'content': 'alpha general practice',
+                    },
+                    {
+                        'file_path': 'technology-issue-quick-sharing.pdf',
+                        'content': 'alpha target phrase direct evidence',
+                    },
+                ],
+            },
+        }
+    )
+
+    assert [document['display_name'] for document in retrieved] == [
+        'technology-issue-quick-sharing.pdf',
+        'generic-best-practice.pptx',
+    ]

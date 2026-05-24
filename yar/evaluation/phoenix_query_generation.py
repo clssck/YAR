@@ -290,12 +290,17 @@ class GenerationConfig:
     output_path: str | None = None
     phoenix_base_url: str | None = None
     phoenix_api_key: str | None = None
-    canonical_suffix: str = '.canonical.md'
+    source_suffix: str = '.canonical.md'
+    canonical_suffix: str | None = None  # Legacy alias; prefer source_suffix.
 
 
 # ---------------------------------------------------------------------------
 # Corpus loading via S3 API
 # ---------------------------------------------------------------------------
+
+
+def _configured_source_suffix(config: GenerationConfig) -> str:
+    return config.canonical_suffix or config.source_suffix
 
 
 def _http_get_json(url: str, *, headers: dict[str, str], timeout: float = 30.0) -> Any:
@@ -359,25 +364,24 @@ def _document_title(file_path: str) -> str:
 
 
 def _load_corpus(config: GenerationConfig) -> list[SourceDocument]:
-    """Walk ``<workspace>/<doc>/<file>.canonical.md`` and pull every doc's text."""
+    """Walk uploaded S3 text artifacts under ``<workspace>/<doc>/`` and fetch their text."""
     docs: list[SourceDocument] = []
+    source_suffix = _configured_source_suffix(config).lower()
     workspace_listing = _list_s3_prefix(config, f'{config.workspace}/')
     doc_prefixes = [folder for folder in workspace_listing.get('folders', []) if folder.endswith('/')]
 
     for doc_prefix in doc_prefixes:
         doc_id = doc_prefix.rstrip('/').rsplit('/', 1)[-1]
         doc_listing = _list_s3_prefix(config, doc_prefix)
-        canonical_objects = [
-            obj
-            for obj in doc_listing.get('objects', [])
-            if str(obj.get('key', '')).lower().endswith(config.canonical_suffix)
+        source_objects = [
+            obj for obj in doc_listing.get('objects', []) if str(obj.get('key', '')).lower().endswith(source_suffix)
         ]
-        if not canonical_objects:
-            logger.warning('No canonical markdown found under %s; skipping', doc_prefix)
+        if not source_objects:
+            logger.warning('No %s artifact found under %s; skipping', source_suffix, doc_prefix)
             continue
-        # Prefer the largest canonical file (in case there are multiple).
-        canonical_objects.sort(key=lambda obj: int(obj.get('size') or 0), reverse=True)
-        key = str(canonical_objects[0]['key'])
+        # Prefer the largest matching artifact (in case there are multiple).
+        source_objects.sort(key=lambda obj: int(obj.get('size') or 0), reverse=True)
+        key = str(source_objects[0]['key'])
         try:
             text = _fetch_s3_text(config, key)
         except Exception as exc:
@@ -669,7 +673,7 @@ _COMPARISON_FALLBACK_PREFERRED_TERMS = frozenset(
 
 _MECHANISM_BAIT_UNSAFE_TARGET_RE = re.compile(
     r'\b(?:technology\s+transfer|leader\s+role|process\s+performance\s+qualification|'
-    r'governance|ways?\s+of\s+working)\b',
+    r'ppq(?:\s+assay)?|governance|ways?\s+of\s+working)\b',
     re.IGNORECASE,
 )
 
@@ -1153,6 +1157,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--output', default=None, help='Optional local JSON dump path.')
     parser.add_argument('--phoenix-base-url', default=os.getenv('PHOENIX_BASE_URL') or None)
     parser.add_argument('--phoenix-api-key', default=os.getenv('PHOENIX_API_KEY') or None)
+    parser.add_argument(
+        '--source-suffix',
+        default=os.getenv('YAR_EVAL_SOURCE_SUFFIX', '.canonical.md'),
+        help='Uploaded S3 text artifact suffix to sample, e.g. .canonical.md or .processed.md.',
+    )
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)s %(message)s')
@@ -1175,6 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
         output_path=args.output,
         phoenix_base_url=args.phoenix_base_url,
         phoenix_api_key=args.phoenix_api_key,
+        source_suffix=args.source_suffix,
     )
 
     examples = generate_queries(config)

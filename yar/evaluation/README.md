@@ -40,9 +40,11 @@ provisioning run leaves the eval CLIs ready out of the box.
 ## 1. Generate a baseline dataset
 
 `phoenix_query_generation` walks the S3 corpus through the yar-server's
-`/s3/list` + `/s3/content` endpoints, splits each canonical-markdown file
-into ~3 KB passages, and asks the judge LLM to write one query per passage
-per intent.
+`/s3/list` + `/s3/content` endpoints, splits each selected uploaded text
+artifact into ~3 KB passages, and asks the judge LLM to write one query per
+passage per intent. It defaults to `.canonical.md`; pass
+`--source-suffix .processed.md` to generate directly from uploaded processed
+Markdown.
 
 Five intent types, each with `should_refuse` metadata so the refusal
 evaluator can grade against expectation:

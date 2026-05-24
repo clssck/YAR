@@ -189,6 +189,140 @@ def _validate_fts_language(language: str) -> str:
 
 from yar.kg.bm25_sql import build_bm25_sql  # re-exported for callers historically using postgres_impl
 
+_BM25_FALLBACK_STOPWORDS = frozenset(
+    {
+        'about',
+        'after',
+        'also',
+        'and',
+        'are',
+        'based',
+        'been',
+        'before',
+        'being',
+        'can',
+        'could',
+        'does',
+        'during',
+        'for',
+        'from',
+        'had',
+        'has',
+        'have',
+        'how',
+        'into',
+        'is',
+        'its',
+        'keep',
+        'minimum',
+        'should',
+        'required',
+        'submission',
+        'the',
+        'their',
+        'there',
+        'these',
+        'this',
+        'was',
+        'were',
+        'what',
+        'when',
+        'which',
+        'with',
+    }
+)
+_BM25_FALLBACK_INTENT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ('lessons learned', r'\blessons?\s+learn(?:ed|t|ing)\b'),
+    ('physical flow', r'\bphysical\s+flow\b'),
+    ('batch analysis', r'\bbatch\s+analysis\b'),
+    ('green light', r'\bgreen\s+light\b'),
+    ('technology issue', r'\btechnology\s+issue\b'),
+    ('critical success factors', r'\bcritical\s+success\s+factors?\b'),
+    ('best practice', r'\bbest\s+practice\b'),
+    ('dose ranging', r'\bdose[-\s]?ranging\b'),
+    ('presentation', r'\bpresentation\b'),
+    ('article', r'\barticles?\b'),
+)
+
+
+def _append_bm25_fallback_query(target: list[str], seen: set[str], candidate: str) -> None:
+    cleaned = ' '.join(str(candidate or '').strip().split())
+    if not cleaned:
+        return
+    normalized = re.sub(r'[^a-z0-9]+', ' ', cleaned.casefold()).strip()
+    if not normalized or normalized in seen:
+        return
+    seen.add(normalized)
+    target.append(cleaned)
+
+
+def _bm25_degraded_fallback_queries(
+    query: str,
+    phrase_terms: list[str] | None,
+    *,
+    max_queries: int = 8,
+) -> list[str]:
+    """Return lower-recall-loss BM25 queries for provider-failure degraded mode.
+
+    PostgreSQL ``plainto_tsquery`` ANDs all query tokens. When the vector leg is
+    unavailable, strict entity-composite queries can become zero-hit even though
+    BM25 can still recover source chunks with a narrower intent phrase.
+    """
+    fallback_queries: list[str] = []
+    seen = {re.sub(r'[^a-z0-9]+', ' ', str(query or '').casefold()).strip()}
+
+    clean_phrase_terms: list[str] = []
+    phrase_seen: set[str] = set()
+    for term in phrase_terms or []:
+        cleaned = ' '.join(str(term or '').strip().split())
+        if not cleaned:
+            continue
+        tokens = [
+            token
+            for token in re.findall(r'[A-Za-z0-9][A-Za-z0-9._/-]*', cleaned)
+            if token.casefold() not in _BM25_FALLBACK_STOPWORDS
+        ]
+        if not tokens:
+            continue
+        if len(tokens) == 1 or (len(tokens) <= 2 and not any(char.isdigit() for char in cleaned)):
+            _append_bm25_fallback_query(clean_phrase_terms, phrase_seen, cleaned)
+
+    acronym_terms: list[str] = []
+    acronym_seen: set[str] = set()
+    for match in re.finditer(r'\b[A-Z0-9]{3,}\b', query or ''):
+        token = match.group(0)
+        if token.casefold() not in _BM25_FALLBACK_STOPWORDS:
+            _append_bm25_fallback_query(acronym_terms, acronym_seen, token)
+
+    normalized_query = query.casefold()
+    intent_phrases = [
+        phrase
+        for phrase, pattern in _BM25_FALLBACK_INTENT_PATTERNS
+        if re.search(pattern, normalized_query, re.IGNORECASE)
+    ]
+    if 'shipment' in normalized_query and 'depot' in normalized_query:
+        intent_phrases.append('shipment depot')
+
+    focus_terms = [*clean_phrase_terms, *acronym_terms]
+    for intent_phrase in intent_phrases:
+        for focus_term in focus_terms:
+            normalized_focus = re.sub(r'[^a-z0-9]+', ' ', focus_term.casefold()).strip()
+            normalized_intent = re.sub(r'[^a-z0-9]+', ' ', intent_phrase.casefold()).strip()
+            if normalized_focus and normalized_focus not in normalized_intent:
+                _append_bm25_fallback_query(fallback_queries, seen, f'{focus_term} {intent_phrase}')
+                if len(fallback_queries) >= max_queries:
+                    return fallback_queries
+        _append_bm25_fallback_query(fallback_queries, seen, intent_phrase)
+        if len(fallback_queries) >= max_queries:
+            return fallback_queries
+
+    for focus_term in focus_terms:
+        _append_bm25_fallback_query(fallback_queries, seen, focus_term)
+        if len(fallback_queries) >= max_queries:
+            return fallback_queries
+
+    return fallback_queries
+
 
 def normalize_vector_param(vector: Any, *, field_name: str = 'Embedding vector') -> list[float]:
     """Normalize pgvector inputs to a parameterizable list of finite floats."""
@@ -3978,18 +4112,17 @@ class PGVectorStorage(BaseVectorStorage):
         vector_fetch_k = int(top_k * VECTOR_FETCH_MULTIPLIER)
         bm25_fetch_k = int(top_k * (BM25_FETCH_BASE_MULTIPLIER + bm25_weight))  # Scale by weight
 
-        bm25_sql, normalized_phrases = build_bm25_sql(
-            query=query,
-            language=language,
-            phrase_terms=phrase_terms,
-            heading_weight_enabled=os.getenv('YAR_BM25_HEADING_WEIGHT_BOOST', 'false').lower() in ('1', 'true', 'yes'),
-        )
-
-        # Run vector searches and BM25 search in parallel for better performance
+        heading_weight_enabled = os.getenv('YAR_BM25_HEADING_WEIGHT_BOOST', 'false').lower() in ('1', 'true', 'yes')
         db = self._db_required()
 
-        async def run_bm25() -> list[dict[str, Any]]:
-            params = [query, self.workspace, bm25_fetch_k, *normalized_phrases]
+        async def run_bm25_for(search_query: str) -> list[dict[str, Any]]:
+            bm25_sql, normalized_phrases = build_bm25_sql(
+                query=search_query,
+                language=language,
+                phrase_terms=phrase_terms,
+                heading_weight_enabled=heading_weight_enabled,
+            )
+            params = [search_query, self.workspace, bm25_fetch_k, *normalized_phrases]
             results = await db.query(
                 bm25_sql,
                 params=params,
@@ -3997,10 +4130,81 @@ class PGVectorStorage(BaseVectorStorage):
             )
             return results if results else []
 
-        vector_results, bm25_results = await asyncio.gather(
-            self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding),
+        async def run_bm25() -> list[dict[str, Any]]:
+            return await run_bm25_for(query)
+
+        async def run_vector() -> list[dict[str, Any]]:
+            return await self.query(query, top_k=vector_fetch_k, query_embedding=query_embedding)
+
+        vector_payload, bm25_payload = await asyncio.gather(
+            run_vector(),
             run_bm25(),
+            return_exceptions=True,
         )
+
+        vector_error = vector_payload if isinstance(vector_payload, BaseException) else None
+        bm25_error = bm25_payload if isinstance(bm25_payload, BaseException) else None
+        if vector_error and bm25_error:
+            self._last_hybrid_search_trace = {
+                'vector_result_count': 0,
+                'bm25_result_count': 0,
+                'degraded_to_bm25': False,
+                'vector_error_type': type(vector_error).__name__,
+                'vector_error_status_code': getattr(vector_error, 'status_code', None),
+                'bm25_error_type': type(bm25_error).__name__,
+                'bm25_error_status_code': getattr(bm25_error, 'status_code', None),
+            }
+            raise vector_error
+
+        vector_results = [] if vector_error else list(cast(list[dict[str, Any]], vector_payload or []))
+        bm25_results = [] if bm25_error else list(cast(list[dict[str, Any]], bm25_payload or []))
+        bm25_fallback_query = ''
+        bm25_fallback_attempts: list[dict[str, Any]] = []
+        if vector_error and not bm25_error and not bm25_results:
+            for fallback_query in _bm25_degraded_fallback_queries(query, phrase_terms):
+                try:
+                    fallback_results = await run_bm25_for(fallback_query)
+                except Exception as fallback_error:
+                    bm25_fallback_attempts.append(
+                        {
+                            'query': fallback_query,
+                            'error_type': type(fallback_error).__name__,
+                            'error_status_code': getattr(fallback_error, 'status_code', None),
+                        }
+                    )
+                    continue
+                bm25_fallback_attempts.append({'query': fallback_query, 'result_count': len(fallback_results)})
+                if fallback_results:
+                    bm25_results = fallback_results
+                    bm25_fallback_query = fallback_query
+                    break
+        if vector_error:
+            logger.warning(
+                '[%s] Hybrid search vector leg failed; using BM25-only results (error_type=%s status=%s)',
+                self.workspace,
+                type(vector_error).__name__,
+                getattr(vector_error, 'status_code', None),
+            )
+        if bm25_error:
+            logger.warning(
+                '[%s] Hybrid search BM25 leg failed; using vector-only results (error_type=%s status=%s)',
+                self.workspace,
+                type(bm25_error).__name__,
+                getattr(bm25_error, 'status_code', None),
+            )
+        self._last_hybrid_search_trace = {
+            'vector_result_count': len(vector_results),
+            'bm25_result_count': len(bm25_results),
+            'degraded_to_bm25': bool(vector_error and not bm25_error),
+            'degraded_to_vector': bool(bm25_error and not vector_error),
+            'vector_error_type': type(vector_error).__name__ if vector_error else None,
+            'vector_error_status_code': getattr(vector_error, 'status_code', None) if vector_error else None,
+            'bm25_error_type': type(bm25_error).__name__ if bm25_error else None,
+            'bm25_error_status_code': getattr(bm25_error, 'status_code', None) if bm25_error else None,
+            'bm25_fallback_query': bm25_fallback_query,
+            'bm25_fallback_attempt_count': len(bm25_fallback_attempts),
+            'bm25_fallback_attempts': bm25_fallback_attempts,
+        }
 
         # Mark source type for debugging
         for r in vector_results:

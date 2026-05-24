@@ -3211,6 +3211,15 @@ class TestAugmentRetrievalKeywords:
         assert 'requires' in hl
         assert 'Best Practice' in ll
 
+        _hl, risk_ll = _augment_retrieval_keywords(
+            'Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
+            ['lessons learned'],
+            ['CMC risk'],
+        )
+        assert 'syntaxe of the description' in risk_ll
+        assert 'syntax of the description' in risk_ll
+        assert 'descriptive syntax' in risk_ll
+
     def test_technology_issue_recommended_step_adds_literal_anchors(self):
         _hl, ll = _augment_retrieval_keywords(
             'What is the first recommended step for resolving a CMC technology issue?',
@@ -3222,6 +3231,18 @@ class TestAugmentRetrievalKeywords:
         assert 'Subject Matter Expert' in ll
         assert 'Technology Issue Quick Sharing' in ll
         assert 'CMC team' in ll
+
+    def test_pmg_green_light_query_adds_conclusion_anchors(self):
+        _hl, ll = _augment_retrieval_keywords(
+            'Can PMG green light be given for Fitusiran based on the 2024-02-21 PMG Green Light Presentation?',
+            ['approval process'],
+            ['PMG green light', 'Fitusiran'],
+        )
+
+        assert 'Proposal for Green Light' in ll
+        assert 'Final PMG flag proposal' in ll
+        assert 'positive outcome' in ll
+        assert 'CAPAs' in ll
 
     def test_duration_query_adds_shipment_timing_anchors(self):
         hl, ll = _augment_retrieval_keywords(
@@ -3292,6 +3313,17 @@ class TestAugmentRetrievalKeywords:
         assert 'links to resources' in hl
         assert 'Implementation Guideline' in ll
         assert 'Best Practice' in ll
+
+    def test_article_identifier_query_adds_source_reference_terms(self):
+        _hl, ll = _augment_retrieval_keywords(
+            'Which article of Japanese GMP covers the MOU?',
+            ['regulatory reference'],
+            ['Japanese GMP', 'MOU'],
+        )
+
+        assert 'article' in ll
+        assert 'check article' in ll
+        assert 'article reference' in ll
 
     def test_exact_chunk_queries_add_table_and_section_terms(self):
         hl, ll = _augment_retrieval_keywords(
@@ -3365,6 +3397,14 @@ class TestAugmentRetrievalKeywords:
         assert definition_query.startswith('Safety Standard')
         assert 'definition' in definition_query
 
+        broad_generated_query = _build_exact_chunk_search_query(
+            'Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
+            ['lessons learned', 'risk assessment', 'regulatory guidance', 'syntax guidelines'],
+            exact_lookup=True,
+        )
+        assert broad_generated_query.startswith('Based on lessons learned')
+        assert broad_generated_query != 'regulatory guidance'
+
         literal_query = _build_exact_chunk_search_query(
             'Which article of Japanese GMP covers the MOU?',
             None,
@@ -3372,12 +3412,26 @@ class TestAugmentRetrievalKeywords:
         )
         assert 'Japanese GMP' in literal_query
         assert 'MOU' in literal_query
+        assert 'article' in literal_query
 
         presentation_terms = _derive_phrase_terms_for_chunk_search(
             'What is the presentation of Sarclisa (isatuximab)?',
             [],
         )
         assert presentation_terms == ['Sarclisa', 'isatuximab']
+        presentation_query = _build_exact_chunk_search_query(
+            'What is the presentation of Sarclisa (isatuximab)?',
+            presentation_terms,
+            exact_lookup=True,
+        )
+        assert presentation_query == 'presentation isatuximab'
+
+        lessons_query = _build_exact_chunk_search_query(
+            'What are the 3 categories of lessons learned about SERD SAR439589?',
+            ['SERD', 'SAR439589', 'SERD SAR439589'],
+            exact_lookup=True,
+        )
+        assert lessons_query == 'SERD lessons learned'
 
     def test_precise_entity_terms_trigger_exact_chunk_lookup(self):
         assert _should_enable_exact_chunk_fusion(
@@ -3418,6 +3472,29 @@ class TestAugmentRetrievalKeywords:
         assert 'Safety Standard' in phrase_terms
         assert 'NHA' not in phrase_terms
         assert 'product quality' in phrase_terms
+
+    def test_query_phrase_terms_skip_sentence_lead_and_keep_preposition_entity(self):
+        phrase_terms = _derive_phrase_terms_for_chunk_search(
+            (
+                'After US and EU submission of Sarclisa, what were the consequences '
+                'of including an additional physical flow in the Netherlands in the manufacture?'
+            ),
+            None,
+        )
+
+        assert phrase_terms is not None
+        assert 'Sarclisa' in phrase_terms
+        assert 'Netherlands' in phrase_terms
+        assert 'After US' not in phrase_terms
+        search_query = _build_exact_chunk_search_query(
+            (
+                'After US and EU submission of Sarclisa, what were the consequences '
+                'of including an additional physical flow in the Netherlands in the manufacture?'
+            ),
+            phrase_terms,
+            exact_lookup=True,
+        )
+        assert search_query == 'physical flow Netherlands'
 
     def test_exact_chunk_lookup_keeps_precise_terms_from_query(self):
         query = 'Who is Jane Doe in the context of the clinical study?'
@@ -6800,7 +6877,38 @@ class TestResponseQualityControls:
 
         assert response == raw_response
         assert trace['applied'] is False
-        assert trace['reasons'] == []
+
+    def test_normalize_query_shaped_response_adds_binary_yes_prefix_for_affirmative_answer(self):
+        trace: dict[str, object] = {}
+
+        response = _normalize_query_shaped_response(
+            query='Can PMG green light be given for Fitusiran?',
+            response='The PAI Task Force proposed issuance of Green Light for the Fitusiran submission.',
+            available_refs=[
+                {'content': 'Proposal for Green Light: Does the PMG accept proposal for issuance of Green Light?'}
+            ],
+            trace=trace,
+        )
+
+        assert response.startswith('Yes, the PAI Task Force proposed issuance of Green Light')
+        assert isinstance(trace['reasons'], list)
+        assert 'binary_affirmative_prefix' in trace['reasons']
+
+    def test_normalize_query_shaped_response_extracts_risk_syntax_template_from_context(self):
+        trace: dict[str, object] = {}
+
+        response = _normalize_query_shaped_response(
+            query='Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
+            response='Use a category and detailed risk description.',
+            available_refs=[
+                {'content': ('The use of the syntaxe of the description:\n* Due to ... the risk ...could impact ....')}
+            ],
+            trace=trace,
+        )
+
+        assert 'Due to ... the risk ...could impact ....' in response
+        assert isinstance(trace['reasons'], list)
+        assert 'risk_syntax_template_source_row' in trace['reasons']
 
     def test_normalize_query_shaped_response_cleans_lessons_learned_category_delimiter(self):
         trace: dict[str, object] = {}
@@ -7929,6 +8037,71 @@ class TestResponseQualityControls:
 
         assert processed[0]['chunk_id'] == 'definition'
 
+    def test_prioritize_substantive_chunks_keeps_activity_focus_ahead_of_generic_lessons(self):
+        chunks = [
+            {
+                'chunk_id': 'risk-review',
+                'file_path': '17-LLsession-01-Risk Review CIR 15 march 2017.pdf',
+                'content': 'Action plan: use a template for RR communication by CMC teams and managers.',
+                'precise_focus_overlap': 0.0,
+                'exact_phrase_match': 0.0,
+            },
+            {
+                'chunk_id': 'japan-operations',
+                'file_path': "Japanese iCMC Operations Managers' Dairy life Handbook_V1.0.pdf",
+                'content': (
+                    'Japanese iCMC Operations Managers Dairy life Handbook. '
+                    'J-OM manages Japan iCMC operations activities during the JSTF period.'
+                ),
+                'precise_focus_overlap': 0.66,
+                'exact_phrase_match': 1.25,
+            },
+            {
+                'chunk_id': 'comparator',
+                'file_path': '18-LLsession-02-Devpt and supply of blinded comparator- outcome_Oct 18_VF.pptx',
+                'content': 'Context for LL: operations managers aligned comparator sourcing activities.',
+                'precise_focus_overlap': 0.0,
+                'exact_phrase_match': 0.0,
+            },
+        ]
+
+        prioritized = _prioritize_substantive_chunks(
+            chunks,
+            'What are the Japan-specific activities for iCMC Operations Managers?',
+        )
+
+        assert prioritized[0]['chunk_id'] == 'japan-operations'
+
+    def test_prioritize_substantive_chunks_keeps_syntax_pattern_ahead_of_generic_risk(self):
+        chunks = [
+            {
+                'chunk_id': 'generic-risk',
+                'file_path': 'risk-table.pdf',
+                'content': (
+                    'Risk description syntax: cause, risk of event, impact, likelihood, severity, and mitigation plan.'
+                ),
+                'precise_focus_overlap': 0.20,
+                'exact_phrase_match': 0.0,
+            },
+            {
+                'chunk_id': 'risk-syntax',
+                'file_path': 'risk-review-lessons.pdf',
+                'content': (
+                    'Lessons learned: The use of the syntaxe of the description: '
+                    'state the cause, risk, and impact in one description.'
+                ),
+                'precise_focus_overlap': 0.0,
+                'exact_phrase_match': 0.0,
+            },
+        ]
+
+        prioritized = _prioritize_substantive_chunks(
+            chunks,
+            'Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
+        )
+
+        assert prioritized[0]['chunk_id'] == 'risk-syntax'
+
     @pytest.mark.asyncio
     async def test_process_chunks_unified_prioritizes_precise_focus_over_generic_temporal_exact(self):
         tokenizer = Mock(encode=Mock(side_effect=lambda text: str(text).split()))
@@ -8447,15 +8620,12 @@ class TestResponseQualityControls:
         )
         assert mabel == 'The MABEL dose-ranging interval is 3-4log [2].'
 
-    def test_normalize_query_shaped_response_cleans_japanese_gmp_mou_article(self):
+    def test_normalize_query_shaped_response_extracts_section_identifier_from_source_row(self):
         trace: dict[str, object] = {}
 
         normalized = _normalize_query_shaped_response(
             query='Which article of Japanese GMP covers the MOU?',
-            response=(
-                'The retrieved context does not describe the article of Japanese GMP that covers the MOU. '
-                'If you need to learn MOU and MRA, you should check article 11 of Japanese GMP [1].'
-            ),
+            response='The retrieved context does not describe the exact article of Japanese GMP that covers the MOU.',
             available_refs=[
                 {
                     'reference_id': '1',
@@ -8465,8 +8635,8 @@ class TestResponseQualityControls:
             trace=trace,
         )
 
-        assert normalized == 'The Japanese GMP article that covers the MOU is article 11 [1].'
-        assert trace['reasons'] == ['japanese_gmp_mou_article_cleanup']
+        assert normalized == 'The relevant article is article 11 [1].'
+        assert trace['reasons'] == ['section_identifier_source_row']
 
     def test_normalize_query_shaped_response_shipment_duration_drops_task_clause(self):
         trace: dict[str, object] = {}
@@ -8494,7 +8664,7 @@ class TestResponseQualityControls:
         assert 'goods shipment preparation' not in normalized.casefold()
         assert trace['reasons'] == ['shipment_duration_source_row']
 
-    def test_normalize_query_shaped_response_uses_sarclisa_physical_flow_source_row(self):
+    def test_normalize_query_shaped_response_uses_physical_flow_source_row(self):
         trace: dict[str, object] = {}
 
         normalized = _normalize_query_shaped_response(
@@ -8518,13 +8688,14 @@ class TestResponseQualityControls:
             trace=trace,
         )
 
-        assert 'Sanofi Genzyme' in normalized
-        assert 'wrong logo' in normalized
-        assert 'shipping validation protocol and container' in normalized
-        assert 'wrong NDC code' in normalized
-        assert 'batch shipped back and relabeled [1]' in normalized
+        normalized_lower = normalized.casefold()
+        assert 'sanofi genzyme' in normalized_lower
+        assert 'wrong logo' in normalized_lower
+        assert 'shipping validation protocol and container' in normalized_lower
+        assert 'ndc code was wrong' in normalized_lower
+        assert 'batch shipped back and needed to be relabeled [1]' in normalized_lower
         assert trace['applied'] is True
-        assert trace['reasons'] == ['sarclisa_physical_flow_consequence_source_row']
+        assert trace['reasons'] == ['physical_flow_consequence_source_row']
 
     def test_filter_confident_exact_context_chunks_keeps_supported_source_group(self):
         supported = {

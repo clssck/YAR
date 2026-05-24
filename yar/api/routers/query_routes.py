@@ -817,6 +817,33 @@ def _trace_rag_result_attrs(result: Any, tracing: TraceManager) -> dict[str, Any
         attrs['retrieval.exact_chunk_lookup'] = bool(retrieval.get('exact_chunk_lookup'))
         attrs['retrieval.entity_filter'] = str(retrieval.get('entity_filter') or '')
 
+    vector_search = metadata.get('vector_search')
+    if not isinstance(vector_search, dict) and isinstance(retrieval, dict):
+        nested_vector_search = retrieval.get('vector_search')
+        if isinstance(nested_vector_search, dict):
+            vector_search = nested_vector_search
+    if isinstance(vector_search, dict):
+        for key in (
+            'chunk_search_query',
+            'failure_reason',
+            'error_type',
+            'error_status_code',
+            'raw_result_count',
+            'valid_chunk_count',
+            'hybrid_vector_result_count',
+            'hybrid_bm25_result_count',
+            'hybrid_degraded_to_bm25',
+            'hybrid_degraded_to_vector',
+            'hybrid_vector_error_type',
+            'hybrid_vector_error_status_code',
+            'hybrid_bm25_error_type',
+            'hybrid_bm25_error_status_code',
+            'hybrid_bm25_fallback_query',
+            'hybrid_bm25_fallback_attempt_count',
+        ):
+            if key in vector_search and vector_search[key] is not None:
+                attrs[f'retrieval.vector_search.{key}'] = vector_search[key]
+        attrs['retrieval.vector_search.exact_chunk_lookup'] = bool(vector_search.get('exact_chunk_lookup'))
     processing_info = metadata.get('processing_info')
     if isinstance(processing_info, dict):
         for key in (

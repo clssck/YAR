@@ -406,7 +406,7 @@ class _FakeRag:
                 },
                 'answer_shaping': {
                     'applied': True,
-                    'reasons': ['sarclisa_physical_flow_consequence_source_row'],
+                    'reasons': ['physical_flow_consequence_source_row'],
                     'raw_answer_length': 12,
                     'final_answer_length': 11,
                     'raw_answer_preview': 'raw answer',
@@ -475,7 +475,7 @@ async def test_query_route_trace_redacts_sensitive_text_by_default():
     assert query_span.attributes['retrieval.exact_context_filter.reason'] == 'confident_exact_source_filter'
     assert query_span.attributes['retrieval.exact_context_filter.dropped_count'] == 1
     assert query_span.attributes['answer_shaping.applied'] is True
-    assert query_span.attributes['answer_shaping.reasons'] == ['sarclisa_physical_flow_consequence_source_row']
+    assert query_span.attributes['answer_shaping.reasons'] == ['physical_flow_consequence_source_row']
     assert query_span.attributes['retrieval.auto_entity_filter'] == 'PKU'
     assert 'input.query' not in query_span.attributes
     assert 'output.answer' not in query_span.attributes
@@ -543,6 +543,19 @@ def test_trace_rag_result_attrs_surfaces_processing_info():
             'metadata': {
                 'keywords': {'high_level': ['alpha'], 'low_level': ['beta']},
                 'processing_info': {'zero_hits': True, 'total_entities_found': 0, 'final_chunks_count': 0},
+                'vector_search': {
+                    'chunk_search_query': 'alpha beta',
+                    'failure_reason': 'search_exception',
+                    'error_type': 'PermissionDeniedError',
+                    'error_status_code': 403,
+                    'raw_result_count': 0,
+                    'valid_chunk_count': 0,
+                    'exact_chunk_lookup': True,
+                    'hybrid_degraded_to_bm25': True,
+                    'hybrid_bm25_result_count': 3,
+                    'hybrid_vector_error_type': 'PermissionDeniedError',
+                    'hybrid_vector_error_status_code': 403,
+                },
             },
         },
         manager,
@@ -551,6 +564,15 @@ def test_trace_rag_result_attrs_surfaces_processing_info():
     assert attrs['retrieval.zero_hits'] is True
     assert attrs['retrieval.keywords_hl'] == ['alpha']
     assert attrs['retrieval.final_chunks_count'] == 0
+    assert attrs['retrieval.vector_search.failure_reason'] == 'search_exception'
+    assert attrs['retrieval.vector_search.error_type'] == 'PermissionDeniedError'
+    assert attrs['retrieval.vector_search.error_status_code'] == 403
+    assert attrs['retrieval.vector_search.chunk_search_query'] == 'alpha beta'
+    assert attrs['retrieval.vector_search.exact_chunk_lookup'] is True
+    assert attrs['retrieval.vector_search.hybrid_degraded_to_bm25'] is True
+    assert attrs['retrieval.vector_search.hybrid_bm25_result_count'] == 3
+    assert attrs['retrieval.vector_search.hybrid_vector_error_type'] == 'PermissionDeniedError'
+    assert attrs['retrieval.vector_search.hybrid_vector_error_status_code'] == 403
 
 
 def test_result_tags_marks_zero_hits():

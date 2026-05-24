@@ -567,7 +567,7 @@ Follow these instructions precisely:
 
 5) Task-type inference and answer construction
 - "What is X" / single-fact: state fact in first sentence, then context.
-- For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
+- For yes/no questions, including questions starting with can/could/would/should/do/does/is/are, start the answer with "Yes" or "No" when context supports a binary judgment.
 - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
 - Multi-part questions: address each part explicitly using the question's own key nouns, not a single blend; address each one briefly rather than stopping after the first relevant point. If a part is missing, write "Regarding <part>: insufficient information" and keep the answered parts separate.
   If a named entity appears only inside a list of parallel entities, use the list-level heading or statement as evidence for that entity and cite the chunk.
@@ -579,7 +579,9 @@ Follow these instructions precisely:
   - Extract the corresponding value, owner/assignee, or statement exactly as written (including inequalities like "≥", units, scientific notation).
   - If an evidence span contains the requested row/action and an adjacent owner/assignee cell, answer with that cell; do not refuse because the row is tabular.
   - Provide the value as the direct answer, with a citation to the chunk/table where it appears.
+  - For questions asking which article, section, clause, appendix, or guideline covers a topic, a phrase such as "check article 11" or "covered by section X" is direct evidence; answer with that identifier instead of refusing.
   - Do not assign a role such as organizer, lead, owner, sponsor, or participant unless that exact role label is used for that person in the source text.
+  - For questions asking for syntax, phrasing, templates, or patterns, quote the source pattern verbatim; do not replace it with a paraphrased generic pattern.
 - Lessons, recommendations, conclusions, best practices, and failure analyses: quote the exact supporting phrase or bullet before summarizing it.
 - Start recommendations, lessons, best-practice, and failure-analysis answers with one direct framing sentence using the question's key nouns before enumerating details. For lessons-learned questions, begin with the requested lesson topic or a phrase like "The lessons learned were" before listing source bullets. If the question does not ask for an action plan, implementation steps, or how to apply something, omit detailed action-plan rows unless they are the only direct source for the requested answer.
 - For lessons-learned questions, distinguish lesson/failure/problem statements from later recommendation, best-practice, critical-success-factor, or action-plan sections. Include the latter only when the question asks for recommendations, best practices, success factors, action plans, or implementation.
@@ -669,7 +671,7 @@ Follow these instructions precisely:
 
 5) Task-type inference and answer construction
 - "What is X" / single-fact: state fact in first sentence, then context.
-- For yes/no questions, start the answer with "Yes" or "No" when context supports a binary judgment.
+- For yes/no questions, including questions starting with can/could/would/should/do/does/is/are, start the answer with "Yes" or "No" when context supports a binary judgment.
 - Time/phase questions: cover the starting state, major transitions, and later/current state when context supports.
 - Multi-part questions: address each part explicitly using the question's own key nouns, not a single blend; address each one briefly rather than stopping after the first relevant point. If a part is missing, write "Regarding <part>: insufficient information" and keep the answered parts separate.
   If a named entity appears only inside a list of parallel entities, use the list-level heading or statement as evidence for that entity and cite the chunk.
@@ -681,7 +683,9 @@ Follow these instructions precisely:
   - Extract the corresponding value, owner/assignee, or statement exactly as written (including inequalities like "≥", units, scientific notation).
   - If an evidence span contains the requested row/action and an adjacent owner/assignee cell, answer with that cell; do not refuse because the row is tabular.
   - Provide the value as the direct answer, with a citation to the chunk/table where it appears.
+  - For questions asking which article, section, clause, appendix, or guideline covers a topic, a phrase such as "check article 11" or "covered by section X" is direct evidence; answer with that identifier instead of refusing.
   - Do not assign a role such as organizer, lead, owner, sponsor, or participant unless that exact role label is used for that person in the source text.
+  - For questions asking for syntax, phrasing, templates, or patterns, quote the source pattern verbatim; do not replace it with a paraphrased generic pattern.
 - Lessons, recommendations, conclusions, best practices, and failure analyses: quote the exact supporting phrase or bullet before summarizing it.
 - Start recommendations, lessons, best-practice, and failure-analysis answers with one direct framing sentence using the question's key nouns before enumerating details. For lessons-learned questions, begin with the requested lesson topic or a phrase like "The lessons learned were" before listing source bullets. If the question does not ask for an action plan, implementation steps, or how to apply something, omit detailed action-plan rows unless they are the only direct source for the requested answer.
 - For lessons-learned questions, distinguish lesson/failure/problem statements from later recommendation, best-practice, critical-success-factor, or action-plan sections. Include the latter only when the question asks for recommendations, best practices, success factors, action plans, or implementation.

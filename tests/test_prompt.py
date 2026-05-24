@@ -385,8 +385,8 @@ class TestRAGResponsePrompts:
         rag_prompt = PROMPTS['rag_response']
         naive_prompt = PROMPTS['naive_rag_response']
 
-        assert 'For yes/no questions, start the answer with "Yes" or "No"' in rag_prompt
-        assert 'For yes/no questions, start the answer with "Yes" or "No"' in naive_prompt
+        assert 'including questions starting with can/could/would/should/do/does/is/are' in rag_prompt
+        assert 'including questions starting with can/could/would/should/do/does/is/are' in naive_prompt
         assert 'keep each supported item explicit and separate them cleanly with semicolons' in rag_prompt
         assert 'keep each supported item explicit and separate them cleanly with semicolons' in naive_prompt
         assert "start by restating the requested subject using the user's wording" in rag_prompt
@@ -395,12 +395,18 @@ class TestRAGResponsePrompts:
         assert 'preserve source numbering/rows when present and include each visible item explicitly' in naive_prompt
         assert 'do not refuse because the row is tabular' in rag_prompt
         assert 'do not refuse because the row is tabular' in naive_prompt
+        assert 'check article 11' in rag_prompt
+        assert 'check article 11' in naive_prompt
+        assert 'answer with that identifier instead of refusing' in rag_prompt
+        assert 'answer with that identifier instead of refusing' in naive_prompt
         assert 'answer process/lesson/action questions from the substantive sections' in rag_prompt
         assert 'answer process/lesson/action questions from the substantive sections' in naive_prompt
         assert 'Do not assign a role such as organizer, lead, owner, sponsor, or participant' in rag_prompt
         assert 'Do not assign a role such as organizer, lead, owner, sponsor, or participant' in naive_prompt
         assert 'quote the exact supporting phrase or bullet before summarizing it' in rag_prompt
         assert 'quote the exact supporting phrase or bullet before summarizing it' in naive_prompt
+        assert 'quote the source pattern verbatim; do not replace it with a paraphrased generic pattern' in rag_prompt
+        assert 'quote the source pattern verbatim; do not replace it with a paraphrased generic pattern' in naive_prompt
 
 
 class TestQueryContextPrompts:

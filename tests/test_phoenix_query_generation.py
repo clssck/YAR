@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import patch
+
+import httpx
+import pytest
 
 from yar.evaluation.phoenix_query_generation import (
     GenerationConfig,
@@ -12,7 +16,9 @@ from yar.evaluation.phoenix_query_generation import (
     _fallback_comparison_example,
     _gen_comparison,
     _gen_single_passage_intent,
+    _load_corpus,
     _query_mentions_source_anchor,
+    generate_queries,
 )
 
 
@@ -229,3 +235,58 @@ def test_comparison_generation_falls_back_when_llm_omits_source_anchor() -> None
     assert example is not None
     assert '16-LLsession-09- outcome Jan 18 2017' in example['query']
     assert '18-LLsession-02-Devpt and supply of blinded comparator- outcome Oct 18 VF' in example['query']
+
+
+def _live_api_base_url() -> str:
+    return (os.getenv('YAR_TEST_URL') or os.getenv('YAR_API_URL') or 'http://localhost:9621').rstrip('/')
+
+
+def _live_api_headers() -> dict[str, str]:
+    api_key = os.getenv('YAR_API_KEY')
+    return {'X-API-Key': api_key} if api_key else {}
+
+
+def _skip_if_live_api_unavailable(base_url: str) -> None:
+    try:
+        response = httpx.get(f'{base_url}/health', headers=_live_api_headers(), timeout=5.0)
+    except httpx.HTTPError as exc:
+        pytest.skip(f'YAR server not available at {base_url}: {exc}')
+    if response.status_code != 200:
+        pytest.skip(f'YAR server not healthy at {base_url}: HTTP {response.status_code}')
+
+
+@pytest.mark.integration
+@pytest.mark.requires_api
+def test_uploaded_processed_docs_generate_qa_examples_from_s3_api() -> None:
+    base_url = _live_api_base_url()
+    _skip_if_live_api_unavailable(base_url)
+
+    config = GenerationConfig(
+        server_url=base_url,
+        api_key=os.getenv('YAR_API_KEY') or None,
+        workspace=os.getenv('YAR_TEST_WORKSPACE') or os.getenv('WORKSPACE') or 'default',
+        source_suffix='.processed.md',
+        judge_model=os.getenv('YAR_EVAL_JUDGE_MODEL', 'tuna'),
+        judge_base_url=os.getenv('YAR_EVAL_JUDGE_BASE_URL') or None,
+        judge_api_key=os.getenv('YAR_EVAL_JUDGE_API_KEY') or None,
+        intents=['factual_lookup'],
+        queries_per_intent=1,
+        passage_chars=2000,
+        passage_min_chars=200,
+        seed=23,
+    )
+
+    docs = _load_corpus(config)
+    assert docs, 'No uploaded .processed.md artifacts found through the YAR /s3/list + /s3/content API.'
+    assert all(doc.file_path.endswith('.processed.md') for doc in docs)
+    assert all(doc.content.strip() for doc in docs)
+
+    examples = generate_queries(config)
+
+    assert examples, 'Uploaded processed documents did not yield any generated QA examples.'
+    example = examples[0]
+    assert example['intent'] == 'factual_lookup'
+    assert example['query'].strip()
+    assert example['expected_answer'].strip()
+    assert example['source_file_path'] in {doc.file_path for doc in docs}
+    assert example['source_file_path'].endswith('.processed.md')
