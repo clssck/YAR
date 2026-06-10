@@ -45,6 +45,7 @@ const PORT_MAPPINGS = [
   { port: 5173, name: "Vite Dev Server" },
   { port: 9100, name: "RustFS S3 API" },
   { port: 9101, name: "RustFS Web Console" },
+  { port: 6006, name: "Phoenix Dashboard" }, // OTEL trace UI (observability profile)
   { port: 5432, name: "PostgreSQL", skip: true }, // TCP, not HTTP - skip by default
 ];
 
