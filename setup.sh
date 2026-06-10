@@ -423,8 +423,8 @@ echo ""
 echo -e "${YELLOW}[Step 3/3] Waiting for services to be healthy...${NC}"
 echo ""
 
-SERVICES=("postgres" "rustfs" "litellm")
-REQUIRED_HEALTHY=3
+SERVICES=("postgres" "rustfs" "litellm" "phoenix")
+REQUIRED_HEALTHY=${#SERVICES[@]}
 
 get_service_status() {
     local service=$1
