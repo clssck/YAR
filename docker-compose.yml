@@ -146,7 +146,10 @@ services:
       PHOENIX_GRPC_PORT: 4317
       PHOENIX_TELEMETRY_ENABLED: ${PHOENIX_TELEMETRY_ENABLED:-false}
     ports:
-      - '${DOCKER_GATEWAY_IP:-127.0.0.1}:6006:6006'
+      # 0.0.0.0 (not gateway-only) so a localhost-targeting reverse proxy
+      # (e.g. jupyter-server-proxy at /proxy/6006) can reach the dashboard;
+      # 172.28.0.1 is still covered for the OTEL collector endpoint.
+      - '6006:6006'
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:4317:4317'
     healthcheck:
       # phoenix image is distroless (no shell); use exec-form python against /healthz
