@@ -293,7 +293,11 @@ else
     set_env "MAX_PARALLEL_INSERT" "${MAX_PARALLEL_INSERT:-10}"
 
     # Reverse proxy path prefix (for K8s/code-server environments)
-    set_env "ROOT_PATH" "${ROOT_PATH:-/oneai-rnd-transformerscmc-genai/janos/proxy/9621}"
+    RP="${ROOT_PATH:-/oneai-rnd-transformerscmc-genai/janos/proxy/9621}"
+    set_env "ROOT_PATH" "$RP"
+    # Phoenix UI sits on 6006 behind the same proxy; serve it under the matching
+    # sub-path so its SPA assets resolve through the proxy (avoids the white page).
+    set_env "PHOENIX_HOST_ROOT_PATH" "${RP%/*}/6006"
 fi
 
 ./scripts/generate_litellm_config.sh "$PROFILE"

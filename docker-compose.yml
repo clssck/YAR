@@ -145,6 +145,9 @@ services:
       PHOENIX_PORT: 6006
       PHOENIX_GRPC_PORT: 4317
       PHOENIX_TELEMETRY_ENABLED: ${PHOENIX_TELEMETRY_ENABLED:-false}
+      # Serve the UI under a reverse-proxy sub-path (e.g. /oneai-.../proxy/6006).
+      # Empty = root. Set it to the FULL external prefix when behind a path proxy.
+      PHOENIX_HOST_ROOT_PATH: ${PHOENIX_HOST_ROOT_PATH:-}
     ports:
       # 0.0.0.0 (not gateway-only) so a localhost-targeting reverse proxy
       # (e.g. jupyter-server-proxy at /proxy/6006) can reach the dashboard;
