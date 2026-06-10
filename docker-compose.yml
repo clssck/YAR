@@ -71,6 +71,11 @@ services:
   rustfs:
     image: rustfs/rustfs:1.0.0-alpha.99  # Pin to alpha; bump intentionally
     container_name: yar-rustfs
+    # Run as root: this sandboxed Docker blocks the image's non-root uid 10001
+    # from writing the host bind mount (./data/rustfs) even at mode 0777
+    # (uid-remap/overlay quirk). Root is the only reliable fix here while
+    # keeping the host-bind persistence model below.
+    user: "0:0"
     ports:
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9100:9000'  # S3 API (mapped to 9100 to avoid conflicts)
       - '${DOCKER_GATEWAY_IP:-127.0.0.1}:9101:9001'  # Web console
