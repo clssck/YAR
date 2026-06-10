@@ -278,8 +278,8 @@ echo ""
 echo -e "${YELLOW}🛑 [Step 1/4] Stopping containers...${NC}"
 
 if [ -f "docker-compose.yml" ]; then
-    # Stop all services including work profile (litellm)
-    docker compose --profile work down 2>&1 | while read -r line; do
+    # Stop all services across every profile (work=litellm, observability=phoenix)
+    docker compose --profile work --profile observability down 2>&1 | while read -r line; do
         echo -e "  ${BLUE}▸${NC} $line"
     done
 else
