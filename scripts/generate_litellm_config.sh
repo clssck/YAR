@@ -10,10 +10,10 @@ OPENAI_KEY='os.environ/OPENAI_API_KEY'
 
 case "$PROFILE" in
   dev)
-    TUNA_TARGET="openai/mistralai/mistral-small-2603"
+    TUNA_TARGET="openai/deepseek/deepseek-v4-flash"
     SALMON_TARGET="openai/google/gemini-3.1-flash-lite-preview"
     SHRIMP_TARGET="openai/perplexity/pplx-embed-v1-0.6b"
-    TUNA_COMMENT="mistralai/mistral-small-2603 via OpenRouter"
+    TUNA_COMMENT="deepseek/deepseek-v4-flash via OpenRouter"
     SALMON_COMMENT="google/gemini-3.1-flash-lite-preview via OpenRouter"
     SHRIMP_COMMENT="perplexity/pplx-embed-v1-0.6b via OpenRouter"
     TUNA_API_BASE="https://openrouter.ai/api/v1"
