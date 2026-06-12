@@ -528,6 +528,15 @@ class YAR:
             initialize_share_data,
         )
 
+        # Auto-configure tracing from the environment for library / direct usage.
+        # The API server calls configure_tracing() explicitly before constructing
+        # YAR, so this guard is a no-op there; it only activates when YAR is used as
+        # a library with tracing env vars set (e.g. YAR_TRACE_ENABLED + endpoint).
+        from yar.tracing import configure_tracing, get_active_trace_manager
+
+        if get_active_trace_manager() is None:
+            configure_tracing(default_project='yar-app', enabled_by_default=False)
+
         # Handle deprecated parameters
         if self.log_level is not None:
             warnings.warn(
@@ -2069,29 +2078,36 @@ class YAR:
                 pipeline_mutated = True
                 # Process all documents through per-doc pipeline with semaphore concurrency
                 doc_tasks = []
-                for doc_id, status_doc in to_process_docs.items():
-                    doc_tasks.append(
-                        asyncio.create_task(
-                            process_document(
-                                doc_id,
-                                status_doc,
-                                split_by_character,
-                                split_by_character_only,
-                                pipeline_status,
-                                pipeline_status_lock,
-                                semaphore,
+                from yar.tracing import get_active_trace_manager, noop_trace_manager
+
+                ingest_tracer = get_active_trace_manager() or noop_trace_manager(default_project='yar-app')
+                with ingest_tracer.start_chain_span(
+                    'app.ingest',
+                    attributes={'ingest.document_count': len(to_process_docs)},
+                ):
+                    for doc_id, status_doc in to_process_docs.items():
+                        doc_tasks.append(
+                            asyncio.create_task(
+                                process_document(
+                                    doc_id,
+                                    status_doc,
+                                    split_by_character,
+                                    split_by_character_only,
+                                    pipeline_status,
+                                    pipeline_status_lock,
+                                    semaphore,
+                                )
                             )
                         )
-                    )
 
-                try:
-                    await asyncio.gather(*doc_tasks)
-                except PipelineCancelledException:
-                    for task in doc_tasks:
-                        if not task.done():
-                            task.cancel()
-                    await asyncio.wait(doc_tasks, return_when=asyncio.ALL_COMPLETED)
-                    return
+                    try:
+                        await asyncio.gather(*doc_tasks)
+                    except PipelineCancelledException:
+                        for task in doc_tasks:
+                            if not task.done():
+                                task.cancel()
+                        await asyncio.wait(doc_tasks, return_when=asyncio.ALL_COMPLETED)
+                        return
 
                 # Check if there's a pending request to process more documents (with lock)
                 has_pending_request = False

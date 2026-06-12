@@ -673,7 +673,7 @@ def test_start_llm_span_emits_openinference_attributes():
             history_messages=[{'role': 'user', 'content': 'past'}],
             invocation_parameters={'temperature': 0.1},
         ) as span:
-            span.set_llm_token_counts(prompt=10, completion=5, total=15)
+            span.set_llm_token_counts(prompt=10, completion=5, total=15, reasoning=3, cache_read=8)
             span.set_llm_cost(prompt=0.001, completion=0.002, total=0.003)
             span.set_llm_finish_reason('stop')
             span.set_llm_output_messages([{'role': 'assistant', 'content': 'hi'}])
@@ -686,6 +686,8 @@ def test_start_llm_span_emits_openinference_attributes():
     assert llm_attrs['llm.token_count.prompt'] == 10
     assert llm_attrs['llm.token_count.completion'] == 5
     assert llm_attrs['llm.token_count.total'] == 15
+    assert llm_attrs['llm.token_count.completion_details.reasoning'] == 3
+    assert llm_attrs['llm.token_count.prompt_details.cache_read'] == 8
     assert llm_attrs['llm.cost.total'] == 0.003
     assert llm_attrs['llm.finish_reason'] == 'stop'
     # Messages flattened

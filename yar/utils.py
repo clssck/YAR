@@ -2774,6 +2774,8 @@ class TokenTracker:
         self.completion_tokens = 0
         self.total_tokens = 0
         self.call_count = 0
+        self.reasoning_tokens = 0
+        self.cached_tokens = 0
 
     def add_usage(self, token_counts):
         """Add token usage from one LLM call.
@@ -2783,6 +2785,8 @@ class TokenTracker:
         """
         self.prompt_tokens += token_counts.get('prompt_tokens', 0)
         self.completion_tokens += token_counts.get('completion_tokens', 0)
+        self.reasoning_tokens += token_counts.get('reasoning_tokens', 0)
+        self.cached_tokens += token_counts.get('cached_tokens', 0)
 
         # If total_tokens is provided, use it directly; otherwise calculate the sum
         if 'total_tokens' in token_counts:
@@ -2798,6 +2802,8 @@ class TokenTracker:
             'prompt_tokens': self.prompt_tokens,
             'completion_tokens': self.completion_tokens,
             'total_tokens': self.total_tokens,
+            'reasoning_tokens': self.reasoning_tokens,
+            'cached_tokens': self.cached_tokens,
             'call_count': self.call_count,
         }
 

@@ -489,7 +489,7 @@ def create_app(args):
                 def add_usage(self, usage: dict[str, int]) -> None:
                     if not usage:
                         return
-                    for key in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
+                    for key in ('prompt_tokens', 'completion_tokens', 'total_tokens', 'reasoning_tokens', 'cached_tokens'):
                         value = usage.get(key)
                         if isinstance(value, (int, float)) and value:
                             self.counts[key] = self.counts.get(key, 0) + int(value)
@@ -528,6 +528,8 @@ def create_app(args):
                             prompt=call_tracker.counts.get('prompt_tokens'),
                             completion=call_tracker.counts.get('completion_tokens'),
                             total=call_tracker.counts.get('total_tokens'),
+                            reasoning=call_tracker.counts.get('reasoning_tokens'),
+                            cache_read=call_tracker.counts.get('cached_tokens'),
                         )
                     if isinstance(result, str):
                         span.set_attribute('output.answer_length', len(result))

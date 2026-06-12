@@ -216,3 +216,78 @@ class TestOpenAIEmbedding:
             assert result is not None
             assert len(result) == 1
             assert len(result[0]) == 1536
+
+
+class TestTokenUsageCapture:
+    """Fix C: the binding forwards reasoning + cached token sub-counts to the token tracker."""
+
+    @pytest.mark.asyncio
+    async def test_tracker_captures_reasoning_and_cached(self):
+        from yar.llm.openai import openai_complete_if_cache
+        from yar.utils import TokenTracker
+
+        mock_response = MagicMock(spec=['choices', 'usage'])
+        mock_choice = MagicMock(spec=['message'])
+        mock_message = MagicMock(spec=['content'])
+        mock_message.content = 'ok'
+        mock_choice.message = mock_message
+        mock_response.choices = [mock_choice]
+        usage = MagicMock(
+            spec=[
+                'prompt_tokens', 'completion_tokens', 'total_tokens',
+                'completion_tokens_details', 'prompt_tokens_details',
+            ]
+        )
+        usage.prompt_tokens = 100
+        usage.completion_tokens = 50
+        usage.total_tokens = 150
+        usage.completion_tokens_details = MagicMock(spec=['reasoning_tokens'])
+        usage.completion_tokens_details.reasoning_tokens = 30
+        usage.prompt_tokens_details = MagicMock(spec=['cached_tokens'])
+        usage.prompt_tokens_details.cached_tokens = 80
+        mock_response.usage = usage
+
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            tracker = TokenTracker()
+            await openai_complete_if_cache(model='gpt-4', prompt='Hi', api_key='k', token_tracker=tracker)
+
+        usage_out = tracker.get_usage()
+        assert usage_out['prompt_tokens'] == 100
+        assert usage_out['completion_tokens'] == 50
+        assert usage_out['reasoning_tokens'] == 30
+        assert usage_out['cached_tokens'] == 80
+
+    @pytest.mark.asyncio
+    async def test_tracker_defaults_to_zero_without_details(self):
+        from yar.llm.openai import openai_complete_if_cache
+        from yar.utils import TokenTracker
+
+        mock_response = MagicMock(spec=['choices', 'usage'])
+        mock_choice = MagicMock(spec=['message'])
+        mock_message = MagicMock(spec=['content'])
+        mock_message.content = 'ok'
+        mock_choice.message = mock_message
+        mock_response.choices = [mock_choice]
+        usage = MagicMock(spec=['prompt_tokens', 'completion_tokens', 'total_tokens'])
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 4
+        usage.total_tokens = 14
+        mock_response.usage = usage
+
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            tracker = TokenTracker()
+            await openai_complete_if_cache(model='gpt-4', prompt='Hi', api_key='k', token_tracker=tracker)
+
+        usage_out = tracker.get_usage()
+        assert usage_out['reasoning_tokens'] == 0
+        assert usage_out['cached_tokens'] == 0

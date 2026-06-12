@@ -645,10 +645,15 @@ async def openai_complete_if_cache(
                 final_content = safe_unicode_decode(final_content.encode('utf-8'))
 
             if token_tracker and hasattr(response, 'usage'):
+                usage = response.usage
+                completion_details = getattr(usage, 'completion_tokens_details', None)
+                prompt_details = getattr(usage, 'prompt_tokens_details', None)
                 token_counts = {
-                    'prompt_tokens': getattr(response.usage, 'prompt_tokens', 0),
-                    'completion_tokens': getattr(response.usage, 'completion_tokens', 0),
-                    'total_tokens': getattr(response.usage, 'total_tokens', 0),
+                    'prompt_tokens': getattr(usage, 'prompt_tokens', 0) or 0,
+                    'completion_tokens': getattr(usage, 'completion_tokens', 0) or 0,
+                    'total_tokens': getattr(usage, 'total_tokens', 0) or 0,
+                    'reasoning_tokens': (getattr(completion_details, 'reasoning_tokens', 0) or 0) if completion_details else 0,
+                    'cached_tokens': (getattr(prompt_details, 'cached_tokens', 0) or 0) if prompt_details else 0,
                 }
                 token_tracker.add_usage(token_counts)
 
