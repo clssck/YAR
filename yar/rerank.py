@@ -269,7 +269,37 @@ def chunk_documents_for_rerank(
             f'Clamping to {overlap_tokens} to prevent infinite loop.'
         )
 
-    tokenizer = TiktokenTokenizer(model_name=tokenizer_model)
+    try:
+        tokenizer = TiktokenTokenizer(model_name=tokenizer_model)
+    except Exception as exc:
+        logger.warning(
+            'Failed to initialize tokenizer %s for rerank chunking; '
+            'falling back to character-based chunking: %s',
+            tokenizer_model,
+            exc,
+        )
+
+        chunked_docs = []
+        doc_indices = []
+        max_chars = max(1, max_tokens * 4)
+        overlap_chars = min(max(0, overlap_tokens * 4), max_chars - 1)
+
+        for idx, doc in enumerate(documents):
+            if len(doc) <= max_chars:
+                chunked_docs.append(doc)
+                doc_indices.append(idx)
+            else:
+                start = 0
+                while start < len(doc):
+                    end = min(start + max_chars, len(doc))
+                    chunked_docs.append(doc[start:end])
+                    doc_indices.append(idx)
+
+                    if end >= len(doc):
+                        break
+                    start = end - overlap_chars
+
+        return chunked_docs, doc_indices
 
     # Use tokenizer for exact chunking.
     chunked_docs = []

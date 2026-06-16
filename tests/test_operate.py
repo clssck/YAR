@@ -3220,6 +3220,12 @@ class TestAugmentRetrievalKeywords:
         assert 'syntax of the description' in risk_ll
         assert 'descriptive syntax' in risk_ll
 
+    def test_normalize_retrieval_query_typos_preserves_valid_words(self):
+        assert _normalize_retrieval_query_typos('that there sponsors practice') == 'that there sponsors practice'
+        assert _normalize_retrieval_query_typos('Wht sponors need this practce?') == (
+            'What sponsors need this practice?'
+        )
+
     def test_technology_issue_recommended_step_adds_literal_anchors(self):
         _hl, ll = _augment_retrieval_keywords(
             'What is the first recommended step for resolving a CMC technology issue?',
@@ -4504,6 +4510,72 @@ class TestOperateEdgeCases:
         assert isinstance(hl, list)
         assert isinstance(ll, list)
 
+    @pytest.mark.asyncio
+    async def test_keyword_extraction_coerces_string_keywords_without_splitting(self):
+        """String keyword values should become one keyword, not character lists."""
+        string_llm = AsyncMock(return_value='{"high_level_keywords": "summary", "low_level_keywords": "foo"}')
+        global_config = {
+            'llm_model_func': string_llm,
+            'tokenizer': Mock(encode=Mock(return_value=[])),
+            'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE},
+        }
+
+        hl, ll = await extract_keywords_only(
+            text='unmatched query',
+            param=QueryParam(disable_cache=True),
+            global_config=global_config,
+        )
+
+        assert hl == ['summary']
+        assert ll == ['foo']
+
+        list_llm = AsyncMock(
+            return_value='{"high_level_keywords": ["summary", "overview"], "low_level_keywords": ["foo", "bar"]}'
+        )
+        list_config = {
+            'llm_model_func': list_llm,
+            'tokenizer': Mock(encode=Mock(return_value=[])),
+            'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE},
+        }
+
+        hl, ll = await extract_keywords_only(
+            text='unmatched query',
+            param=QueryParam(disable_cache=True),
+            global_config=list_config,
+        )
+
+        assert hl == ['summary', 'overview']
+        assert ll == ['foo', 'bar']
+
+        cached_llm = AsyncMock(return_value='{"high_level_keywords": [], "low_level_keywords": []}')
+        cache_config = {
+            'llm_model_func': cached_llm,
+            'tokenizer': Mock(encode=Mock(return_value=[])),
+            'addon_params': {'language': DEFAULT_SUMMARY_LANGUAGE},
+        }
+        cached_response = '{"high_level_keywords": "cached summary", "low_level_keywords": "cached foo"}'
+
+        with patch('yar.operate.handle_cache', new=AsyncMock(return_value=(cached_response, 1))):
+            hl, ll = await extract_keywords_only(
+                text='unmatched query',
+                param=QueryParam(),
+                global_config=cache_config,
+                hashing_kv=MagicMock(),
+            )
+
+        cached_llm.assert_not_awaited()
+        assert hl == ['cached summary']
+        assert ll == ['cached foo']
+
+    def test_coerce_keyword_list_skips_none_and_blank(self):
+        """List branch must skip None/blank items and strip, not emit a literal 'None'."""
+        from yar.operate import _coerce_keyword_list
+
+        assert _coerce_keyword_list(['foo', None, '  ', 'bar ']) == ['foo', 'bar']
+        assert _coerce_keyword_list('pharma') == ['pharma']
+        assert _coerce_keyword_list('   ') == []
+        assert _coerce_keyword_list(None) == []
+        assert _coerce_keyword_list([]) == []
 
 # ============================================================================
 # Helper Function Tests
@@ -5681,6 +5753,129 @@ class TestPerformKgSearchBranchExecution:
 @pytest.mark.offline
 class TestQueryCacheKeyInputs:
     """Regression tests for query cache key inputs."""
+
+    @pytest.mark.asyncio
+    async def test_query_cache_keys_include_retrieval_and_rerank_knobs(self):
+        """KG and naive cache keys should change when retrieval knobs change."""
+        from yar.utils import compute_args_hash as real_compute_args_hash
+
+        async def capture_kg_args(
+            *,
+            retrieval_multiplier: int,
+            bm25_weight: float,
+            min_rerank_score: float = 0.25,
+            disable_truncation: bool = False,
+        ) -> tuple:
+            captured_args: list[tuple] = []
+
+            def capture_args(*args):
+                captured_args.append(args)
+                return f'kg-cache-{len(captured_args)}'
+
+            query_param = QueryParam(
+                mode='mix',
+                retrieval_multiplier=retrieval_multiplier,
+                bm25_weight=bm25_weight,
+                disable_truncation=disable_truncation,
+                model_func=AsyncMock(return_value='Answer'),
+            )
+            context_result = QueryContextResult(
+                context='Context block',
+                raw_data={'data': {'references': []}},
+            )
+            global_config = {
+                'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                'min_rerank_score': min_rerank_score,
+            }
+
+            with (
+                patch('yar.operate.get_keywords_from_query', new=AsyncMock(return_value=(['High'], ['Low']))),
+                patch('yar.operate._build_query_context', new=AsyncMock(return_value=context_result)),
+                patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+                patch('yar.operate.compute_args_hash', side_effect=capture_args),
+            ):
+                result = await kg_query(
+                    query='What is alpha therapy?',
+                    knowledge_graph_inst=MagicMock(),
+                    entities_vdb=MagicMock(),
+                    relationships_vdb=MagicMock(),
+                    text_chunks_db=MagicMock(),
+                    query_param=query_param,
+                    global_config=global_config,
+                )
+
+            assert result is not None
+            assert len(captured_args) == 1
+            return captured_args[0]
+
+        async def capture_naive_args(
+            *,
+            retrieval_multiplier: int,
+            bm25_weight: float,
+            min_rerank_score: float = 0.25,
+            disable_truncation: bool = False,
+        ) -> tuple:
+            captured_args: list[tuple] = []
+
+            def capture_args(*args):
+                captured_args.append(args)
+                return f'naive-cache-{len(captured_args)}'
+
+            query_param = QueryParam(
+                mode='naive',
+                retrieval_multiplier=retrieval_multiplier,
+                bm25_weight=bm25_weight,
+                disable_truncation=disable_truncation,
+                model_func=AsyncMock(return_value='Answer'),
+            )
+            chunk = {
+                'content': 'Alpha therapy context.',
+                'file_path': 'alpha.md',
+                'chunk_id': 'alpha-1',
+            }
+            global_config = {
+                'tokenizer': Mock(encode=Mock(return_value=[0] * 10)),
+                'min_rerank_score': min_rerank_score,
+            }
+
+            with (
+                patch('yar.operate._get_vector_context', new=AsyncMock(return_value=[chunk])),
+                patch('yar.operate.process_chunks_unified', new=AsyncMock(return_value=[chunk])),
+                patch('yar.operate.handle_cache', new=AsyncMock(return_value=None)),
+                patch('yar.operate.compute_args_hash', side_effect=capture_args),
+            ):
+                result = await naive_query(
+                    query='What is alpha therapy?',
+                    chunks_vdb=MagicMock(),
+                    query_param=query_param,
+                    global_config=global_config,
+                )
+
+            assert result is not None
+            assert len(captured_args) == 1
+            return captured_args[0]
+
+        for capture_args in (capture_kg_args, capture_naive_args):
+            baseline = await capture_args(retrieval_multiplier=2, bm25_weight=0.3)
+            same = await capture_args(retrieval_multiplier=2, bm25_weight=0.3)
+            changed_multiplier = await capture_args(retrieval_multiplier=3, bm25_weight=0.3)
+            changed_weight = await capture_args(retrieval_multiplier=2, bm25_weight=0.7)
+            changed_min_score = await capture_args(
+                retrieval_multiplier=2, bm25_weight=0.3, min_rerank_score=0.5
+            )
+            changed_truncation = await capture_args(
+                retrieval_multiplier=2, bm25_weight=0.3, disable_truncation=True
+            )
+
+            assert baseline == same
+            assert real_compute_args_hash(*baseline) == real_compute_args_hash(*same)
+            assert real_compute_args_hash(*baseline) != real_compute_args_hash(*changed_multiplier)
+            assert real_compute_args_hash(*baseline) != real_compute_args_hash(*changed_weight)
+            assert real_compute_args_hash(*baseline) != real_compute_args_hash(*changed_min_score)
+            assert real_compute_args_hash(*baseline) != real_compute_args_hash(*changed_truncation)
+            assert 2 in baseline
+            assert 0.3 in baseline
+            assert '0.25' in baseline
 
 
 @pytest.mark.offline
@@ -7522,6 +7717,88 @@ class TestResponseQualityControls:
             'evidence_spans',
         }
         assert all(set(relation) <= allowed_keys for relation in result['relations_context'])
+
+
+    @pytest.mark.asyncio
+    async def test_apply_token_truncation_honors_disable_truncation(self):
+        tokenizer = MagicMock(encode=Mock(side_effect=lambda text: text.split()))
+        search_result = {
+            'query': 'What supports alpha therapy?',
+            'final_entities': [
+                {
+                    'entity_name': 'Alpha therapy',
+                    'entity_type': 'product',
+                    'description': 'alpha beta gamma delta',
+                    'file_path': 'alpha.md',
+                },
+                {
+                    'entity_name': 'Beta endpoint',
+                    'entity_type': 'outcome',
+                    'description': 'epsilon zeta eta theta',
+                    'file_path': 'beta.md',
+                },
+            ],
+            'final_relations': [
+                {
+                    'src_id': 'Alpha therapy',
+                    'tgt_id': 'Beta endpoint',
+                    'keywords': 'supports',
+                    'description': 'alpha therapy supports beta endpoint strongly',
+                    'file_path': 'alpha.md',
+                },
+                {
+                    'src_id': 'Beta endpoint',
+                    'tgt_id': 'Gamma review',
+                    'keywords': 'reviewed by',
+                    'description': 'beta endpoint is reviewed by gamma review',
+                    'file_path': 'beta.md',
+                },
+            ],
+        }
+        global_config = {
+            'tokenizer': tokenizer,
+            'max_entity_tokens': 1,
+            'max_relation_tokens': 1,
+        }
+
+        truncated = await _apply_token_truncation(
+            search_result,
+            QueryParam(mode='mix', max_entity_tokens=1, max_relation_tokens=1),
+            global_config,
+        )
+
+        assert truncated['entities_context'] == []
+        assert truncated['relations_context'] == []
+
+        with patch('yar.operate.logger.warning') as warning_mock:
+            untruncated = await _apply_token_truncation(
+                search_result,
+                QueryParam(
+                    mode='mix',
+                    max_entity_tokens=1,
+                    max_relation_tokens=1,
+                    disable_truncation=True,
+                ),
+                global_config,
+            )
+
+        assert [entity['entity'] for entity in untruncated['entities_context']] == [
+            'Alpha therapy',
+            'Beta endpoint',
+        ]
+        assert [(relation['entity1'], relation['entity2']) for relation in untruncated['relations_context']] == [
+            ('Alpha therapy', 'Beta endpoint'),
+            ('Beta endpoint', 'Gamma review'),
+        ]
+        assert untruncated['filtered_entities'] == search_result['final_entities']
+        assert untruncated['filtered_relations'] == search_result['final_relations']
+        for entity in untruncated['entities_context']:
+            assert 'file_path' not in entity and 'created_at' not in entity
+        for relation in untruncated['relations_context']:
+            assert 'file_path' not in relation and 'created_at' not in relation
+        warning_messages = [call.args[0] for call in warning_mock.call_args_list]
+        assert any('entity context would exceed token budget' in message for message in warning_messages)
+        assert any('relation context would exceed token budget' in message for message in warning_messages)
 
     @pytest.mark.asyncio
     async def test_build_context_str_dedupes_visible_alias_references_without_changing_prompt_chunks(self):

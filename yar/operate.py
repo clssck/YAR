@@ -187,46 +187,14 @@ _RETRIEVAL_EXACT_SEARCH_TERM_RE = re.compile(
 )
 _RETRIEVAL_SECTION_CODE_RE = re.compile(r'\b[A-Z]{2,}\s*<\d+[A-Za-z0-9._/-]*>\b')
 _RETRIEVAL_QUERY_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
-_RETRIEVAL_QUERY_CORRECTION_TERMS = frozenset(
-    {
-        'what',
-        'which',
-        'where',
-        'when',
-        'why',
-        'who',
-        'how',
-        'practice',
-        'practices',
-        'guidance',
-        'guideline',
-        'recommendation',
-        'recommendations',
-        'conflict',
-        'conflicts',
-        'strategy',
-        'management',
-        'sponsor',
-        'sponsors',
-        'were',
-        'participant',
-        'participants',
-        'status',
-        'session',
-        'definition',
-        'timeline',
-        'approval',
-        'study',
-        'studies',
-        'lesson',
-        'lessons',
-        'learned',
-        'impact',
-        'important',
-        'align',
-        'alignment',
-    }
-)
+_RETRIEVAL_QUERY_TYPO_CORRECTIONS = {
+    'wht': 'what',
+    'whta': 'what',
+    'practce': 'practice',
+    'practces': 'practices',
+    'sponor': 'sponsor',
+    'sponors': 'sponsors',
+}
 
 _RETRIEVAL_PRECISE_ENTITY_TERM_RE = re.compile(
     r'^(?:[A-Z][A-Za-z0-9._/-]{1,}|[A-Z0-9]{2,})(?:\s+(?:[A-Z][A-Za-z0-9._/-]{1,}|[A-Z0-9]{2,}))*$'
@@ -6810,16 +6778,20 @@ async def kg_query(
         query_param.response_type,
         query_param.top_k,
         query_param.chunk_top_k,
+        query_param.retrieval_multiplier,
         query_param.max_entity_tokens,
         query_param.max_relation_tokens,
         query_param.max_total_tokens,
+        query_param.disable_truncation,
         hl_keywords_str,
         ll_keywords_str,
         query_param.user_prompt or '',
         sys_prompt_temp,
         response_max_tokens,
         query_param.enable_rerank,
+        str(global_config.get('min_rerank_score', 'None')),
         query_param.enable_bm25_fusion,
+        query_param.bm25_weight,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
@@ -7153,25 +7125,12 @@ def _should_enable_exact_chunk_fusion(query: str, ll_keywords: list[str]) -> boo
     return bool(_query_literal_chunk_search_terms(query, ll_keywords, max_terms=1))
 
 
-def _is_single_edit_away(source: str, target: str) -> bool:
-    if source == target or abs(len(source) - len(target)) > 1:
-        return False
-    if len(source) == len(target):
-        return sum(left != right for left, right in zip(source, target, strict=False)) == 1
-    shorter, longer = (source, target) if len(source) < len(target) else (target, source)
-    short_index = 0
-    long_index = 0
-    edits = 0
-    while short_index < len(shorter) and long_index < len(longer):
-        if shorter[short_index] == longer[long_index]:
-            short_index += 1
-            long_index += 1
-            continue
-        edits += 1
-        if edits > 1:
-            return False
-        long_index += 1
-    return True
+def _coerce_keyword_list(value):
+    if isinstance(value, list):
+        return [str(t).strip() for t in value if t is not None and str(t).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
 
 def _match_query_token_case(replacement: str, original: str) -> str:
@@ -7183,24 +7142,16 @@ def _match_query_token_case(replacement: str, original: str) -> str:
 
 
 def _normalize_retrieval_query_typos(query: str) -> str:
-    """Correct single-edit typos for common retrieval intent words before search."""
+    """Correct known retrieval-intent misspellings before search."""
     if not query:
         return query
 
     def replace_match(match: re.Match[str]) -> str:
         token = match.group(0)
-        normalized = token.casefold()
-        if normalized in _RETRIEVAL_QUERY_CORRECTION_TERMS:
+        replacement = _RETRIEVAL_QUERY_TYPO_CORRECTIONS.get(token.casefold())
+        if replacement is None:
             return token
-        candidates = [
-            candidate
-            for candidate in _RETRIEVAL_QUERY_CORRECTION_TERMS
-            if abs(len(normalized) - len(candidate)) <= 1 and _is_single_edit_away(normalized, candidate)
-        ]
-        if candidates:
-            candidates.sort(key=lambda candidate: (len(candidate) <= len(normalized), candidate))
-            return _match_query_token_case(candidates[0], token)
-        return token
+        return _match_query_token_case(replacement, token)
 
     return _RETRIEVAL_QUERY_WORD_RE.sub(replace_match, query)
 
@@ -7272,7 +7223,10 @@ async def extract_keywords_only(
             keywords_data = json_repair.loads(cached_response)
             mark_query_cache_hit()
             if isinstance(keywords_data, dict):
-                return keywords_data.get('high_level_keywords', []), keywords_data.get('low_level_keywords', [])
+                return (
+                    _coerce_keyword_list(keywords_data.get('high_level_keywords', [])),
+                    _coerce_keyword_list(keywords_data.get('low_level_keywords', [])),
+                )
         except (json.JSONDecodeError, KeyError, AttributeError):
             logger.warning('Invalid cache format for keywords, proceeding with extraction')
 
@@ -7307,8 +7261,8 @@ async def extract_keywords_only(
         logger.error(f'LLM respond: {result}')
         return [], []
 
-    hl_keywords = keywords_data.get('high_level_keywords', [])
-    ll_keywords = keywords_data.get('low_level_keywords', [])
+    hl_keywords = _coerce_keyword_list(keywords_data.get('high_level_keywords', []))
+    ll_keywords = _coerce_keyword_list(keywords_data.get('low_level_keywords', []))
 
     # Stop-word hygiene: filter single-token stop-words from ll_keywords. The LLM mostly avoids
     # these but slips on edge cases ('What is the system?' -> ll=['the system'] sometimes). Multi-word
@@ -7893,7 +7847,11 @@ async def _get_vector_context(
                 )
                 valid_chunks = diversified
 
-        search_type = 'bm25_fusion' if query_param.enable_bm25_fusion else 'vector'
+        search_type = (
+            'bm25_fusion'
+            if (query_param.enable_bm25_fusion and getattr(chunks_vdb, 'hybrid_search', None) is not None)
+            else 'vector'
+        )
         oversample_note = f' oversample:{multiplier}x' if multiplier > 1 else ''
         logger.info(
             f'Naive query ({search_type}): {len(valid_chunks)} chunks '
@@ -8393,6 +8351,7 @@ async def _apply_token_truncation(
         'max_relation_tokens',
         global_config.get('max_relation_tokens', DEFAULT_MAX_RELATION_TOKENS),
     )
+    disable_truncation = getattr(query_param, 'disable_truncation', False)
 
     final_entities_before_ranking = list(search_result['final_entities'])
     final_entities = _rank_entities_for_prompt_context(final_entities_before_ranking, search_result, query_param)
@@ -8507,12 +8466,27 @@ async def _apply_token_truncation(
             entity_copy.pop('created_at', None)
             entities_context_for_truncation.append(entity_copy)
 
-        entities_context = truncate_list_by_token_size(
-            entities_context_for_truncation,
-            key=lambda x: '\n'.join(json.dumps(item, ensure_ascii=False) for item in [x]),
-            max_token_size=max_entity_tokens,
-            tokenizer=tokenizer,
-        )
+        if disable_truncation:
+            truncated_entities_context = truncate_list_by_token_size(
+                entities_context_for_truncation,
+                key=lambda x: '\n'.join(json.dumps(item, ensure_ascii=False) for item in [x]),
+                max_token_size=max_entity_tokens,
+                tokenizer=tokenizer,
+            )
+            if len(truncated_entities_context) < len(entities_context_for_truncation):
+                logger.warning(
+                    'Token truncation disabled: entity context would exceed token budget %d; keeping %d records',
+                    max_entity_tokens,
+                    len(entities_context_for_truncation),
+                )
+            entities_context = entities_context_for_truncation
+        else:
+            entities_context = truncate_list_by_token_size(
+                entities_context_for_truncation,
+                key=lambda x: '\n'.join(json.dumps(item, ensure_ascii=False) for item in [x]),
+                max_token_size=max_entity_tokens,
+                tokenizer=tokenizer,
+            )
 
     if relations_context:
         # Remove file_path and created_at for token calculation
@@ -8523,12 +8497,27 @@ async def _apply_token_truncation(
             relation_copy.pop('created_at', None)
             relations_context_for_truncation.append(relation_copy)
 
-        relations_context = truncate_list_by_token_size(
-            relations_context_for_truncation,
-            key=lambda x: '\n'.join(json.dumps(item, ensure_ascii=False) for item in [x]),
-            max_token_size=max_relation_tokens,
-            tokenizer=tokenizer,
-        )
+        if disable_truncation:
+            truncated_relations_context = truncate_list_by_token_size(
+                relations_context_for_truncation,
+                key=lambda x: '\n'.join(json.dumps(item, ensure_ascii=False) for item in [x]),
+                max_token_size=max_relation_tokens,
+                tokenizer=tokenizer,
+            )
+            if len(truncated_relations_context) < len(relations_context_for_truncation):
+                logger.warning(
+                    'Token truncation disabled: relation context would exceed token budget %d; keeping %d records',
+                    max_relation_tokens,
+                    len(relations_context_for_truncation),
+                )
+            relations_context = relations_context_for_truncation
+        else:
+            relations_context = truncate_list_by_token_size(
+                relations_context_for_truncation,
+                key=lambda x: '\n'.join(json.dumps(item, ensure_ascii=False) for item in [x]),
+                max_token_size=max_relation_tokens,
+                tokenizer=tokenizer,
+            )
 
     logger.info(f'After truncation: {len(entities_context)} entities, {len(relations_context)} relations')
 
@@ -12499,14 +12488,18 @@ async def naive_query(
         query_param.response_type,
         query_param.top_k,
         query_param.chunk_top_k,
+        query_param.retrieval_multiplier,
         query_param.max_entity_tokens,
         query_param.max_relation_tokens,
         query_param.max_total_tokens,
+        query_param.disable_truncation,
         query_param.user_prompt or '',
         sys_prompt_template,
         response_max_tokens,
         query_param.enable_rerank,
+        str(global_config.get('min_rerank_score', 'None')),
         query_param.enable_bm25_fusion,
+        query_param.bm25_weight,
         query_param.entity_filter or '',  # Include entity_filter in cache key
     )
 
