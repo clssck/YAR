@@ -718,6 +718,78 @@ def test_start_llm_span_redacts_messages_when_capture_prompts_false():
     assert llm_attrs['llm.model_name'] == 'gpt-4'
 
 
+def test_app_ingest_chain_span_allows_require_parent_llm_span(monkeypatch):
+    from yar.tracing import _has_recording_parent_span
+
+    try:
+        from opentelemetry import trace as otel_trace
+    except Exception:  # pragma: no cover - dependency optional
+        otel_trace = None
+    if otel_trace is not None:
+        monkeypatch.setattr(otel_trace, 'get_current_span', lambda: None)
+
+    manager = _active_trace_manager()
+
+    assert _has_recording_parent_span() is False
+    with manager.start_llm_span('llm.outside', model='gpt-4', provider='openai'):
+        pass
+    assert manager.tracer.spans == []
+
+    with manager.start_chain_span('app.ingest'):
+        assert _has_recording_parent_span() is True
+        with manager.start_llm_span('llm.ingest', model='gpt-4', provider='openai'):
+            pass
+
+    assert _has_recording_parent_span() is False
+    assert [span.name for span in manager.tracer.spans] == ['app.ingest', 'llm.ingest']
+    assert manager.tracer.spans[1].span.attributes['openinference.span.kind'] == 'LLM'
+
+
+def test_app_ingest_chain_span_propagates_to_concurrent_tasks(monkeypatch):
+    """Fix B: per-document tasks spawned via ``asyncio.create_task`` inside the
+    ``app.ingest`` chain span inherit the recording parent (contextvars are copied
+    into each task), so their ``require_parent`` LLM spans attach instead of being
+    suppressed. A worker run after the chain exits sees no parent and is suppressed.
+    """
+    import asyncio
+
+    from yar.tracing import _has_recording_parent_span
+
+    try:
+        from opentelemetry import trace as otel_trace
+    except Exception:  # pragma: no cover - dependency optional
+        otel_trace = None
+    if otel_trace is not None:
+        monkeypatch.setattr(otel_trace, 'get_current_span', lambda: None)
+
+    manager = _active_trace_manager()
+
+    async def worker(idx):
+        assert _has_recording_parent_span() is True
+        with manager.start_llm_span(f'llm.doc{idx}', model='gpt-4', provider='openai'):
+            pass
+
+    async def drive():
+        with manager.start_chain_span('app.ingest'):
+            await asyncio.gather(*(asyncio.create_task(worker(i)) for i in range(3)))
+
+    asyncio.run(drive())
+
+    names = [span.name for span in manager.tracer.spans]
+    assert names.count('app.ingest') == 1
+    assert sorted(n for n in names if n.startswith('llm.doc')) == ['llm.doc0', 'llm.doc1', 'llm.doc2']
+
+    manager.tracer.spans.clear()
+
+    async def after_chain():
+        assert _has_recording_parent_span() is False
+        with manager.start_llm_span('llm.after', model='gpt-4', provider='openai'):
+            pass
+
+    asyncio.run(after_chain())
+    assert manager.tracer.spans == []
+
+
 def test_start_embedding_span_emits_openinference_attributes():
     manager = _active_trace_manager(capture_contexts=True)
     with manager.start_chain_span('chain.parent'):
@@ -860,6 +932,69 @@ def test_active_trace_manager_register_and_release(monkeypatch):
         assert get_active_trace_manager() is None
     finally:
         _set_active_trace_manager(previous)
+
+
+def test_yar_auto_configures_tracing_only_when_env_enabled(monkeypatch, tmp_path):
+    from dataclasses import dataclass
+
+    from yar.tracing import _set_active_trace_manager, get_active_trace_manager
+    from yar.yar import YAR
+
+    async def _embedding_func(texts: list[str]) -> list[list[float]]:
+        return [[0.0, 0.0, 0.0] for _ in texts]
+
+    async def _llm_func(prompt: str, **kwargs) -> str:
+        return 'ok'
+
+    @dataclass
+    class _MockEmbeddingFunc:
+        max_token_size: int = 8191
+        embedding_dim: int = 3
+        model_name: str = 'test-embedding'
+        func: object = _embedding_func
+
+    class _DummyStorage:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    configured_manager = _active_trace_manager()
+    from_env_calls: list[tuple[str, bool]] = []
+
+    def _fake_from_env(cls, *, default_project='yar', enabled_by_default=False):
+        from_env_calls.append((default_project, enabled_by_default))
+        return configured_manager
+
+    def _build_yar(name: str) -> YAR:
+        return YAR(
+            working_dir=str(tmp_path / name),
+            workspace=name,
+            embedding_func=_MockEmbeddingFunc(),
+            llm_model_func=_llm_func,
+            tokenizer=SimpleNamespace(),
+        )
+
+    monkeypatch.setattr('yar.yar.verify_storage_implementation', lambda *args, **kwargs: None)
+    monkeypatch.setattr('yar.yar.check_storage_env_vars', lambda *args, **kwargs: None)
+    monkeypatch.setattr(YAR, '_get_storage_class', lambda self, storage_name: _DummyStorage)
+    monkeypatch.setattr(TraceManager, 'from_env', classmethod(_fake_from_env))
+    monkeypatch.delenv('YAR_TRACE_ENABLED', raising=False)
+    monkeypatch.delenv('PHOENIX_COLLECTOR_ENDPOINT', raising=False)
+    monkeypatch.delenv('PHOENIX_API_KEY', raising=False)
+
+    previous = get_active_trace_manager()
+    try:
+        _set_active_trace_manager(None)
+        _build_yar('disabled')
+        assert get_active_trace_manager() is None
+        assert from_env_calls == []
+
+        monkeypatch.setenv('YAR_TRACE_ENABLED', 'true')
+        _build_yar('enabled')
+        assert get_active_trace_manager() is configured_manager
+        assert from_env_calls == [('yar-app', False)]
+    finally:
+        _set_active_trace_manager(previous)
+
 
 
 def test_default_tags_propagate_through_spans(monkeypatch):

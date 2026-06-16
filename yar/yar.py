@@ -528,13 +528,17 @@ class YAR:
             initialize_share_data,
         )
 
-        # Auto-configure tracing from the environment for library / direct usage.
-        # The API server calls configure_tracing() explicitly before constructing
-        # YAR, so this guard is a no-op there; it only activates when YAR is used as
-        # a library with tracing env vars set (e.g. YAR_TRACE_ENABLED + endpoint).
-        from yar.tracing import configure_tracing, get_active_trace_manager
+        # Auto-configure tracing from the environment for library / direct usage
+        # only when tracing is explicitly enabled. The API server calls
+        # configure_tracing() before constructing YAR, so this guard is a no-op
+        # there; disabled library usage must leave the global manager unset so a
+        # later env-enabled construction can configure tracing.
+        from yar.tracing import TraceConfig, configure_tracing, get_active_trace_manager
 
-        if get_active_trace_manager() is None:
+        if (
+            get_active_trace_manager() is None
+            and TraceConfig.from_env(default_project='yar-app').enabled
+        ):
             configure_tracing(default_project='yar-app', enabled_by_default=False)
 
         # Handle deprecated parameters

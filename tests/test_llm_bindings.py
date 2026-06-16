@@ -57,6 +57,33 @@ def _create_chat_response(content: str, prompt_tokens: int = 10, completion_toke
     return mock_response
 
 
+class _AsyncChunkStream:
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _create_stream_content_chunk(content: str):
+    chunk = MagicMock(spec=['choices'])
+    choice = MagicMock(spec=['delta'])
+    delta = MagicMock(spec=['content'])
+    delta.content = content
+    choice.delta = delta
+    chunk.choices = [choice]
+    return chunk
+
+
 class TestOpenAIComplete:
     @pytest.mark.asyncio
     async def test_openai_complete_basic(self):
@@ -291,3 +318,189 @@ class TestTokenUsageCapture:
         usage_out = tracker.get_usage()
         assert usage_out['reasoning_tokens'] == 0
         assert usage_out['cached_tokens'] == 0
+
+    @pytest.mark.asyncio
+    async def test_tracker_captures_dict_shaped_response_usage_details(self):
+        from yar.llm.openai import openai_complete_if_cache
+        from yar.utils import TokenTracker
+
+        mock_response = {
+            'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}],
+            'usage': {
+                'prompt_tokens': 100,
+                'completion_tokens': 50,
+                'total_tokens': 150,
+                'completion_tokens_details': {'reasoning_tokens': 30},
+                'prompt_tokens_details': {'cached_tokens': 80},
+            },
+        }
+
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            tracker = TokenTracker()
+            await openai_complete_if_cache(model='gpt-4', prompt='Hi', api_key='k', token_tracker=tracker)
+
+        usage_out = tracker.get_usage()
+        assert usage_out['prompt_tokens'] == 100
+        assert usage_out['completion_tokens'] == 50
+        assert usage_out['total_tokens'] == 150
+        assert usage_out['reasoning_tokens'] == 30
+        assert usage_out['cached_tokens'] == 80
+
+    @pytest.mark.asyncio
+    async def test_tracker_defaults_dict_usage_to_zero_without_details(self):
+        from yar.llm.openai import openai_complete_if_cache
+        from yar.utils import TokenTracker
+
+        mock_response = {
+            'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}],
+            'usage': {
+                'prompt_tokens': 10,
+                'completion_tokens': 4,
+                'total_tokens': 14,
+            },
+        }
+
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            tracker = TokenTracker()
+            await openai_complete_if_cache(model='gpt-4', prompt='Hi', api_key='k', token_tracker=tracker)
+
+        usage_out = tracker.get_usage()
+        assert usage_out['prompt_tokens'] == 10
+        assert usage_out['completion_tokens'] == 4
+        assert usage_out['total_tokens'] == 14
+        assert usage_out['reasoning_tokens'] == 0
+        assert usage_out['cached_tokens'] == 0
+
+    def test_token_tracker_accumulates_reasoning_and_cached_across_calls(self):
+        from yar.utils import TokenTracker
+
+        tracker = TokenTracker()
+        tracker.add_usage({
+            'prompt_tokens': 10,
+            'completion_tokens': 5,
+            'total_tokens': 15,
+            'reasoning_tokens': 2,
+            'cached_tokens': 7,
+        })
+        tracker.add_usage({
+            'prompt_tokens': 11,
+            'completion_tokens': 6,
+            'total_tokens': 17,
+            'reasoning_tokens': 3,
+            'cached_tokens': 8,
+        })
+
+        usage_out = tracker.get_usage()
+        assert usage_out['prompt_tokens'] == 21
+        assert usage_out['completion_tokens'] == 11
+        assert usage_out['total_tokens'] == 32
+        assert usage_out['reasoning_tokens'] == 5
+        assert usage_out['cached_tokens'] == 15
+        assert usage_out['call_count'] == 2
+
+    @pytest.mark.asyncio
+    async def test_streaming_tracker_requests_usage_and_captures_reasoning_cached(self):
+        from yar.llm.openai import openai_complete_if_cache
+        from yar.utils import TokenTracker
+
+        final_chunk = MagicMock(spec=['choices', 'usage'])
+        final_chunk.choices = []
+        final_chunk.usage = {
+            'prompt_tokens': 12,
+            'completion_tokens': 8,
+            'total_tokens': 20,
+            'completion_tokens_details': {'reasoning_tokens': 5},
+            'prompt_tokens_details': {'cached_tokens': 9},
+        }
+        stream = _AsyncChunkStream([
+            _create_stream_content_chunk('hello '),
+            _create_stream_content_chunk('world'),
+            final_chunk,
+        ])
+
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(return_value=stream)
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            tracker = TokenTracker()
+            result = await openai_complete_if_cache(
+                model='gpt-4',
+                prompt='Hi',
+                api_key='k',
+                token_tracker=tracker,
+                stream=True,
+            )
+            chunks = []
+            async for chunk in result:
+                chunks.append(chunk)
+
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        usage_out = tracker.get_usage()
+        assert chunks == ['hello ', 'world']
+        assert call_kwargs['stream'] is True
+        assert call_kwargs['stream_options'] == {'include_usage': True}
+        assert usage_out['prompt_tokens'] == 12
+        assert usage_out['completion_tokens'] == 8
+        assert usage_out['total_tokens'] == 20
+        assert usage_out['reasoning_tokens'] == 5
+        assert usage_out['cached_tokens'] == 9
+        assert stream.closed is True
+
+    @pytest.mark.asyncio
+    async def test_streaming_retries_without_stream_options_on_bad_request(self):
+        """Providers that reject ``stream_options`` get a transparent retry without it,
+        so streaming still works (usage capture is simply skipped for that provider)."""
+        import httpx
+        from openai import BadRequestError
+
+        from yar.llm.openai import openai_complete_if_cache
+        from yar.utils import TokenTracker
+
+        rejection = BadRequestError(
+            "Unsupported parameter: 'stream_options'",
+            response=httpx.Response(400, request=httpx.Request('POST', 'https://api.test/v1')),
+            body=None,
+        )
+        stream = _AsyncChunkStream([
+            _create_stream_content_chunk('hello '),
+            _create_stream_content_chunk('world'),
+        ])
+        calls = []
+
+        def create_side_effect(*args, **kwargs):
+            calls.append(kwargs)
+            if 'stream_options' in kwargs:
+                raise rejection
+            return stream
+
+        with patch('yar.llm.openai.create_openai_async_client') as mock_client_factory:
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(side_effect=create_side_effect)
+            mock_client.close = AsyncMock()
+            mock_client_factory.return_value = mock_client
+
+            tracker = TokenTracker()
+            result = await openai_complete_if_cache(
+                model='gpt-4', prompt='Hi', api_key='k', token_tracker=tracker, stream=True,
+            )
+            chunks = [chunk async for chunk in result]
+
+        assert chunks == ['hello ', 'world']
+        assert len(calls) == 2
+        assert 'stream_options' in calls[0]
+        assert 'stream_options' not in calls[1]
+        assert calls[1]['stream'] is True
+        assert calls[1]['model'] == 'gpt-4'
+        assert tracker.get_usage()['prompt_tokens'] == 0

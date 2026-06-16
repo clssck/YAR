@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from openai import (
     APIConnectionError,
     APITimeoutError,
+    BadRequestError,
     RateLimitError,
 )
 from tenacity import (
@@ -67,6 +68,24 @@ class InvalidResponseError(Exception):
     """Custom exception class for triggering retry mechanism"""
 
     pass
+
+
+def _attr_or_key(obj, name, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def _mentions_stream_options(exc: Any) -> bool:
+    """True when an API error references the ``stream_options`` parameter."""
+    parts = (
+        str(getattr(exc, 'message', '') or ''),
+        str(getattr(exc, 'body', '') or ''),
+        str(exc),
+    )
+    return any('stream_options' in part.lower() for part in parts)
 
 
 # Module-level cache for tiktoken encodings
@@ -378,6 +397,12 @@ async def openai_complete_if_cache(
     # Add explicit parameters back to kwargs so they're passed to OpenAI API
     if stream is not None:
         kwargs['stream'] = stream
+    if kwargs.get('stream') is True:
+        stream_options = kwargs.get('stream_options')
+        if isinstance(stream_options, dict):
+            kwargs['stream_options'] = {**stream_options, 'include_usage': True}
+        else:
+            kwargs['stream_options'] = {'include_usage': True}
     if timeout is not None:
         kwargs['timeout'] = timeout
 
@@ -394,9 +419,22 @@ async def openai_complete_if_cache(
                 model=api_model, messages=typed_messages, **kwargs
             )
         else:
-            response = await openai_async_client.chat.completions.create(
-                model=api_model, messages=typed_messages, **kwargs
-            )
+            try:
+                response = await openai_async_client.chat.completions.create(
+                    model=api_model, messages=typed_messages, **kwargs
+                )
+            except BadRequestError as stream_opt_exc:
+                # Some OpenAI-compatible / Azure providers reject the
+                # ``stream_options`` parameter we add for streaming usage capture.
+                # Retry once without it so streaming still works; usage capture is
+                # simply skipped for that provider.
+                if 'stream_options' not in kwargs or not _mentions_stream_options(stream_opt_exc):
+                    raise
+                logger.warning('Provider rejected stream_options; retrying stream without usage capture')
+                retry_kwargs = {key: value for key, value in kwargs.items() if key != 'stream_options'}
+                response = await openai_async_client.chat.completions.create(
+                    model=api_model, messages=typed_messages, **retry_kwargs
+                )
     except (APITimeoutError, APIConnectionError, RateLimitError):
         await openai_async_client.close()
         raise
@@ -431,9 +469,10 @@ async def openai_complete_if_cache(
                 iteration_started = True
                 async for chunk in response:
                     # Check if this chunk has usage information (final chunk)
-                    if hasattr(chunk, 'usage') and chunk.usage:
-                        final_chunk_usage = chunk.usage
-                        logger.debug(f'Received usage info in streaming chunk: {chunk.usage}')
+                    chunk_usage = _attr_or_key(chunk, 'usage')
+                    if chunk_usage:
+                        final_chunk_usage = chunk_usage
+                        logger.debug(f'Received usage info in streaming chunk: {chunk_usage}')
 
                     # Check if choices exists and is not empty
                     if not hasattr(chunk, 'choices') or not chunk.choices:
@@ -512,11 +551,19 @@ async def openai_complete_if_cache(
                 # After streaming is complete, track token usage
                 if token_tracker and final_chunk_usage:
                     # Use actual usage from the API
+                    completion_details = _attr_or_key(final_chunk_usage, 'completion_tokens_details')
+                    prompt_details = _attr_or_key(final_chunk_usage, 'prompt_tokens_details')
                     token_counts = {
-                        'prompt_tokens': getattr(final_chunk_usage, 'prompt_tokens', 0),
-                        'completion_tokens': getattr(final_chunk_usage, 'completion_tokens', 0),
-                        'total_tokens': getattr(final_chunk_usage, 'total_tokens', 0),
+                        'prompt_tokens': _attr_or_key(final_chunk_usage, 'prompt_tokens', 0) or 0,
+                        'completion_tokens': _attr_or_key(final_chunk_usage, 'completion_tokens', 0) or 0,
+                        'total_tokens': _attr_or_key(final_chunk_usage, 'total_tokens', 0) or 0,
                     }
+                    reasoning_tokens = _attr_or_key(completion_details, 'reasoning_tokens')
+                    cached_tokens = _attr_or_key(prompt_details, 'cached_tokens')
+                    if reasoning_tokens is not None:
+                        token_counts['reasoning_tokens'] = reasoning_tokens or 0
+                    if cached_tokens is not None:
+                        token_counts['cached_tokens'] = cached_tokens or 0
                     token_tracker.add_usage(token_counts)
                     logger.debug(f'Streaming token usage (from API): {token_counts}')
                 elif token_tracker:
@@ -576,28 +623,38 @@ async def openai_complete_if_cache(
 
     else:
         try:
-            if not response or not response.choices or not hasattr(response.choices[0], 'message'):
+            choices = _attr_or_key(response, 'choices')
+            if not response or not choices:
                 logger.error('Invalid response from OpenAI API')
                 await openai_async_client.close()  # Ensure client is closed
                 raise InvalidResponseError('Invalid response from OpenAI API')
 
-            message = response.choices[0].message
-            _record_llm_finish_reason(getattr(response.choices[0], 'finish_reason', None))
+            first_choice = choices[0]
+            message = _attr_or_key(first_choice, 'message')
+            if message is None:
+                logger.error('Invalid response from OpenAI API')
+                await openai_async_client.close()  # Ensure client is closed
+                raise InvalidResponseError('Invalid response from OpenAI API')
+            _record_llm_finish_reason(_attr_or_key(first_choice, 'finish_reason'))
 
             # Handle parsed responses (structured output via response_format)
             # When using beta.chat.completions.parse(), the response is in message.parsed
-            if hasattr(message, 'parsed') and message.parsed is not None:
+            parsed = _attr_or_key(message, 'parsed')
+            if parsed is not None:
                 # Serialize the parsed structured response to JSON
-                final_content = message.parsed.model_dump_json()
+                final_content = parsed.model_dump_json()
                 logger.debug('Using parsed structured response from API')
             else:
                 # Handle regular content responses
-                content = getattr(message, 'content', None)
+                content = _attr_or_key(message, 'content')
                 # Support both OpenAI's reasoning_content and OpenRouter's reasoning field
-                reasoning_content = getattr(message, 'reasoning_content', '') or getattr(message, 'reasoning', '')
+                reasoning_content = (
+                    _attr_or_key(message, 'reasoning_content', '')
+                    or _attr_or_key(message, 'reasoning', '')
+                )
                 # Also handle OpenRouter's reasoning_details array format
                 if not reasoning_content:
-                    reasoning_details = getattr(message, 'reasoning_details', None)
+                    reasoning_details = _attr_or_key(message, 'reasoning_details')
                     if reasoning_details and isinstance(reasoning_details, list):
                         # Concatenate all reasoning text for non-streaming
                         reasoning_parts = []
@@ -644,16 +701,16 @@ async def openai_complete_if_cache(
             if r'\u' in final_content:
                 final_content = safe_unicode_decode(final_content.encode('utf-8'))
 
-            if token_tracker and hasattr(response, 'usage'):
-                usage = response.usage
-                completion_details = getattr(usage, 'completion_tokens_details', None)
-                prompt_details = getattr(usage, 'prompt_tokens_details', None)
+            if token_tracker:
+                usage = _attr_or_key(response, 'usage')
+                completion_details = _attr_or_key(usage, 'completion_tokens_details')
+                prompt_details = _attr_or_key(usage, 'prompt_tokens_details')
                 token_counts = {
-                    'prompt_tokens': getattr(usage, 'prompt_tokens', 0) or 0,
-                    'completion_tokens': getattr(usage, 'completion_tokens', 0) or 0,
-                    'total_tokens': getattr(usage, 'total_tokens', 0) or 0,
-                    'reasoning_tokens': (getattr(completion_details, 'reasoning_tokens', 0) or 0) if completion_details else 0,
-                    'cached_tokens': (getattr(prompt_details, 'cached_tokens', 0) or 0) if prompt_details else 0,
+                    'prompt_tokens': _attr_or_key(usage, 'prompt_tokens', 0) or 0,
+                    'completion_tokens': _attr_or_key(usage, 'completion_tokens', 0) or 0,
+                    'total_tokens': _attr_or_key(usage, 'total_tokens', 0) or 0,
+                    'reasoning_tokens': _attr_or_key(completion_details, 'reasoning_tokens', 0) or 0,
+                    'cached_tokens': _attr_or_key(prompt_details, 'cached_tokens', 0) or 0,
                 }
                 token_tracker.add_usage(token_counts)
 
