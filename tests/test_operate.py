@@ -5003,6 +5003,38 @@ class TestPerformKgSearchScoreAwareMerge:
         ]
 
     @pytest.mark.asyncio
+    async def test_entity_confidence_floor_exempts_graph_derived_entities(self, monkeypatch):
+        # Global/graph-derived entities (relationship-expansion endpoints from
+        # _get_edge_data) carry no vector-similarity score; fix #1 exempts them
+        # from the floor, while scored local entities below the floor still drop.
+        monkeypatch.setenv('YAR_ENTITY_CONFIDENCE_FLOOR', '0.45')
+        query_param = QueryParam(mode='hybrid', top_k=5)
+        text_chunks_db = MagicMock()
+        text_chunks_db.global_config = {}
+        local_entities = [{'entity_name': 'ScoredWeakLocal', 'score': 0.20, 'rank': 1}]
+        global_entities = [{'entity_name': 'GraphDerivedGlobal', 'rank': 2}]
+
+        with (
+            patch('yar.operate._get_node_data', new=AsyncMock(return_value=(local_entities, []))),
+            patch('yar.operate._get_edge_data', new=AsyncMock(return_value=([], global_entities))),
+        ):
+            result = await _perform_kg_search(
+                query='',
+                ll_keywords='ScoredWeakLocal',
+                hl_keywords='GraphDerivedGlobal',
+                knowledge_graph_inst=MagicMock(),
+                entities_vdb=MagicMock(),
+                relationships_vdb=MagicMock(),
+                text_chunks_db=text_chunks_db,
+                query_param=query_param,
+                chunks_vdb=None,
+            )
+
+        names = [entity['entity_name'] for entity in result['final_entities']]
+        assert 'GraphDerivedGlobal' in names
+        assert 'ScoredWeakLocal' not in names
+
+    @pytest.mark.asyncio
     async def test_relation_merge_prefers_highest_scored_duplicate(self):
         query_param = QueryParam(mode='hybrid', top_k=3)
         text_chunks_db = MagicMock()

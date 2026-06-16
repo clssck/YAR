@@ -8067,6 +8067,17 @@ async def _perform_kg_search(
             score_values.append(1.0 - max(_safe_float(entity.get('distance')), 0.0))
         return _clamp_unit(max(score_values))
 
+    def _has_similarity_signal(entity: dict[str, Any]) -> bool:
+        # Graph-derived entities (pulled in via relationship expansion in global/
+        # hybrid/mix) carry no vector-similarity score; only vector-retrieved
+        # entities do. Used to exempt graph-derived entities from the floor.
+        if 'distance' in entity:
+            return True
+        return any(
+            entity.get(key) is not None
+            for key in ('score', 'similarity', 'cosine_similarity', 'vector_score', 'trgm_score')
+        )
+
     def _saturating_score(value: Any, damping: float) -> float:
         normalized_value = max(_safe_float(value), 0.0)
         if normalized_value <= 0.0:
@@ -8134,7 +8145,9 @@ async def _perform_kg_search(
     if entity_confidence_floor > 0.0 and final_entities:
         before_count = len(final_entities)
         final_entities = [
-            entity for entity in final_entities if _entity_similarity_score(entity) >= entity_confidence_floor
+            entity
+            for entity in final_entities
+            if (not _has_similarity_signal(entity)) or _entity_similarity_score(entity) >= entity_confidence_floor
         ]
         dropped_count = before_count - len(final_entities)
         if dropped_count:
