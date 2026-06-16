@@ -46,6 +46,7 @@ import re
 import sys
 import time
 import warnings
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,20 @@ from yar.tracing import TraceManager, noop_trace_manager, trace_sequence_preview
 from yar.utils import logger
 
 _TRUE_ENV_VALUES = frozenset({'1', 'true', 'yes', 'on'})
+
+
+def _disabled_eval_trace_manager() -> TraceManager:
+    """Disabled eval trace manager pinned to the 'yar-eval' project.
+
+    The disabled noop manager would otherwise inherit the application's
+    YAR_TRACE_PROJECT / PHOENIX_PROJECT_NAME via TraceConfig.from_env; this pins
+    the project so eval-off runs report 'yar-eval'. (The enabled eval path still
+    registers via TraceManager.from_env -- isolating it is a separate follow-up.)
+    """
+    manager = noop_trace_manager(default_project='yar-eval')
+    if manager.config.project_name != 'yar-eval':
+        manager.config = replace(manager.config, project_name='yar-eval')
+    return manager
 
 # Suppress legacy wrapper deprecation warnings that remain necessary while
 # ragas.evaluate() in 0.4.x still expects legacy Metric/BaseRagasEmbeddings types.
@@ -846,8 +861,19 @@ def _resolve_benchmark_query(question: str, test_case: dict[str, Any] | None) ->
 
 
 def _build_eval_user_prompt(test_case: dict[str, Any] | None) -> str:
-    """Compose generic generation instructions without adding benchmark answers."""
-    return ' '.join([EVAL_USER_PROMPT, EVAL_EVIDENCE_GROUNDING_PROMPT])
+    """Compose generation instructions without adding benchmark answers."""
+    prompt = ' '.join([EVAL_USER_PROMPT, EVAL_EVIDENCE_GROUNDING_PROMPT])
+    if not test_case:
+        return prompt
+
+    original_question = str(test_case.get('question') or '').strip()
+    retrieval_query = str(test_case.get('retrieval_query') or '').strip()
+    if original_question and retrieval_query and retrieval_query != original_question:
+        return (
+            f'{prompt} Answer the original user question, not the retrieval keywords: '
+            f'{original_question}'
+        )
+    return prompt
 
 
 _REFERENCE_FOCUS_STOPWORDS = {
@@ -1279,7 +1305,7 @@ class RAGEvaluator:
         self.tracing = (
             TraceManager.from_env(default_project='yar-eval', enabled_by_default=True)
             if eval_trace_enabled
-            else noop_trace_manager(default_project='yar-eval')
+            else _disabled_eval_trace_manager()
         )
 
         self.eval_model = None
@@ -1431,7 +1457,7 @@ class RAGEvaluator:
         tracing = getattr(self, 'tracing', None)
         if isinstance(tracing, TraceManager):
             return tracing
-        return noop_trace_manager(default_project='yar-eval')
+        return _disabled_eval_trace_manager()
 
     def _finalize_trace_result(
         self,

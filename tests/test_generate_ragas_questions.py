@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from yar.evaluation.generate_ragas_questions import (
+    REPO_ROOT,
     SourceChunk,
     _anchor_question_to_sources,
     build_eval_cases_from_testset_rows,
@@ -33,7 +34,8 @@ def test_collect_source_documents_from_dataset_and_cli_dedupes(tmp_path: Path):
         source_documents=['inputs/doc-b.pdf', 'inputs/doc-c.pdf'],
     )
 
-    assert [path.as_posix().split('/LightRAG/')[-1] for path in paths] == [
+    repo_root = REPO_ROOT.resolve(strict=False)
+    assert [path.resolve(strict=False).relative_to(repo_root).as_posix() for path in paths] == [
         'inputs/doc-a.pdf',
         'inputs/doc-b.pdf',
         'inputs/doc-c.pdf',

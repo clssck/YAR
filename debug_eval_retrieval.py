@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import re
-import sys
 from pathlib import Path
 
 import httpx
@@ -163,7 +161,7 @@ def main() -> None:
                 relations = data.get('relationships', [])
                 references = data.get('references', [])
 
-                print(f'  RAG Retrieval:')
+                print('  RAG Retrieval:')
                 print(f'    Chunks: {len(chunks)}  Entities: {len(entities)}  Relations: {len(relations)}  Refs: {len(references)}')
 
                 # Show keywords the system extracted
@@ -186,19 +184,19 @@ def main() -> None:
                 if source_files:
                     print(f'    Source files: {sorted(source_files)}')
                 else:
-                    print(f'    Source files: NONE')
+                    print('    Source files: NONE')
 
                 # Keyword presence check
                 hits = keyword_hit_check(chunks, expected)
                 found = [k for k, v in hits.items() if v]
                 missed = [k for k, v in hits.items() if not v]
-                print(f'    Expected-answer keywords in chunks:')
+                print('    Expected-answer keywords in chunks:')
                 print(f'      Found:  {found}')
                 print(f'      Missed: {missed}')
 
                 # Top 3 chunk previews
                 if chunks:
-                    print(f'    Top chunks:')
+                    print('    Top chunks:')
                     for i, c in enumerate(chunks[:3]):
                         content = c.get('content', '')
                         print(f'      [{i+1}] {truncate(content, 100)}')

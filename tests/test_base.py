@@ -646,6 +646,7 @@ class TestYARQueryMethods:
         rag.relationships_vdb = object()
         rag.text_chunks = object()
         rag.chunks_vdb = object()
+        rag.relation_chunks = object()
         rag.llm_response_cache = object()
         rag._query_done = AsyncMock()
 
@@ -656,7 +657,7 @@ class TestYARQueryMethods:
 
         with (
             patch('yar.yar.asdict', return_value={}),
-            patch('yar.yar.naive_query', new=AsyncMock(return_value=returned_result)) as naive_query_mock,
+            patch('yar.yar.kg_query', new=AsyncMock(return_value=returned_result)) as kg_query_mock,
         ):
             result = await YAR.aquery_data(
                 rag,
@@ -664,11 +665,12 @@ class TestYARQueryMethods:
                 QueryParam(mode='mix'),
             )
 
-        routed_param = naive_query_mock.await_args.args[2]
-        assert routed_param.mode == 'naive'
-        assert result['metadata']['mode'] == 'naive'
+        routed_param = kg_query_mock.await_args.args[5]
+        assert routed_param.mode == 'hybrid'
+        assert kg_query_mock.await_args.kwargs['relation_chunks_storage'] is rag.relation_chunks
+        assert result['metadata']['mode'] == 'hybrid'
         assert result['metadata']['requested_query_mode'] == 'mix'
-        assert result['metadata']['effective_query_mode'] == 'naive'
+        assert result['metadata']['effective_query_mode'] == 'hybrid'
 
 
 class TestEvaluationHarnessHelpers:
@@ -876,7 +878,10 @@ class TestEvaluationHarnessHelpers:
         assert 'extractive evidence spans' in payload['user_prompt']
         assert 'shortest exact context span(s)' in payload['user_prompt']
         assert ('benchmark question ' + 'exactly') not in payload['user_prompt']
-        assert 'original question should not leak' not in payload['user_prompt']
+        assert (
+            'Answer the original user question, not the retrieval keywords: original question should not leak'
+            in payload['user_prompt']
+        )
 
     def test_load_case_mode_overrides_validates_keys_and_modes(self, tmp_path):
         overrides_path = tmp_path / 'case_modes.json'
@@ -1211,10 +1216,11 @@ class TestEvaluationHarnessHelpers:
         position_pool = asyncio.Queue()
         await position_pool.put(0)
         progress_counter = {'completed': 0}
+        dataset_from_dict = Mock(return_value=object())
 
         with (
             patch.object(RAGEvaluator, 'generate_rag_response', new=AsyncMock(return_value=rag_response)),
-            patch('yar.evaluation.eval_rag_quality.Dataset.from_dict', return_value=object()) as dataset_from_dict,
+            patch('yar.evaluation.eval_rag_quality.Dataset', SimpleNamespace(from_dict=dataset_from_dict)),
             patch(
                 'yar.evaluation.eval_rag_quality.Faithfulness', return_value='faithfulness-metric'
             ) as faithfulness_cls,
@@ -1309,10 +1315,11 @@ class TestEvaluationHarnessHelpers:
         )
         position_pool = asyncio.Queue()
         await position_pool.put(0)
+        dataset_from_dict = Mock(return_value=object())
 
         with (
             patch.object(RAGEvaluator, 'generate_rag_response', new=AsyncMock(return_value=rag_response)),
-            patch('yar.evaluation.eval_rag_quality.Dataset.from_dict', return_value=object()) as dataset_from_dict,
+            patch('yar.evaluation.eval_rag_quality.Dataset', SimpleNamespace(from_dict=dataset_from_dict)),
             patch('yar.evaluation.eval_rag_quality.Faithfulness', return_value='fm'),
             patch('yar.evaluation.eval_rag_quality.AnswerRelevancy', return_value='arm'),
             patch('yar.evaluation.eval_rag_quality.ContextRecall', return_value='crm'),
@@ -1410,10 +1417,11 @@ class TestEvaluationHarnessHelpers:
         )
         position_pool = asyncio.Queue()
         await position_pool.put(0)
+        dataset_from_dict = Mock(return_value=object())
 
         with (
             patch.object(RAGEvaluator, 'generate_rag_response', new=AsyncMock(return_value=rag_response)),
-            patch('yar.evaluation.eval_rag_quality.Dataset.from_dict', return_value=object()) as dataset_from_dict,
+            patch('yar.evaluation.eval_rag_quality.Dataset', SimpleNamespace(from_dict=dataset_from_dict)),
             patch('yar.evaluation.eval_rag_quality.Faithfulness', return_value='fm'),
             patch('yar.evaluation.eval_rag_quality.AnswerRelevancy', return_value='arm'),
             patch('yar.evaluation.eval_rag_quality.ContextRecall', return_value='crm'),
@@ -1465,10 +1473,11 @@ class TestEvaluationHarnessHelpers:
         )
         position_pool = asyncio.Queue()
         await position_pool.put(0)
+        dataset_from_dict = Mock(return_value=object())
 
         with (
             patch.object(RAGEvaluator, 'generate_rag_response', new=AsyncMock(return_value=rag_response)),
-            patch('yar.evaluation.eval_rag_quality.Dataset.from_dict', return_value=object()) as dataset_from_dict,
+            patch('yar.evaluation.eval_rag_quality.Dataset', SimpleNamespace(from_dict=dataset_from_dict)),
             patch('yar.evaluation.eval_rag_quality.Faithfulness', return_value='fm'),
             patch('yar.evaluation.eval_rag_quality.AnswerRelevancy', return_value='arm'),
             patch('yar.evaluation.eval_rag_quality.ContextRecall', return_value='crm'),
@@ -1690,6 +1699,8 @@ class TestCollectMetricVerdictTraces:
             patch('yar.evaluation.eval_rag_quality.ContextRecallClassificationPrompt', return_value=cr_instance),
             patch('yar.evaluation.eval_rag_quality.ContextPrecisionPrompt', return_value=cp_instance),
             patch('yar.evaluation.eval_rag_quality.RAGAS_AVAILABLE', True),
+            patch('yar.evaluation.eval_rag_quality.QCA', SimpleNamespace),
+            patch('yar.evaluation.eval_rag_quality.QAC', SimpleNamespace),
         ):
             result = await _collect_metric_verdict_traces(
                 llm=object(), question='Q?', contexts=['ctx text'], reference='ground truth'
@@ -1721,6 +1732,8 @@ class TestCollectMetricVerdictTraces:
             patch('yar.evaluation.eval_rag_quality.ContextRecallClassificationPrompt', return_value=cr_instance),
             patch('yar.evaluation.eval_rag_quality.ContextPrecisionPrompt', return_value=cp_instance),
             patch('yar.evaluation.eval_rag_quality.RAGAS_AVAILABLE', True),
+            patch('yar.evaluation.eval_rag_quality.QCA', SimpleNamespace),
+            patch('yar.evaluation.eval_rag_quality.QAC', SimpleNamespace),
         ):
             result = await _collect_metric_verdict_traces(
                 llm=object(),
@@ -1755,6 +1768,8 @@ class TestCollectMetricVerdictTraces:
             patch('yar.evaluation.eval_rag_quality.ContextRecallClassificationPrompt', return_value=cr_instance),
             patch('yar.evaluation.eval_rag_quality.ContextPrecisionPrompt', return_value=cp_instance),
             patch('yar.evaluation.eval_rag_quality.RAGAS_AVAILABLE', True),
+            patch('yar.evaluation.eval_rag_quality.QCA', SimpleNamespace),
+            patch('yar.evaluation.eval_rag_quality.QAC', SimpleNamespace),
         ):
             result = await _collect_metric_verdict_traces(
                 llm=object(), question='Q?', contexts=['ctx'], reference='ref'
@@ -1782,6 +1797,8 @@ class TestCollectMetricVerdictTraces:
             patch('yar.evaluation.eval_rag_quality.ContextRecallClassificationPrompt', return_value=cr_instance),
             patch('yar.evaluation.eval_rag_quality.ContextPrecisionPrompt', return_value=cp_instance),
             patch('yar.evaluation.eval_rag_quality.RAGAS_AVAILABLE', True),
+            patch('yar.evaluation.eval_rag_quality.QCA', SimpleNamespace),
+            patch('yar.evaluation.eval_rag_quality.QAC', SimpleNamespace),
         ):
             result = await _collect_metric_verdict_traces(
                 llm=object(), question='Q?', contexts=['ctx'], reference='ref'
@@ -1813,6 +1830,8 @@ class TestCollectMetricVerdictTraces:
             patch('yar.evaluation.eval_rag_quality.ContextRecallClassificationPrompt', return_value=cr_instance),
             patch('yar.evaluation.eval_rag_quality.ContextPrecisionPrompt', return_value=cp_instance),
             patch('yar.evaluation.eval_rag_quality.RAGAS_AVAILABLE', True),
+            patch('yar.evaluation.eval_rag_quality.QCA', SimpleNamespace),
+            patch('yar.evaluation.eval_rag_quality.QAC', SimpleNamespace),
         ):
             result = await _collect_metric_verdict_traces(
                 llm=object(), question='Q?', contexts=[long_ctx], reference='ref'

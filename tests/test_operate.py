@@ -41,6 +41,7 @@ from yar.graph_model import (
     normalize_relation_keywords,
 )
 from yar.operate import (
+    _action_chunk_search_query,
     _apply_auto_entity_filter,
     _apply_token_truncation,
     _attach_relation_evidence_from_storage,
@@ -2308,6 +2309,35 @@ class TestEntityFilterMatching:
         assert chunks[0]['file_path'] == '2019 Alpha-Launch lessons learned.pptx'
 
     @pytest.mark.asyncio
+    async def test_vector_context_logs_vector_when_hybrid_search_unavailable(self):
+        class VectorOnlyChunksVDB:
+            cosine_better_than_threshold = 0.4
+
+            def __init__(self):
+                self.query = AsyncMock(
+                    return_value=[
+                        {
+                            'id': 'chunk-1',
+                            'content': 'Alpha therapy context.',
+                            'file_path': 'alpha.md',
+                            'score': 0.91,
+                        }
+                    ]
+                )
+
+        chunks_vdb = VectorOnlyChunksVDB()
+        query_param = QueryParam(mode='mix', top_k=5, chunk_top_k=5, enable_bm25_fusion=True)
+
+        with patch('yar.operate.logger.info') as info_mock:
+            chunks = await _get_vector_context('Tell me about alpha therapy', chunks_vdb, query_param)
+
+        chunks_vdb.query.assert_awaited_once()
+        assert len(chunks) == 1
+        info_messages = [call.args[0] for call in info_mock.call_args_list]
+        assert any('Naive query (vector): 1 chunks' in message for message in info_messages)
+        assert not any('Naive query (bm25_fusion)' in message for message in info_messages)
+
+    @pytest.mark.asyncio
     async def test_vector_context_filter_returns_empty_when_no_field_matches(self):
         chunks_vdb = MagicMock()
         chunks_vdb.cosine_better_than_threshold = 0.4
@@ -2406,7 +2436,8 @@ class TestEntityFilterMatching:
         assert chunks_vdb.hybrid_search.await_count == 2
         assert chunks[0]['chunk_id'] == 'chunk-1'
         assert (
-            query_param.__dict__['_exact_chunk_search_fallback']['failed_chunk_search_query'] == 'Sarclisa isatuximab'
+            query_param.__dict__['_exact_chunk_search_fallback']['failed_chunk_search_query']
+            == 'presentation isatuximab'
         )
         assert query_param.__dict__['_vector_search_trace']['exact_fallback']['fallback_result_count'] == 1
 
@@ -3210,6 +3241,28 @@ class TestAugmentRetrievalKeywords:
         assert 'action plan' in hl
         assert 'requires' in hl
         assert 'Best Practice' in ll
+        action_query = _action_chunk_search_query(
+            'How can effective conflict management be applied based on lessons learned?'
+        )
+        assert 'conflict management requires' in action_query
+        assert 'conflict management requires' in _action_chunk_search_query('How to manage conflicts?')
+        assert 'conflict management requires' in _action_chunk_search_query(
+            'What should we do about conflict management?'
+        )
+        assert 'conflict management requires' in _action_chunk_search_query(
+            'What are the steps to manage conflicts?'
+        )
+        assert 'conflict management requires' in _action_chunk_search_query(
+            'How should conflicts be managed?'
+        )
+        assert _action_chunk_search_query('What should the dose status be?') == ''
+        assert _action_chunk_search_query('What is conflict management?') == ''
+        assert (
+            _action_chunk_search_query(
+                'List the types of differences that lead to conflicts in strategy management.'
+            )
+            == ''
+        )
 
         _hl, risk_ll = _augment_retrieval_keywords(
             'Based on lessons learned, what is the correct descriptive syntax to phrase a CMC risk?',
@@ -5125,8 +5178,8 @@ class TestPerformKgSearchScoreAwareMerge:
                 chunks_vdb=chunks_vdb,
             )
 
-        chunks_vdb.hybrid_search.assert_awaited_once()
-        phrase_terms = chunks_vdb.hybrid_search.await_args.kwargs['phrase_terms']
+        assert chunks_vdb.hybrid_search.await_count == 2
+        phrase_terms = chunks_vdb.hybrid_search.await_args_list[0].kwargs['phrase_terms']
         assert phrase_terms is not None
         assert 'conflict management' in phrase_terms
         assert 'lessons learned' in phrase_terms
@@ -5560,7 +5613,7 @@ class TestPerformKgSearchBranchExecution:
             await release.wait()
             return (
                 [{'src_id': 'g', 'tgt_id': 'h', 'score': 0.9}],
-                [{'entity_name': 'GlobalEntity', 'score': 0.4}],
+                [{'entity_name': 'GlobalEntity', 'score': 0.6}],
             )
 
         with (
@@ -7849,6 +7902,7 @@ class TestResponseQualityControls:
                 'content': 'Alpha therapy reduces complications in carefully selected patients.',
                 'file_path': 'docs/alpha.md',
                 'chunk_id': 'alpha-1',
+                'stage_ranks': {'final_prompt_rank': 1},
             }
         ]
 
@@ -8475,9 +8529,10 @@ class TestResponseQualityControls:
             topic_terms=['Product PX-482', 'Phase 1 study'],
             facet_terms=['approval timeline', 'project management impact'],
         )
-
         processed_ids = [chunk['chunk_id'] for chunk in processed]
         assert set(processed_ids[:4]) == {'focus-anchor', 'focus-timeline', 'focus-impact', 'focus-supply'}
+        assert processed_ids.index('focus-timeline') < processed_ids.index('focus-anchor')
+        assert processed_ids.index('focus-timeline') < processed_ids.index('generic-timeline')
 
     @pytest.mark.asyncio
     async def test_process_chunks_unified_traces_stage_ranks_and_token_drops(self, monkeypatch):

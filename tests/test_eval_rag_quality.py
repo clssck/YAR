@@ -55,6 +55,8 @@ def test_evaluator_tracing_is_off_by_default(tmp_path: Path, monkeypatch):
     )
     monkeypatch.delenv('YAR_EVAL_TRACE_ENABLED', raising=False)
     monkeypatch.setenv('YAR_TRACE_ENABLED', 'true')
+    monkeypatch.setenv('YAR_TRACE_PROJECT', 'yar-app')
+    monkeypatch.setenv('PHOENIX_PROJECT_NAME', 'yar-app')
 
     evaluator = RAGEvaluator(test_dataset_path=dataset, retrieval_only=True)
 

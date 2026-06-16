@@ -5549,13 +5549,27 @@ def _guidance_chunk_search_query(query: str) -> str:
     return ' '.join(terms)
 
 
+_ACTION_INTENT_QUERY_RE = re.compile(
+    r'\b(?:how can|how to|what are the steps to|steps to|'
+    r'how should (?:we|i|the team|teams|leaders?|[^?]{0,80}\b(?:be )?(?:managed|applied|implemented))|'
+    r'what should (?:we|i|the team|teams|leaders?) do|what actions?|what steps?|apply|applied|'
+    r'action plan|practical actions|implementation steps)\b'
+)
+
+
+def _is_action_intent_query(normalized_query: str) -> bool:
+    return bool(_ACTION_INTENT_QUERY_RE.search(normalized_query))
+
+
 def _action_chunk_search_query(query: str) -> str:
     normalized_query = _normalize_match_text(query)
     if not normalized_query:
         return ''
+    if not _is_action_intent_query(normalized_query):
+        return ''
     terms: list[str] = []
     if 'conflict management' in normalized_query or (
-        'conflict' in normalized_query and re.search(r'\b(?:manage|managing|management)\b', normalized_query)
+        'conflict' in normalized_query and re.search(r'\b(?:manage|managed|managing|management)\b', normalized_query)
     ):
         for term in (
             'conflict management',
@@ -5567,11 +5581,6 @@ def _action_chunk_search_query(query: str) -> str:
         ):
             _append_unique_keyword(terms, term)
         return ' '.join(terms)
-    if not re.search(
-        r'\b(?:how can|apply|applied|action plan|practical actions|implementation steps)\b',
-        normalized_query,
-    ):
-        return ''
     for term in ('best practice', 'action plan', 'requires', 'practical actions', 'implementation steps'):
         _append_unique_keyword(terms, term)
     return ' '.join(terms)
@@ -7127,7 +7136,7 @@ def _should_enable_exact_chunk_fusion(query: str, ll_keywords: list[str]) -> boo
 
 def _coerce_keyword_list(value):
     if isinstance(value, list):
-        return [str(t).strip() for t in value if t is not None and str(t).strip()]
+        return [text for t in value if t is not None and (text := str(t).strip())]
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
@@ -9533,8 +9542,13 @@ async def _merge_all_chunks(
         if term in action_query_text
     ]
     normalized_conflict_query = _normalize_match_text(query)
-    conflict_action_query = 'conflict management' in action_query_text or (
-        re.search(r'\bmanag(?:e|ing) conflicts?\b', normalized_conflict_query) is not None
+    conflict_action_query = bool(
+        _is_action_intent_query(normalized_conflict_query)
+        and action_query_text
+        and (
+            'conflict management' in action_query_text
+            or re.search(r'\bmanag(?:e|ing) conflicts?\b', normalized_conflict_query) is not None
+        )
     )
     normalized_top_k = max(
         (

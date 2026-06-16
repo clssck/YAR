@@ -3658,8 +3658,21 @@ def _chunk_support_sort_key(
         metadata_query_match,
         duration_answer_match,
         impact_answer_match,
+        precise_document_match,
     )
     merge_score = cast(float, _safe_float(chunk.get('merge_score'), 0.0) or 0.0) if support_signal > 0.0 else 0.0
+    if precise_focus_document_keys:
+        return (
+            -duration_answer_match,
+            -impact_answer_match,
+            -precise_document_match,
+            -exact_phrase_match,
+            -precise_focus_overlap,
+            -priority_match,
+            -metadata_query_match,
+            -merge_score,
+            index,
+        )
     return (
         -duration_answer_match,
         -impact_answer_match,

@@ -194,7 +194,10 @@ def test_build_query_payload_adds_evidence_span_grounding_to_generation_prompt(t
     assert 'extractive evidence spans' in payload['user_prompt']
     assert 'shortest exact context span(s)' in payload['user_prompt']
     assert 'preserve numbers, dates, table cells, row labels' in payload['user_prompt']
-    assert 'final approval or recommendation' in payload['user_prompt']
+    grounding_phrase = (
+        'answer only from claims that those spans or the surrounding chunk text directly support.'
+    )
+    assert grounding_phrase in payload['user_prompt']
 
 
 def test_build_query_payload_keeps_retrieval_query_but_prompts_original_question(tmp_path) -> None:
@@ -228,7 +231,10 @@ def test_build_query_payload_keeps_retrieval_query_but_prompts_original_question
     )
 
     assert payload['query'] == retrieval_query
-    assert original_question in payload['user_prompt']
+    original_question_prompt = (
+        f'Answer the original user question, not the retrieval keywords: {original_question}'
+    )
+    assert original_question_prompt in payload['user_prompt']
     assert 'retrieval keywords' in payload['user_prompt']
     assert 'extractive evidence spans' in payload['user_prompt']
 
