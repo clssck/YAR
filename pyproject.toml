@@ -173,6 +173,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+filterwarnings = [
+    # Third-party: phoenix imports its own deprecated submodule (phoenix.evals.templating)
+    # on package init; YAR cannot act on it, so silence just this exact message.
+    "ignore:The phoenix.evals.templating module is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py313"
