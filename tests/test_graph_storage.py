@@ -152,6 +152,7 @@ async def test_get_nodes_edges_batch_passes_raw_ids_to_sql():
 
     async def fake_query(query, **kwargs):
         captured['params'] = kwargs.get('params')
+        captured['query'] = query
         return [{'node_id': 'a"b\\c', 'source_id': 'a"b\\c', 'target_id': 'Neighbor'}]
 
     storage._query = fake_query
@@ -159,6 +160,9 @@ async def test_get_nodes_edges_batch_passes_raw_ids_to_sql():
 
     assert captured['params']['node_ids'] == ['a"b\\c']
     assert out['a"b\\c'] == [('a"b\\c', 'Neighbor')]
+    # Guard the perf characteristic: indexed agtype comparison, not the seq-scanning ::text = ANY.
+    assert '(to_json(i.eid)::text)::agtype' in captured['query']
+    assert '::text = ANY' not in captured['query']
 
 
 def check_env_file():
