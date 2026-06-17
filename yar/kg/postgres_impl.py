@@ -6690,17 +6690,34 @@ class PGGraphStorage(BaseGraphStorage):
 
         for i in range(0, len(unique_ids), batch_size):
             batch = unique_ids[i : i + batch_size]
-            cy_params = {'params': json.dumps({'node_ids': batch}, ensure_ascii=False)}
+            # Native SQL over AGE tables instead of cypher MATCH (n)-[r]-(connected:base).
+            # AGE's cypher does not use the entity_id index for the UNWIND/MATCH lookup
+            # (it seq-scans `base` per id), which times out on non-trivial graphs. Resolving
+            # ids to base.id and joining "DIRECTED" on start_id/end_id (UNION ALL = both
+            # directions) uses the existing indexes -> ~3000x faster. Mirrors get_all_edges.
+            query = f"""
+                WITH targets AS (
+                    SELECT v.id AS vid,
+                           (ag_catalog.agtype_access_operator(VARIADIC ARRAY[v.properties, '"entity_id"'::agtype]))::text AS eid
+                    FROM {self.graph_name}.base v
+                    WHERE (ag_catalog.agtype_access_operator(VARIADIC ARRAY[v.properties, '"entity_id"'::agtype]))::text = ANY($1::text[])
+                )
+                SELECT t.eid AS node_id,
+                       t.eid AS source_id,
+                       (ag_catalog.agtype_access_operator(VARIADIC ARRAY[b.properties, '"entity_id"'::agtype]))::text AS target_id
+                FROM targets t
+                JOIN {self.graph_name}."DIRECTED" r ON r.start_id = t.vid
+                JOIN {self.graph_name}.base b ON r.end_id = b.id
+                UNION ALL
+                SELECT t.eid AS node_id,
+                       (ag_catalog.agtype_access_operator(VARIADIC ARRAY[a.properties, '"entity_id"'::agtype]))::text AS source_id,
+                       t.eid AS target_id
+                FROM targets t
+                JOIN {self.graph_name}."DIRECTED" r ON r.end_id = t.vid
+                JOIN {self.graph_name}.base a ON r.start_id = a.id
+            """
 
-            cypher = """UNWIND $node_ids AS node_id
-                         MATCH (n:base {entity_id: node_id})
-                         MATCH (n)-[r]-(connected:base)
-                         RETURN node_id,
-                                startNode(r).entity_id AS source_id,
-                                endNode(r).entity_id AS target_id"""
-            query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (node_id text, source_id text, target_id text)'
-
-            results = await self._query(query, params=cy_params)
+            results = await self._query(query, params={'node_ids': batch})
 
             for result in results:
                 if result['node_id'] and result['source_id'] and result['target_id']:

@@ -101,9 +101,12 @@ def test_batch_node_edges_uses_single_undirected_traversal():
     from yar.kg.postgres_impl import PGGraphStorage
 
     source = inspect.getsource(PGGraphStorage.get_nodes_edges_batch)
-    assert 'MATCH (n)-[r]-(connected:base)' in source
-    assert 'startNode(r).entity_id AS source_id' in source
-    assert 'endNode(r).entity_id AS target_id' in source
+    # Rewritten from cypher MATCH (n)-[r]-(connected:base) to native SQL: AGE's cypher does not
+    # use the entity_id index (it seq-scans per id), so the batch joins "DIRECTED" on
+    # start_id/end_id in both directions (UNION ALL) within a single query instead.
+    assert 'cypher(' not in source
+    assert '"DIRECTED"' in source
+    assert 'UNION ALL' in source
     assert 'outgoing_cypher' not in source
     assert 'incoming_cypher' not in source
 
