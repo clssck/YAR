@@ -6686,11 +6686,16 @@ class PGGraphStorage(BaseGraphStorage):
             # ids to base.id and joining "DIRECTED" on start_id/end_id (UNION ALL = both
             # directions) uses the existing indexes -> ~3000x faster. Mirrors get_all_edges.
             query = f"""
-                WITH targets AS (
-                    SELECT v.id AS vid,
-                           (ag_catalog.agtype_access_operator(VARIADIC ARRAY[v.properties, '"entity_id"'::agtype]))::text AS eid
-                    FROM {self.graph_name}.base v
-                    WHERE (ag_catalog.agtype_access_operator(VARIADIC ARRAY[v.properties, '"entity_id"'::agtype]))::text = ANY($1::text[])
+                WITH ids(eid) AS (
+                    SELECT unnest($1::text[])
+                ),
+                targets AS (
+                    -- agtype-to-agtype compare hits the entity_id expression index; project the
+                    -- raw input id (i.eid) as the result key so special-char ids stay exact.
+                    SELECT bn.id AS vid, i.eid AS eid
+                    FROM ids i
+                    JOIN {self.graph_name}.base bn
+                      ON ag_catalog.agtype_access_operator(VARIADIC ARRAY[bn.properties, '"entity_id"'::agtype]) = (to_json(i.eid)::text)::agtype
                 )
                 SELECT t.eid AS node_id,
                        t.eid AS source_id,
