@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -151,6 +152,48 @@ def test_trace_config_can_enable_app_tracing_by_default(monkeypatch):
 
     assert config.enabled is True
     assert config.project_name == 'yar-app'
+
+
+def test_eval_trace_project_overrides_app_project_before_registration(monkeypatch):
+    register_calls = []
+
+    trace_module = ModuleType('opentelemetry.trace')
+    trace_module.get_tracer = lambda name: SimpleNamespace(name=name)
+    opentelemetry_module = ModuleType('opentelemetry')
+    opentelemetry_module.trace = trace_module
+    otel_module = ModuleType('phoenix.otel')
+
+    def fake_register(**kwargs):
+        register_calls.append(kwargs)
+        return SimpleNamespace(name='provider')
+
+    otel_module.register = fake_register
+    phoenix_module = ModuleType('phoenix')
+    phoenix_module.otel = otel_module
+
+    monkeypatch.setitem(sys.modules, 'opentelemetry', opentelemetry_module)
+    monkeypatch.setitem(sys.modules, 'opentelemetry.trace', trace_module)
+    monkeypatch.setitem(sys.modules, 'phoenix', phoenix_module)
+    monkeypatch.setitem(sys.modules, 'phoenix.otel', otel_module)
+    monkeypatch.delenv('YAR_TRACE_ENABLED', raising=False)
+    monkeypatch.delenv('PHOENIX_PROJECT_NAME', raising=False)
+    monkeypatch.delenv('YAR_TRACE_AUTO_INSTRUMENT', raising=False)
+    monkeypatch.delenv('YAR_TRACE_METRICS_ENABLED', raising=False)
+    monkeypatch.setenv('YAR_EVAL_TRACE_ENABLED', 'true')
+    monkeypatch.setenv('YAR_TRACE_PROJECT', 'yar-app')
+
+    eval_manager = TraceManager.from_env(default_project='yar-eval', enabled_by_default=True)
+
+    assert eval_manager.config.project_name == 'yar-eval'
+    assert register_calls[-1]['project_name'] == 'yar-eval'
+
+    monkeypatch.delenv('YAR_EVAL_TRACE_ENABLED', raising=False)
+    register_calls.clear()
+
+    app_manager = TraceManager.from_env(default_project='yar-app', enabled_by_default=True)
+
+    assert app_manager.config.project_name == 'yar-app'
+    assert register_calls[-1]['project_name'] == 'yar-app'
 
 
 def test_trace_env_can_disable_default_app_tracing(monkeypatch):

@@ -279,9 +279,17 @@ class TraceConfig:
                     if k.strip():
                         headers[k.strip()] = v.strip()
 
+        project_name = (
+            os.getenv('YAR_TRACE_PROJECT')
+            or os.getenv('PHOENIX_PROJECT_NAME')
+            or default_project
+        )
+        if _env_bool('YAR_EVAL_TRACE_ENABLED', False):
+            project_name = 'yar-eval'
+
         return cls(
             enabled=_env_bool('YAR_TRACE_ENABLED', enabled_by_default),
-            project_name=os.getenv('YAR_TRACE_PROJECT') or os.getenv('PHOENIX_PROJECT_NAME') or default_project,
+            project_name=project_name,
             endpoint=_normalize_phoenix_endpoint(os.getenv('PHOENIX_COLLECTOR_ENDPOINT')),
             api_key=os.getenv('PHOENIX_API_KEY') or None,
             headers=headers,
