@@ -111,6 +111,56 @@ def test_batch_node_edges_uses_single_undirected_traversal():
     assert 'incoming_cypher' not in source
 
 
+def test_normalize_node_id_skips_cypher_escaping_for_sql_lookups():
+    """for_cypher=False preserves quotes/backslashes/backticks so native-SQL/param lookups match
+    the stored entity_id; the default (for_cypher=True) still escapes them for interpolated cypher."""
+    from yar.kg.postgres_impl import PGGraphStorage
+
+    raw = 'Doc "Best" \\ v`1`'
+    assert PGGraphStorage._normalize_node_id(raw, for_cypher=False) == raw
+    escaped = PGGraphStorage._normalize_node_id(raw)
+    assert escaped == raw.replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`')
+    assert escaped != raw
+
+
+@pytest.mark.asyncio
+async def test_get_node_edges_delegates_directionally():
+    """get_node_edges delegates to the batch path and returns its directional (source, target)
+    tuples unchanged (no queried-first reordering of incoming edges)."""
+    from yar.kg.postgres_impl import PGGraphStorage
+
+    storage = PGGraphStorage.__new__(PGGraphStorage)
+
+    async def fake_batch(node_ids):
+        assert node_ids == ['B']
+        return {'B': [('A', 'B'), ('B', 'C')]}  # incoming A->B + outgoing B->C
+
+    storage.get_nodes_edges_batch = fake_batch
+    edges = await storage.get_node_edges('B')
+    assert edges == [('A', 'B'), ('B', 'C')]
+
+
+@pytest.mark.asyncio
+async def test_get_nodes_edges_batch_passes_raw_ids_to_sql():
+    """Native-SQL batch passes raw (non-cypher-escaped) ids to the query param and keys the
+    result by the raw original id, so special-char entities still match the stored entity_id."""
+    from yar.kg.postgres_impl import PGGraphStorage
+
+    storage = PGGraphStorage.__new__(PGGraphStorage)
+    storage.graph_name = 'g'
+    captured = {}
+
+    async def fake_query(query, **kwargs):
+        captured['params'] = kwargs.get('params')
+        return [{'node_id': 'a"b\\c', 'source_id': 'a"b\\c', 'target_id': 'Neighbor'}]
+
+    storage._query = fake_query
+    out = await storage.get_nodes_edges_batch(['a"b\\c'])
+
+    assert captured['params']['node_ids'] == ['a"b\\c']
+    assert out['a"b\\c'] == [('a"b\\c', 'Neighbor')]
+
+
 def check_env_file():
     """
     Check if the .env file exists and issue a warning if it does not.

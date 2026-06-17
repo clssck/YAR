@@ -5493,7 +5493,7 @@ class PGGraphStorage(BaseGraphStorage):
             return re.sub(r'[^a-zA-Z0-9_]', '_', namespace)
 
     @staticmethod
-    def _normalize_node_id(node_id: str) -> str:
+    def _normalize_node_id(node_id: str, for_cypher: bool = True) -> str:
         """Best-effort sanitization for identifiers we interpolate into Cypher.
 
         This avoids common parse errors without altering the semantic value.
@@ -5504,10 +5504,13 @@ class PGGraphStorage(BaseGraphStorage):
         # Drop control characters that can break AGE parsing
         normalized_id = re.sub(r'[\x00-\x1F]', '', node_id)
 
-        # Escape characters that matter for the interpolated Cypher literal
-        normalized_id = normalized_id.replace('\\', '\\\\')  # backslash
-        normalized_id = normalized_id.replace('"', '\\"')  # double quote
-        normalized_id = normalized_id.replace('`', '\\`')  # backtick
+        # Escape characters that matter for the interpolated Cypher literal.
+        # Skipped for parameterized native-SQL callers (asyncpg binds values safely, and
+        # escaping would corrupt the value so it no longer matches the stored entity_id).
+        if for_cypher:
+            normalized_id = normalized_id.replace('\\', '\\\\')  # backslash
+            normalized_id = normalized_id.replace('"', '\\"')  # double quote
+            normalized_id = normalized_id.replace('`', '\\`')  # backtick
 
         # Reject empty results after normalization
         normalized_id = normalized_id.strip()
@@ -6004,28 +6007,15 @@ class PGGraphStorage(BaseGraphStorage):
 
     async def get_node_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
         """
-        Retrieves all edges (relationships) for a particular node identified by its label.
-        :return: list of dictionaries containing edge information
+        Retrieves all edges (relationships) for a particular node.
+
+        Returns a list of (source_id, target_id) tuples in real edge direction
+        (per BaseGraphStorage), delegating to the native-SQL batch path. The cypher
+        ``MATCH (n)-[]-(connected)`` form does not use the entity_id index and times
+        out on non-trivial graphs, so it is avoided here too.
         """
-        label = self._normalize_node_id(source_node_id)
-
-        # Use UNWIND pattern for AGE compatibility (AGE doesn't support $1 inside cypher)
-        cypher = """UNWIND $node_ids AS node_id
-                      MATCH (n:base {entity_id: node_id})
-                      OPTIONAL MATCH (n)-[]-(connected:base)
-                      RETURN n.entity_id AS source_id, connected.entity_id AS connected_id"""
-        query = f'SELECT * FROM cypher({_dollar_quote(self.graph_name)}, {_dollar_quote(cypher)}, $1::agtype) AS (source_id text, connected_id text)'
-
-        results = await self._query(query, params={'params': json.dumps({'node_ids': [label]}, ensure_ascii=False)})
-        edges = []
-        for record in results:
-            source_id = record['source_id']
-            connected_id = record['connected_id']
-
-            if source_id and connected_id:
-                edges.append((source_id, connected_id))
-
-        return edges
+        batch = await self.get_nodes_edges_batch([source_node_id])
+        return batch.get(source_node_id, [])
 
     # Note: Removed @retry decorator - _query() already has retry logic via _run_with_retry.
     # Having both causes excessive retries (3 decorator × 10 connection = 30 attempts).
@@ -6681,7 +6671,7 @@ class PGGraphStorage(BaseGraphStorage):
         seen = set()
         unique_ids: list[str] = []
         for nid in node_ids:
-            n = self._normalize_node_id(nid)
+            n = self._normalize_node_id(nid, for_cypher=False)
             if n and n not in seen:
                 seen.add(n)
                 unique_ids.append(n)
@@ -6725,7 +6715,7 @@ class PGGraphStorage(BaseGraphStorage):
 
         out: dict[str, list[tuple[str, str]]] = {}
         for orig in node_ids:
-            n = self._normalize_node_id(orig)
+            n = self._normalize_node_id(orig, for_cypher=False)
             out[orig] = edges_norm.get(n, [])
 
         return out
