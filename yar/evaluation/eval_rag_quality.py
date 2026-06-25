@@ -55,6 +55,7 @@ from urllib.parse import unquote, urlparse
 import httpx
 from dotenv import load_dotenv
 
+from yar.constants import DEFAULT_CHUNK_TOP_K, DEFAULT_TOP_K
 from yar.tracing import TraceManager, noop_trace_manager, trace_sequence_preview
 from yar.utils import logger
 
@@ -1415,8 +1416,8 @@ class RAGEvaluator:
         )
 
         logger.info('Retrieval Parameters:')
-        logger.info('  Query Top-K:            %s entities/relations', int(os.getenv('EVAL_QUERY_TOP_K', '15')))
-        logger.info('  Chunk Top-K:            %s chunks', int(os.getenv('EVAL_CHUNK_TOP_K', '15')))
+        logger.info('  Query Top-K:            %s entities/relations', int(os.getenv('EVAL_QUERY_TOP_K', str(DEFAULT_TOP_K))))
+        logger.info('  Chunk Top-K:            %s chunks', int(os.getenv('EVAL_CHUNK_TOP_K', str(DEFAULT_CHUNK_TOP_K))))
         logger.info(
             '  BM25 fusion:            %s',
             'enabled' if os.getenv('EVAL_ENABLE_BM25_FUSION', 'true').lower() == 'true' else 'disabled',
@@ -1621,11 +1622,11 @@ class RAGEvaluator:
             'mode': self.query_mode,
             'include_references': True,
             'include_chunk_content': True,
-            'top_k': int(os.getenv('EVAL_QUERY_TOP_K', '15')),
-            'chunk_top_k': int(os.getenv('EVAL_CHUNK_TOP_K', '15')),
+            'top_k': int(os.getenv('EVAL_QUERY_TOP_K', str(DEFAULT_TOP_K))),
+            'chunk_top_k': int(os.getenv('EVAL_CHUNK_TOP_K', str(DEFAULT_CHUNK_TOP_K))),
             'max_total_tokens': int(os.getenv('EVAL_MAX_TOTAL_TOKENS', '40000')),
             'cosine_threshold': float(os.getenv('EVAL_COSINE_THRESHOLD', '0.30')),
-            'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'true').lower() == 'true',
+            'enable_rerank': os.getenv('EVAL_ENABLE_RERANK', 'false').lower() == 'true',
             'enable_bm25_fusion': os.getenv('EVAL_ENABLE_BM25_FUSION', 'true').lower() == 'true',
             'bm25_weight': float(os.getenv('EVAL_BM25_WEIGHT', '0.3')),
             'disable_cache': os.getenv('EVAL_DISABLE_CACHE', 'true').lower() == 'true',
@@ -2980,11 +2981,11 @@ async def main():
       python yar/evaluation/eval_rag_quality.py --dataset eval_docs/qa_pairs.json --retrieval-only
 
     Environment Variables (for parameter tuning):
-      EVAL_QUERY_TOP_K            Number of entities/relations to retrieve (default: 15)
-      EVAL_CHUNK_TOP_K            Number of text chunks to retrieve (default: 15)
+      EVAL_QUERY_TOP_K            Number of entities/relations to retrieve (default: tracks DEFAULT_TOP_K)
+      EVAL_CHUNK_TOP_K            Number of text chunks to retrieve (default: tracks DEFAULT_CHUNK_TOP_K)
       EVAL_MAX_TOTAL_TOKENS       Maximum tokens for context (default: 40000)
-      EVAL_COSINE_THRESHOLD       Vector similarity threshold (default: 0.30)
-      EVAL_ENABLE_RERANK          Enable reranking (default: true)
+      EVAL_COSINE_THRESHOLD       Vector similarity threshold (default: 0.30). NOTE: currently IGNORED by /query/data (QueryRequest has no cosine_threshold field); set server-side COSINE_THRESHOLD to change it.
+      EVAL_ENABLE_RERANK          Enable reranking (default: false, matches production QueryParam.enable_rerank)
       EVAL_ENABLE_BM25_FUSION     Enable BM25 fusion: vector + BM25 search (default: true)
       EVAL_BM25_WEIGHT            BM25 weight for fusion 0.0-1.0 (default: 0.3)
       EVAL_DISABLE_CACHE          Disable keyword/query cache during evaluation (default: true)
