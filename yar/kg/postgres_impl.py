@@ -4218,13 +4218,33 @@ class PGVectorStorage(BaseVectorStorage):
             id_key='id',
             k=RRF_K,  # Configurable via YAR_RRF_K env var
         )
+        fused_top = fused_results[:top_k]
+        vector_ids = {str(item.get('id')) for item in vector_results if item.get('id') is not None}
+        bm25_by_id = {str(item.get('id')): item for item in bm25_results if item.get('id') is not None}
+
+        enriched_results: list[dict[str, Any]] = []
+        fused_count = max(len(fused_top), 1)
+        for rank, item in enumerate(fused_top, start=1):
+            item_id = str(item.get('id'))
+            bm25_item = bm25_by_id.get(item_id)
+            enriched = item.copy()
+            if bm25_item is not None:
+                # Preserve BM25 provenance for diagnostics regardless of which leg won the RRF tie.
+                enriched['bm25_score'] = bm25_item.get('bm25_score')
+            if item_id not in vector_ids and bm25_item is not None:
+                # BM25-only chunk: RRF keeps the BM25 record, which carries no cosine score, so
+                # _normalize_retrieval_score would assign 0 and the downstream merge/filters would
+                # drop a genuine lexical match. Give it a rank-normalized [0,1] score (preserving RRF
+                # order) on the cosine scale so exact entity/date/acronym hits compete; tail stays low.
+                enriched['score'] = max(1.0 - ((rank - 1) / fused_count), 0.0)
+            enriched_results.append(enriched)
 
         logger.debug(
             f'[{self.workspace}] Hybrid search: {len(vector_results)} vector + {len(bm25_results)} BM25 '
-            f'→ {len(fused_results[:top_k])} fused'
+            f'→ {len(enriched_results)} fused'
         )
 
-        return fused_results[:top_k]
+        return enriched_results
 
     async def hybrid_entity_search(
         self,
@@ -7711,7 +7731,11 @@ SQL_TEMPLATES = {
                      d.s3_key,
                      d.char_start,
                      d.char_end,
-                     EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
+                     EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at,
+                     c.content_vector {distance_op} $2 AS distance,
+                     (1 - (c.content_vector {distance_op} $2)) AS vector_score,
+                     (1 - (c.content_vector {distance_op} $2)) AS score,
+                     'vector' AS source_type
               FROM YAR_VDB_CHUNKS c
               LEFT JOIN YAR_DOC_CHUNKS d ON c.workspace = d.workspace AND c.id = d.id
               WHERE c.workspace = $1

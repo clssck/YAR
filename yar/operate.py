@@ -7806,6 +7806,9 @@ async def _get_vector_context(
                 'char_start': result.get('char_start'),
                 'char_end': result.get('char_end'),
                 'retrieval_score': _normalize_retrieval_score(result),
+                'vector_score': result.get('vector_score'),
+                'bm25_score': result.get('bm25_score'),
+                'rrf_score': result.get('rrf_score'),
                 'source_order': index,
                 'exact_phrase_match': (
                     1.0 if any(term in normalized_content for term in normalized_exact_terms) else 0.0
@@ -9623,6 +9626,9 @@ async def _merge_all_chunks(
                     'body_temporal_signal': 0.0,
                     'exact_phrase_match': 0.0,
                     'metadata_query_match': 0.0,
+                    'vector_score': None,
+                    'bm25_score': None,
+                    'rrf_score': None,
                 },
             )
             entry['source_types'].add(source_type)
@@ -9684,6 +9690,12 @@ async def _merge_all_chunks(
             for metadata_key in ('chunk_order_index', 'char_start', 'char_end'):
                 if entry.get(metadata_key) is None and chunk.get(metadata_key) is not None:
                     entry[metadata_key] = chunk.get(metadata_key)
+            for score_key in ('vector_score', 'bm25_score', 'rrf_score'):
+                if chunk.get(score_key) is not None:
+                    entry[score_key] = max(
+                        _safe_float(entry.get(score_key), 0.0),
+                        _safe_float(chunk.get(score_key), 0.0),
+                    )
 
     merge_weights = ChunkMergeWeights.from_env()
 
@@ -10188,6 +10200,9 @@ async def _merge_all_chunks(
                 'char_end': entry.get('char_end'),
                 'source_type': '+'.join(sorted(entry['source_types'])),
                 'retrieval_score': entry['retrieval_score'],
+                'vector_score': entry.get('vector_score'),
+                'bm25_score': entry.get('bm25_score'),
+                'rrf_score': entry.get('rrf_score'),
                 'occurrence_count': entry['occurrence_count'],
                 'source_order': entry['best_source_order'],
                 'query_overlap': max(entry['heading_query_overlap'], entry['body_query_overlap']),
