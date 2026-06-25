@@ -1759,3 +1759,58 @@ class TestValidateAndStripUnsupportedAcronyms:
         modified, stripped = self._call(response, context)
         assert modified == response
         assert stripped == []
+
+class TestPickByVectorSimilarityScores:
+    """Regression guard: pick_by_vector_similarity must surface a chunk_id->cosine map
+    under return_scores=True so KG-derived chunks can carry a retrieval_score (else they
+    enter _merge_all_chunks at 0)."""
+
+    @pytest.mark.asyncio
+    async def test_return_scores_maps_chunk_to_cosine(self):
+        from yar.utils import pick_by_vector_similarity
+
+        vectors = {'c1': [1.0, 0.0], 'c2': [0.9, 0.1], 'c3': [0.0, 1.0]}
+
+        class _VDB:
+            async def get_vectors_by_ids(self, ids):
+                return {i: vectors[i] for i in ids if i in vectors}
+
+        entity_info = [{'sorted_chunks': ['c1', 'c2', 'c3']}]
+        kwargs = {
+            'query': 'q',
+            'text_chunks_storage': None,
+            'chunks_vdb': _VDB(),
+            'num_of_chunks': 3,
+            'entity_info': entity_info,
+            'embedding_func': None,
+            'query_embedding': [1.0, 0.0],
+        }
+        scores = await pick_by_vector_similarity(return_scores=True, **kwargs)
+        assert isinstance(scores, dict)
+        assert set(scores) == {'c1', 'c2', 'c3'}
+        assert scores['c1'] == pytest.approx(1.0, abs=1e-6)
+        assert scores['c1'] >= scores['c2'] >= scores['c3']
+
+        ids = await pick_by_vector_similarity(return_scores=False, **kwargs)
+        assert isinstance(ids, list)
+        assert set(ids) == {'c1', 'c2', 'c3'}
+
+    @pytest.mark.asyncio
+    async def test_return_scores_empty_when_no_vectors(self):
+        from yar.utils import pick_by_vector_similarity
+
+        class _EmptyVDB:
+            async def get_vectors_by_ids(self, ids):
+                return {}
+
+        scores = await pick_by_vector_similarity(
+            query='q',
+            text_chunks_storage=None,
+            chunks_vdb=_EmptyVDB(),
+            num_of_chunks=3,
+            entity_info=[{'sorted_chunks': ['c1']}],
+            embedding_func=None,
+            query_embedding=[1.0, 0.0],
+            return_scores=True,
+        )
+        assert scores == {}

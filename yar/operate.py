@@ -11815,6 +11815,7 @@ async def _find_related_text_unit_from_entities(
         total_entity_chunks += len(sorted_chunks)
 
     selected_chunk_ids = []  # Initialize to avoid UnboundLocalError
+    chunk_scores: dict[str, float] = {}  # chunk_id -> KG vector-selection cosine similarity
 
     # Step 4: Apply the selected chunk selection algorithm
     # Pick by vector similarity:
@@ -11830,7 +11831,7 @@ async def _find_related_text_unit_from_entities(
             kg_chunk_pick_method = 'WEIGHT'
         else:
             try:
-                selected_chunk_ids = await pick_by_vector_similarity(
+                chunk_scores = await pick_by_vector_similarity(
                     query=query,
                     text_chunks_storage=text_chunks_db,
                     chunks_vdb=chunks_vdb,
@@ -11838,7 +11839,9 @@ async def _find_related_text_unit_from_entities(
                     entity_info=entities_with_chunks,
                     embedding_func=actual_embedding_func,
                     query_embedding=query_embedding,
+                    return_scores=True,
                 )
+                selected_chunk_ids = list(chunk_scores.keys())
 
                 if selected_chunk_ids == []:
                     kg_chunk_pick_method = 'WEIGHT'
@@ -11856,6 +11859,7 @@ async def _find_related_text_unit_from_entities(
                 kg_chunk_pick_method = 'WEIGHT'
 
     if kg_chunk_pick_method == 'WEIGHT':
+        chunk_scores = {}  # WEIGHT polling has no vector-selection similarity
         # Pick by entity and chunk weight:
         #     When reranking is disabled, delivered more solely KG related chunks to the LLM
         selected_chunk_ids = pick_by_weighted_polling(entities_with_chunks, max_related_chunks, min_related_chunks=1)
@@ -11880,6 +11884,11 @@ async def _find_related_text_unit_from_entities(
             chunk_data_copy['chunk_id'] = chunk_id  # Add chunk_id for deduplication
             chunk_data_copy['occurrence_count'] = chunk_occurrence_count.get(chunk_id, 1)
             chunk_data_copy['source_order'] = i + 1
+            _sim = chunk_scores.get(chunk_id)
+            if _sim is not None:
+                _s = min(max(float(_sim), 0.0), 1.0)
+                chunk_data_copy['retrieval_score'] = _s
+                chunk_data_copy['vector_score'] = _s
             result_chunks.append(chunk_data_copy)
 
     result_chunks = _rank_chunks_by_query_intent(
@@ -12227,6 +12236,7 @@ async def _find_related_text_unit_from_relations(
 
     # Step 4: Apply the selected chunk selection algorithm
     selected_chunk_ids = []  # Initialize to avoid UnboundLocalError
+    chunk_scores: dict[str, float] = {}  # chunk_id -> KG vector-selection cosine similarity
 
     if kg_chunk_pick_method == 'VECTOR' and query and chunks_vdb:
         num_of_chunks = int(max_related_chunks * len(relations_with_chunks) / 2)
@@ -12238,7 +12248,7 @@ async def _find_related_text_unit_from_relations(
             kg_chunk_pick_method = 'WEIGHT'
         else:
             try:
-                selected_chunk_ids = await pick_by_vector_similarity(
+                chunk_scores = await pick_by_vector_similarity(
                     query=query,
                     text_chunks_storage=text_chunks_db,
                     chunks_vdb=chunks_vdb,
@@ -12246,7 +12256,9 @@ async def _find_related_text_unit_from_relations(
                     entity_info=relations_with_chunks,
                     embedding_func=actual_embedding_func,
                     query_embedding=query_embedding,
+                    return_scores=True,
                 )
+                selected_chunk_ids = list(chunk_scores.keys())
 
                 if selected_chunk_ids == []:
                     kg_chunk_pick_method = 'WEIGHT'
@@ -12264,6 +12276,7 @@ async def _find_related_text_unit_from_relations(
                 kg_chunk_pick_method = 'WEIGHT'
 
     if kg_chunk_pick_method == 'WEIGHT':
+        chunk_scores = {}  # WEIGHT polling has no vector-selection similarity
         # Apply linear gradient weighted polling algorithm
         selected_chunk_ids = pick_by_weighted_polling(relations_with_chunks, max_related_chunks, min_related_chunks=1)
 
@@ -12293,6 +12306,11 @@ async def _find_related_text_unit_from_relations(
             chunk_data_copy['chunk_id'] = chunk_id  # Add chunk_id for deduplication
             chunk_data_copy['occurrence_count'] = chunk_occurrence_count.get(chunk_id, 1)
             chunk_data_copy['source_order'] = i + 1
+            _sim = chunk_scores.get(chunk_id)
+            if _sim is not None:
+                _s = min(max(float(_sim), 0.0), 1.0)
+                chunk_data_copy['retrieval_score'] = _s
+                chunk_data_copy['vector_score'] = _s
             result_chunks.append(chunk_data_copy)
 
             # Update chunk tracking if provided

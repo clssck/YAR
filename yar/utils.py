@@ -2659,7 +2659,8 @@ async def pick_by_vector_similarity(
     entity_info: list[dict[str, Any]],
     embedding_func: Callable,
     query_embedding=None,
-) -> list[str]:
+    return_scores: bool = False,
+) -> list[str] | dict[str, float]:
     """
     Vector similarity-based text chunk selection algorithm.
 
@@ -2682,7 +2683,7 @@ async def pick_by_vector_similarity(
     )
 
     if not entity_info or num_of_chunks <= 0:
-        return []
+        return {} if return_scores else []
 
     # Collect all unique chunk IDs from entity info
     all_chunk_ids = set()
@@ -2692,7 +2693,7 @@ async def pick_by_vector_similarity(
 
     if not all_chunk_ids:
         logger.warning('Vector similarity chunk selection:  no chunk IDs found in entity_info')
-        return []
+        return {} if return_scores else []
 
     logger.debug(f'Vector similarity chunk selection: {len(all_chunk_ids)} unique chunk IDs collected')
 
@@ -2718,7 +2719,7 @@ async def pick_by_vector_similarity(
                 logger.warning(
                     f'Vector similarity chunk selection: found {len(chunk_vectors)} but expecting {len(all_chunk_ids)}'
                 )
-            return []
+            return {} if return_scores else []
 
         # Calculate cosine similarities
         similarities = []
@@ -2740,12 +2741,17 @@ async def pick_by_vector_similarity(
 
         # Sort by similarity (highest first) and select top num_of_chunks
         similarities.sort(key=lambda x: x[1], reverse=True)
-        selected_chunks = [chunk_id for chunk_id, _ in similarities[:num_of_chunks]]
+        top = similarities[:num_of_chunks]
+        selected_chunks = [chunk_id for chunk_id, _ in top]
 
         logger.debug(
             f'Vector similarity chunk selection: {len(selected_chunks)} chunks from {len(all_chunk_ids)} candidates'
         )
 
+        # When requested, return chunk_id -> cosine similarity so KG-derived chunks can carry a
+        # cosine-scale retrieval_score into _merge_all_chunks (otherwise they enter the merge at 0).
+        if return_scores:
+            return {chunk_id: float(sim) for chunk_id, sim in top}
         return selected_chunks
 
     except Exception as e:
@@ -2753,7 +2759,7 @@ async def pick_by_vector_similarity(
         logger.error(f'[VECTOR_SIMILARITY] Traceback: {traceback.format_exc()}')
         # Fallback to simple truncation
         logger.debug('[VECTOR_SIMILARITY] Falling back to simple truncation')
-        return all_chunk_ids[:num_of_chunks]
+        return dict.fromkeys(all_chunk_ids[:num_of_chunks], 0.0) if return_scores else all_chunk_ids[:num_of_chunks]
 
 
 class TokenTracker:
