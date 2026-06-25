@@ -26,8 +26,8 @@ dependencies = [
     "dspy>=3.0.4",
     "json_repair",
     "numpy>=2.0.0",
-    "pandas>=2.0.0,<2.4.0",
-    "pgvector>=0.3.6,<1.0.0",
+    "pandas>=2.0.0",
+    "pgvector>=0.3.6",
     "pipmaster",
     "pydantic",
     "pypinyin",
@@ -45,7 +45,7 @@ dependencies = [
 [project.optional-dependencies]
 # Test framework and dev tool dependencies (for CI/CD and testing)
 dev = [
-    "pytest>=8.4.2,<9",
+    "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pre-commit",
     "ruff",
@@ -58,8 +58,8 @@ api = [
     "configparser",
     "json_repair",
     "numpy>=2.0.0",
-    "openai>=2.0.0,<3.0.0",
-    "pandas>=2.0.0,<2.4.0",
+    "openai>=2.0.0",
+    "pandas>=2.0.0",
     "pipmaster",
     "pydantic",
     "pypinyin",
@@ -71,8 +71,8 @@ api = [
     # API-specific dependencies
     "aiofiles",
     "ascii_colors",
-    "aioboto3>=12.0.0,<16.0.0",
-    "asyncpg",
+    "aioboto3>=12.0.0",
+    "asyncpg>=0.29.0",
     "distro",
     "fastapi",
     "httpcore",
@@ -80,8 +80,7 @@ api = [
     "jiter",
     "bcrypt>=4.0.0",
     "psutil",
-    "PyJWT>=2.8.0,<3.0.0",
-    "python-jose[cryptography]",
+    "PyJWT>=2.8.0",
     "python-multipart",
     "pytz",
     "uvicorn",
@@ -92,12 +91,12 @@ api = [
 # Offline deployment dependencies (layered design for flexibility)
 offline-storage = [
     # Storage backend dependencies
-    "asyncpg>=0.29.0,<1.0.0",
+    "asyncpg>=0.29.0",
 ]
 
 offline-llm = [
     # LLM provider dependencies
-    "openai>=2.0.0,<3.0.0",
+    "openai>=2.0.0",
 ]
 
 offline = [
@@ -107,13 +106,13 @@ offline = [
 
 test = [
     "yar[api]",
-    "pytest>=8.4.2,<9",
+    "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pre-commit",
     "ruff",
     "moto[s3]>=5.0",  # AWS S3 mocking for S3 client tests
     "httpx>=0.27",  # Async HTTP client for FastAPI testing
-    "aioboto3>=12.0.0,<16.0.0",  # Required for S3 client tests
+    "aioboto3>=12.0.0",  # Required for S3 client tests
 ]
 
 # Type-checking/lint extras
@@ -123,7 +122,7 @@ lint = [
 
 evaluation = [
     "yar[api]",
-    "ragas>=0.4.3,<0.5",
+    "ragas>=0.4.3",
     "datasets>=4.3.0",
     "rapidfuzz>=3.0",
 ]
