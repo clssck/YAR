@@ -1,7 +1,7 @@
 # LiteLLM Proxy for AWS Bedrock
 # Unified LLM + Embedding gateway
 
-FROM ghcr.io/berriai/litellm:v1.83.10-stable
+FROM ghcr.io/berriai/litellm:v1.89.4
 
 # Copy config file
 COPY config.yaml /app/config.yaml

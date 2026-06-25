@@ -46,7 +46,7 @@ services:
     mem_limit: 2g
 
   rustfs:
-    image: rustfs/rustfs:1.0.0-alpha.99
+    image: rustfs/rustfs:1.0.0-beta.8
     container_name: yar-rustfs-test
     ports:
       - '9000:9000' # S3 API

@@ -69,7 +69,7 @@ services:
   # RustFS - S3-compatible document storage
   # ══════════════════════════════════════════════════════════════════════════════
   rustfs:
-    image: rustfs/rustfs:1.0.0-alpha.99  # Pin to alpha; bump intentionally
+    image: rustfs/rustfs:1.0.0-beta.8  # Pin to beta; bump intentionally
     container_name: yar-rustfs
     # Run as root: this sandboxed Docker blocks the image's non-root uid 10001
     # from writing the host bind mount (./data/rustfs) even at mode 0777
@@ -132,7 +132,7 @@ services:
   # setup.sh/start.sh start this by default via the observability profile
   # ══════════════════════════════════════════════════════════════════════════════
   phoenix:
-    image: arizephoenix/phoenix:latest
+    image: arizephoenix/phoenix:version-17.11.0
     container_name: yar-phoenix
     profiles:
       - observability

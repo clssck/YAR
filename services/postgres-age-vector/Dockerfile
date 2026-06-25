@@ -5,7 +5,7 @@
 # saved vs. an unpurged build).
 
 ARG PG_MAJOR=18
-ARG PGVECTOR_TAG=0.8.2-pg18-trixie
+ARG PGVECTOR_TAG=0.8.3-pg18-trixie
 ARG AGE_TAG=PG18/v1.7.0-rc0
 
 FROM pgvector/pgvector:${PGVECTOR_TAG}

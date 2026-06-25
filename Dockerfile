@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.25.0
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Frontend dependency stage
 # ──────────────────────────────────────────────────────────────────────────────
-FROM oven/bun:1.3-debian AS frontend-deps
+FROM oven/bun:1.3.14-debian AS frontend-deps
 
 WORKDIR /app
 COPY yar_webui/ ./yar_webui/
@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # ──────────────────────────────────────────────────────────────────────────────
 # Frontend build stage (Node/Vite avoids the Bun build OOM)
 # ──────────────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS frontend-builder
+FROM node:24-trixie-slim AS frontend-builder
 
 WORKDIR /app
 COPY --from=frontend-deps /app/yar_webui ./yar_webui
@@ -25,7 +25,7 @@ RUN cd yar_webui && node ./node_modules/vite/bin/vite.js build --emptyOutDir
 # ──────────────────────────────────────────────────────────────────────────────
 # Python build stage
 # ──────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.11.8-python3.13-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:0.11.24-python3.13-trixie-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive \
     UV_SYSTEM_PYTHON=1 \
@@ -65,7 +65,7 @@ RUN mkdir -p /app/data/tiktoken \
 # ──────────────────────────────────────────────────────────────────────────────
 # Final stage
 # ──────────────────────────────────────────────────────────────────────────────
-FROM python:3.13-slim
+FROM python:3.13-slim-trixie
 
 WORKDIR /app
 

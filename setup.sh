@@ -221,6 +221,17 @@ set_env() {
     fi
 }
 
+# Helper function to remove an env var line (so stale values don't linger in .env)
+unset_env() {
+    local key="$1"
+    [ -f .env ] || return 0
+    if [[ "$OSTYPE" == darwin* ]]; then
+        sed -i '' "/^${key}=/d" .env
+    else
+        sed -i "/^${key}=/d" .env
+    fi
+}
+
 # Save active profile
 set_env "YAR_PROFILE" "$PROFILE"
 
@@ -258,7 +269,7 @@ if [ "$PROFILE" = "dev" ]; then
 
     set_env "EMBEDDING_BINDING" "openai"
     set_env "EMBEDDING_MODEL" "shrimp"
-    set_env "EMBEDDING_DIM" "1024"
+    unset_env "EMBEDDING_DIM"  # autodetected from the embedding model; scrub any stale value
     set_env "EMBEDDING_SEND_DIM" "false"
     set_env "EMBEDDING_TOKEN_LIMIT" "8192"
     set_env "EMBEDDING_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"
@@ -280,7 +291,7 @@ else
 
     set_env "EMBEDDING_BINDING" "openai"
     set_env "EMBEDDING_MODEL" "shrimp"
-    set_env "EMBEDDING_DIM" "1024"
+    unset_env "EMBEDDING_DIM"  # autodetected from the embedding model; scrub any stale value
     set_env "EMBEDDING_SEND_DIM" "false"
     set_env "EMBEDDING_TOKEN_LIMIT" "8192"
     set_env "EMBEDDING_BINDING_HOST" "http://${GATEWAY_IP}:4000/v1"

@@ -41,6 +41,10 @@ if [ -f .env ]; then
     set +a
 fi
 
+# EMBEDDING_DIM is intentionally autodetected from the embedding model; drop any
+# stale value sourced from .env so it cannot override autodetection.
+unset EMBEDDING_DIM
+
 # Resolve profile: CLI flag > .env > interactive
 if [ -z "$PROFILE" ]; then
     if [ -n "${YAR_PROFILE}" ]; then
@@ -162,7 +166,7 @@ if [ "$PROFILE" = "dev" ]; then
 
     export EMBEDDING_BINDING="openai"
     export EMBEDDING_MODEL="shrimp"
-    export EMBEDDING_DIM="1024"
+    # EMBEDDING_DIM omitted on purpose: YAR autodetects the dim from the embedding model
     export EMBEDDING_SEND_DIM="false"
     export EMBEDDING_TOKEN_LIMIT="${EMBEDDING_TOKEN_LIMIT:-8192}"
     export EMBEDDING_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
@@ -186,7 +190,7 @@ else
 
     export EMBEDDING_BINDING="openai"
     export EMBEDDING_MODEL="shrimp"
-    export EMBEDDING_DIM="${EMBEDDING_DIM:-1024}"
+    # EMBEDDING_DIM omitted on purpose: YAR autodetects the dim from the embedding model
     export EMBEDDING_SEND_DIM="${EMBEDDING_SEND_DIM:-false}"
     export EMBEDDING_TOKEN_LIMIT="${EMBEDDING_TOKEN_LIMIT:-8192}"
     export EMBEDDING_BINDING_HOST="http://${SERVICE_HOST}:4000/v1"
