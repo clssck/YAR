@@ -114,6 +114,7 @@ from yar.utils import (
     subtract_source_ids,
     sync_wrapper,
 )
+from yar.validators import validate_numeric_config
 
 # Public API exports (for re-export via __init__.py)
 __all__ = [
@@ -389,6 +390,9 @@ class YAR:
     embedding_func: EmbeddingFunc | None = field(default=None)
     """Function for computing text embeddings. Must be set before use."""
 
+    embedding_dim: int | None = field(default=None)
+    """Explicit or resolved embedding vector dimension. None means resolve at storage initialization."""
+
     embedding_token_limit: int | None = field(default=None, init=False)
     """Token limit for embedding model. Set automatically from embedding_func.max_token_size in __post_init__."""
 
@@ -535,10 +539,7 @@ class YAR:
         # later env-enabled construction can configure tracing.
         from yar.tracing import TraceConfig, configure_tracing, get_active_trace_manager
 
-        if (
-            get_active_trace_manager() is None
-            and TraceConfig.from_env(default_project='yar-app').enabled
-        ):
+        if get_active_trace_manager() is None and TraceConfig.from_env(default_project='yar-app').enabled:
             configure_tracing(default_project='yar-app', enabled_by_default=False)
 
         # Handle deprecated parameters
@@ -627,6 +628,7 @@ class YAR:
         global_config = cast(GlobalConfig, asdict(self))
         # Restore original EmbeddingFunc object (asdict converts it to dict)
         global_config['embedding_func'] = original_embedding_func
+        self._global_config = global_config
 
         _print_config = ',\n  '.join([f'{k} = {v}' for k, v in global_config.items()])
         logger.debug(f'YAR init with param:\n  {_print_config}\n')
@@ -724,9 +726,110 @@ class YAR:
 
         self._storages_status = StoragesStatus.CREATED
 
+    @staticmethod
+    def _validate_embedding_dim_value(value: Any, source: str) -> int:
+        numeric_dim = validate_numeric_config(value, source, min_val=1, max_val=65535)
+        if numeric_dim != int(numeric_dim):
+            raise ValueError(f'Invalid embedding dimension from {source}: must be an integer, got {value!r}')
+        return int(numeric_dim)
+
+    def _get_configured_embedding_dim(self) -> int | None:
+        global_config = getattr(self, '_global_config', {})
+        config_dim = global_config.get('embedding_dim') if isinstance(global_config, dict) else None
+        if config_dim is None:
+            config_dim = self.embedding_dim
+        if config_dim is not None:
+            return self._validate_embedding_dim_value(config_dim, 'global_config.embedding_dim')
+
+        env_dim = os.getenv('EMBEDDING_DIM')
+        if env_dim:
+            return self._validate_embedding_dim_value(env_dim, 'EMBEDDING_DIM')
+
+        embedding_func_dim = getattr(self.embedding_func, 'embedding_dim', None)
+        if embedding_func_dim is not None:
+            return self._validate_embedding_dim_value(embedding_func_dim, 'embedding_func.embedding_dim')
+
+        return None
+
+    def _get_cached_embedding_dim(self) -> int | None:
+        detected_dim = getattr(self.embedding_func, '_detected_dim', None)
+        if detected_dim is None:
+            return None
+        return self._validate_embedding_dim_value(detected_dim, 'embedding_func._detected_dim')
+
+    def _get_embedding_result_dim(self, result: Any) -> int:
+        shape = getattr(result, 'shape', None)
+        if shape is not None:
+            if len(shape) == 0:
+                raise ValueError('embedding probe returned a scalar instead of a vector')
+            dim = shape[1] if len(shape) >= 2 else shape[0]
+            return self._validate_embedding_dim_value(dim, 'embedding probe result')
+
+        if isinstance(result, (list, tuple)) and result:
+            first = result[0]
+            if hasattr(first, '__len__') and not isinstance(first, (str, bytes)):
+                return self._validate_embedding_dim_value(len(first), 'embedding probe result')
+            return self._validate_embedding_dim_value(len(result), 'embedding probe result')
+
+        raise ValueError('embedding probe returned no vectors')
+
+    def _store_resolved_embedding_dim(self, embedding_dim: int) -> None:
+        self.embedding_dim = embedding_dim
+        global_config = getattr(self, '_global_config', None)
+        if isinstance(global_config, dict):
+            global_config['embedding_dim'] = embedding_dim
+            storage_config = global_config.get('vector_db_storage_cls_kwargs')
+            if isinstance(storage_config, dict):
+                storage_config['embedding_dim'] = embedding_dim
+        self.vector_db_storage_cls_kwargs['embedding_dim'] = embedding_dim
+        os.environ['EMBEDDING_DIM'] = str(embedding_dim)
+
+    async def _resolve_embedding_dimension(self) -> int:
+        configured_dim = self._get_configured_embedding_dim()
+        if configured_dim is not None:
+            self._store_resolved_embedding_dim(configured_dim)
+            logger.info(f'Resolved embedding dimension: {configured_dim}D (configured)')
+            return configured_dim
+
+        cached_dim = self._get_cached_embedding_dim()
+        if cached_dim is not None:
+            self._store_resolved_embedding_dim(cached_dim)
+            logger.info(f'Resolved embedding dimension: {cached_dim}D (detected)')
+            return cached_dim
+
+        if self.embedding_func is None:
+            raise RuntimeError('Failed to resolve embedding dimension: embedding_func is not configured')
+
+        try:
+            result = await self.embedding_func(['dimension test'])
+        except Exception as e:
+            raise RuntimeError(
+                'Failed to resolve embedding dimension: EMBEDDING_DIM/global_config.embedding_dim '
+                'is not set and the startup embedding probe failed. Set EMBEDDING_DIM or configure '
+                'embedding_dim explicitly.'
+            ) from e
+
+        try:
+            detected_dim = self._get_embedding_result_dim(result)
+        except ValueError as e:
+            raise RuntimeError(
+                'Failed to resolve embedding dimension: startup embedding probe did not return a usable vector.'
+            ) from e
+
+        if (
+            hasattr(self.embedding_func, '_detected_dim')
+            and getattr(self.embedding_func, '_detected_dim', None) is None
+        ):
+            self.embedding_func._detected_dim = detected_dim
+
+        self._store_resolved_embedding_dim(detected_dim)
+        logger.info(f'Resolved embedding dimension: {detected_dim}D (detected)')
+        return detected_dim
+
     async def initialize_storages(self):
         """Storage initialization must be called one by one to prevent deadlock"""
         if self._storages_status == StoragesStatus.CREATED:
+            await self._resolve_embedding_dimension()
             # Set the first initialized workspace will set the default workspace
             # Allows namespace operation without specifying workspace for backward compatibility
             default_workspace = get_default_workspace()

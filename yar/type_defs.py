@@ -91,6 +91,8 @@ class GlobalConfig(TypedDict, total=False):
     max_file_paths: int
     max_extract_input_tokens: int | str
     embedding_token_limit: int | None
+    embedding_dim: int | None
+    vector_db_storage_cls_kwargs: dict[str, Any]
     MAX_TOTAL_TOKENS: int
     min_rerank_score: float | None
 

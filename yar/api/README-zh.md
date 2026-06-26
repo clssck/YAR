@@ -76,7 +76,7 @@ LLM_BINDING_API_KEY=your_api_key
 EMBEDDING_BINDING=ollama
 EMBEDDING_BINDING_HOST=http://localhost:11434
 EMBEDDING_MODEL=bge-m3:latest
-EMBEDDING_DIM=1024
+# EMBEDDING_DIM=1024  # optional: omit to auto-detect from the model
 # EMBEDDING_BINDING_API_KEY=your_api_key
 ```
 
@@ -93,7 +93,7 @@ OLLAMA_LLM_NUM_CTX=8192
 EMBEDDING_BINDING=ollama
 EMBEDDING_BINDING_HOST=http://localhost:11434
 EMBEDDING_MODEL=bge-m3:latest
-EMBEDDING_DIM=1024
+# EMBEDDING_DIM=1024  # optional: omit to auto-detect from the model
 # EMBEDDING_BINDING_API_KEY=your_api_key
 ```
 
@@ -476,7 +476,7 @@ LLM_BINDING_API_KEY=your-api-key
 
 ### Embedding Configuration (Use valid host. For local services installed with docker, you can use host.docker.internal)
 EMBEDDING_MODEL=bge-m3:latest
-EMBEDDING_DIM=1024
+# EMBEDDING_DIM=1024  # optional: omit to auto-detect from the model
 EMBEDDING_BINDING=ollama
 EMBEDDING_BINDING_HOST=http://localhost:11434
 

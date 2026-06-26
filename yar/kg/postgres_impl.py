@@ -145,6 +145,37 @@ if VECTOR_DISTANCE_METRIC not in VECTOR_OPS_CLASS:
 # Patterns for sensitive parameter keys that should be masked in logs
 _SENSITIVE_KEY_PATTERNS = frozenset({'password', 'secret', 'token', 'key', 'credential', 'auth'})
 _VECTOR_TABLE_NAMES = frozenset({'YAR_VDB_CHUNKS', 'YAR_VDB_ENTITY', 'YAR_VDB_RELATION'})
+
+
+def _validate_embedding_dim(value: Any, source: str = 'embedding_dim') -> int:
+    numeric_dim = validate_numeric_config(value, source, min_val=1, max_val=65535)
+    if numeric_dim != int(numeric_dim):
+        raise ValueError(f'Invalid {source}: embedding dimension must be an integer, got {value!r}')
+    return int(numeric_dim)
+
+
+def _resolve_embedding_dim_from_global_config(global_config: Mapping[str, Any] | None) -> int | None:
+    if not global_config:
+        return None
+
+    raw_dim = global_config.get('embedding_dim')
+    if raw_dim is None:
+        storage_config = global_config.get('vector_db_storage_cls_kwargs')
+        if isinstance(storage_config, Mapping):
+            raw_dim = storage_config.get('embedding_dim')
+
+    if raw_dim is None:
+        embedding_func = global_config.get('embedding_func')
+        raw_dim = getattr(embedding_func, 'embedding_dim', None)
+        if raw_dim is None:
+            raw_dim = getattr(embedding_func, '_detected_dim', None)
+
+    if raw_dim is None:
+        return None
+
+    return _validate_embedding_dim(raw_dim, 'global_config.embedding_dim')
+
+
 _VALID_FTS_LANGUAGES = frozenset(
     {
         'simple',
@@ -513,6 +544,15 @@ class PostgreSQLDB:
         if isinstance(vector_index_type, str):
             vector_index_type = vector_index_type.strip().upper() or None
         self.vector_index_type = vector_index_type if self.enable_vector else None
+        self.embedding_dim: int | None = None
+        if self.enable_vector:
+            raw_embedding_dim = config.get('embedding_dim')
+            if raw_embedding_dim is None:
+                raise ValueError(
+                    'PostgreSQL vector storage requires resolved embedding_dim before table creation. '
+                    'Set EMBEDDING_DIM or initialize YAR so it can auto-detect the embedding dimension.'
+                )
+            self.embedding_dim = _validate_embedding_dim(raw_embedding_dim, 'embedding_dim')
         self.hnsw_m = config.get('hnsw_m')
         self.hnsw_ef = config.get('hnsw_ef')
         self.hnsw_ef_search = config.get('hnsw_ef_search')
@@ -575,6 +615,18 @@ class PostgreSQLDB:
 
         # Migration error tracking - stores (migration_name, error_message) tuples
         self._migration_failures: list[tuple[str, str]] = []
+
+    def _get_embedding_dim(self) -> int:
+        if self.embedding_dim is None:
+            raise RuntimeError('PostgreSQL embedding dimension has not been resolved')
+        return _validate_embedding_dim(self.embedding_dim, 'embedding_dim')
+
+    def _get_table_ddl(self, table_name: str, table_config: Mapping[str, str]) -> str:
+        ddl = table_config['ddl']
+        if table_name not in _VECTOR_TABLE_NAMES:
+            return ddl
+        embedding_dim = self._get_embedding_dim()
+        return ddl.format(embedding_dim=embedding_dim)
 
     def _create_ssl_context(self) -> ssl.SSLContext | None:
         """Create SSL context based on configuration parameters."""
@@ -1174,9 +1226,9 @@ class PostgreSQLDB:
     # ========================================================================
 
     async def validate_vector_dimensions(self) -> None:
-        """Validate that existing vector columns match EMBEDDING_DIM configuration.
+        """Validate that existing vector columns match the resolved embedding dimension.
 
-        pgvector stores fixed-dimension vectors. If EMBEDDING_DIM changes (e.g.,
+        pgvector stores fixed-dimension vectors. If the resolved embedding dimension changes (e.g.,
         switching embedding models), existing data becomes incompatible.
 
         When the table is empty, the column dimension is auto-migrated to match
@@ -1184,14 +1236,14 @@ class PostgreSQLDB:
         the operator can decide how to proceed.
 
         Raises:
-            ValueError: If database vector dimension doesn't match EMBEDDING_DIM
+            ValueError: If database vector dimension doesn't match the resolved embedding dimension
                 and the table contains data.
         """
         if not self.enable_vector:
             logger.info('PostgreSQL, Skipping vector dimension validation (POSTGRES_ENABLE_VECTOR=false)')
             return
 
-        expected_dim = int(os.environ.get('EMBEDDING_DIM', 1024))
+        expected_dim = self._get_embedding_dim()
 
         vector_tables = [
             ('yar_vdb_chunks', 'content_vector'),
@@ -1238,8 +1290,8 @@ class PostgreSQLDB:
                 if has_data:
                     raise ValueError(
                         f"VECTOR DIMENSION MISMATCH: Table '{table_name}' has {actual_dim}D vectors "
-                        f'with existing data, but EMBEDDING_DIM={expected_dim}. '
-                        f'Options: (1) Set EMBEDDING_DIM={actual_dim} to match existing data, or '
+                        f'with existing data, but resolved embedding_dim={expected_dim}. '
+                        f'Options: (1) configure embedding_dim={actual_dim} to match existing data, or '
                         f'(2) Clear documents and restart to rebuild with the new dimension.'
                     )
 
@@ -1270,7 +1322,7 @@ class PostgreSQLDB:
             except Exception as e:
                 logger.debug(f'PostgreSQL, Could not validate {table_name} dimensions: {e}')
 
-        logger.info(f'PostgreSQL, Vector dimensions validated: EMBEDDING_DIM={expected_dim}')
+        logger.info(f'PostgreSQL, Vector dimensions validated: embedding_dim={expected_dim}')
 
     async def _migrate_llm_cache_schema(self):
         """Migrate LLM cache schema: add new columns and remove deprecated mode field"""
@@ -1997,7 +2049,7 @@ class PostgreSQLDB:
                 # Table doesn't exist - create it
                 try:
                     logger.info(f'PostgreSQL, Try Creating table {k} in database')
-                    await self.execute(v['ddl'])
+                    await self.execute(self._get_table_ddl(k, v))
                     logger.info(f'PostgreSQL, Creation success table {k} in PostgreSQL database')
                 except Exception as e:
                     logger.error(
@@ -2006,7 +2058,7 @@ class PostgreSQLDB:
                     raise e
 
         # Validate vector dimensions BEFORE creating vector indexes
-        # This fails fast if EMBEDDING_DIM doesn't match existing data
+        # This fails fast if the resolved embedding dimension doesn't match existing data
         await self.validate_vector_dimensions()
 
         # Batch check all indexes at once (optimization: single query instead of N queries)
@@ -2750,9 +2802,7 @@ class PostgreSQLDB:
             """,
         }
 
-        embedding_dim = int(os.environ.get('EMBEDDING_DIM', 1024))
-        # Validate embedding_dim to prevent injection in DDL statements
-        embedding_dim = int(validate_numeric_config(embedding_dim, 'EMBEDDING_DIM', min_val=1, max_val=65535))
+        embedding_dim = self._get_embedding_dim()
 
         vector_index_type = self.vector_index_type or 'HNSW'
         vit_lower = vector_index_type.lower()
@@ -3031,7 +3081,7 @@ class ClientManager:
     _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
 
     @staticmethod
-    def get_config() -> dict[str, Any]:
+    def get_config(global_config: Mapping[str, Any] | None = None) -> dict[str, Any]:
         config = configparser.ConfigParser()
         config.read('config.ini', 'utf-8')
 
@@ -3093,7 +3143,13 @@ class ClientManager:
             ),
         )
 
-        return {
+        embedding_dim = _resolve_embedding_dim_from_global_config(global_config)
+        if embedding_dim is None:
+            env_embedding_dim = os.environ.get('EMBEDDING_DIM')
+            if env_embedding_dim:
+                embedding_dim = _validate_embedding_dim(env_embedding_dim, 'EMBEDDING_DIM')
+
+        postgres_config = {
             'host': os.environ.get(
                 'POSTGRES_HOST',
                 config.get('postgres', 'host', fallback='localhost'),
@@ -3215,17 +3271,31 @@ class ClientManager:
                 )
             ),
         }
+        if embedding_dim is not None:
+            postgres_config['embedding_dim'] = embedding_dim
+        return postgres_config
 
     @classmethod
-    async def get_client(cls) -> PostgreSQLDB:
+    async def get_client(cls, global_config: Mapping[str, Any] | None = None) -> PostgreSQLDB:
         async with cls._lock:
             if cls._db_instance is None:
-                config = ClientManager.get_config()
+                config = ClientManager.get_config(global_config)
                 db = PostgreSQLDB(config)
                 await db.initdb()
                 await db.check_tables()
                 cls._db_instance = db
                 cls._ref_count = 0
+            else:
+                requested_dim = _resolve_embedding_dim_from_global_config(global_config)
+                if (
+                    requested_dim is not None
+                    and cls._db_instance.embedding_dim is not None
+                    and requested_dim != cls._db_instance.embedding_dim
+                ):
+                    raise ValueError(
+                        f'PostgreSQL client already initialized with embedding_dim='
+                        f'{cls._db_instance.embedding_dim}, got {requested_dim}'
+                    )
             cls._ref_count += 1
             return cast(PostgreSQLDB, cls._db_instance)
 
@@ -3282,7 +3352,7 @@ class PGKVStorage(BaseKVStorage):
     async def initialize(self):
         async with get_data_init_lock():
             if self.db is None:
-                self.db = await ClientManager.get_client()
+                self.db = await ClientManager.get_client(self.global_config)
 
             if not (hasattr(self, 'workspace') and self.workspace):
                 self.workspace = self.db.workspace if self.db.workspace else 'default'
@@ -3775,7 +3845,7 @@ class PGVectorStorage(BaseVectorStorage):
     async def initialize(self):
         async with get_data_init_lock():
             if self.db is None:
-                self.db = await ClientManager.get_client()
+                self.db = await ClientManager.get_client(self.global_config)
 
             if not getattr(self.db, 'enable_vector', True):
                 raise RuntimeError('PGVectorStorage requires POSTGRES_ENABLE_VECTOR=true for pgvector operations')
@@ -4853,7 +4923,7 @@ class PGDocStatusStorage(DocStatusStorage):
     async def initialize(self):
         async with get_data_init_lock():
             if self.db is None:
-                self.db = await ClientManager.get_client()
+                self.db = await ClientManager.get_client(self.global_config)
 
             if not (hasattr(self, 'workspace') and self.workspace):
                 self.workspace = self.db.workspace if self.db.workspace else 'default'
@@ -5541,7 +5611,7 @@ class PGGraphStorage(BaseGraphStorage):
     async def initialize(self):
         async with get_data_init_lock():
             if self.db is None:
-                self.db = await ClientManager.get_client()
+                self.db = await ClientManager.get_client(self.global_config)
 
             if not (hasattr(self, 'workspace') and self.workspace):
                 self.workspace = self.db.workspace if self.db.workspace else 'default'
@@ -7367,14 +7437,14 @@ TABLES = {
                     )"""
     },
     'YAR_VDB_CHUNKS': {
-        'ddl': f"""CREATE TABLE YAR_VDB_CHUNKS (
+        'ddl': """CREATE TABLE YAR_VDB_CHUNKS (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     full_doc_id VARCHAR(256),
                     chunk_order_index INTEGER,
                     tokens INTEGER,
                     content TEXT,
-                    content_vector VECTOR({os.environ.get('EMBEDDING_DIM', 1024)}),
+                    content_vector VECTOR({embedding_dim}),
                     file_path TEXT NULL,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
@@ -7382,13 +7452,13 @@ TABLES = {
                     )"""
     },
     'YAR_VDB_ENTITY': {
-        'ddl': f"""CREATE TABLE YAR_VDB_ENTITY (
+        'ddl': """CREATE TABLE YAR_VDB_ENTITY (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     entity_name VARCHAR(512),
                     entity_type VARCHAR(100) NULL,
                     content TEXT,
-                    content_vector VECTOR({os.environ.get('EMBEDDING_DIM', 1024)}),
+                    content_vector VECTOR({embedding_dim}),
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     chunk_ids VARCHAR(255)[] NULL,
@@ -7397,13 +7467,13 @@ TABLES = {
                     )"""
     },
     'YAR_VDB_RELATION': {
-        'ddl': f"""CREATE TABLE YAR_VDB_RELATION (
+        'ddl': """CREATE TABLE YAR_VDB_RELATION (
                     id VARCHAR(255),
                     workspace VARCHAR(255),
                     source_id VARCHAR(512),
                     target_id VARCHAR(512),
                     content TEXT,
-                    content_vector VECTOR({os.environ.get('EMBEDDING_DIM', 1024)}),
+                    content_vector VECTOR({embedding_dim}),
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     chunk_ids VARCHAR(255)[] NULL,
